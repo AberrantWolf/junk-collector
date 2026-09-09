@@ -470,6 +470,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "hex",
+ "language-tags",
  "serde",
  "serde_json",
  "sha2",
@@ -486,6 +487,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1264,6 +1266,12 @@ dependencies = [
  "futures-util",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "language-tags"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4345964bb142484797b161f473a503a434de77149dd8c7427788c6e13379388"
 
 [[package]]
 name = "lazy_static"

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Reject dependencies that bypass documented layer boundaries."""
 import pathlib
+import hashlib
+import re
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -26,6 +28,28 @@ for manifest in (ROOT / "crates").glob("*/Cargo.toml"):
             errors.append(f"{name} -> {dependency}: dependency bypasses the architecture")
         if name in {"collector-core", "collector-modules"} and dependency in FORBIDDEN_IN_DOMAIN:
             errors.append(f"{name} -> {dependency}: domain code cannot own infrastructure")
+
+# Check concrete document links. Prose coverage and security decisions require
+# review; keyword matching cannot establish that a design is complete.
+for document in [ROOT / "README.md", *(ROOT / "docs").rglob("*.md")]:
+    text = document.read_text()
+    for target in re.findall(r"\[[^]]+\]\(([^)]+)\)", text):
+        target = target.split("#", 1)[0]
+        if not target or "://" in target or target.startswith(("#", "mailto:")):
+            continue
+        if not (document.parent / target).resolve().exists():
+            errors.append(f"{document.relative_to(ROOT)}: missing link target {target}")
+
+fixture = ROOT / "crates/collector-store/tests/fixtures/schema-1"
+for manifest in fixture.rglob("manifest.toml"):
+    data = tomllib.loads(manifest.read_text())
+    record = manifest.with_name("record.json")
+    if not record.exists():
+        errors.append(f"{manifest.relative_to(ROOT)}: fixture record.json is missing")
+        continue
+    actual = hashlib.sha256(record.read_bytes()).hexdigest()
+    if data.get("record_sha256") != actual:
+        errors.append(f"{manifest.relative_to(ROOT)}: fixture record digest mismatch")
 if errors:
     raise SystemExit("\n".join(errors))
-print("Architecture dependency checks passed.")
+print("Architecture, documentation link, and fixture manifest checks passed.")

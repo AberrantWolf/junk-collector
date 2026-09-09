@@ -12,6 +12,7 @@ thiserror.workspace = true
 chrono.workspace = true
 sha2.workspace = true
 hex.workspace = true
+language-tags = "0.3"
 
 [dev-dependencies]
 tempfile.workspace = true

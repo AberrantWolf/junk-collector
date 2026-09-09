@@ -23,23 +23,38 @@ impl Store {
             .map_err(storage)?
             .to_string();
         let id = UserId::new();
-        lock(&self.db)?
-            .execute(
-                "INSERT INTO private.users VALUES (?,?,?,?)",
-                params![id.to_string(), username, password_hash, administrator],
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute(
+            "INSERT INTO private.users VALUES (?,?,?,?)",
+            params![id.to_string(), username, password_hash, administrator],
+        )
+        .map_err(storage)?;
+        let count: u64 = tx
+            .query_row("SELECT COUNT(*) FROM private.users", [], |row| row.get(0))
+            .map_err(storage)?;
+        if count == 1 {
+            tx.execute(
+                "INSERT INTO private.settings(key,value) VALUES('default_user_id',?) ON CONFLICT(key) DO NOTHING",
+                [id.to_string()],
             )
             .map_err(storage)?;
+        }
+        tx.commit().map_err(storage)?;
         Ok(id)
     }
-    /// The initial account is the default profile in single-user presentation.
+    /// The durable default UserId is selected once. Account order and multi-user
+    /// presentation changes cannot silently select another profile.
     pub fn default_username(&self) -> Result<String> {
         lock(&self.db)?
             .query_row(
-                "SELECT username FROM private.users ORDER BY rowid LIMIT 1",
+                "SELECT u.username FROM private.settings s JOIN private.users u ON u.id=s.value WHERE s.key='default_user_id'",
                 [],
                 |r| r.get(0),
             )
-            .map_err(storage)
+            .optional()
+            .map_err(storage)?
+            .ok_or_else(|| Error::Unavailable("default user is missing or deleted; assign it explicitly through the private recovery workflow".into()))
     }
     pub fn user_count(&self) -> Result<u64> {
         lock(&self.db)?

@@ -1,6 +1,6 @@
 # Junk Collector development
 
-Read `docs/architecture.md` before adding or changing a subsystem. `docs/implementation-status.md` distinguishes implemented behavior from planned capabilities; keep it current.
+Read `docs/architecture.md` before adding or changing a subsystem. `docs/implementation-status.md` distinguishes implemented behavior from planned capabilities; keep it current. For continued implementation, select one ticket from `docs/handoff-backlog.md` and read `docs/release-requirements.md`; complete its dependencies and acceptance criteria without silently broadening scope.
 
 - This is architecture-first. If a module has no natural place, revise the boundaries before implementing it.
 - Domain/core code has no HTTP, filesystem, database, GUI or device dependencies. Application services own policy; adapters own mechanisms.

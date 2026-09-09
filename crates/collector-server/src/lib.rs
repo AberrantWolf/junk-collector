@@ -8,10 +8,10 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
 };
-use collector_app::CollectionService;
+use collector_app::{CollectionService, PresentedItem};
 use collector_client::Pairing;
 use collector_core::*;
-use collector_modules::Registry;
+use collector_modules::{Availability, Registry};
 use collector_store::{Store, UploadFile};
 use serde::Deserialize;
 use std::{
@@ -289,8 +289,29 @@ async fn identity(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({"server_id":state.pairing.server_id,"protocol_version":1}))
 }
 async fn features(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let modules = Registry::builtins()
+        .descriptors()
+        .into_iter()
+        .map(|module| {
+            let capabilities = module.capabilities.into_iter().map(|capability| {
+                let (available, limitation) = match &capability.availability {
+                    Availability::Available => (true, None),
+                    Availability::Unavailable { limitation } => (false, Some(limitation.clone())),
+                };
+                serde_json::json!({
+                    "name": capability.id.as_str().rsplit('.').next().unwrap_or_default().replace('-', "_"),
+                    "available": available,
+                    "limitation": limitation,
+                    "id": capability.id,
+                    "display_name": capability.display_name,
+                    "availability": capability.availability,
+                })
+            }).collect::<Vec<_>>();
+            serde_json::json!({"id":module.id,"schema_version":module.schema_version,"display_name":module.display_name,"capabilities":capabilities})
+        })
+        .collect::<Vec<_>>();
     Json(
-        serde_json::json!({"default_username": if state.multi_user { None } else { Some(&state.default_username) },"multi_user":state.multi_user,"curation":state.exposure.allows(state.ingress,Surface::Curation),"administration":state.exposure.allows(state.ingress,Surface::Administration),"passkeys":state.passkeys.is_some(),"modules":Registry::builtins().descriptors()}),
+        serde_json::json!({"default_username": if state.multi_user { None } else { Some(&state.default_username) },"multi_user":state.multi_user,"curation":state.exposure.allows(state.ingress,Surface::Curation),"administration":state.exposure.allows(state.ingress,Surface::Administration),"passkeys":state.passkeys.is_some(),"modules":modules}),
     )
 }
 #[derive(Deserialize)]
@@ -391,20 +412,20 @@ async fn browse(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<BrowseQuery>,
-) -> ApiResult<Json<Page<Item>>> {
+) -> ApiResult<Json<Page<PresentedItem>>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
-        blocking(move || state.service.browse(&actor, query)).await?,
+        blocking(move || state.service.browse_presented(&actor, query)).await?,
     ))
 }
 async fn item(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<ItemId>,
-) -> ApiResult<Json<Item>> {
+) -> ApiResult<Json<PresentedItem>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
-        blocking(move || state.service.item(&actor, id)).await?,
+        blocking(move || state.service.item_presented(&actor, id)).await?,
     ))
 }
 #[derive(Deserialize)]
@@ -417,16 +438,17 @@ async fn save_item(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
     Json(input): Json<SaveItem>,
-) -> ApiResult<Json<Item>> {
+) -> ApiResult<Json<PresentedItem>> {
     let actor = principal(&state, &headers)?;
     if id != input.item.id {
         return Err(Error::Invalid("item ID mismatch".into()).into());
     }
     Ok(Json(
         blocking(move || {
-            state
+            let saved = state
                 .service
-                .save(&actor, input.item, input.expected_revision)
+                .save(&actor, input.item, input.expected_revision)?;
+            state.service.item_presented(&actor, saved.id)
         })
         .await?,
     ))

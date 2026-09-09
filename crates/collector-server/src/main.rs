@@ -91,18 +91,20 @@ fn local_origin(config: &Config) -> String {
 }
 fn instructions(config: &Config, path: &std::path::Path) {
     println!(
-        "\nLocal management: {} (open on this computer)",
+        "\nLocal management: {} (open this exact address on the server computer)",
         local_origin(config)
     );
-    println!("Sign in, open Administration, create a collection, then choose Add item.");
     println!(
-        "Public proxy upstream: http://{} (client access; curation={}, administration={})",
+        "For first use: sign in here, choose Create collection (or open Administration), then choose Add item."
+    );
+    println!(
+        "Public proxy upstream: http://{} (client surface; curation={}, administration={})",
         config.public_bind,
         config.exposure.public_curation || config.exposure.public_administration,
         config.exposure.public_administration
     );
     println!(
-        "LAN client HTTPS listener: {} (browser certificate trust required; management is private by default)",
+        "LAN client HTTPS listener: {} (client surface by default; browser certificate trust is separate from native pairing)",
         config.lan_bind
     );
     println!(
@@ -115,7 +117,7 @@ fn instructions(config: &Config, path: &std::path::Path) {
         );
     }
     println!(
-        "Use localhost exactly for local browser access. For other computers, configure trusted HTTPS and its exact allowed_origins entry. Never publish the private listener through a public tunnel.\n"
+        "Use localhost exactly for local browser access. Remote browsers require trusted HTTPS and its exact allowed_origins entry. Local HTTP onboarding is Chromium-tested; other browsers may require trusted HTTPS. Never publish the private listener through a public tunnel.\n"
     );
 }
 fn password() -> Result<String> {

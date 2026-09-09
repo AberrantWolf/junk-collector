@@ -2,7 +2,7 @@
 
 A homelab collection archive for physical games and music CDs, their original dumps, artwork, and verification evidence.
 
-**Development foundation — not yet the complete first release.** The server, portable archive, upload/thumbnail workflows, authentication, and artwork/text WebUI are executable. Native apps, shared audio, catalog verification and several curation workflows remain unfinished. See [implementation status](docs/implementation-status.md) and [architecture](docs/architecture.md).
+**Development foundation — not yet the complete first release.** The server, portable archive, upload/thumbnail workflows, authentication, and artwork/text WebUI are executable. Native apps, shared audio, catalog verification and several curation workflows remain unfinished. See [implementation status](docs/implementation-status.md) and [architecture](docs/architecture.md). Remaining work is organized in the [handoff backlog](docs/handoff-backlog.md), with the [accepted release requirements](docs/release-requirements.md) preserved alongside it.
 
 ## Run locally
 
@@ -15,7 +15,7 @@ cargo run -p collector-server -- setup
 cargo run -p collector-server -- serve
 ```
 
-Open **http://localhost:9842** on the server computer. Sign in with the password from setup, open **Administration**, create a collection, close Administration, then choose **Add item**. Attach artwork and original files after saving the inventory item.
+Open the exact local management address printed by setup—by default **http://localhost:9842**—on the server computer. Sign in with the password from setup, choose **Create collection** (or open **Administration**), then choose **Add item**. Attach artwork and original files after saving the inventory item. The public and direct-LAN addresses are client surfaces by default and cannot perform initial management.
 
 `setup` creates `collector.toml`, archive/state directories, a local TLS identity and the default account. Re-running it repairs the local browser origin while keeping accounts, passwords, data, exposure settings and existing certificates. It backs up an existing configuration before rewriting it. Stop the server before running setup. Passwords can also be piped through stdin; never put them in command arguments. `init` remains available for scripted first-time initialization.
 
@@ -28,7 +28,7 @@ cargo run -p collector-server -- doctor
 cargo run -p collector-server -- serve
 ```
 
-`doctor` checks configuration without acquiring the archive lock, so it also works while the server runs. An `origin_not_allowed` error means the browser address is missing from `allowed_origins`; it is distinct from a collection-role denial. Use `localhost` exactly for this local setup. If the browser cannot retain a Secure cookie on localhost, the UI reports that explicitly; use trusted HTTPS as described below. Local HTTP onboarding is covered by the Chromium smoke test; other browsers remain to be qualified.
+`doctor` checks configuration without acquiring the archive lock, so it also works while the server runs. An `origin_not_allowed` error means the browser address is missing from `allowed_origins`; it is distinct from an expired session and from a collection-role denial. Use `localhost` exactly for this local setup—`127.0.0.1` is a different browser origin. If the browser cannot retain a Secure cookie on localhost, the UI reports that explicitly; use trusted HTTPS as described below. Local HTTP onboarding is covered by the Chromium smoke test; other browsers remain to be qualified and may require trusted HTTPS.
 
 Default listeners:
 

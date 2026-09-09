@@ -1,6 +1,6 @@
 import {chromium} from '@playwright/test';
 import {spawn,spawnSync} from 'node:child_process';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
@@ -16,7 +16,14 @@ const binary=path.join(root,'target/debug/collector-server');
 if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nallowed_origins = []\n`);
 const init=spawnSync(binary,['--config',config,localSetup?'setup':'init', '--username',localSetup?'collector':'owner'],{input:password,encoding:'utf8'});
 assert.equal(init.status,0,init.stderr);
-if(localSetup){const repeat=spawnSync(binary,['--config',config,'setup'],{input:'',encoding:'utf8'});assert.equal(repeat.status,0,repeat.stderr);}
+if(localSetup){
+ const certificateBefore=await readFile(path.join(scratch,'state/tls/cert.pem'),'utf8');
+ const repeat=spawnSync(binary,['--config',config,'setup'],{input:'',encoding:'utf8'});assert.equal(repeat.status,0,repeat.stderr);
+ assert.equal(await readFile(path.join(scratch,'state/tls/cert.pem'),'utf8'),certificateBefore,'repair setup replaced the TLS identity');
+ const repairedConfig=await readFile(config,'utf8');
+ assert.match(repairedConfig,/http:\/\/localhost:19842/);
+ assert.match(repairedConfig,/public_curation = false/);
+}
 const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});
 let logs='';server.stderr.on('data',d=>logs+=d);server.stdout.on('data',d=>logs+=d);
 let browser; let page;
@@ -26,17 +33,26 @@ try{
  browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
- if(localSetup){const doctor=spawnSync(binary,['--config',config,'doctor'],{encoding:'utf8'});assert.equal(doctor.status,0,doctor.stderr);const features=await(await fetch('http://localhost:19841/api/v1/features')).json();assert.equal(features.administration,false);assert.equal(features.curation,false);}
+ if(localSetup){
+  const doctor=spawnSync(binary,['--config',config,'doctor'],{encoding:'utf8'});assert.equal(doctor.status,0,doctor.stderr);
+  const features=await(await fetch('http://localhost:19841/api/v1/features')).json();assert.equal(features.administration,false);assert.equal(features.curation,false);
+  await page.goto('http://127.0.0.1:19842');
+  await page.getByLabel('Password',{exact:true}).fill(password);
+  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await page.getByText('This browser address is not enabled',{exact:false}).waitFor();
+ }
  await page.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
  await page.getByLabel('Password',{exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
- await page.getByRole('button',{name:'Administration',exact:true}).click();
- await page.getByLabel('Collection name').fill('Shelf & stereo');
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
+ const administration=page.getByRole('dialog',{name:/Make room for a collection/});
+ await administration.getByLabel('Collection name').fill('Shelf & stereo');
+ await administration.getByRole('button',{name:'Create collection',exact:true}).click();
  await page.getByText('Collection created.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Close administration'}).click();
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).waitFor();
+ await page.getByText('This collection has no entries yet.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Add item',exact:true}).click();
  await page.getByRole('combobox',{name:/Kind/}).selectOption('org.junk.music');
  await page.getByLabel('Title',{exact:true}).fill('A test pressing');
@@ -52,9 +68,33 @@ try{
  await page.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('button',{name:/A test pressing/}).waitFor();
  assert.equal(await page.locator('.collection-row img').count(),1);
+ if(localSetup){
+  const clientPage=await context.newPage();
+  await clientPage.goto('http://localhost:19841');
+  await clientPage.getByText('Client access only at this address.',{exact:false}).waitFor();
+  assert.equal(await clientPage.getByRole('button',{name:'Administration',exact:true}).count(),0);
+  assert.equal(await clientPage.getByRole('button',{name:'Curate collection',exact:true}).count(),0);
+  assert.equal(await clientPage.evaluate(async()=>{const response=await fetch('/administration.js');return response.status;}),404);
+  await clientPage.close();
+ }
  await page.getByRole('searchbox').fill('pressing');
  await page.waitForTimeout(350);
  assert.equal(await page.locator('.collection-row').count(),1);
+ await page.evaluate(async()=>{
+  const collection=(await(await fetch('/api/v1/collections')).json())[0];
+  const id=crypto.randomUUID();
+  const item={id,collection_id:collection.id,revision:0,title:'Opaque module fixture',subtitle:'Unavailable schema',identity_link:{kind:'none'},domain:{module:'org.example.absent',schema_version:8,payload:{z:100,a:null}},identity:'unidentified',translations:[],identifiers:[],specimens:[],wishlist:true,captures:[],assets:[],metadata:{candidates:[],selected:null,overrides:{}},deleted:false,updated_at:new Date().toISOString()};
+  const response=await fetch(`/api/v1/items/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({item,expected_revision:0})});
+  if(!response.ok)throw new Error(`opaque module fixture: ${response.status} ${await response.text()}`);
+ });
+ await page.getByRole('searchbox').fill('Opaque module');
+ await page.waitForTimeout(350);
+ await page.getByRole('button',{name:/Opaque module fixture/}).click();
+ await page.getByRole('region',{name:'Module details'}).getByText('not executable',{exact:false}).waitFor();
+ assert.equal(await page.getByRole('region',{name:'Module details'}).getByRole('button').count(),0);
+ await page.getByRole('button',{name:'Close details'}).click();
+ await page.getByRole('searchbox').fill('pressing');
+ await page.waitForTimeout(350);
  // Standard browser WebAuthn, with a virtual authenticator instead of a physical password manager.
  if(!localSetup){
  const cdp=await context.newCDPSession(page);await cdp.send('WebAuthn.enable');
@@ -69,6 +109,29 @@ try{
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:path.join(root,'web/test-results/browser-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mobile horizontal overflow');
+ await page.setViewportSize({width:1440,height:1000});
+ const viewerPassword=randomBytes(24).toString('hex');
+ await page.evaluate(async viewerPassword=>{
+  const request=async(path,init={})=>{const response=await fetch(`/api/v1${path}`,{...init,headers:{...(init.body?{'content-type':'application/json'}:{}),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.status===204?undefined:response.json();};
+  const collections=await request('/collections');
+  const created=await request('/admin/users',{method:'POST',body:JSON.stringify({username:'viewer',password:viewerPassword,administrator:false})});
+  await request('/admin/grants',{method:'POST',body:JSON.stringify({collection_id:collections[0].id,user_id:created.user_id,role:'viewer'})});
+  await request('/auth/logout',{method:'POST'});
+  await request('/auth/login',{method:'POST',body:JSON.stringify({username:'viewer',password:viewerPassword,device_name:'Viewer browser'})});
+ },viewerPassword);
+ await page.reload();
+ await page.getByRole('button',{name:'Curate collection',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Add item',exact:true}).click();
+ const curator=page.getByRole('dialog',{name:/Add an entry/});
+ await curator.getByLabel('Title',{exact:true}).fill('Unsaved viewer entry');
+ await curator.getByRole('button',{name:'Add',exact:true}).click();
+ await curator.getByText('your collection role does not allow this change',{exact:false}).waitFor();
+ assert.equal(await curator.getByLabel('Title',{exact:true}).inputValue(),'Unsaved viewer entry');
+ assert.equal(await curator.getByText('Inventory saved.',{exact:false}).count(),0);
+ await page.getByRole('button',{name:'Close curator'}).click();
+ await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE'});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});
+ await page.getByRole('searchbox').fill('session expired');
+ await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
- console.log(localSetup?'Local setup smoke passed: repaired origins, repeat setup, live doctor, custom default profile, cookie login, private management, inventory and artwork.':'Browser smoke passed: session login, management bundles, inventory, artwork rows, search, WebAuthn registration/login, mobile layout.');
+ console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory, unavailable-module disclosure, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, artwork rows, unavailable-module disclosure, search, role denial, WebAuthn registration/login and mobile layout.');
 }catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();server.kill('SIGINT');await new Promise(resolve=>server.once('exit',resolve));await rm(scratch,{recursive:true,force:true});}

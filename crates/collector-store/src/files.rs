@@ -306,7 +306,15 @@ impl Store {
             });
         }
         sync_directory(&stage)?;
-        let package_root = self.item_path(item.id)?.join("files");
+        let item_root = self.item_path(item.id)?;
+        let collection_root = item_root
+            .parent()
+            .and_then(std::path::Path::parent)
+            .ok_or_else(|| Error::Storage("item path has no collection parent".into()))?;
+        let package_root = collection_root
+            .join("captures")
+            .join(upload.capture_id.to_string())
+            .join("payload");
         fs::create_dir_all(&package_root).map_err(storage)?;
         let destination = package_root.join(upload.representation_id.to_string());
         if destination.exists() {
@@ -324,7 +332,12 @@ impl Store {
         let inputs = files.iter().map(|f| f.digest.clone()).collect();
         item.captures.push(Capture {
             id: upload.capture_id,
-            carrier_id: None,
+            collection_id: item.collection_id,
+            revision: Revision(1),
+            association: CaptureAssociation {
+                item_id: Some(item.id),
+                ..Default::default()
+            },
             created_at: Utc::now(),
             representations: vec![Representation {
                 id: upload.representation_id,
@@ -334,6 +347,7 @@ impl Store {
                 source: None,
                 profile: None,
             }],
+            legacy_payload_locator: None,
         });
         let evidence = Evidence {
             id: EvidenceId::new(),
@@ -382,19 +396,47 @@ impl Store {
         if item.deleted {
             return Err(Error::NotFound);
         }
-        let file = item
+        let capture = item
             .captures
             .iter()
-            .flat_map(|c| &c.representations)
-            .find(|r| r.id == representation)
-            .and_then(|r| r.files.get(index))
+            .find(|capture| {
+                capture
+                    .representations
+                    .iter()
+                    .any(|value| value.id == representation)
+            })
+            .ok_or(Error::NotFound)?;
+        let file = capture
+            .representations
+            .iter()
+            .find(|value| value.id == representation)
+            .and_then(|value| value.files.get(index))
             .ok_or(Error::NotFound)?
             .clone();
         safe_name(&file.name)?;
-        let root = self
-            .item_path(item.id)?
-            .join("files")
-            .join(representation.to_string());
+        let item_root = self.item_path(item.id)?;
+        let root = if let Some(locator) = &capture.legacy_payload_locator {
+            if locator.relative_path != "files" {
+                return Err(Error::Invalid("unsupported legacy payload locator".into()));
+            }
+            let original_item = self.item(locator.item_id)?;
+            if original_item.collection_id != item.collection_id {
+                return Err(Error::Forbidden);
+            }
+            self.item_path(locator.item_id)?
+                .join("files")
+                .join(representation.to_string())
+        } else {
+            let collection_root = item_root
+                .parent()
+                .and_then(std::path::Path::parent)
+                .ok_or_else(|| Error::Storage("item path has no collection parent".into()))?;
+            collection_root
+                .join("captures")
+                .join(capture.id.to_string())
+                .join("payload")
+                .join(representation.to_string())
+        };
         let path = fs::canonicalize(root.join(&file.name)).map_err(storage)?;
         if !path.starts_with(fs::canonicalize(root).map_err(storage)?) {
             return Err(Error::Forbidden);
@@ -456,6 +498,7 @@ impl Store {
         sync_directory(root.parent().unwrap())?;
         item.assets.push(Asset {
             id,
+            subject: AssetSubject::Item { item_id },
             kind: AssetKind::Cover,
             visibility: Visibility::Shared,
             media_type: media_type.into(),
