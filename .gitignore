@@ -1,0 +1,9 @@
+/target/
+/web/node_modules/
+/.collector/
+.DS_Store
+
+/web/test-results/
+
+/collector.toml
+/collector.toml.*.bak

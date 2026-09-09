@@ -1,0 +1,9 @@
+export type Role = 'viewer' | 'curator' | 'owner';
+export type Asset = {id:string;kind:string;visibility:string;alt_text:string;thumbnail:unknown};
+export type Representation = {id:string;format:string;role:string;files:{name:string;bytes:number;digest:{hex:string}}[]};
+export type Item = {id:string;collection_id:string;revision:number;title:string;subtitle:string;domain:{module:string;schema_version:number;payload:Record<string,unknown>};identity:string;wishlist:boolean;specimens:unknown[];assets:Asset[];captures:{id:string;representations:Representation[]}[];deleted:boolean;[key:string]:unknown};
+export type Collection = {id:string;name:string;revision:number};
+export type Features = {default_username?:string;multi_user:boolean;curation:boolean;administration:boolean;passkeys:boolean;modules:{id:string;display_name:string}[]};
+export type Principal = {user_id:string;administrator:boolean;device_id:string};
+export type Api = <T=unknown>(path:string,init?:RequestInit)=>Promise<T>;
+export type Page = {items:Item[];next_cursor:string|null};
