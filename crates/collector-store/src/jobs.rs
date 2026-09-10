@@ -1,8 +1,70 @@
 use super::*;
-use collector_app::{JobClaim, JobSpec};
+use collector_app::{JobClaim, JobRecord, JobSpec};
 use rusqlite::TransactionBehavior;
 
 type StoredJobIdentity = (String, String, Option<String>, Option<String>, String);
+type StoredJobRecord = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+    String,
+    u64,
+    u64,
+    u32,
+    i64,
+    i64,
+    Option<String>,
+    Option<String>,
+);
+
+fn read_job_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredJobRecord> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
+        row.get(13)?,
+    ))
+}
+
+fn parse_job_record(row: StoredJobRecord) -> Result<JobRecord> {
+    Ok(JobRecord {
+        id: row.0.parse().map_err(storage)?,
+        user_id: row.1.parse().map_err(storage)?,
+        collection_id: row
+            .2
+            .map(|value| value.parse().map_err(storage))
+            .transpose()?,
+        item_id: row
+            .3
+            .map(|value| value.parse().map_err(storage))
+            .transpose()?,
+        kind: row.4,
+        state: crate::parse_job_state(&row.5)?,
+        phase: row.6,
+        completed_units: row.7,
+        total_units: row.8,
+        attempt: row.9,
+        created_at: chrono::DateTime::from_timestamp(row.10, 0)
+            .ok_or_else(|| Error::Storage("job creation timestamp is invalid".into()))?,
+        updated_at: chrono::DateTime::from_timestamp(row.11, 0)
+            .ok_or_else(|| Error::Storage("job update timestamp is invalid".into()))?,
+        error: row.12,
+        limitation: row.13,
+    })
+}
 
 impl Store {
     pub(crate) fn reconcile_job_publications(&self) -> Result<()> {
@@ -470,5 +532,148 @@ impl Store {
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
         Ok(())
+    }
+
+    pub(crate) fn job_record(&self, id: JobId, user: UserId) -> Result<JobRecord> {
+        let row = lock(&self.db)?
+            .query_row(
+                "SELECT id,user_id,collection_id,item_id,kind,state,phase,
+                   completed_units,total_units,attempt,created_at,updated_at,error,limitation
+                 FROM private.jobs WHERE id=? AND user_id=?",
+                params![id.to_string(), user.to_string()],
+                read_job_record,
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        parse_job_record(row)
+    }
+
+    pub(crate) fn job_records(
+        &self,
+        user: UserId,
+        cursor: Option<JobId>,
+        limit: u16,
+    ) -> Result<Page<JobRecord>> {
+        if limit == 0 || limit > 100 {
+            return Err(Error::Invalid("job page limit must be 1–100".into()));
+        }
+        let db = lock(&self.db)?;
+        let cursor = cursor
+            .map(|id| {
+                db.query_row(
+                    "SELECT created_at,id FROM private.jobs WHERE id=? AND user_id=?",
+                    params![id.to_string(), user.to_string()],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()
+                .map_err(storage)?
+                .ok_or(Error::NotFound)
+            })
+            .transpose()?;
+        let mut statement = db
+            .prepare(
+                "SELECT id,user_id,collection_id,item_id,kind,state,phase,
+                   completed_units,total_units,attempt,created_at,updated_at,error,limitation
+                 FROM private.jobs
+                 WHERE user_id=? AND (? IS NULL OR created_at<? OR (created_at=? AND id<?))
+                 ORDER BY created_at DESC,id DESC LIMIT ?",
+            )
+            .map_err(storage)?;
+        let (cursor_time, cursor_id) = cursor
+            .map(|(time, id)| (Some(time), Some(id)))
+            .unwrap_or((None, None));
+        let rows = statement
+            .query_map(
+                params![
+                    user.to_string(),
+                    cursor_time,
+                    cursor_time,
+                    cursor_time,
+                    cursor_id,
+                    i64::from(limit) + 1,
+                ],
+                read_job_record,
+            )
+            .map_err(storage)?;
+        let mut items = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(parse_job_record)
+            .collect::<Result<Vec<_>>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|job| job.id.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
+    pub(crate) fn retry_failed_job_record(&self, id: JobId, user: UserId) -> Result<JobId> {
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let (kind, state, prior_result, error, attempt, failed_at): (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            u32,
+            i64,
+        ) = tx
+            .query_row(
+                "SELECT kind,state,result,error,attempt,updated_at FROM private.jobs
+                 WHERE id=? AND user_id=?",
+                params![id.to_string(), user.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        if state != "failed" || kind != "integrity_verification" {
+            return Err(Error::Conflict);
+        }
+        let mut result = prior_result
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(storage)?
+            .unwrap_or_else(|| serde_json::json!({"prior_failures":[]}));
+        let failures = result
+            .get_mut("prior_failures")
+            .and_then(serde_json::Value::as_array_mut)
+            .ok_or_else(|| Error::Storage("job failure history is malformed".into()))?;
+        failures.push(serde_json::json!({
+            "attempt": attempt,
+            "error": error,
+            "failed_at": failed_at,
+        }));
+        tx.execute(
+            "UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,
+               attempt=attempt+1,error=NULL,result=?,cancellation_requested=0,
+               worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=?
+             WHERE id=?",
+            params![
+                serde_json::to_string(&result).map_err(storage)?,
+                self.clock.now().timestamp(),
+                id.to_string()
+            ],
+        )
+        .map_err(storage)?;
+        self.record_command(&tx, &id)?;
+        tx.commit().map_err(storage)?;
+        Ok(id)
     }
 }

@@ -48,14 +48,19 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   retries reuse the Job, Capture, and Representation identities, increment attempt,
   retain source bytes, and preserve prior failure details. The process-local job
   semaphore has been removed.
+- P02.4 replaces the legacy job-list HTTP shape with cursor `JobView` pages and
+  submitter-scoped detail, cancellation, and retry routes. Views provide bounded
+  progress, attempt, safe diagnostics, timestamps, and actionable flags while
+  excluding stored requests, prior-failure bodies, worker/lease/claim data, and
+  other users' jobs. Mutations require idempotency keys. P02 is locally complete;
+  target-Linux filesystem/process behavior and independent review remain external.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete P02.4 cursor/detail/cancel/retry job APIs and independent review; complete
-   physical component/condition/acquisition/loan editing,
+2. Complete physical component/condition/acquisition/loan editing,
    sensitive attachments, and the configured inbox/import-review UI.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.

@@ -198,6 +198,74 @@ pub struct JobClaim {
     pub created_at: chrono::DateTime<Utc>,
 }
 
+#[derive(Clone, Debug)]
+pub struct JobRecord {
+    pub id: JobId,
+    pub user_id: UserId,
+    pub collection_id: Option<CollectionId>,
+    pub item_id: Option<ItemId>,
+    pub kind: String,
+    pub state: JobState,
+    pub phase: String,
+    pub completed_units: u64,
+    pub total_units: u64,
+    pub attempt: u32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub error: Option<String>,
+    pub limitation: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct JobView {
+    pub id: JobId,
+    pub collection_id: Option<CollectionId>,
+    pub item_id: Option<ItemId>,
+    pub kind: String,
+    pub state: JobState,
+    pub phase: String,
+    pub completed_units: u64,
+    pub total_units: u64,
+    pub attempt: u32,
+    pub cancellable: bool,
+    pub retryable: bool,
+    pub error: Option<String>,
+    pub limitation: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<JobRecord> for JobView {
+    fn from(record: JobRecord) -> Self {
+        let cancellable = matches!(record.state, JobState::Queued | JobState::Running)
+            && record.phase != "revision_committed";
+        let retryable = record.state == JobState::Failed
+            && matches!(
+                record.kind.as_str(),
+                "integrity_verification" | "preservation_import"
+            );
+        Self {
+            id: record.id,
+            collection_id: record.collection_id,
+            item_id: record.item_id,
+            kind: record.kind,
+            state: record.state,
+            phase: record.phase,
+            completed_units: record.completed_units.min(record.total_units),
+            total_units: record.total_units,
+            attempt: record.attempt,
+            cancellable,
+            retryable,
+            error: record.error.map(|value| value.chars().take(512).collect()),
+            limitation: record
+                .limitation
+                .map(|value| value.chars().take(512).collect()),
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        }
+    }
+}
+
 pub trait JobPort: Send + Sync {
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId>;
     fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>>;
@@ -215,6 +283,14 @@ pub trait JobPort: Send + Sync {
     fn cancel_claimed_job(&self, id: JobId, claim_token: &str) -> Result<()>;
     fn cancellation_requested(&self, id: JobId, claim_token: &str) -> Result<bool>;
     fn request_job_cancellation(&self, id: JobId, user: UserId) -> Result<()>;
+    fn job_record(&self, id: JobId, user: UserId) -> Result<JobRecord>;
+    fn job_records(
+        &self,
+        user: UserId,
+        cursor: Option<JobId>,
+        limit: u16,
+    ) -> Result<Page<JobRecord>>;
+    fn retry_failed_job(&self, id: JobId, user: UserId) -> Result<JobId>;
 }
 
 pub trait AdministrationPort: Send + Sync {
@@ -1644,6 +1720,47 @@ impl CollectionService {
             ));
         }
         Ok(jobs)
+    }
+    pub fn job(&self, actor: &Principal, id: JobId) -> Result<JobView> {
+        self.jobs.job_record(id, actor.user_id).map(Into::into)
+    }
+    pub fn job_page(
+        &self,
+        actor: &Principal,
+        cursor: Option<JobId>,
+        limit: Option<u16>,
+    ) -> Result<Page<JobView>> {
+        let page = self
+            .jobs
+            .job_records(actor.user_id, cursor, limit.unwrap_or(50).min(100))?;
+        Ok(Page {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_cursor: page.next_cursor,
+        })
+    }
+    pub fn cancel_job(&self, actor: &Principal, id: JobId, context: &CommandContext) -> Result<()> {
+        self.jobs.job_record(id, actor.user_id)?;
+        self.execute_command(actor, context, "job.cancel", &id, |effects| {
+            effects.request_job_cancellation(id, actor.user_id)
+        })
+    }
+    pub fn retry_job(
+        &self,
+        actor: &Principal,
+        id: JobId,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        let job = self.jobs.job_record(id, actor.user_id)?;
+        if job.state != JobState::Failed {
+            return Err(Error::Conflict);
+        }
+        self.execute_command(actor, context, "job.retry", &id, |effects| {
+            match job.kind.as_str() {
+                "preservation_import" => effects.retry_upload(id),
+                "integrity_verification" => effects.retry_failed_job(id, actor.user_id),
+                _ => Err(Error::Unavailable("this job kind cannot be retried".into())),
+            }
+        })
     }
     pub fn require_administrator(&self, actor: &Principal) -> Result<()> {
         if actor.administrator {

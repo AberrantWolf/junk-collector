@@ -1271,6 +1271,7 @@ pub struct Job {
 pub enum JobState {
     Queued,
     Running,
+    CancelRequested,
     Completed,
     Failed,
     Cancelled,

@@ -148,6 +148,7 @@ impl Store {
         let (durable_state, durable_phase) = match upload.state {
             JobState::Queued => ("running", "awaiting_source"),
             JobState::Running => ("running", "staging"),
+            JobState::CancelRequested => ("cancel_requested", "cancelling"),
             JobState::Completed => ("completed", "completed"),
             JobState::Failed => ("failed", "failed"),
             JobState::Cancelled => ("cancelled", "cancelled"),

@@ -2967,6 +2967,101 @@ fn integrity_job_observes_cancellation_between_files() {
 }
 
 #[test]
+fn job_views_are_cursor_paged_and_omit_execution_secrets() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let user = UserId::new();
+    let other = UserId::new();
+    let mut ids = Vec::new();
+    for fixture in 0..3 {
+        let id = JobId::new();
+        ids.push(id);
+        store
+            .enqueue_job(JobSpec {
+                id,
+                user_id: user,
+                collection_id: None,
+                item_id: None,
+                kind: "integrity_verification".into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({"private_marker":format!("secret-{fixture}")}),
+            })
+            .unwrap();
+    }
+    let first = store.job_records(user, None, 2).unwrap();
+    assert_eq!(first.items.len(), 2);
+    let second = store
+        .job_records(user, Some(first.next_cursor.unwrap().parse().unwrap()), 2)
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert!(second.next_cursor.is_none());
+    let listed = first
+        .items
+        .into_iter()
+        .chain(second.items)
+        .map(|job| job.id)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(listed, ids.into_iter().collect());
+    assert!(matches!(
+        store.job_record(listed.iter().copied().next().unwrap(), other),
+        Err(Error::NotFound)
+    ));
+
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let actor = Principal {
+        user_id: user,
+        administrator: false,
+        device_id: None,
+    };
+    let claim = store.claim_job("private-worker", 30).unwrap().unwrap();
+    let serialized = serde_json::to_string(&service.job(&actor, claim.id).unwrap()).unwrap();
+    assert!(!serialized.contains("private_marker"));
+    assert!(!serialized.contains(&claim.claim_token));
+    assert!(!serialized.contains("private-worker"));
+}
+
+#[test]
+fn failed_integrity_job_retries_with_the_same_identity_and_attempt_history() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "retry-integrity.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 0, 0, b"data")
+        .unwrap();
+    service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
+    let job = service
+        .enqueue_integrity_verification(&actor, saved.id, &command())
+        .unwrap();
+    let claim = store.claim_job("server-a", 30).unwrap().unwrap();
+    store
+        .fail_job(job, &claim.claim_token, "injected tool failure")
+        .unwrap();
+
+    assert_eq!(service.retry_job(&actor, job, &command()).unwrap(), job);
+    let queued = service.job(&actor, job).unwrap();
+    assert_eq!(queued.state, JobState::Queued);
+    assert_eq!(queued.attempt, 2);
+    assert!(service.run_next_job("server-a").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+}
+
+#[test]
 fn review_capture_update_survives_reindex() {
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();

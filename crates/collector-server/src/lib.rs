@@ -10,8 +10,9 @@ use axum::{
 };
 use collector_app::{
     AccountUpdate, AccountView, AuthenticatedPrincipal, CollectionService, CommandContext,
-    EnrollmentStart, EnrollmentView, GrantView, MediaResource, NativeDeviceView, PasskeyView,
-    PresentedCollection, PresentedEvidence, PresentedItem, SaveItemCommand, SessionView,
+    EnrollmentStart, EnrollmentView, GrantView, JobView, MediaResource, NativeDeviceView,
+    PasskeyView, PresentedCollection, PresentedEvidence, PresentedItem, SaveItemCommand,
+    SessionView,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -477,6 +478,9 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(upload, cancel_upload))
         .routes(routes!(commit_upload))
         .routes(routes!(jobs))
+        .routes(routes!(job))
+        .routes(routes!(cancel_job))
+        .routes(routes!(retry_job))
         .routes(routes!(chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)))
         .routes(routes!(cover).layer(DefaultBodyLimit::max(20 * 1024 * 1024)))
 }
@@ -1509,10 +1513,67 @@ async fn verify(
     )
         .into_response())
 }
-#[utoipa::path(get, path = "/api/v1/jobs", responses((status = 200, body = Vec<Job>), (status = 401)))]
-async fn jobs(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Vec<Job>>> {
+#[derive(Deserialize, utoipa::IntoParams)]
+struct JobQuery {
+    cursor: Option<JobId>,
+    limit: Option<u16>,
+}
+
+#[utoipa::path(get, path = "/api/v1/jobs", params(JobQuery), responses((status = 200, body = Page<JobView>), (status = 401)))]
+async fn jobs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<JobQuery>,
+) -> ApiResult<Json<Page<JobView>>> {
     let actor = principal(&state, &headers)?;
-    Ok(Json(blocking(move || state.service.jobs(&actor)).await?))
+    Ok(Json(
+        blocking(move || state.service.job_page(&actor, query.cursor, query.limit)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/jobs/{id}", params(("id" = JobId, Path)), responses((status = 200, body = JobView), (status = 401), (status = 404)))]
+async fn job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<JobView>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(blocking(move || state.service.job(&actor, id)).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/jobs/{id}/cancel", params(("id" = JobId, Path), ("Idempotency-Key" = String, Header)), responses((status = 200, body = JobView), (status = 401), (status = 404), (status = 409)))]
+async fn cancel_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<JobView>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    blocking({
+        let state = state.clone();
+        let actor = actor.clone();
+        move || state.service.cancel_job(&actor, id, &context)
+    })
+    .await?;
+    Ok(Json(blocking(move || state.service.job(&actor, id)).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/jobs/{id}/retry", params(("id" = JobId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = JobView), (status = 401), (status = 404), (status = 409)))]
+async fn retry_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    blocking({
+        let state = state.clone();
+        let actor = actor.clone();
+        move || state.service.retry_job(&actor, id, &context)
+    })
+    .await?;
+    let view = blocking(move || state.service.job(&actor, id)).await?;
+    Ok((StatusCode::ACCEPTED, Json(view)).into_response())
 }
 #[utoipa::path(get, path = "/api/v1/admin/settings", responses((status = 200, body = serde_json::Value), (status = 403)))]
 async fn settings(

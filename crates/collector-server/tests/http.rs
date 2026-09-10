@@ -2,7 +2,9 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use collector_app::{AuthenticatedPrincipal, Catalog, CommandContext, CredentialKind};
+use collector_app::{
+    AuthenticatedPrincipal, Catalog, CommandContext, CredentialKind, JobPort, JobSpec,
+};
 use collector_client::Pairing;
 use collector_core::*;
 use collector_server::*;
@@ -584,7 +586,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 48);
+    assert_eq!(paths.len(), 51);
     assert!(paths.values().all(|path| {
         path.as_object().is_some_and(|operations| {
             operations.values().all(|operation| {
@@ -800,6 +802,96 @@ async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work
         JobState::Queued
     );
     assert!(service.run_next_job("http-test-worker").unwrap());
+}
+
+#[tokio::test]
+async fn job_routes_are_submitter_scoped_idempotent_and_secret_free() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let owner = state
+        .store
+        .create_user("job-owner", "a long owner password", false)
+        .unwrap();
+    let other_admin = state
+        .store
+        .create_user("other-admin", "a long admin password", true)
+        .unwrap();
+    let job = JobId::new();
+    state
+        .store
+        .enqueue_job(JobSpec {
+            id: job,
+            user_id: owner,
+            collection_id: None,
+            item_id: None,
+            kind: "integrity_verification".into(),
+            phase: "queued".into(),
+            total_units: 2,
+            request: serde_json::json!({"secret_request":"do-not-return"}),
+        })
+        .unwrap();
+    let (owner_token, _) = state.store.issue_session(owner, "browser").unwrap();
+    let (admin_token, _) = state.store.issue_session(other_admin, "browser").unwrap();
+    let app = router(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/jobs?limit=1")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["items"][0]["id"], job.to_string());
+    let serialized = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(!serialized.contains("secret_request"));
+    assert!(!serialized.contains("claim_token"));
+    assert!(!serialized.contains("worker_instance"));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/jobs/{job}"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/jobs/{job}/cancel"))
+                    .header("origin", "https://collector.example")
+                    .header("authorization", format!("Bearer {owner_token}"))
+                    .header("idempotency-key", "cancel-same-job")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["state"], "cancelled");
+        assert_eq!(body["cancellable"], false);
+    }
 }
 
 #[tokio::test]

@@ -276,7 +276,7 @@ migration; P02.2 claim/worker state machine; P02.3 cancellation, retry, and
 publication reconciliation; P02.4 job API and review. See
 [the Wave 3 execution plan](wave-3-plan.md).
 
-**Status (2026-09-10): P02.1-P02.3 complete; P02.4 is next.** Private schema
+**Status (2026-09-10): complete locally; U03.1 is next.** Private schema
 v8 stores typed jobs and migrates legacy uploads without identity/history loss.
 Transactional FIFO claims enforce two active jobs globally and one per user, with
 30-second leases, five-second heartbeats, prior-instance restart takeover, claim
@@ -285,8 +285,13 @@ first real consumers. Integrity verification, browser upload publication, and
 configured-inbox staging/publication now use the durable workers; no process-local
 job semaphore remains. Cancellation is cooperative before the fenced archive
 revision boundary and stably too late afterward. Retry retains source, identities,
-attempt count, and prior failure details. The cursor `JobView` and submitter-scoped
-detail/cancel/retry HTTP routes remain P02.4 and are explicitly unimplemented.
+attempt count, and prior failure details. Cursor job pages plus submitter-only
+detail/cancel/retry routes expose bounded safe views and require idempotency keys
+for mutations; stored requests, failure history, worker identities, leases, and
+claim tokens never cross the API. An administrator cannot bypass submitter scope.
+The local root review passed 112 Rust tests and Chromium smoke. Target-Linux
+process/filesystem behavior and independent review remain externally unqualified;
+event streaming remains C06 and distributed scheduling remains out of scope.
 
 ### P03 — Provisional package review and resumable ingest
 

@@ -564,6 +564,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["job"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retry_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -1065,22 +1113,32 @@ export interface components {
             /** @enum {string} */
             kind: "edition";
         };
-        Job: {
-            /** Format: int64 */
-            completed_bytes: number;
-            error?: string | null;
-            id: components["schemas"]["JobId"];
-            item_id: components["schemas"]["ItemId"];
-            kind: string;
-            state: components["schemas"]["JobState"];
-            /** Format: int64 */
-            total_bytes: number;
-            user_id: components["schemas"]["UserId"];
-        };
         /** Format: uuid */
         JobId: string;
         /** @enum {string} */
-        JobState: "queued" | "running" | "completed" | "failed" | "cancelled";
+        JobState: "queued" | "running" | "cancel_requested" | "completed" | "failed" | "cancelled";
+        JobView: {
+            /** Format: int32 */
+            attempt: number;
+            cancellable: boolean;
+            collection_id?: null | components["schemas"]["CollectionId"];
+            /** Format: int64 */
+            completed_units: number;
+            /** Format: date-time */
+            created_at: string;
+            error?: string | null;
+            id: components["schemas"]["JobId"];
+            item_id?: null | components["schemas"]["ItemId"];
+            kind: string;
+            limitation?: string | null;
+            phase: string;
+            retryable: boolean;
+            state: components["schemas"]["JobState"];
+            /** Format: int64 */
+            total_units: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
         LanguageTag: string;
         LegacyComponentProvenance: {
             legacy_carrier_id: components["schemas"]["CarrierId"];
@@ -1201,6 +1259,31 @@ export interface components {
             reason: string;
             /** @enum {string} */
             state: "disposed";
+        };
+        Page_JobView: {
+            items: {
+                /** Format: int32 */
+                attempt: number;
+                cancellable: boolean;
+                collection_id?: null | components["schemas"]["CollectionId"];
+                /** Format: int64 */
+                completed_units: number;
+                /** Format: date-time */
+                created_at: string;
+                error?: string | null;
+                id: components["schemas"]["JobId"];
+                item_id?: null | components["schemas"]["ItemId"];
+                kind: string;
+                limitation?: string | null;
+                phase: string;
+                retryable: boolean;
+                state: components["schemas"]["JobState"];
+                /** Format: int64 */
+                total_units: number;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            next_cursor?: string | null;
         };
         Page_PresentedItem: {
             items: {
@@ -2736,7 +2819,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                cursor: null | components["schemas"]["JobId"];
+                limit: number | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -2746,10 +2832,125 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Job"][];
+                    "application/json": components["schemas"]["Page_JobView"];
                 };
             };
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancel_job: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    retry_job: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -11,7 +11,7 @@ use chrono::Utc;
 use collector_app::{
     AccessPort, AccountView, AdministrationPort, AuthenticatedPrincipal, AuthenticationPort,
     Catalog, ContentPort, CredentialKind, EnrollmentPort, EnrollmentStart, EnrollmentView,
-    GrantView, IdempotencyPort, ImportPort, JobClaim, JobPort, JobSpec, MediaResource,
+    GrantView, IdempotencyPort, ImportPort, JobClaim, JobPort, JobRecord, JobSpec, MediaResource,
     NativeCredentialIssue, NativeDeviceView, ReceiptDecision, SessionView, StoredPasskey,
 };
 pub use collector_app::{Upload, UploadFile};
@@ -1070,6 +1070,23 @@ impl JobPort for Store {
     fn request_job_cancellation(&self, id: JobId, user: UserId) -> Result<()> {
         self.request_job_cancellation_record(id, user)
     }
+
+    fn job_record(&self, id: JobId, user: UserId) -> Result<JobRecord> {
+        Store::job_record(self, id, user)
+    }
+
+    fn job_records(
+        &self,
+        user: UserId,
+        cursor: Option<JobId>,
+        limit: u16,
+    ) -> Result<Page<JobRecord>> {
+        Store::job_records(self, user, cursor, limit)
+    }
+
+    fn retry_failed_job(&self, id: JobId, user: UserId) -> Result<JobId> {
+        self.retry_failed_job_record(id, user)
+    }
 }
 
 impl AdministrationPort for Store {
@@ -1702,6 +1719,7 @@ pub(crate) fn job_phase_storage(state: &JobState) -> &'static str {
     match state {
         JobState::Queued => "awaiting_source",
         JobState::Running => "staging",
+        JobState::CancelRequested => "cancelling",
         JobState::Completed => "completed",
         JobState::Failed => "failed",
         JobState::Cancelled => "cancelled",
@@ -1711,7 +1729,8 @@ pub(crate) fn job_phase_storage(state: &JobState) -> &'static str {
 pub(crate) fn parse_job_state(value: &str) -> Result<JobState> {
     match value {
         "queued" => Ok(JobState::Queued),
-        "running" | "cancel_requested" => Ok(JobState::Running),
+        "running" => Ok(JobState::Running),
+        "cancel_requested" => Ok(JobState::CancelRequested),
         "completed" => Ok(JobState::Completed),
         "failed" => Ok(JobState::Failed),
         "cancelled" => Ok(JobState::Cancelled),

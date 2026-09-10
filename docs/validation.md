@@ -78,6 +78,32 @@
   streaming remains C06. Target-Linux process/filesystem behavior remains
   externally unqualified.
 
+## Wave 3 P02.4 job API and root review — 2026-09-10
+
+- `job_views_are_cursor_paged_and_omit_execution_secrets` covers stable descending
+  cursor pages, page bounds, submitter filtering, safe progress, and serialization
+  that contains no stored request, claim token, or worker identity.
+- `failed_integrity_job_retries_with_the_same_identity_and_attempt_history` proves
+  the generic retry path reuses the real Job, increments attempt, retains private
+  failure history, and completes the same executable integrity consumer.
+- `job_routes_are_submitter_scoped_idempotent_and_secret_free` exercises list,
+  detail, and cancellation through HTTP. Another user's administrator receives
+  404 rather than a bypass, and an identical cancellation key replays the same
+  safe result. Missing/mismatched idempotency behavior remains covered by the
+  general mutation contract test.
+- Generated OpenAPI and TypeScript now include cursor `JobView`, detail, cancel,
+  and retry routes. No view contains private request/result history, lease, worker,
+  or claim fields.
+- P02 root review reran architecture/link/fixture checks, Rust formatting, all 112
+  locked workspace tests, warning-free all-target clippy, TypeScript checking,
+  deterministic API drift, web build, and the embedded-assets server rebuild.
+  Chromium initially failed to launch/terminate under the filesystem sandbox with
+  `EPERM`; the same isolated temporary-profile smoke suite passed with approved
+  sandbox escalation.
+- **Externally unqualified:** target-Linux process termination/filesystem behavior
+  and independent scheduler review. **Not implemented:** C06 event streaming and
+  distributed scheduling. These are not represented as P02 capabilities.
+
 Validated locally on macOS, Rust 1.95.0 and Node 24.3.0.
 
 - `cargo test --workspace`: 20 integration tests pass, covering module registration, archive recovery and tamper detection, upload/inbox source preservation and retries, authorization/redaction, image bounds, search/pagination, credential revocation, exposure routing, HTTP ranges, cache keys, and direct enrolled TLS.

@@ -1373,21 +1373,169 @@
     "/api/v1/jobs": {
       "get": {
         "operationId": "jobs",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/JobId"
+                }
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Job"
-                  }
+                  "$ref": "#/components/schemas/Page_JobView"
                 }
               }
             }
           },
           "401": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "get": {
+        "operationId": "job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/cancel": {
+      "post": {
+        "operationId": "cancel_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/retry": {
+      "post": {
+        "operationId": "retry_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
             "description": ""
           }
         }
@@ -3069,22 +3217,63 @@
           }
         ]
       },
-      "Job": {
+      "JobId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "JobState": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "cancel_requested",
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "JobView": {
         "type": "object",
         "required": [
           "id",
-          "user_id",
-          "item_id",
           "kind",
           "state",
-          "completed_bytes",
-          "total_bytes"
+          "phase",
+          "completed_units",
+          "total_units",
+          "attempt",
+          "cancellable",
+          "retryable",
+          "created_at",
+          "updated_at"
         ],
         "properties": {
-          "completed_bytes": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cancellable": {
+            "type": "boolean"
+          },
+          "collection_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectionId"
+              }
+            ]
+          },
+          "completed_units": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
           },
           "error": {
             "type": [
@@ -3096,37 +3285,43 @@
             "$ref": "#/components/schemas/JobId"
           },
           "item_id": {
-            "$ref": "#/components/schemas/ItemId"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
           },
           "kind": {
             "type": "string"
           },
+          "limitation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
           "state": {
             "$ref": "#/components/schemas/JobState"
           },
-          "total_bytes": {
+          "total_units": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
           },
-          "user_id": {
-            "$ref": "#/components/schemas/UserId"
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
-      },
-      "JobId": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "JobState": {
-        "type": "string",
-        "enum": [
-          "queued",
-          "running",
-          "completed",
-          "failed",
-          "cancelled"
-        ]
       },
       "LanguageTag": {
         "type": "string"
@@ -3577,6 +3772,114 @@
             }
           }
         ]
+      },
+      "Page_JobView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "kind",
+                "state",
+                "phase",
+                "completed_units",
+                "total_units",
+                "attempt",
+                "cancellable",
+                "retryable",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "attempt": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "cancellable": {
+                  "type": "boolean"
+                },
+                "collection_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CollectionId"
+                    }
+                  ]
+                },
+                "completed_units": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "$ref": "#/components/schemas/JobId"
+                },
+                "item_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ItemId"
+                    }
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "limitation": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "phase": {
+                  "type": "string"
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "state": {
+                  "$ref": "#/components/schemas/JobState"
+                },
+                "total_units": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "Page_PresentedItem": {
         "type": "object",
