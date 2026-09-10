@@ -485,7 +485,7 @@ Execute reviewed narrow extractions of parsers, normalized hashing, disc identit
 
 ### D03 — Extract reusable audio services and reader contract
 
-**Status (2026-09-10): D03.1-D03.4 implemented/reviewed; D03.5 is next.** Junk
+**Status (2026-09-10): complete locally; W3.R is next.** Junk
 Libs now has executable source/PCM coordinate contracts, opaque playback identity/
 position contracts, qualified PCM-WAV decode with exact integer-frame seeks, and
 path-free adapters for already-open CUE/redumper readers. It also has bounded
@@ -496,7 +496,10 @@ boundaries while retaining its compressed fallback and CPAL adapter. Only owned
 audio and lockfile hunks were committed; user changes in `amp-core`, desktop
 presentation, documentation, and the remaining lockfile hunks are preserved.
 Collector's authorized representation becomes an opaque audio source only after
-application authorization, without exposing its archive path.
+application authorization, without exposing its archive path. Cross-repository
+sample, exact-seek, transition, resampling, DSP, queue, and dependency-boundary
+review passes. Published pins, physical CPAL/loopback, private real-dump/codec
+fixtures, target platforms, and independent review remain external qualifications.
 
 **Review · Dependencies:** D01, A03. **Owner:** shared audio crates; collector application media-reader port; Trash Amp adapters.
 

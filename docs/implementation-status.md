@@ -210,6 +210,11 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   already-authorized representation as the shared opaque byte source without
   exposing an archive path. Shared compressed codec support remains required;
   physical output and private fixtures remain external qualifications.
+- D03 is locally complete and reviewed across Junk Libs, Trash Amp, and Collector.
+  The headless default audio contract depends only on `thiserror`; decoding, disc
+  readers, and resampling are optional mechanisms. Compressed shared decoding,
+  richer effects, event delivery, published dependency pins, and hardware/private
+  qualification remain required or external as recorded in the Wave 3 ledger.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 

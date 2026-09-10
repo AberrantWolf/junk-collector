@@ -1,5 +1,29 @@
 # Validation recorded for the foundation
 
+# Wave 3 D03.5 cross-repository review — 2026-09-10
+
+- Junk Libs reran `cargo test --workspace --all-features` and
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`. The
+  dependency review found no path, HTTP, product-ID, GUI, or CPAL use in production
+  audio/playback sources; the only filesystem matches are CUE test-fixture writes.
+  The default `junk-libs-audio` tree was narrowed to `thiserror` only in `4c7e98e`.
+- Trash Amp reran all 42 workspace tests and full strict clippy in D03.4. Its
+  adapter lockfile followed the dependency cleanup in `cb95c57`; the two user-owned
+  lock hunks and all other user changes remain unstaged.
+- Collector explicit-package fmt passes. `cargo test --workspace` exits zero with
+  139 tests passing, and `cargo clippy --workspace --all-targets -- -D warnings`
+  exits zero. Architecture and diff checks pass.
+- The literal whole-workspace fmt command currently traverses a sibling path
+  workspace and reports older formatting drift in unrelated PDF/docview sources.
+  W3.R owns resolving or recording that final integration gate; D03 did not absorb
+  unrelated formatting changes merely to claim a pass.
+- **Implemented:** the D03 headless contracts, qualified WAV/CUE/redumper decode,
+  exact frame seeking, bounded resampling, gain/clipping, queue policy, and local
+  consumer migrations. **Not implemented:** shared compressed codecs, richer DSP,
+  events, or device policy. **Externally unqualified:** published Git pins,
+  physical CPAL/loopback, private real dumps/codecs, target platforms, and
+  independent review.
+
 # Wave 3 D03.4 consumer migration — 2026-09-10
 
 - Junk Libs `c3c133b` adds validated queue restoration so a device adapter can
