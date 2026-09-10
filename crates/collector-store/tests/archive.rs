@@ -3584,10 +3584,21 @@ fn focused_inventory_commands_preserve_history_and_are_idempotent() {
     let durable = reopened.item(base.id).unwrap();
     assert_eq!(durable.specimens.len(), 2);
     assert_eq!(durable.specimens[0].loans.len(), 1);
+    assert_eq!(
+        durable.specimens[0].loans[0].returned_at,
+        Some(chrono::NaiveDate::from_ymd_opt(2026, 9, 4).unwrap())
+    );
     assert!(matches!(
         durable.specimens[0].ownership,
         Ownership::Disposed { .. }
     ));
+    assert_eq!(durable.specimens[1].label, "Listening copy");
+    assert_eq!(durable.specimens[1].possession, Possession::Present);
+    assert!(matches!(
+        durable.specimens[1].ownership,
+        Ownership::Borrowed
+    ));
+    assert!(durable.specimens[1].loans.is_empty());
 }
 
 #[test]

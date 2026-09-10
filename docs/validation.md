@@ -1,5 +1,28 @@
 # Validation recorded for the foundation
 
+## Wave 3 U03.3 physical lifecycle privacy/reindex review — 2026-09-10
+
+- The read-model firewall fixture now includes a returned loan with a unique
+  contact marker. Authenticated viewer responses for both `GET /items/{id}` and
+  cursor browse contain no acquisition, private-note, contact, or loan-history
+  keys or marker text; the curator response retains the private note and contact.
+- `physical_lifecycle_routes_follow_curation_listener_composition` probes all
+  seven focused route patterns/eight methods. They are 404-absent on public
+  ingress when public curation is disabled and reach authentication only when
+  explicitly enabled; spoofed proxy headers remain irrelevant.
+- The two-copy restart fixture now asserts the disposed first copy retains its
+  returned loan, while the separately updated borrowed second copy retains its
+  label and possession with no loan history. Reindex/reopen also retains the
+  Capture/Asset relationships and readable original artwork established before
+  disposal.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 116
+  locked workspace tests, warning-free all-target clippy, generated API drift,
+  TypeScript checking, web build, and rebuilt server pass. Normal HTTPS and
+  `LOCAL_SETUP=1` private-listener Chromium smoke suites both pass.
+- **Externally unqualified:** independent lifecycle/privacy review. **Not
+  implemented by design:** specimen deletion, trading, or disposal-driven
+  Evidence/payload deletion.
+
 ## Wave 3 U03.2 physical lifecycle editor — 2026-09-10
 
 - The Chromium smoke scenario creates a copy with condition, acquisition, cost,

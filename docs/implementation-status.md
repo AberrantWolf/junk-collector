@@ -68,15 +68,21 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   in React component state across stale Item revisions; the conflict panel names
   both revisions and offers reload/discard or manual reapply. The layout retains
   the existing archival-workbench visual language and is keyboard/mobile tested.
+- U03.3 verifies viewer detail and browse DTOs structurally omit acquisition,
+  private notes, contacts, and loan history while curator DTOs retain them.
+  Focused lifecycle routes are composed only on curation-enabled listeners. Two
+  independent copies, returned history, disposal, Capture/Asset relationships,
+  and stored artwork bytes survive reindex/restart. U03 is locally complete;
+  independent review remains external.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete the U03.3 privacy/reindex review, then implement sensitive
-   attachments and the configured inbox/import-review UI. Focused lifecycle APIs
-   and their copy-level editor are implemented.
+2. Implement sensitive attachments and the configured inbox/import-review UI.
+   Physical lifecycle APIs, editor, privacy filtering, and recovery review are
+   locally complete.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

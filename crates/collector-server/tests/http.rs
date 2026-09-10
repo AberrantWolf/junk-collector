@@ -99,6 +99,92 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
         }
     }
 }
+
+#[tokio::test]
+async fn physical_lifecycle_routes_follow_curation_listener_composition() {
+    let id = ItemId::new();
+    let specimen = SpecimenId::new();
+    let component = ComponentId::new();
+    let loan = LoanId::new();
+    let requests = [
+        (
+            "POST",
+            format!("/api/v1/items/{id}/specimens"),
+            serde_json::json!({"expected_revision":1,"details":{"label":"copy","condition":"good","ownership":"owned","possession":"present","acquisition":null,"private_notes":null}}),
+        ),
+        (
+            "PUT",
+            format!("/api/v1/items/{id}/specimens/{specimen}"),
+            serde_json::json!({"expected_revision":1,"details":{"label":"copy","condition":"good","ownership":"owned","possession":"present","acquisition":null,"private_notes":null}}),
+        ),
+        (
+            "POST",
+            format!("/api/v1/items/{id}/specimens/{specimen}/components"),
+            serde_json::json!({"expected_revision":1,"details":{"label":"disc","kind":"optical_disc","position":1,"carrier":{"label":"disc","kind":"optical_disc"}}}),
+        ),
+        (
+            "PUT",
+            format!("/api/v1/items/{id}/specimens/{specimen}/components/{component}"),
+            serde_json::json!({"expected_revision":1,"details":{"label":"disc","kind":"optical_disc","position":1,"carrier":{"label":"disc","kind":"optical_disc"}}}),
+        ),
+        (
+            "DELETE",
+            format!(
+                "/api/v1/items/{id}/specimens/{specimen}/components/{component}?expected_revision=1"
+            ),
+            serde_json::Value::Null,
+        ),
+        (
+            "POST",
+            format!("/api/v1/items/{id}/specimens/{specimen}/loans"),
+            serde_json::json!({"expected_revision":1,"command":{"contact":"person","lent_at":"2026-09-10","due_at":null}}),
+        ),
+        (
+            "POST",
+            format!("/api/v1/items/{id}/specimens/{specimen}/loans/{loan}/return"),
+            serde_json::json!({"expected_revision":1,"command":{"returned_at":"2026-09-11","possession":"present"}}),
+        ),
+        (
+            "POST",
+            format!("/api/v1/items/{id}/specimens/{specimen}/dispose"),
+            serde_json::json!({"expected_revision":1,"command":{"date":"2026-09-12","reason":"test","possession":"elsewhere"}}),
+        ),
+    ];
+    for enabled in [false, true] {
+        let (_root, mut state) = state();
+        state.exposure.public_curation = enabled;
+        let app = router(state);
+        for (method, path, body) in &requests {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(*method)
+                        .uri(path)
+                        .header("origin", "https://collector.example")
+                        .header("idempotency-key", "listener-composition-probe")
+                        .header("content-type", "application/json")
+                        .body(Body::from(if body.is_null() {
+                            Vec::new()
+                        } else {
+                            serde_json::to_vec(body).unwrap()
+                        }))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if enabled {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::NOT_FOUND
+                },
+                "{method} {path}, curation={enabled}"
+            );
+        }
+    }
+}
 #[tokio::test]
 async fn private_surface_still_requires_authentication_and_csrf_origin() {
     let (_root, mut state) = state();
@@ -991,7 +1077,13 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
                 coordinates: None,
             }),
             private_notes: Some("private note marker".into()),
-            loans: vec![],
+            loans: vec![Loan {
+                id: LoanId::new(),
+                contact: "private contact marker".into(),
+                lent_at: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
+                due_at: Some(chrono::NaiveDate::from_ymd_opt(2026, 8, 8).unwrap()),
+                returned_at: Some(chrono::NaiveDate::from_ymd_opt(2026, 8, 4).unwrap()),
+            }],
         }],
         wishlist: false,
         captures: vec![],
@@ -1093,6 +1185,7 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         "do-not-serialize",
         "private shop marker",
         "private note marker",
+        "private contact marker",
         "private provider marker",
     ] {
         assert!(
@@ -1111,6 +1204,33 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
     assert_eq!(body["effective_permissions"]["can_manage_access"], false);
     assert_eq!(body["presentation"]["values"], serde_json::json!([]));
     assert!(body["captures"][0].get("legacy_payload_locator").is_none());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items?collection_id={}", collection.id))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(!text.contains("private shop marker"));
+    assert!(!text.contains("private note marker"));
+    assert!(!text.contains("private contact marker"));
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    for field in ["acquisition", "private_notes", "loans"] {
+        assert!(
+            body["items"][0]["specimens"][0].get(field).is_none(),
+            "browse DTO serialized private specimen field {field}"
+        );
+    }
 
     let response = app
         .clone()
@@ -1180,6 +1300,10 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
     );
     assert_eq!(body["metadata"]["selected"], "private provider marker");
     assert_eq!(body["specimens"][0]["private_notes"], "private note marker");
+    assert_eq!(
+        body["specimens"][0]["loans"][0]["contact"],
+        "private contact marker"
+    );
     assert_eq!(body["effective_permissions"]["can_curate"], true);
     assert_eq!(body["effective_permissions"]["can_manage_access"], false);
     assert!(body["captures"][0].get("legacy_payload_locator").is_none());

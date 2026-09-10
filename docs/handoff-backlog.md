@@ -155,7 +155,7 @@ Planned children (complete in order): U03.1 focused lifecycle commands, U03.2
 lifecycle editor, and U03.3 privacy/reindex review. See
 [the Wave 3 execution plan](wave-3-plan.md).
 
-**Status (2026-09-10): U03.1 and U03.2 implemented; U03.3 is next.** The broad Item-save
+**Status (2026-09-10): complete locally; U04.1 is next.** The broad Item-save
 command can no longer submit specimen state, and the Wave 1 adapter delegates
 only when its specimen snapshot exactly matches canonical storage. Focused,
 revisioned, idempotent commands and curator-only routes create/update specimens
@@ -171,8 +171,11 @@ notes, ordered parts/carriers, lending, explicit return, retained loan history,
 and disposal. A real revision race keeps the user's draft and offers either
 server reload/discard or manual reapply against the displayed current revision.
 Chromium exercises the full lifecycle, keyboard order, and a 390px responsive
-layout. The U03.3 structural privacy/reindex/browser review is explicitly not
-implemented yet.
+layout. U03.3 proves both detail and browse DTOs structurally omit acquisition,
+private notes, contacts, and loan history for viewers; all focused mutations
+follow curation listener composition; and independent copy state survives
+reindex/restart. Both normal and private-local Chromium suites pass. Independent
+review remains externally unqualified.
 
 ### U04 — Sensitive supporting assets and role-aware artwork
 
