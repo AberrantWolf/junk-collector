@@ -1,5 +1,24 @@
 # Validation recorded for the foundation
 
+# Wave 3 D03.1 headless audio contracts — 2026-09-10
+
+- TDD first failed because the two new crates exported none of the requested
+  contracts. Green tests read and seek an opaque in-memory source, retain bounded
+  media hints, reject zero PCM dimensions/incomplete interleaved frames, preserve
+  integer chunk starts, carry a consumer-defined key without interpreting it, and
+  reject track-local positions beyond the declared length.
+- Commit: Junk Libs `714b49e`. Passed `cargo test --workspace --all-features`,
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`, focused
+  package fmt, and `git diff --check`.
+- The Trash Amp read-only overlap audit found `amp-audio` clean. User-owned changes
+  remain in `amp-core`, desktop source/Slint, README/architecture/validation, and
+  `Cargo.lock`; none was modified by this child.
+- **Implemented:** byte-source, PCM-shape, frame-coordinate, opaque-key, and
+  generation contracts. **Not implemented:** D03.2 decoding/exact seek, D03.3
+  resampling/queue/DSP, D03.4 consumer migration, or D03.5 review. No dormant
+  service method was added. **Externally unqualified:** independent review and all
+  codec/device/hardware behavior.
+
 # Wave 3 D02.5 neutral DAT parser and root review — 2026-09-10
 
 - TDD first failed on the absent `junk_libs_dat::parse_dat` API. The shared

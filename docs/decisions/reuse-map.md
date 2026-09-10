@@ -88,11 +88,13 @@ but never fabricated into hashed source bytes.
 | Frame-450 evidence and offset search | `junk-libs-accuraterip`; reconstructed packed-integer disc stream | none | D02/D05 | CUETools-derived frame-450 semantics and -2939..=2939 cross-track vectors | implemented locally; frame-450 alone never verifies |
 | Offset search | Phono `verify_with_offsets`; signed sample-frame offsets with explicit window | none | D02/D05 | ARver plus locally supplied real harness | supported by code/vector; real-dump qualification outstanding |
 | dBAR parsing and confidence | Phono dBAR parser/report types; database records keyed by disc/track | network only for download | D02 parser / D05 provider adapter | recorded public response vector | supported for parsing; live provider unqualified |
-| WAV decode | Trash Amp audio and junk-libs readers; interleaved integer PCM frames | decoder feature | D03 shared decoder service | generated WAV sample/frame and seek vectors | supported |
+| Headless audio source/PCM contract | `junk-libs-audio`; opaque `Read + Seek + Send`, length/media hints, interleaved `f32`, integer frames | none | D03 shared decoder/resampler/DSP services | in-memory read/seek and PCM-shape boundary tests | implemented |
+| WAV decode | Trash Amp audio and junk-libs readers; interleaved integer PCM frames | decoder feature | D03 shared decoder service | generated WAV sample/frame and seek vectors | supported in Trash Amp; shared migration pending D03.2 |
 | Compressed decode | Trash Amp decoder path; decoded integer PCM frames | Symphonia codecs | D03 | redistributable/public-domain encoded vectors per codec | unqualified per codec |
 | Integer-frame seek | Trash Amp/junk-libs reader APIs; decoded sample frames, never bytes or seconds | decoder-specific | D03 | generated impulse/ramp fixture at boundary seeks | supported for WAV; compressed unqualified |
 | Resampling | Trash Amp audio; explicit input/output sample rates and PCM frames | resampler | D03 DSP service | generated impulses/sines compared with independent numeric tolerances | supported for current fixture; broader formats unqualified |
-| Playback queue | Trash Amp `amp-core`/`amp-audio`; logical track IDs and positions | none | D03 service | deterministic state-machine tests | supported |
+| Playback coordinate contract | `junk-libs-playback`; opaque consumer keys, generations and track-local integer frames | none | D03 queue service | generic-key/range contract tests | implemented; transitions pending D03.3 |
+| Playback queue | Trash Amp `amp-core`/`amp-audio`; logical track IDs and positions | none | D03 service | deterministic state-machine tests | supported in Trash Amp; shared migration pending D03.3-D03.4 |
 | DSP chain | Trash Amp audio; decoded PCM buffers | optional DSP features | D03 service | independent impulse/gain/clipping vectors per effect | unqualified |
 | Device output | Trash Amp CPAL path; host device frames | CPAL/hardware | D03 optional output adapter only | manual hardware matrix | unqualified; unavailable in headless CI |
 

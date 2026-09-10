@@ -186,6 +186,13 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   policy remain product-owned. D02 is locally complete. Collector game/music
   integration remains D04/D05, and publishing/pinning shared SHAs plus private/
   live-disc qualification remain external.
+- D03.1 establishes `junk-libs-audio` opaque `Read + Seek + Send` byte sources,
+  length/media hints, nonzero sample-rate/channel formats, interleaved `f32` PCM
+  chunks, and integer frame coordinates. `junk-libs-playback` establishes generic
+  opaque track keys, generations, and validated track-local positions. These are
+  executable contracts only: decoding, resampling, queue transitions, DSP, and
+  consumer migrations remain required under D03.2-D03.5, and AccurateRip remains
+  entirely on integer CD PCM.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 

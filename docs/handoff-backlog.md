@@ -485,6 +485,13 @@ Execute reviewed narrow extractions of parsers, normalized hashing, disc identit
 
 ### D03 — Extract reusable audio services and reader contract
 
+**Status (2026-09-10): D03.1 implemented/reviewed; D03.2 is next.** Junk Libs
+now has executable source/PCM coordinate contracts and opaque playback identity/
+position contracts, with no exported decoder or queue-control placeholder. The
+Trash Amp audit found its audio crate clean while user changes occupy `amp-core`,
+desktop presentation, documentation, and the lockfile; later migration must avoid
+those hunks and stage only owned lockfile changes.
+
 **Review · Dependencies:** D01, A03. **Owner:** shared audio crates; collector application media-reader port; Trash Amp adapters.
 
 Define capability-based authorized media readers and extract decoding, integer-sample seeking, queue/DSP/playback services from app-specific orchestration. Specify PCM format/track-boundary semantics and device adapter ownership; keep filesystem and HTTP readers behind adapters.
