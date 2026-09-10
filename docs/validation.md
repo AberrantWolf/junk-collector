@@ -1,5 +1,22 @@
 # Validation recorded for the foundation
 
+## Wave 3 P02.1 durable job repository — 2026-09-10
+
+- A test-first schema assertion failed against the Wave 2 two-column JSON job
+  table, then passed after private schema v8 added typed ownership, target,
+  state/phase, progress, attempt, timestamp, diagnostic, request/result, lease,
+  claim-token, and cancellation fields.
+- The committed private-v2 fixture migrates its older Job shape, which has no
+  Item identity, without changing its Job ID or losing completed progress. A
+  current upload produces a typed queued row and remains readable through the
+  existing service.
+- `python3 scripts/check_architecture.py`, `cargo fmt --all -- --check`,
+  `cargo test --workspace --locked` (96 tests), and
+  `cargo clippy --workspace --all-targets -- -D warnings` pass.
+- **Not implemented:** durable claims/leases, scheduler execution, restart
+  reconciliation, cancellation/retry commands, and the new job API remain
+  P02.2-P02.4. No UI or capability advertises them.
+
 Validated locally on macOS, Rust 1.95.0 and Node 24.3.0.
 
 - `cargo test --workspace`: 20 integration tests pass, covering module registration, archive recovery and tamper detection, upload/inbox source preservation and retries, authorization/redaction, image bounds, search/pagination, credential revocation, exposure routing, HTTP ranges, cache keys, and direct enrolled TLS.

@@ -1266,7 +1266,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 7 {
+    if private_version > 8 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -1482,6 +1482,92 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             PRAGMA private.user_version = 7;").map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
+    if private_version < 8 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "ALTER TABLE private.jobs RENAME TO jobs_v7;
+            CREATE TABLE private.jobs (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              collection_id TEXT,
+              item_id TEXT,
+              kind TEXT NOT NULL,
+              state TEXT NOT NULL CHECK(state IN ('queued','running','completed','failed','cancelled','cancel_requested')),
+              phase TEXT NOT NULL,
+              completed_units INTEGER NOT NULL,
+              total_units INTEGER NOT NULL,
+              attempt INTEGER NOT NULL,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
+              error TEXT,
+              limitation TEXT,
+              request TEXT NOT NULL CHECK(length(request) <= 16777216),
+              result TEXT CHECK(result IS NULL OR length(result) <= 1048576),
+              worker_instance TEXT,
+              lease_expires INTEGER,
+              claim_token TEXT,
+              cancellation_requested INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX private.jobs_owner_order ON jobs(user_id,created_at,id);
+            CREATE INDEX private.jobs_claim_order ON jobs(state,created_at,id);",
+        )
+        .map_err(storage)?;
+        let legacy = {
+            let mut statement = tx
+                .prepare("SELECT id,record FROM private.jobs_v7 ORDER BY id")
+                .map_err(storage)?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(storage)?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        for (id, record) in legacy {
+            let job: serde_json::Value = serde_json::from_str(&record).map_err(storage)?;
+            let field = |name: &str| {
+                job.get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            };
+            let user_id = field("user_id")
+                .ok_or_else(|| Error::Storage("legacy job has no user identity".into()))?;
+            let item_id = field("item_id");
+            let kind =
+                field("kind").ok_or_else(|| Error::Storage("legacy job has no kind".into()))?;
+            let state =
+                field("state").ok_or_else(|| Error::Storage("legacy job has no state".into()))?;
+            let phase = job_phase_storage(&parse_job_state(&state)?);
+            let completed = job
+                .get("completed_bytes")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let total = job
+                .get("total_bytes")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let error = field("error");
+            tx.execute(
+                "INSERT INTO private.jobs(
+                  id,user_id,collection_id,item_id,kind,state,phase,
+                  completed_units,total_units,attempt,created_at,updated_at,
+                  error,limitation,request,result,worker_instance,lease_expires,
+                  claim_token,cancellation_requested
+                ) VALUES(?,?,NULL,?,?,?,?,?,?,1,0,0,?,NULL,?,NULL,NULL,NULL,NULL,0)",
+                params![
+                    id, user_id, item_id, kind, state, phase, completed, total, error, record,
+                ],
+            )
+            .map_err(storage)?;
+        }
+        tx.execute_batch(
+            "DROP TABLE private.jobs_v7;
+            PRAGMA private.user_version = 8;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
@@ -1534,6 +1620,37 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         tx.commit().map_err(storage)?;
     }
     Ok(())
+}
+
+pub(crate) fn job_state_storage(state: &JobState) -> &'static str {
+    match state {
+        JobState::Queued => "queued",
+        JobState::Running => "running",
+        JobState::Completed => "completed",
+        JobState::Failed => "failed",
+        JobState::Cancelled => "cancelled",
+    }
+}
+
+pub(crate) fn job_phase_storage(state: &JobState) -> &'static str {
+    match state {
+        JobState::Queued => "awaiting_source",
+        JobState::Running => "staging",
+        JobState::Completed => "completed",
+        JobState::Failed => "failed",
+        JobState::Cancelled => "cancelled",
+    }
+}
+
+pub(crate) fn parse_job_state(value: &str) -> Result<JobState> {
+    match value {
+        "queued" => Ok(JobState::Queued),
+        "running" | "cancel_requested" => Ok(JobState::Running),
+        "completed" => Ok(JobState::Completed),
+        "failed" => Ok(JobState::Failed),
+        "cancelled" => Ok(JobState::Cancelled),
+        _ => Err(Error::Storage(format!("invalid durable job state {value}"))),
+    }
 }
 
 fn stable_private_uuid(label: &str) -> uuid::Uuid {

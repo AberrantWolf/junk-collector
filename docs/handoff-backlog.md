@@ -271,6 +271,19 @@ Replace persisted status plus process-local scheduling with durable claims/resta
 
 **Limit:** local scheduler only; no distributed queue service.
 
+Planned children (complete in order): P02.1 durable job repository and v8
+migration; P02.2 claim/worker state machine; P02.3 cancellation, retry, and
+publication reconciliation; P02.4 job API and review. See
+[the Wave 3 execution plan](wave-3-plan.md).
+
+**Status (2026-09-10): P02.1 complete; P02.2 is next.** Private schema v8 replaces
+opaque job-only rows with typed owner/target/state/phase/progress/attempt/time,
+diagnostic, request/result, lease, claim, and cancellation columns. The committed
+private-v2 fixture and current upload jobs migrate without changing Job IDs or
+losing progress/failure history. Existing upload and job reads remain operational.
+Durable claiming, leases, executable restart scheduling, cancellation/retry
+controls, and the reviewed job API remain explicitly unimplemented.
+
 ### P03 — Provisional package review and resumable ingest
 
 **Review · Dependencies:** A04, P01, P02, A03. **Owner:** application import workflow; store staging; HTTP uploads.

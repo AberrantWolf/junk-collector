@@ -145,9 +145,38 @@ impl Store {
             total_bytes: upload.files.iter().map(|f| f.bytes.0).sum(),
             error: None,
         };
+        let collection_id = self.item(upload.item_id)?.collection_id;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
-        tx.execute("INSERT INTO private.jobs VALUES (?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![job.id.to_string(),serde_json::to_string(&job).map_err(storage)?]).map_err(storage)?;
+        let now = Utc::now().timestamp();
+        tx.execute(
+            "INSERT INTO private.jobs(
+              id,user_id,collection_id,item_id,kind,state,phase,
+              completed_units,total_units,attempt,created_at,updated_at,
+              error,limitation,request,result,worker_instance,lease_expires,
+              claim_token,cancellation_requested
+            ) VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?,NULL,?,NULL,NULL,NULL,NULL,0)
+            ON CONFLICT(id) DO UPDATE SET
+              state=excluded.state,phase=excluded.phase,
+              completed_units=excluded.completed_units,total_units=excluded.total_units,
+              updated_at=excluded.updated_at,error=excluded.error,request=excluded.request",
+            params![
+                job.id.to_string(),
+                job.user_id.to_string(),
+                collection_id.to_string(),
+                job.item_id.to_string(),
+                job.kind,
+                crate::job_state_storage(&job.state),
+                crate::job_phase_storage(&job.state),
+                job.completed_bytes,
+                job.total_bytes,
+                now,
+                now,
+                job.error,
+                serde_json::to_string(upload).map_err(storage)?,
+            ],
+        )
+        .map_err(storage)?;
         if let Some(result) = &self.command_result {
             self.record_command(&tx, result)?;
         }
@@ -569,17 +598,37 @@ impl Store {
     pub(crate) fn jobs_for_user(&self, user: UserId) -> Result<Vec<Job>> {
         let db = lock(&self.db)?;
         let mut stmt = db
-            .prepare("SELECT record FROM private.jobs ORDER BY id DESC LIMIT 500")
+            .prepare("SELECT id,user_id,item_id,kind,state,completed_units,total_units,error FROM private.jobs WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 500")
             .map_err(storage)?;
         let rows = stmt
-            .query_map([], |r| r.get::<_, String>(0))
+            .query_map([user.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, u64>(5)?,
+                    row.get::<_, u64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                ))
+            })
             .map_err(storage)?;
         let mut jobs = Vec::new();
         for row in rows {
-            let job: Job = serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
-            if job.user_id == user {
-                jobs.push(job);
-            }
+            let (id, stored_user, item_id, kind, state, completed_bytes, total_bytes, error) =
+                row.map_err(storage)?;
+            let Some(item_id) = item_id else { continue };
+            jobs.push(Job {
+                id: id.parse().map_err(storage)?,
+                user_id: stored_user.parse().map_err(storage)?,
+                item_id: item_id.parse().map_err(storage)?,
+                kind,
+                state: crate::parse_job_state(&state)?,
+                completed_bytes,
+                total_bytes,
+                error,
+            });
         }
         Ok(jobs)
     }
@@ -853,11 +902,8 @@ impl Store {
         };
         lock(&self.db)?
             .execute(
-                "UPDATE private.jobs SET record=? WHERE id=?",
-                params![
-                    serde_json::to_string(&job).map_err(storage)?,
-                    id.to_string()
-                ],
+                "UPDATE private.jobs SET state='failed',phase='failed',updated_at=?,error=? WHERE id=?",
+                params![Utc::now().timestamp(), job.error, id.to_string()],
             )
             .map_err(storage)?;
         Ok(())

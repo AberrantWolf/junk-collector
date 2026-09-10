@@ -899,7 +899,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         private
@@ -962,6 +962,16 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
             .unwrap();
         assert_eq!(count, 1, "lost private-v2 {table}");
     }
+    assert_eq!(
+        private
+            .query_row(
+                "SELECT state,completed_units,total_units FROM jobs WHERE id='018f0000-0000-7000-8000-000000000093'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?, row.get::<_, u64>(2)?))
+            )
+            .unwrap(),
+        ("completed".to_owned(), 14, 14)
+    );
     assert_eq!(
         private
             .query_row(
@@ -2297,6 +2307,66 @@ fn failed_background_import_is_reported_and_retains_source_chunks() {
     assert_eq!(job.state, JobState::Failed);
     assert_eq!(job.error.as_deref(), Some("Test failure"));
     assert!(service.commit_upload(&actor, upload.id, &command()).is_ok());
+}
+
+#[test]
+fn durable_job_rows_store_typed_state_without_losing_upload_identity() {
+    let (root, _store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let columns = db
+        .prepare("SELECT name FROM pragma_table_info('jobs') ORDER BY cid")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    for required in [
+        "user_id",
+        "item_id",
+        "kind",
+        "state",
+        "phase",
+        "completed_units",
+        "total_units",
+        "attempt",
+        "request",
+        "result",
+        "worker_instance",
+        "lease_expires",
+        "claim_token",
+        "cancellation_requested",
+    ] {
+        assert!(
+            columns.iter().any(|column| column == required),
+            "{required}"
+        );
+    }
+    let (id, state, completed, total): (String, String, u64, u64) = db
+        .query_row(
+            "SELECT id,state,completed_units,total_units FROM jobs WHERE id=?",
+            [upload.id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(id, upload.id.to_string());
+    assert_eq!(state, "queued");
+    assert_eq!(completed, 0);
+    assert_eq!(total, 4);
 }
 
 #[test]
