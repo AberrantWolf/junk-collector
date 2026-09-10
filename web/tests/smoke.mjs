@@ -179,6 +179,24 @@ try{
  await importWorkspace.getByText('Review saved.',{exact:false}).waitFor();
  await importWorkspace.getByRole('button',{name:'Publish capture',exact:true}).click();
  await importWorkspace.getByText('Capture published.',{exact:false}).waitFor();
+ const jobLedger=curator.getByRole('region',{name:'Background work'});
+ await jobLedger.getByRole('article',{name:'Capture publication completed'}).waitFor();
+ await page.evaluate(async()=>{
+  const request=async(path,init={})=>{const response=await fetch(`/api/v1${path}`,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
+  const collection=(await request('/collections',{method:'GET'}))[0];
+  const itemId=crypto.randomUUID();const itemCommand={collection_id:collection.id,title:'Stale publication fixture',subtitle:'before review',identity_link:{kind:'none'},domain:{module:'org.junk.music',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false};
+  const item=await request(`/items/${itemId}`,{method:'PUT',body:JSON.stringify({command:itemCommand,expected_revision:0})});
+  const staged=await request('/imports',{method:'POST',body:JSON.stringify({collection_id:collection.id,package_name:'stale-publication-job',files:[{name:'empty.bin',bytes:0,sha256:null}]})});
+  const reviewed=await request(`/imports/${staged.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:staged.revision,identity:{identity:'unidentified'},association:{item_id:item.id,specimen_id:null,component_id:null,carrier_id:null},expected_item_revision:item.revision})});
+  await request(`/items/${item.id}`,{method:'PUT',body:JSON.stringify({command:{...itemCommand,subtitle:'changed after review'},expected_revision:item.revision})});
+  const accepted=await request(`/imports/${reviewed.id}/publish`,{method:'POST'});
+  for(let attempt=0;attempt<100;attempt++){const job=await request(`/jobs/${accepted.job_id}`,{method:'GET'});if(job.state==='failed')return;await new Promise(resolve=>setTimeout(resolve,50));}
+  throw new Error('stale publication job did not fail');
+ });
+ await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).click();
+ const failedJob=jobLedger.getByRole('article',{name:'Capture publication failed'});
+ await failedJob.getByRole('button',{name:'Retry job',exact:true}).click();
+ await failedJob.getByText('attempt 2',{exact:false}).waitFor();
  await page.setViewportSize({width:390,height:844});
  await importWorkspace.scrollIntoViewIfNeeded();
  await page.screenshot({path:path.join(root,'web/test-results/import-mobile.png'),fullPage:true});

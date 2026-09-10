@@ -1,5 +1,28 @@
 # Validation recorded for the foundation
 
+## Wave 3 P04.2 durable Job controls — 2026-09-10
+
+- The curation dialog's “Background work” region consumes the submitter-scoped
+  cursor page and separates queued/running/cancel-requested Jobs from terminal
+  history. Rows expose only `JobView` progress, attempt, safe error/limitation, and
+  server-computed `cancellable`/`retryable` actions.
+- The polling loop runs every two seconds only while the document is visible and a
+  Job is active, backs off to 30 seconds when idle, and refreshes immediately after
+  visibility restoration, browser reconnect, Import job submission/completion, or
+  cancel/retry. It never writes Import form state; reconnect refreshes the durable
+  Import while retaining local identity/association choices.
+- Chromium observes completed Import analysis/publication history, creates an
+  associated Import whose Item revision becomes stale before publication, waits for
+  its real failed Job, selects “Retry job,” and observes attempt 2 on that same Job.
+  P02.4's permanent Rust HTTP tests continue to cover real cancel/retry authorization,
+  idempotency, and another user's Job identity.
+- Checks: TypeScript check/build, rebuilt embedded-assets server, and normal HTTPS
+  Chromium smoke pass. The 138 Rust tests remain unchanged from P03.4.
+- **Not implemented:** P04.3's explicit offline/reconnect, running cancellation,
+  stale-review, unauthorized Import/Job, focus restoration, live-announcement,
+  reduced-motion, and local-listener review matrix. C06 event streaming remains
+  unavailable. **Externally unqualified:** independent accessibility review.
+
 ## Wave 3 P04.1 provisional Import workspace — 2026-09-10
 
 - The Chromium workflow opens the real curation dialog, selects the configured

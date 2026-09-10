@@ -14,6 +14,7 @@ const phaseLabel:Record<ImportView['phase'],string>={staging:'Staging package',a
 function fileName(file:File){return file.webkitRelativePath||file.name;}
 function packageName(files:File[]){const first=files[0]&&fileName(files[0]);return first?.includes('/')?first.split('/')[0]:'Browser package';}
 function percent(done:number,total:number){return total?Math.min(100,Math.round(done/total*100)):100;}
+function jobsChanged(){window.dispatchEvent(new Event('collector-jobs-updated'));}
 
 async function waitForJob(id:string,onProgress:(job:JobView)=>void){
  for(;;){
@@ -45,6 +46,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
  useEffect(()=>{setInboxPackage(selectedInbox?.packages[0]||'');},[selectedInbox?.label]);
  useEffect(()=>{setComponent('');setCarrier('');},[specimen]);
  useEffect(()=>{setCarrier('');},[component]);
+ useEffect(()=>{const refresh=()=>{if(record)api<ImportView>(`/imports/${record.id}`).then(setRecord).catch(onError);};window.addEventListener('online',refresh);window.addEventListener('collector-jobs-updated',refresh);return()=>{window.removeEventListener('online',refresh);window.removeEventListener('collector-jobs-updated',refresh);};},[record?.id]);
 
  function reset(){setRecord(undefined);setJob(undefined);setFiles([]);setIdentity('unidentified');setAttach(true);setSpecimen('');setComponent('');setCarrier('');}
  async function stage(){
@@ -61,7 +63,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
     }
    }else{
     const staged=await api<{import:ImportView;job_id:string}>(`/collections/${item.collection_id}/inboxes/${encodeURIComponent(label)}/stage`,{method:'POST',body:JSON.stringify({package:inboxPackage})});
-    setRecord(staged.import);await waitForJob(staged.job_id,setJob);setRecord(await api<ImportView>(`/imports/${staged.import.id}`));
+    setRecord(staged.import);jobsChanged();await waitForJob(staged.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${staged.import.id}`));
    }
   }catch(error){onError(error);}finally{setBusy(false);}
  }
@@ -69,7 +71,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
   if(!record)return;setBusy(true);setJob(undefined);
   try{
    const accepted=await api<{job_id:string}>(`/imports/${record.id}/analysis`,{method:'POST',body:JSON.stringify({module:item.domain.module})});
-   await waitForJob(accepted.job_id,setJob);setRecord(await api<ImportView>(`/imports/${record.id}`));
+   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));
   }catch(error){onError(error);}finally{setBusy(false);}
  }
  function association():Association{
@@ -87,7 +89,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
   if(!record)return;setBusy(true);setJob(undefined);
   try{
    const accepted=await api<{job_id:string}>(`/imports/${record.id}/publish`,{method:'POST'});
-   await waitForJob(accepted.job_id,setJob);setRecord(await api<ImportView>(`/imports/${record.id}`));
+   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));
   }catch(error){onError(error);}finally{setBusy(false);}
  }
 

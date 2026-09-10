@@ -392,14 +392,19 @@ filesystem termination behavior remain externally unqualified.
 
 **Routine · Dependencies:** P02, P03, U02. **Owner:** web curation/administration through application APIs.
 
-**Status (2026-09-10): P04.1 complete locally; P04.2 is next.** The curation
+**Status (2026-09-10): P04.1-P04.2 complete locally; P04.3 is next.** The curation
 workbench now stages browser files or a configured-inbox package through the one
 P03 workflow, displays the complete inventory and durable progress, shows honest
 analysis limitations/candidate choices, records Item/copy/part/carrier or unattached
 association, and publishes the Capture. The Chromium interaction covers both source
 selectors and a full unidentified/unattached browser publication at desktop and
-390px. Active/history Job controls, idle/reconnect polling, cancellation/retry UI,
-and the P04.3 browser/security matrix remain not implemented.
+390px. A submitter-scoped active/history ledger now shows bounded progress,
+attempts, diagnostics, and real cancel/retry controls. It polls visible active work
+every two seconds, backs off to 30 seconds when idle, and refreshes on reconnect or
+action without owning or resetting Import review drafts. Chromium retries a real
+stale-publication failure and observes attempt 2. The P04.3 browser/security,
+cancellation-race, focus/live-region, reduced-motion, and local-listener matrix
+remain not implemented.
 
 Add configured inbox selection, package inventory/review, provisional association controls, durable job progress/error/cancel/retry views and reconnect behavior. Configuration administration remains private by default; collection imports use the curation surface.
 

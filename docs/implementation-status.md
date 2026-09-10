@@ -139,14 +139,19 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   candidate alternatives without a verification claim, record an existing physical
   chain or no association, and publish the reviewed Capture. The responsive keyboard-
   named workflow is browser-tested at desktop and 390px.
+- P04.2 adds the submitter's durable active/history Job ledger with bounded progress,
+  attempts, safe diagnostics, and server-computed cancel/retry affordances. Visible
+  active work polls at two seconds, idle state at 30 seconds, and reconnect/action/
+  visibility changes refresh immediately. Retry keeps the same Job identity and
+  updates its attempt; Import review inputs remain owned outside the polling ledger.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete P04.2 durable active/history Job controls and P04.3 browser/security
-   review. The P04.1 package/import review workspace is locally implemented. The
+2. Complete P04.3 browser/security and accessibility review. The P04.1 package/
+   import workspace and P04.2 durable Job controls are locally implemented. The
    current legacy upload and administrator inbox routes are compatibility adapters
    scheduled for API-major removal. Document attachments, event streaming, and
    offline artwork remain unimplemented.
