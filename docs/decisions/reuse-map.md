@@ -18,6 +18,33 @@ source does not implement the promised case.
 The SHAs identify what was inspected, not a request to reset any checkout. D02/D03
 must re-check status and API drift before editing.
 
+## D02.1 drift and provenance revalidation — 2026-09-10
+
+The D02 implementation gate re-read every checkout without changing sibling files.
+The inspected commits and dirty paths are unchanged from D01; the longer object IDs
+and upstream relationship below are the boundary for subsequent child commits.
+
+| Checkout | Revalidated revision/upstream | Revalidated working state |
+|---|---|---|
+| `../junk-libs` | `1e424737db7bb3ba329aea709de6fe3ca8fe9eea`; `main` is one commit ahead of `origin/main` | clean |
+| `../retro-junk` | `e8792f111cb3cbfe86fa876b585251e34b2df944`; `main` is one commit ahead of `origin/main` | only untracked `scripts/README-retro-library-sync.md` and `scripts/sync_retro_library.fish` |
+| `../phono-junk` | `dab36e8b89d59b76fec96186a29f7358587f0ece`; `main` matches `origin/main` | only untracked `AGENTS.md`; its exact junk-libs pin `0c8ac1a1ea3902f20a0e06ba2c922d2dc2b1774d` is present in the local junk-libs object store |
+| `../trash-amp` | `796a2786ed99877e692f8f624d6b0e0bc9a371b7`; `main` is one commit ahead of `origin/main` | tracked changes in `Cargo.lock`, `README.md`, `amp-core` manifest/library, desktop main/UI, architecture and validation; untracked browse source/UI files |
+
+The provenance gate remains unresolved for copying Retro-owned implementation:
+Retro's MIT file still says `Copyright (c) [year] [fullname]`. D02.2 may make
+Retro consume independently authored/shared contracts, but it must not move or
+redistribute Retro source until attribution is resolved. Phono and junk-libs name
+Scott Harper in their MIT files.
+
+Fixture availability was also rechecked. Phono has committed ARver TOC/CUE vectors,
+generated sparse BIN recipes, offline CRC/dBAR/offset tests, a network-gated ARver
+WAV oracle, and an owned-dump/live-provider Redumper harness gated by
+`JUNK_LIBS_REDUMPER_AUDIO_PREFIX`. Retro has a generated archive fixture. `chdman`
+is installed at `/opt/homebrew/bin/chdman`, but no D02 CHD qualification has run
+yet and no private Redumper payload was supplied. These facts qualify inputs; they
+do not implement or verify any D02 extraction.
+
 ## Operation inventory
 
 Coordinates are explicit: bytes are file bytes unless a row names normalized ROM

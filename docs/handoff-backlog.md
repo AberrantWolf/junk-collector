@@ -452,6 +452,14 @@ Inspect sibling manifests/source/instructions and record exact algorithms, crate
 
 ### D02 — Extract format/hash/disc verification primitives
 
+**Status (2026-09-10): D02.1 implemented/reviewed; D02.2 is next.** The
+documentation-only drift gate reconfirmed exact sibling SHAs, upstream divergence,
+dirty paths, licenses, and fixture/tool availability without changing sibling code.
+Retro source redistribution remains blocked by its placeholder MIT attribution;
+the Phono owned-dump/live-provider oracle remains externally gated. No shared API
+or compiling scaffold was added. D02.2 may now consolidate the generic reader/hash
+consumer path while preserving all recorded user changes.
+
 **Review · Dependencies:** D01. **Owner:** independently consumable junk-libs crates and affected sibling consumers.
 
 Execute reviewed narrow extractions of parsers, normalized hashing, disc identity and verification primitives; keep I/O backends optional. Migrate existing consumers in separate changes from Collector integration. Resolve sibling write permissions through the environment when required; do not copy algorithms into Collector to evade a blocked extraction.

@@ -1,5 +1,24 @@
 # Validation recorded for the foundation
 
+# Wave 3 D02.1 drift/provenance gate — 2026-09-10
+
+- Re-read the four sibling checkouts at full object IDs and compared their branch,
+  upstream divergence, and exact dirty paths with D01. No drift was found and no
+  sibling file was modified.
+- Confirmed the Phono manifest's exact junk-libs revision exists in the local object
+  store. Confirmed committed/generated ARver TOC/CUE, CRC, dBAR and offset vectors,
+  Retro's generated archive fixture, and `/opt/homebrew/bin/chdman` are available.
+- Failure/qualification probes: Retro's MIT attribution is still the literal
+  `[year] [fullname]` placeholder; the Redumper test still requires
+  `JUNK_LIBS_REDUMPER_AUDIO_PREFIX` plus a live AccurateRip request; no private dump
+  was supplied and no CHD vector was executed.
+- Check: `python3 scripts/check_architecture.py`.
+- **Implemented:** the reviewable D02.1 documentation/provenance gate only.
+  **Not implemented:** D02.2-D02.5 shared APIs, algorithm extraction, consumer
+  migrations, and Collector integration. **Externally unqualified:** private
+  Redumper/live-provider results and future CHD vectors; Retro source redistribution
+  is blocked until attribution is resolved.
+
 ## Wave 3 P04.3 browser/security and root review — 2026-09-10
 
 - The expanded Chromium flow retries a real stale-publication Job, observes the same

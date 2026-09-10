@@ -150,6 +150,13 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   real browser matrix covers retry/cancel, cross-user and collection authorization,
   unavailable analyzer disclosure, keyboard/focus/live status, reduced motion, mobile
   layout, and normal/private listener composition. P04 is locally complete.
+- D02.1 revalidates the D01 extraction boundary at exact sibling commits and dirty
+  paths. It confirms the old Phono junk-libs pin is locally available, the published
+  and generated disc vectors plus `chdman` are present, and the owned-dump/live
+  oracle is still external. This is an implemented documentation gate only: no D02
+  shared algorithm, consumer migration, or catalog verification capability exists
+  yet, and Retro-owned source cannot be redistributed while its MIT attribution is
+  a placeholder.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
@@ -160,7 +167,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
    P04 workspace and Job controls. The legacy upload and administrator inbox routes
    remain compatibility adapters scheduled for API-major removal. Document
    attachments, event streaming, and offline artwork remain unimplemented.
-3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
+3. Complete D02-D05 shared algorithms and analyzer/provider adapters, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. D02.1 only completed the drift/provenance documentation gate; no catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
 6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.
