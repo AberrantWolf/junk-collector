@@ -276,6 +276,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{collection}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_asset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{collection}/assets/{asset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["asset_metadata"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{collection}/assets/{asset}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tombstone_asset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{collection}/assets/{asset}/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_asset"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{collection}/assets/{asset}/original": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["asset_original"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{collection}/assets/{asset}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["asset_thumbnail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{id}/grants": {
         parameters: {
             query?: never;
@@ -475,7 +571,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["asset"];
+        get: operations["item_asset"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1426,7 +1522,7 @@ export interface components {
         };
         Page_PresentedItem: {
             items: {
-                assets: components["schemas"]["Asset"][];
+                assets: components["schemas"]["PresentedAsset"][];
                 captures: components["schemas"]["PresentedCapture"][];
                 collection_id: components["schemas"]["CollectionId"];
                 deleted: boolean;
@@ -1438,6 +1534,7 @@ export interface components {
                 identity_link: components["schemas"]["ItemIdentityLink"];
                 metadata?: null | components["schemas"]["MetadataState"];
                 presentation: components["schemas"]["ModulePresentation"];
+                primary_artwork?: null | components["schemas"]["AssetId"];
                 revision: components["schemas"]["Revision"];
                 specimens: components["schemas"]["PresentedSpecimen"][];
                 subtitle: string;
@@ -1478,6 +1575,20 @@ export interface components {
             label: string;
             value: unknown;
         };
+        PresentedAsset: {
+            alt_text: string;
+            archived: boolean;
+            id: components["schemas"]["AssetId"];
+            kind: components["schemas"]["AssetKind"];
+            media_type: string;
+            original?: null | components["schemas"]["StoredFile"];
+            revision: components["schemas"]["Revision"];
+            subject: components["schemas"]["AssetSubject"];
+            thumbnail?: null | components["schemas"]["StoredFile"];
+            /** Format: date-time */
+            updated_at: string;
+            visibility?: null | components["schemas"]["Visibility"];
+        };
         PresentedCapture: {
             association: components["schemas"]["CaptureAssociation"];
             collection_id: components["schemas"]["CollectionId"];
@@ -1514,7 +1625,7 @@ export interface components {
          *     flattened into a transport response.
          */
         PresentedItem: {
-            assets: components["schemas"]["Asset"][];
+            assets: components["schemas"]["PresentedAsset"][];
             captures: components["schemas"]["PresentedCapture"][];
             collection_id: components["schemas"]["CollectionId"];
             deleted: boolean;
@@ -1526,6 +1637,7 @@ export interface components {
             identity_link: components["schemas"]["ItemIdentityLink"];
             metadata?: null | components["schemas"]["MetadataState"];
             presentation: components["schemas"]["ModulePresentation"];
+            primary_artwork?: null | components["schemas"]["AssetId"];
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["PresentedSpecimen"][];
             subtitle: string;
@@ -1677,6 +1789,14 @@ export interface components {
             bytes: components["schemas"]["ByteLength"];
             digest: components["schemas"]["Digest"];
             name: string;
+        };
+        UpdateAssetCommand: {
+            alt_text: string;
+            visibility: components["schemas"]["Visibility"];
+        };
+        UpdateAssetEnvelope: {
+            command: components["schemas"]["UpdateAssetCommand"];
+            expected_revision: components["schemas"]["Revision"];
         };
         Upload: {
             capture_id: components["schemas"]["CaptureId"];
@@ -2291,6 +2411,300 @@ export interface operations {
             };
         };
     };
+    create_asset: {
+        parameters: {
+            query: {
+                subject_kind: "work" | "edition" | "item" | "specimen" | "component" | "capture";
+                subject_id: string;
+                kind: "cover" | "photo" | "scan" | "document" | "other";
+                visibility: "shared" | "curators";
+                alt_text?: string;
+            };
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedAsset"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    asset_metadata: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                asset: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedAsset"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tombstone_asset: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                asset: components["schemas"]["AssetId"];
+                expected_revision: components["schemas"]["Revision"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedAsset"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_asset: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                asset: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAssetEnvelope"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedAsset"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    asset_original: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                asset: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    asset_thumbnail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                asset: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     collection_grants: {
         parameters: {
             query?: never;
@@ -2798,7 +3212,7 @@ export interface operations {
             };
         };
     };
-    asset: {
+    item_asset: {
         parameters: {
             query?: {
                 thumbnail?: boolean;

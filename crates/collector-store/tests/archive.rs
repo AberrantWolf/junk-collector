@@ -6,7 +6,7 @@ use collector_app::{
     SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_core::*;
-use collector_modules::Registry;
+use collector_modules::*;
 use collector_store::{Clock, Store, UploadFile};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,38 @@ use std::sync::atomic::{AtomicBool, Ordering};
 struct TestClock {
     seconds: std::sync::atomic::AtomicI64,
     millis: std::sync::atomic::AtomicU64,
+}
+
+struct ArtworkSelectingModule {
+    selected: AssetId,
+}
+
+impl CollectionModule for ArtworkSelectingModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        ModuleDescriptor {
+            id: ModuleId("org.junk.music".into()),
+            schema_version: 1,
+            display_name: "Artwork selection fixture".into(),
+            capabilities: vec![],
+        }
+    }
+
+    fn validate_current(&self, _data: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+
+    fn present(&self, data: &ModuleData) -> ModuleResult<ModulePresentation> {
+        Ok(ModulePresentation {
+            module_id: data.module.0.clone(),
+            schema_version: data.schema_version,
+            available: true,
+            artwork: vec![ArtworkReference {
+                asset_id: self.selected,
+                alt_text: "Module selection".into(),
+            }],
+            ..Default::default()
+        })
+    }
 }
 
 impl TestClock {
@@ -2199,14 +2231,17 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
             .create_asset(&actor, command.clone(), &bytes, &context)
             .unwrap();
         assert_eq!(state.revision, Revision(1));
-        assert_eq!(state.asset.subject, subject);
-        assert_eq!(state.asset.media_type, formats[index % formats.len()].1);
-        assert_eq!(state.asset.file.bytes, ByteLength(bytes.len() as u64));
-        let thumbnail = state.asset.thumbnail.as_ref().unwrap();
+        assert_eq!(state.subject, subject);
+        assert_eq!(state.media_type, formats[index % formats.len()].1);
+        assert_eq!(
+            state.original.as_ref().unwrap().bytes,
+            ByteLength(bytes.len() as u64)
+        );
+        let thumbnail = state.thumbnail.as_ref().unwrap();
         assert_eq!(thumbnail.name, "thumbnail.png");
         let thumbnail_path = files_named(&root.path().join("archive"), "thumbnail.png")
             .into_iter()
-            .find(|path| path.to_string_lossy().contains(&state.asset.id.to_string()))
+            .find(|path| path.to_string_lossy().contains(&state.id.to_string()))
             .unwrap();
         let thumbnail_image = image::open(thumbnail_path).unwrap();
         assert!(thumbnail_image.width() <= 192 && thumbnail_image.height() <= 192);
@@ -2214,7 +2249,7 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
             .create_asset(&actor, command, &bytes, &context)
             .unwrap();
         assert_eq!(replay.revision, Revision(1));
-        assert_eq!(replay.asset.id, state.asset.id);
+        assert_eq!(replay.id, state.id);
         originals.push(bytes);
         states.push(state);
     }
@@ -2222,8 +2257,20 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
     for bytes in &originals {
         assert!(find_file_with_bytes(&root.path().join("archive"), bytes).is_some());
     }
+    let mut registry = Registry::default();
+    registry
+        .register(Box::new(ArtworkSelectingModule {
+            selected: states[1].id,
+        }))
+        .unwrap();
+    let selection_service = CollectionService::new(store.clone(), Arc::new(registry));
+    let presented = selection_service
+        .item_presented(&actor, inventory.id)
+        .unwrap();
+    assert_eq!(presented.primary_artwork, Some(states[1].id));
+    assert_eq!(presented.presentation.artwork[0].asset_id, states[1].id);
 
-    let original_id = states[0].asset.id;
+    let original_id = states[0].id;
     let updated = service
         .update_asset(
             &actor,
@@ -2237,8 +2284,11 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
         )
         .unwrap();
     assert_eq!(updated.revision, Revision(2));
-    assert_eq!(updated.asset.subject, states[0].asset.subject);
-    assert_eq!(updated.asset.file.digest, states[0].asset.file.digest);
+    assert_eq!(updated.subject, states[0].subject);
+    assert_eq!(
+        updated.original.as_ref().unwrap().digest,
+        states[0].original.as_ref().unwrap().digest
+    );
     assert_eq!(store.item(inventory.id).unwrap().revision, item_revision);
     let tombstone = service
         .tombstone_asset(
@@ -2249,7 +2299,7 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
         )
         .unwrap();
     assert_eq!(tombstone.revision, Revision(3));
-    assert!(tombstone.deleted);
+    assert!(tombstone.archived);
     assert!(
         service
             .asset(&actor, inventory.id, original_id, false)
@@ -2272,7 +2322,7 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
     store.reindex().unwrap();
     for state in states.iter().skip(1) {
         assert_eq!(
-            ContentPort::asset_state(&*store, state.asset.id)
+            ContentPort::asset_state(&*store, state.id)
                 .unwrap()
                 .revision,
             Revision(1)

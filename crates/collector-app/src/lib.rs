@@ -109,6 +109,43 @@ pub struct AssetState {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PresentedAsset {
+    pub id: AssetId,
+    pub revision: Revision,
+    pub subject: AssetSubject,
+    pub kind: AssetKind,
+    pub media_type: String,
+    pub alt_text: String,
+    pub updated_at: DateTime<Utc>,
+    pub archived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<Visibility>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original: Option<StoredFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<StoredFile>,
+}
+
+impl PresentedAsset {
+    fn from_state(state: AssetState, role: Role) -> Self {
+        let private = role != Role::Viewer;
+        Self {
+            id: state.asset.id,
+            revision: state.revision,
+            subject: state.asset.subject,
+            kind: state.asset.kind,
+            media_type: state.asset.media_type,
+            alt_text: state.asset.alt_text,
+            updated_at: state.updated_at,
+            archived: state.deleted,
+            visibility: private.then_some(state.asset.visibility),
+            original: private.then_some(state.asset.file),
+            thumbnail: private.then_some(state.asset.thumbnail).flatten(),
+        }
+    }
+}
+
 /// Persistence and file mechanisms after application policy has authorized an
 /// effect. No method receives a Principal or Role.
 pub trait ContentPort: Send + Sync {
@@ -120,8 +157,9 @@ pub trait ContentPort: Send + Sync {
         representation: RepresentationId,
         index: usize,
     ) -> Result<MediaResource>;
-    fn asset(&self, item: ItemId, asset: AssetId, thumbnail: bool) -> Result<MediaResource>;
+    fn asset_resource(&self, asset: AssetId, thumbnail: bool) -> Result<MediaResource>;
     fn asset_state(&self, asset: AssetId) -> Result<AssetState>;
+    fn asset_states_for_item(&self, item: ItemId) -> Result<Vec<AssetState>>;
     fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId>;
     fn create_asset(
         &self,
@@ -744,7 +782,9 @@ pub struct PresentedItem {
     pub specimens: Vec<PresentedSpecimen>,
     pub wishlist: bool,
     pub captures: Vec<PresentedCapture>,
-    pub assets: Vec<Asset>,
+    pub assets: Vec<PresentedAsset>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_artwork: Option<AssetId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MetadataState>,
     pub deleted: bool,
@@ -1133,7 +1173,7 @@ impl CollectionService {
         for mut item in page.items {
             let role = self.authorize(actor, item.collection_id, Action::Browse)?;
             item.redact_for(role);
-            items.push(self.presented(item, role));
+            items.push(self.presented(item, role)?);
         }
         Ok(Page {
             items,
@@ -1144,20 +1184,51 @@ impl CollectionService {
         let mut item = self.reader.item(id)?;
         let role = self.authorize(actor, item.collection_id, Action::Browse)?;
         item.redact_for(role);
-        Ok(self.presented(item, role))
+        self.presented(item, role)
     }
-    fn presented(&self, item: Item, role: Role) -> PresentedItem {
+    fn presented(&self, item: Item, role: Role) -> Result<PresentedItem> {
         let mut presentation = self.modules.presentation(&item.domain);
+        let mut asset_states = self
+            .content
+            .asset_states_for_item(item.id)?
+            .into_iter()
+            .filter(|state| {
+                !state.deleted
+                    && (role != Role::Viewer || state.asset.visibility == Visibility::Shared)
+            })
+            .collect::<Vec<_>>();
         presentation.artwork.retain(|reference| {
-            item.assets
+            asset_states
                 .iter()
-                .any(|asset| asset.id == reference.asset_id)
+                .any(|state| state.asset.id == reference.asset_id)
         });
+        let module_artwork = presentation.artwork.first().map(|value| value.asset_id);
+        let mut fallback = asset_states
+            .iter()
+            .filter(|state| {
+                state.asset.kind == AssetKind::Cover
+                    && matches!(
+                        state.asset.subject,
+                        AssetSubject::Item { .. }
+                            | AssetSubject::Edition { .. }
+                            | AssetSubject::Work { .. }
+                    )
+            })
+            .collect::<Vec<_>>();
+        fallback.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| left.asset.id.cmp(&right.asset.id))
+        });
+        let primary_artwork =
+            module_artwork.or_else(|| fallback.first().map(|state| state.asset.id));
         if role == Role::Viewer && !presentation.available {
             presentation.values.clear();
         }
         let private = role != Role::Viewer;
-        PresentedItem {
+        asset_states.sort_by_key(|state| state.asset.id);
+        Ok(PresentedItem {
             id: item.id,
             collection_id: item.collection_id,
             revision: item.revision,
@@ -1179,13 +1250,17 @@ impl CollectionService {
                 .collect(),
             wishlist: item.wishlist,
             captures: item.captures.into_iter().map(Into::into).collect(),
-            assets: item.assets,
+            assets: asset_states
+                .into_iter()
+                .map(|state| PresentedAsset::from_state(state, role))
+                .collect(),
+            primary_artwork,
             metadata: private.then_some(item.metadata),
             deleted: item.deleted,
             updated_at: item.updated_at,
             presentation,
             effective_permissions: role.into(),
-        }
+        })
     }
     pub fn save_item(
         &self,
@@ -1921,15 +1996,49 @@ impl CollectionService {
         if item.deleted {
             return Err(Error::NotFound);
         }
-        let asset = item
-            .assets
-            .iter()
-            .find(|asset| asset.id == asset_id)
+        let state = self
+            .content
+            .asset_states_for_item(item_id)?
+            .into_iter()
+            .find(|state| state.asset.id == asset_id && !state.deleted)
             .ok_or(Error::NotFound)?;
-        if role == Role::Viewer && asset.visibility == Visibility::Curators {
+        if role == Role::Viewer && state.asset.visibility == Visibility::Curators {
             return Err(Error::Forbidden);
         }
-        self.content.asset(item_id, asset_id, thumbnail)
+        self.content.asset_resource(asset_id, thumbnail)
+    }
+    pub fn asset_presented(
+        &self,
+        actor: &Principal,
+        collection_id: CollectionId,
+        asset_id: AssetId,
+    ) -> Result<PresentedAsset> {
+        let role = self.authorize(actor, collection_id, Action::Browse)?;
+        let state = self.content.asset_state(asset_id)?;
+        if state.collection_id != collection_id || state.deleted {
+            return Err(Error::NotFound);
+        }
+        if role == Role::Viewer && state.asset.visibility == Visibility::Curators {
+            return Err(Error::Forbidden);
+        }
+        Ok(PresentedAsset::from_state(state, role))
+    }
+    pub fn asset_resource(
+        &self,
+        actor: &Principal,
+        collection_id: CollectionId,
+        asset_id: AssetId,
+        thumbnail: bool,
+    ) -> Result<MediaResource> {
+        let role = self.authorize(actor, collection_id, Action::Browse)?;
+        let state = self.content.asset_state(asset_id)?;
+        if state.collection_id != collection_id || state.deleted {
+            return Err(Error::NotFound);
+        }
+        if role == Role::Viewer && state.asset.visibility == Visibility::Curators {
+            return Err(Error::Forbidden);
+        }
+        self.content.asset_resource(asset_id, thumbnail)
     }
     pub fn create_asset(
         &self,
@@ -1937,9 +2046,9 @@ impl CollectionService {
         command: CreateAssetCommand,
         bytes: &[u8],
         context: &CommandContext,
-    ) -> Result<AssetState> {
+    ) -> Result<PresentedAsset> {
         validate_asset_upload(&command.kind, &command.alt_text, bytes)?;
-        self.authorize(actor, command.collection_id, Action::Curate)?;
+        let role = self.authorize(actor, command.collection_id, Action::Curate)?;
         let subject_collection = self.content.asset_subject_collection(command.subject)?;
         if subject_collection != command.collection_id {
             return Err(Error::Invalid(
@@ -1948,9 +2057,10 @@ impl CollectionService {
         }
         let asset_id = deterministic_new_asset_id(actor.user_id, context.key());
         let request = (asset_id, command.clone(), Digest::sha256(bytes));
-        self.execute_command(actor, context, "asset.create", &request, |effects| {
+        let state = self.execute_command(actor, context, "asset.create", &request, |effects| {
             effects.create_asset(asset_id, command, bytes)
-        })
+        })?;
+        Ok(PresentedAsset::from_state(state, role))
     }
     pub fn update_asset(
         &self,
@@ -1959,19 +2069,20 @@ impl CollectionService {
         expected: Revision,
         command: UpdateAssetCommand,
         context: &CommandContext,
-    ) -> Result<AssetState> {
+    ) -> Result<PresentedAsset> {
         if command.alt_text.len() > 4096 {
             return Err(Error::Invalid("alt text exceeds upload limit".into()));
         }
         let current = self.content.asset_state(asset_id)?;
-        self.authorize(actor, current.collection_id, Action::Curate)?;
+        let role = self.authorize(actor, current.collection_id, Action::Curate)?;
         if current.deleted {
             return Err(Error::NotFound);
         }
         let request = (asset_id, expected, command.clone());
-        self.execute_command(actor, context, "asset.update", &request, |effects| {
+        let state = self.execute_command(actor, context, "asset.update", &request, |effects| {
             effects.update_asset(asset_id, expected, command.visibility, command.alt_text)
-        })
+        })?;
+        Ok(PresentedAsset::from_state(state, role))
     }
     pub fn tombstone_asset(
         &self,
@@ -1979,16 +2090,18 @@ impl CollectionService {
         asset_id: AssetId,
         expected: Revision,
         context: &CommandContext,
-    ) -> Result<AssetState> {
+    ) -> Result<PresentedAsset> {
         let current = self.content.asset_state(asset_id)?;
-        self.authorize(actor, current.collection_id, Action::Curate)?;
+        let role = self.authorize(actor, current.collection_id, Action::Curate)?;
         if current.deleted {
             return Err(Error::NotFound);
         }
         let request = (asset_id, expected);
-        self.execute_command(actor, context, "asset.tombstone", &request, |effects| {
-            effects.tombstone_asset(asset_id, expected)
-        })
+        let state =
+            self.execute_command(actor, context, "asset.tombstone", &request, |effects| {
+                effects.tombstone_asset(asset_id, expected)
+            })?;
+        Ok(PresentedAsset::from_state(state, role))
     }
     pub fn publish_cover(
         &self,

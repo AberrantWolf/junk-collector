@@ -185,6 +185,66 @@ async fn physical_lifecycle_routes_follow_curation_listener_composition() {
         }
     }
 }
+
+#[tokio::test]
+async fn asset_mutations_follow_curation_listener_composition() {
+    let collection = CollectionId::new();
+    let asset = AssetId::new();
+    let item = ItemId::new();
+    let requests = [
+        (
+            "POST",
+            format!(
+                "/api/v1/collections/{collection}/assets?subject_kind=item&subject_id={item}&kind=cover&visibility=shared"
+            ),
+            b"image".to_vec(),
+        ),
+        (
+            "PUT",
+            format!("/api/v1/collections/{collection}/assets/{asset}/metadata"),
+            serde_json::to_vec(&serde_json::json!({
+                "expected_revision": 1,
+                "command": {"visibility":"shared","alt_text":"cover"}
+            }))
+            .unwrap(),
+        ),
+        (
+            "POST",
+            format!("/api/v1/collections/{collection}/assets/{asset}/archive?expected_revision=1"),
+            vec![],
+        ),
+    ];
+    for enabled in [false, true] {
+        let (_root, mut state) = state();
+        state.exposure.public_curation = enabled;
+        let app = router(state);
+        for (method, path, body) in &requests {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(*method)
+                        .uri(path)
+                        .header("origin", "https://collector.example")
+                        .header("idempotency-key", "asset-listener-probe")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if enabled {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::NOT_FOUND
+                },
+                "{method} {path}, curation={enabled}"
+            );
+        }
+    }
+}
 #[tokio::test]
 async fn private_surface_still_requires_authentication_and_csrf_origin() {
     let (_root, mut state) = state();
@@ -672,7 +732,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 58);
+    assert_eq!(paths.len(), 64);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -686,6 +746,16 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
             paths.contains_key(path),
             "missing focused lifecycle path {path}"
         );
+    }
+    for path in [
+        "/api/v1/collections/{collection}/assets",
+        "/api/v1/collections/{collection}/assets/{asset}",
+        "/api/v1/collections/{collection}/assets/{asset}/metadata",
+        "/api/v1/collections/{collection}/assets/{asset}/archive",
+        "/api/v1/collections/{collection}/assets/{asset}/original",
+        "/api/v1/collections/{collection}/assets/{asset}/thumbnail",
+    ] {
+        assert!(paths.contains_key(path), "missing Asset path {path}");
     }
     assert!(paths.values().all(|path| {
         path.as_object().is_some_and(|operations| {
@@ -1104,7 +1174,7 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
         1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
     ];
-    let mut saved = state
+    let saved = state
         .service
         .publish_cover(
             &owner_actor,
@@ -1116,8 +1186,19 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         )
         .unwrap();
     let private_asset_id = saved.assets[0].id;
-    saved.assets[0].visibility = Visibility::Curators;
-    let saved = Catalog::save(&*state.store, saved.clone(), saved.revision).unwrap();
+    state
+        .service
+        .update_asset(
+            &owner_actor,
+            private_asset_id,
+            Revision(1),
+            collector_app::UpdateAssetCommand {
+                visibility: Visibility::Curators,
+                alt_text: "private asset marker".into(),
+            },
+            &command(),
+        )
+        .unwrap();
     let upload_bytes = b"read-model-evidence-fixture";
     let upload = state
         .service
@@ -1319,6 +1400,389 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_selection() {
+    let (_root, mut state) = state();
+    state.exposure.public_curation = true;
+    let owner = state
+        .store
+        .create_user("asset-owner", "a long owner password", true)
+        .unwrap();
+    let viewer = state
+        .store
+        .create_user("asset-viewer", "a long viewer password", false)
+        .unwrap();
+    let stranger = state
+        .store
+        .create_user("asset-stranger", "a long stranger password", false)
+        .unwrap();
+    let owner_actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&owner_actor),
+            "Asset authorization",
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .grant(
+            &test_authentication(&owner_actor),
+            collection.id,
+            viewer,
+            Role::Viewer,
+            &command(),
+        )
+        .unwrap();
+    let other_collection = state
+        .service
+        .create_collection(
+            &test_authentication(&owner_actor),
+            "Other asset collection",
+            &command(),
+        )
+        .unwrap();
+    let work = Catalog::save_work(
+        &*state.store,
+        Work {
+            id: WorkId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            provisional: false,
+            title: "Inherited art work".into(),
+            translations: vec![],
+            identifiers: vec![],
+            migration_provenance: vec![],
+            deleted: false,
+            updated_at: chrono::Utc::now(),
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let edition = Catalog::save_edition(
+        &*state.store,
+        Edition {
+            id: EditionId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            work_id: Some(work.id),
+            provisional: false,
+            title: "Inherited art edition".into(),
+            expected_components: vec![],
+            identifiers: vec![],
+            migration_provenance: vec![],
+            deleted: false,
+            updated_at: chrono::Utc::now(),
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let item = Catalog::save(
+        &*state.store,
+        Item {
+            id: ItemId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            title: "Inherited art item".into(),
+            subtitle: String::new(),
+            identity_link: ItemIdentityLink::Edition {
+                edition_id: edition.id,
+            },
+            domain: ModuleData {
+                module: ModuleId("org.junk.music".into()),
+                schema_version: 1,
+                payload: RawJson::from_value(serde_json::json!({})),
+            },
+            identity: IdentityState::Unidentified,
+            translations: vec![],
+            identifiers: vec![],
+            specimens: vec![],
+            wishlist: false,
+            captures: vec![],
+            assets: vec![],
+            metadata: MetadataState::default(),
+            deleted: false,
+            updated_at: chrono::Utc::now(),
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let (owner_token, _) = state.store.issue_session(owner, "owner browser").unwrap();
+    let (viewer_token, _) = state.store.issue_session(viewer, "viewer browser").unwrap();
+    let (stranger_token, _) = state
+        .store
+        .issue_session(stranger, "stranger browser")
+        .unwrap();
+    let app = router(state);
+    let png = [
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/collections/{}/assets?subject_kind=work&subject_id={}&kind=cover&visibility=shared&alt_text=Inherited%20cover",
+                    collection.id, work.id
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "http-work-asset")
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(png.to_vec()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let asset_id: AssetId = created["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(created["revision"], 1);
+    assert_eq!(created["visibility"], "shared");
+    assert!(created.get("original").is_some());
+    assert!(created.get("thumbnail").is_some());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/collections/{}/assets/{asset_id}",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let viewer_asset: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(viewer_asset.get("visibility").is_none());
+    assert!(viewer_asset.get("original").is_none());
+    assert!(viewer_asset.get("thumbnail").is_none());
+    assert_eq!(viewer_asset["alt_text"], "Inherited cover");
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/collections/{}/assets/{asset_id}",
+                    other_collection.id
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    for path in [
+        format!(
+            "/api/v1/collections/{}/assets/{asset_id}/original",
+            collection.id
+        ),
+        format!(
+            "/api/v1/collections/{}/assets/{asset_id}/thumbnail",
+            collection.id
+        ),
+        format!("/api/v1/items/{}/assets/{asset_id}", item.id),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("authorization", format!("Bearer {viewer_token}"))
+                    .header("range", "bytes=0-7")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{}", item.id))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let presented: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(presented["primary_artwork"], asset_id.to_string());
+    assert_eq!(presented["assets"][0]["subject"]["kind"], "work");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/collections/{}/assets/{asset_id}/metadata",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "http-private-asset")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "expected_revision": 1,
+                        "command": {"visibility":"curators","alt_text":"Private cover marker"}
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let updated: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(updated["revision"], 2);
+    assert_eq!(updated["subject"], created["subject"]);
+
+    for path in [
+        format!("/api/v1/collections/{}/assets/{asset_id}", collection.id),
+        format!(
+            "/api/v1/collections/{}/assets/{asset_id}/original",
+            collection.id
+        ),
+        format!(
+            "/api/v1/collections/{}/assets/{asset_id}/thumbnail",
+            collection.id
+        ),
+        format!("/api/v1/items/{}/assets/{asset_id}", item.id),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("authorization", format!("Bearer {viewer_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{}", item.id))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let viewer_item: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(viewer_item.get("primary_artwork").is_none());
+    assert_eq!(viewer_item["assets"], serde_json::json!([]));
+    assert!(
+        !String::from_utf8(body.to_vec())
+            .unwrap()
+            .contains("Private cover marker")
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/collections/{}/assets/{asset_id}",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {stranger_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/collections/{}/assets/{asset_id}/archive?expected_revision=2",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "http-tombstone-asset")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["archived"],
+        true
+    );
+    for path in [
+        format!("/api/v1/collections/{}/assets/{asset_id}", collection.id),
+        format!(
+            "/api/v1/collections/{}/assets/{asset_id}/original",
+            collection.id
+        ),
+        format!(
+            "/api/v1/collections/{}/assets/{asset_id}/thumbnail",
+            collection.id
+        ),
+        format!("/api/v1/items/{}/assets/{asset_id}", item.id),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("authorization", format!("Bearer {owner_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 #[tokio::test]

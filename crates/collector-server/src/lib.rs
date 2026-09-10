@@ -10,10 +10,10 @@ use axum::{
 };
 use collector_app::{
     AccountUpdate, AccountView, AuthenticatedPrincipal, CollectionService, CommandContext,
-    ComponentDetails, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView, JobView,
-    MediaResource, NativeDeviceView, PasskeyView, PresentedCollection, PresentedEvidence,
-    PresentedItem, ReturnLoanCommand, SaveItemCommand, SessionView, SpecimenDetails,
-    StartLoanCommand,
+    ComponentDetails, CreateAssetCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView,
+    GrantView, JobView, MediaResource, NativeDeviceView, PasskeyView, PresentedAsset,
+    PresentedCollection, PresentedEvidence, PresentedItem, ReturnLoanCommand, SaveItemCommand,
+    SessionView, SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -465,7 +465,10 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(item))
         .routes(routes!(evidence))
         .routes(routes!(activity, save_activity))
-        .routes(routes!(asset))
+        .routes(routes!(item_asset))
+        .routes(routes!(asset_metadata))
+        .routes(routes!(asset_original))
+        .routes(routes!(asset_thumbnail))
         .routes(routes!(media))
 }
 
@@ -489,6 +492,8 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(job))
         .routes(routes!(cancel_job))
         .routes(routes!(retry_job))
+        .routes(routes!(create_asset).layer(DefaultBodyLimit::max(20 * 1024 * 1024)))
+        .routes(routes!(update_asset, tombstone_asset))
         .routes(routes!(chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)))
         .routes(routes!(cover).layer(DefaultBodyLimit::max(20 * 1024 * 1024)))
 }
@@ -515,7 +520,7 @@ pub fn openapi() -> OpenApi {
     document.info.title = "Junk Collector API".into();
     document.info.version = "1.0.0".into();
     for (path, item) in &mut document.paths.paths {
-        let limit = if path.ends_with("/cover") {
+        let limit = if path.ends_with("/cover") || path.ends_with("/assets") {
             20 * 1024 * 1024
         } else if path.ends_with("/files/{index}") {
             8 * 1024 * 1024
@@ -1450,7 +1455,7 @@ struct AssetQuery {
     thumbnail: bool,
 }
 #[utoipa::path(get, path = "/api/v1/items/{id}/assets/{asset}", params(("id" = ItemId, Path), ("asset" = AssetId, Path), ("thumbnail" = Option<bool>, Query)), responses((status = 200, content_type = "application/octet-stream"), (status = 403), (status = 404)))]
-async fn asset(
+async fn item_asset(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((id, asset)): Path<(ItemId, AssetId)>,
@@ -1460,6 +1465,187 @@ async fn asset(
     let resource =
         blocking(move || state.service.asset(&actor, id, asset, query.thumbnail)).await?;
     file_response(resource, headers).await
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, body = PresentedAsset), (status = 403), (status = 404)))]
+async fn asset_metadata(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, asset)): Path<(CollectionId, AssetId)>,
+) -> ApiResult<Json<PresentedAsset>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.asset_presented(&actor, collection, asset)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}/original", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, content_type = "application/octet-stream"), (status = 206, content_type = "application/octet-stream"), (status = 403), (status = 404), (status = 416)))]
+async fn asset_original(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, asset)): Path<(CollectionId, AssetId)>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let resource = blocking(move || {
+        state
+            .service
+            .asset_resource(&actor, collection, asset, false)
+    })
+    .await?;
+    file_response(resource, headers).await
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}/thumbnail", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, content_type = "image/png"), (status = 206, content_type = "image/png"), (status = 403), (status = 404), (status = 416)))]
+async fn asset_thumbnail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, asset)): Path<(CollectionId, AssetId)>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let resource = blocking(move || {
+        state
+            .service
+            .asset_resource(&actor, collection, asset, true)
+    })
+    .await?;
+    file_response(resource, headers).await
+}
+
+#[derive(Clone, Copy, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum AssetSubjectKind {
+    Work,
+    Edition,
+    Item,
+    Specimen,
+    Component,
+    Capture,
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+struct CreateAssetQuery {
+    #[param(inline)]
+    subject_kind: AssetSubjectKind,
+    subject_id: String,
+    #[param(inline)]
+    kind: AssetKind,
+    #[param(inline)]
+    visibility: Visibility,
+    alt_text: Option<String>,
+}
+
+impl CreateAssetQuery {
+    fn subject(&self) -> Result<AssetSubject> {
+        let invalid = || Error::Invalid("asset subject ID is invalid".into());
+        Ok(match self.subject_kind {
+            AssetSubjectKind::Work => AssetSubject::Work {
+                work_id: self.subject_id.parse().map_err(|_| invalid())?,
+            },
+            AssetSubjectKind::Edition => AssetSubject::Edition {
+                edition_id: self.subject_id.parse().map_err(|_| invalid())?,
+            },
+            AssetSubjectKind::Item => AssetSubject::Item {
+                item_id: self.subject_id.parse().map_err(|_| invalid())?,
+            },
+            AssetSubjectKind::Specimen => AssetSubject::Specimen {
+                specimen_id: self.subject_id.parse().map_err(|_| invalid())?,
+            },
+            AssetSubjectKind::Component => AssetSubject::Component {
+                component_id: self.subject_id.parse().map_err(|_| invalid())?,
+            },
+            AssetSubjectKind::Capture => AssetSubject::Capture {
+                capture_id: self.subject_id.parse().map_err(|_| invalid())?,
+            },
+        })
+    }
+}
+
+#[utoipa::path(post, path = "/api/v1/collections/{collection}/assets", params(("collection" = CollectionId, Path), CreateAssetQuery, ("Idempotency-Key" = String, Header)), request_body(content = String, content_type = "application/octet-stream"), responses((status = 200, body = PresentedAsset), (status = 403), (status = 404), (status = 409), (status = 413), (status = 422), (status = 503)))]
+async fn create_asset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(collection): Path<CollectionId>,
+    Query(query): Query<CreateAssetQuery>,
+    body: axum::body::Bytes,
+) -> ApiResult<Json<PresentedAsset>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let subject = query.subject()?;
+    Ok(Json(
+        blocking(move || {
+            state.service.create_asset(
+                &actor,
+                CreateAssetCommand {
+                    collection_id: collection,
+                    subject,
+                    kind: query.kind,
+                    visibility: query.visibility,
+                    alt_text: query.alt_text.unwrap_or_default(),
+                },
+                &body,
+                &context,
+            )
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateAssetEnvelope {
+    expected_revision: Revision,
+    command: UpdateAssetCommand,
+}
+
+#[utoipa::path(put, path = "/api/v1/collections/{collection}/assets/{asset}/metadata", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path), ("Idempotency-Key" = String, Header)), request_body = UpdateAssetEnvelope, responses((status = 200, body = PresentedAsset), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn update_asset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, asset)): Path<(CollectionId, AssetId)>,
+    Json(input): Json<UpdateAssetEnvelope>,
+) -> ApiResult<Json<PresentedAsset>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let current = state.service.asset_presented(&actor, collection, asset)?;
+    if current.visibility.is_none() {
+        return Err(Error::Forbidden.into());
+    }
+    Ok(Json(
+        blocking(move || {
+            state.service.update_asset(
+                &actor,
+                asset,
+                input.expected_revision,
+                input.command,
+                &context,
+            )
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/collections/{collection}/assets/{asset}/archive", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path), ExpectedRevision, ("Idempotency-Key" = String, Header)), responses((status = 200, body = PresentedAsset), (status = 403), (status = 404), (status = 409)))]
+async fn tombstone_asset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, asset)): Path<(CollectionId, AssetId)>,
+    Query(query): Query<ExpectedRevision>,
+) -> ApiResult<Json<PresentedAsset>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let current = state.service.asset_presented(&actor, collection, asset)?;
+    if current.visibility.is_none() {
+        return Err(Error::Forbidden.into());
+    }
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .tombstone_asset(&actor, asset, query.expected_revision, &context)
+        })
+        .await?,
+    ))
 }
 #[utoipa::path(get, path = "/api/v1/items/{id}/representations/{representation}/{index}", params(("id" = ItemId, Path), ("representation" = RepresentationId, Path), ("index" = usize, Path)), responses((status = 200, content_type = "application/octet-stream"), (status = 206, content_type = "application/octet-stream"), (status = 403), (status = 404), (status = 416)))]
 async fn media(

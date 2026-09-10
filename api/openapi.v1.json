@@ -560,6 +560,388 @@
         }
       }
     },
+    "/api/v1/collections/{collection}/assets": {
+      "post": {
+        "operationId": "create_asset",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "subject_kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "work",
+                "edition",
+                "item",
+                "specimen",
+                "component",
+                "capture"
+              ]
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cover",
+                "photo",
+                "scan",
+                "document",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "visibility",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "curators"
+              ]
+            }
+          },
+          {
+            "name": "alt_text",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 20971520
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedAsset"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{collection}/assets/{asset}": {
+      "get": {
+        "operationId": "asset_metadata",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedAsset"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{collection}/assets/{asset}/archive": {
+      "post": {
+        "operationId": "tombstone_asset",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          },
+          {
+            "name": "expected_revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Revision"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedAsset"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{collection}/assets/{asset}/metadata": {
+      "put": {
+        "operationId": "update_asset",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAssetEnvelope"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedAsset"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{collection}/assets/{asset}/original": {
+      "get": {
+        "operationId": "asset_original",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "206": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "416": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{collection}/assets/{asset}/thumbnail": {
+      "get": {
+        "operationId": "asset_thumbnail",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "image/png": {}
+            }
+          },
+          "206": {
+            "description": "",
+            "content": {
+              "image/png": {}
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "416": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/collections/{id}/grants": {
       "get": {
         "operationId": "collection_grants",
@@ -1130,7 +1512,7 @@
     },
     "/api/v1/items/{id}/assets/{asset}": {
       "get": {
-        "operationId": "asset",
+        "operationId": "item_asset",
         "parameters": [
           {
             "name": "id",
@@ -4561,7 +4943,7 @@
                 "assets": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Asset"
+                    "$ref": "#/components/schemas/PresentedAsset"
                   }
                 },
                 "captures": {
@@ -4609,6 +4991,16 @@
                 },
                 "presentation": {
                   "$ref": "#/components/schemas/ModulePresentation"
+                },
+                "primary_artwork": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AssetId"
+                    }
+                  ]
                 },
                 "revision": {
                   "$ref": "#/components/schemas/Revision"
@@ -4753,6 +5145,76 @@
             "type": "string"
           },
           "value": {}
+        }
+      },
+      "PresentedAsset": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "subject",
+          "kind",
+          "media_type",
+          "alt_text",
+          "updated_at",
+          "archived"
+        ],
+        "properties": {
+          "alt_text": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/AssetId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AssetKind"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "original": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StoredFile"
+              }
+            ]
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/AssetSubject"
+          },
+          "thumbnail": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StoredFile"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "visibility": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Visibility"
+              }
+            ]
+          }
         }
       },
       "PresentedCapture": {
@@ -4909,7 +5371,7 @@
           "assets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Asset"
+              "$ref": "#/components/schemas/PresentedAsset"
             }
           },
           "captures": {
@@ -4957,6 +5419,16 @@
           },
           "presentation": {
             "$ref": "#/components/schemas/ModulePresentation"
+          },
+          "primary_artwork": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssetId"
+              }
+            ]
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
@@ -5568,6 +6040,38 @@
             "type": "string"
           }
         }
+      },
+      "UpdateAssetCommand": {
+        "type": "object",
+        "required": [
+          "visibility",
+          "alt_text"
+        ],
+        "properties": {
+          "alt_text": {
+            "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateAssetEnvelope": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "$ref": "#/components/schemas/UpdateAssetCommand"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
       },
       "Upload": {
         "type": "object",

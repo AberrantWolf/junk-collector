@@ -187,7 +187,7 @@ Add photos/scans and visibility controls using existing original/thumbnail stora
 
 **Limit:** do not duplicate image-processing algorithms in React; offline propagation is C05.
 
-**Status (2026-09-10): U04.1 implemented; U04.2 is next.** Standalone,
+**Status (2026-09-10): U04.1-U04.2 implemented; U04.3 is next.** Standalone,
 collection-scoped Asset commands now create PNG/JPEG/WebP Covers, Photos, and
 Scans for Work, Edition, Item, Specimen, Component, and Capture subjects. The
 single store image pipeline preserves original bytes, emits bounded PNG
@@ -197,9 +197,15 @@ revisions do not change. Reindex retains standalone Work/Edition assets rather
 than depending on the legacy Item projection. Permanent tests cover every
 subject and image format, replay, update/tombstone history, preserved payloads,
 and fail-closed corrupt, oversized, document, and cross-collection input. U04.2
-collection-scoped DTO/byte routes, role filtering, and `primary_artwork` are not
-implemented; U04.3 controls are not displayed. Document uploads remain explicitly
-unavailable.
+adds revisioned `PresentedAsset` DTOs plus collection-scoped metadata, original,
+thumbnail, create, metadata-update, and archive routes. Viewer metadata omits
+visibility and stored file/digest details; curator-only assets are rejected before
+opening either byte representation. The legacy Item URL delegates through the same
+policy. Edition-linked Items inherit Work Assets, and server-selected
+`primary_artwork` prefers the first visible module choice before the newest visible
+Item/Edition/Work Cover with deterministic ID tie-breaking. Mutation routes remain
+absent when curation exposure is disabled. U04.3 controls are not displayed.
+Document uploads remain explicitly unavailable.
 
 ## Security and enrollment
 

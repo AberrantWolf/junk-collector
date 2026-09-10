@@ -1,5 +1,30 @@
 # Validation recorded for the foundation
 
+## Wave 3 U04.2 Asset DTO and authorization — 2026-09-10
+
+- `asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_selection`
+  drives the real HTTP API. A viewer receives shared `PresentedAsset` metadata
+  without visibility, filename, length, or digest fields and can range-read its
+  original and thumbnail through both canonical and legacy paths. After a real
+  metadata revision makes it curator-only, metadata/original/thumbnail and the
+  legacy Item URL all deny the viewer; an unrelated user is denied and a wrong
+  collection path is not found. Archival then hides every route.
+- The same test attaches a Cover to a Work and proves an Edition-linked Item
+  inherits it as role-aware `primary_artwork`. The U04.1 fixture registers a real
+  test module whose visible selected Photo wins ahead of fallback Covers. Fallback
+  ordering uses newest Asset update time and AssetId as a deterministic tie-break.
+- `asset_mutations_follow_curation_listener_composition` proves create,
+  metadata-update, and archive methods are 404-absent when public curation is off
+  and reach authentication only when it is enabled. Generated OpenAPI/TypeScript
+  contain only the working routes, including the explicit 20 MiB create limit.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 120
+  locked workspace tests, warning-free all-target clippy, generated API drift,
+  TypeScript checking, web build, and rebuilt embedded-assets server pass.
+- **Not implemented:** U04.3 attachment/metadata/archive controls, keyboard/lazy
+  loading/responsive review, and distinct no-artwork versus uncertain-identity UI
+  review. Document uploads remain explicitly unavailable. **Externally
+  unqualified:** independent authorization review.
+
 ## Wave 3 U04.1 standalone asset commands — 2026-09-10
 
 - `standalone_assets_cover_all_subjects_and_keep_independent_history` creates

@@ -980,6 +980,42 @@ impl Store {
         })
     }
 
+    pub(crate) fn asset_states_for_item_record(&self, item_id: ItemId) -> Result<Vec<AssetState>> {
+        let item = self.item(item_id)?;
+        if item.deleted {
+            return Err(Error::NotFound);
+        }
+        let inherited_work = match item.identity_link {
+            ItemIdentityLink::Work { work_id } => Some(work_id),
+            ItemIdentityLink::Edition { edition_id } => self.edition(edition_id)?.work_id,
+            ItemIdentityLink::None => None,
+        };
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare("SELECT record FROM assets WHERE collection_id=? ORDER BY id")
+            .map_err(storage)?;
+        let rows = statement
+            .query_map([item.collection_id.to_string()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(storage)?;
+        let mut states = Vec::new();
+        for row in rows {
+            let record: archive_v3::AssetRecordV3 =
+                serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
+            if asset_belongs_to_item(&record.asset, &item, inherited_work) {
+                states.push(AssetState {
+                    collection_id: record.collection_id,
+                    revision: record.revision,
+                    asset: record.asset,
+                    deleted: record.deleted,
+                    updated_at: record.updated_at,
+                });
+            }
+        }
+        Ok(states)
+    }
+
     pub(crate) fn asset_subject_collection_record(
         &self,
         subject: AssetSubject,
@@ -1279,35 +1315,22 @@ impl Store {
         Ok(state)
     }
 
-    pub(crate) fn asset_path(
+    pub(crate) fn asset_resource_path(
         &self,
-        item_id: ItemId,
         asset_id: AssetId,
         thumbnail: bool,
     ) -> Result<(PathBuf, String, Digest, String)> {
-        let item = self.item(item_id)?;
-        if item.deleted {
+        let record = self.asset_record_v3(asset_id)?;
+        if record.deleted {
             return Err(Error::NotFound);
         }
-        let asset = item
-            .assets
-            .iter()
-            .find(|a| a.id == asset_id)
-            .ok_or(Error::NotFound)?;
+        let asset = &record.asset;
         let file = if thumbnail {
             asset.thumbnail.as_ref().ok_or(Error::NotFound)?
         } else {
             &asset.file
         };
         safe_name(&file.name)?;
-        let record: String = lock(&self.db)?
-            .query_row(
-                "SELECT record FROM assets WHERE id=?",
-                [asset_id.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(storage)?;
-        let record: archive_v3::AssetRecordV3 = serde_json::from_str(&record).map_err(storage)?;
         let role = if thumbnail { "thumbnail" } else { "original" };
         let locator = record
             .legacy_payloads

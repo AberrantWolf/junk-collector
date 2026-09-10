@@ -402,10 +402,14 @@ impl Store {
                 })
                 .cloned()
                 .collect();
+            let inherited_work = item_work_id(&record.item, &editions);
             let mut item_assets = std::collections::BTreeMap::new();
             for asset in assets_v3
                 .iter()
-                .filter(|asset| !asset.deleted && asset_belongs_to_item(&asset.asset, &record.item))
+                .filter(|asset| {
+                    !asset.deleted
+                        && asset_belongs_to_item(&asset.asset, &record.item, inherited_work)
+                })
                 .map(|asset| asset.asset.clone())
                 .chain(record.item.assets.clone())
             {
@@ -936,8 +940,9 @@ impl ContentPort for Store {
         })
     }
 
-    fn asset(&self, item: ItemId, asset: AssetId, thumbnail: bool) -> Result<MediaResource> {
-        let (path, media_type, digest, download_name) = self.asset_path(item, asset, thumbnail)?;
+    fn asset_resource(&self, asset: AssetId, thumbnail: bool) -> Result<MediaResource> {
+        let (path, media_type, digest, download_name) =
+            self.asset_resource_path(asset, thumbnail)?;
         let reader = File::open(path).map_err(storage)?;
         let length = reader.metadata().map_err(storage)?.len();
         Ok(MediaResource {
@@ -951,6 +956,10 @@ impl ContentPort for Store {
 
     fn asset_state(&self, asset: AssetId) -> Result<AssetState> {
         self.asset_state_record(asset)
+    }
+
+    fn asset_states_for_item(&self, item: ItemId) -> Result<Vec<AssetState>> {
+        self.asset_states_for_item_record(item)
     }
 
     fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId> {
@@ -2552,7 +2561,18 @@ fn project(tx: &Connection, record: &RevisionRecord, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn asset_belongs_to_item(asset: &Asset, item: &Item) -> bool {
+fn item_work_id(item: &Item, editions: &[Edition]) -> Option<WorkId> {
+    match item.identity_link {
+        ItemIdentityLink::Work { work_id } => Some(work_id),
+        ItemIdentityLink::Edition { edition_id } => editions
+            .iter()
+            .find(|edition| edition.id == edition_id)
+            .and_then(|edition| edition.work_id),
+        ItemIdentityLink::None => None,
+    }
+}
+
+fn asset_belongs_to_item(asset: &Asset, item: &Item, inherited_work: Option<WorkId>) -> bool {
     match asset.subject {
         AssetSubject::Item { item_id } => item_id == item.id,
         AssetSubject::Specimen { specimen_id } => item
@@ -2568,9 +2588,7 @@ fn asset_belongs_to_item(asset: &Asset, item: &Item) -> bool {
         AssetSubject::Capture { capture_id } => {
             item.captures.iter().any(|capture| capture.id == capture_id)
         }
-        AssetSubject::Work { work_id } => {
-            matches!(item.identity_link, ItemIdentityLink::Work { work_id: id } if id == work_id)
-        }
+        AssetSubject::Work { work_id } => inherited_work == Some(work_id),
         AssetSubject::Edition { edition_id } => {
             matches!(item.identity_link, ItemIdentityLink::Edition { edition_id: id } if id == edition_id)
         }
@@ -2687,6 +2705,21 @@ fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
         .drain(..)
         .map(|asset| (asset.id, asset))
         .collect::<std::collections::BTreeMap<_, _>>();
+    let inherited_work = match item.identity_link {
+        ItemIdentityLink::Edition { edition_id } => db
+            .query_row(
+                "SELECT record FROM editions WHERE id=? AND collection_id=?",
+                [edition_id.to_string(), item.collection_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .map(|record| serde_json::from_str::<Edition>(&record).map_err(storage))
+            .transpose()?
+            .and_then(|edition| edition.work_id),
+        ItemIdentityLink::Work { work_id } => Some(work_id),
+        ItemIdentityLink::None => None,
+    };
     let mut statement = db
         .prepare("SELECT record FROM assets WHERE collection_id=?")
         .map_err(storage)?;
@@ -2698,7 +2731,7 @@ fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
     for row in rows {
         let record: archive_v3::AssetRecordV3 =
             serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
-        if asset_belongs_to_item(&record.asset, item) {
+        if asset_belongs_to_item(&record.asset, item, inherited_work) {
             if record.deleted {
                 assets.remove(&record.asset.id);
             } else {
