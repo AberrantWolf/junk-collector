@@ -356,6 +356,19 @@ Separate package inventory/staging, analyzer candidates, user review/physical as
 
 **Limit:** use existing upload/inbox mechanisms, not a second importer; actual analyzer implementations arrive in D04/D05.
 
+**Status (2026-09-10): P03.1 complete locally; P03.2 is next.** Private schema
+v9 now persists a durable provisional Import separately from its execution Jobs:
+safe source summary, bounded declared-file inventory and resumable offsets/digests,
+preallocated Capture/Representation identities, optional physical association and
+expected Item revision, raw candidate observations, limitations, review decision,
+analysis Job link, and workflow phase. Optimistic revision writes preserve immutable
+source and identities across restart. Validation rejects private path-shaped source
+summaries, unsafe/case-colliding inventories, invalid offsets/digests, absent selected
+candidates, and premature publication. A completely staged, reviewed but unidentified
+and unattached Import is valid without fabricated catalog or physical identity.
+P03.2 staging/resume and browser/inbox convergence, P03.3 analysis/review, P03.4
+publication/compatibility, and all public Import routes remain not implemented.
+
 ### P04 — Inbox, import-review and job UI
 
 **Routine · Dependencies:** P02, P03, U02. **Owner:** web curation/administration through application APIs.

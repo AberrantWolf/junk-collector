@@ -1,8 +1,10 @@
 use collector_app::{
     AccessPort, ActiveOwnership, AuthenticatedPrincipal, CarrierDetails, Catalog,
     CollectionService, CommandContext, ComponentDetails, ContentPort, CreateAssetCommand,
-    CredentialKind, DisposeSpecimenCommand, IdempotencyPort, ImportPort, JobPort, JobSpec,
-    MediaResource, ReceiptDecision, ReturnLoanCommand, ReturnedPossession, SaveItemCommand,
+    CredentialKind, DisposeSpecimenCommand, IdempotencyPort, ImportCandidate, ImportDeclaredFile,
+    ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord, ImportReviewDecision,
+    ImportSourceKind, ImportSourceSummary, ImportView, JobPort, JobSpec, MediaResource,
+    ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand, ReturnedPossession, SaveItemCommand,
     SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_core::*;
@@ -934,7 +936,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        8
+        9
     );
     assert_eq!(
         private
@@ -4620,4 +4622,209 @@ fn successful_command_replay_is_not_revalidated_against_later_revisions() {
         serde_json::to_value(original).unwrap(),
         serde_json::to_value(replay).unwrap()
     );
+}
+
+fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRecord {
+    let timestamp = chrono::DateTime::from_timestamp(1_800_000_000, 0).unwrap();
+    ImportRecord {
+        user_id,
+        view: ImportView {
+            id: ImportId::new(),
+            revision: 1,
+            collection_id,
+            source: ImportSourceSummary {
+                kind: ImportSourceKind::Browser,
+                label: None,
+                package_name: "disc-one".into(),
+            },
+            files: vec![ImportDeclaredFile {
+                name: "track01.bin".into(),
+                bytes: ByteLength(4),
+                received_bytes: ByteLength(0),
+                digest: None,
+            }],
+            capture_id: CaptureId::new(),
+            representation_id: RepresentationId::new(),
+            association: CaptureAssociation::default(),
+            expected_item_revision: None,
+            candidates: vec![],
+            limitations: vec![],
+            review: None,
+            analysis_job_id: None,
+            phase: ImportPhase::Staging,
+            created_at: timestamp,
+            updated_at: timestamp,
+        },
+    }
+}
+
+#[test]
+fn schema_nine_persists_durable_imports_without_private_path_columns() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Store::open(&archive, &state).unwrap();
+    let record = provisional_import(UserId::new(), CollectionId::new());
+    let expected = serde_json::to_value(store.create_import(record).unwrap()).unwrap();
+    drop(store);
+
+    let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    assert_eq!(
+        private
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+            .unwrap(),
+        9
+    );
+    let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(columns.contains(&"capture_id".into()));
+    assert!(columns.contains(&"representation_id".into()));
+    assert!(!columns.iter().any(|column| {
+        matches!(
+            column.as_str(),
+            "inbox_root" | "source_path" | "scratch_path" | "archive_path"
+        )
+    }));
+    drop(statement);
+    drop(private);
+
+    let reopened = Store::open(&archive, &state).unwrap();
+    let id: ImportId = expected["view"]["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(
+        serde_json::to_value(reopened.import_record(id).unwrap()).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn durable_import_updates_preserve_identity_and_raw_review_observations() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Store::open_with_clock(
+        root.path().join("archive"),
+        root.path().join("state"),
+        clock.clone(),
+    )
+    .unwrap();
+    let mut record = store
+        .create_import(provisional_import(UserId::new(), CollectionId::new()))
+        .unwrap();
+    let capture_id = record.view.capture_id;
+    let representation_id = record.view.representation_id;
+    let raw = r#"{"ordered":[3,2,1],"unknown":null,"number":1e+02}"#;
+    record.view.files[0].received_bytes = ByteLength(4);
+    record.view.files[0].digest = Some(Digest::sha256(b"data"));
+    record.view.candidates.push(ImportCandidate {
+        key: "candidate-one".into(),
+        module: ModuleId("org.junk.music".into()),
+        label: "Observed disc".into(),
+        observation: RawJson::from_json(raw).unwrap(),
+    });
+    record.view.limitations = vec!["No built-in music analyzer is available".into()];
+    record.view.analysis_job_id = Some(JobId::new());
+    record.view.phase = ImportPhase::AwaitingReview;
+    record.view.review = Some(ImportReviewDecision {
+        identity: ImportIdentityDecision::Candidate {
+            key: "candidate-one".into(),
+        },
+        association: CaptureAssociation::default(),
+    });
+    clock.advance(5);
+    let saved = store.save_import(record, 1).unwrap();
+    assert_eq!(saved.view.revision, 2);
+    assert_eq!(saved.view.capture_id, capture_id);
+    assert_eq!(saved.view.representation_id, representation_id);
+    assert_eq!(saved.view.updated_at.timestamp(), 1_800_000_005);
+    assert_eq!(saved.view.candidates[0].observation.get(), raw);
+
+    let mut stale = saved.clone();
+    stale.view.revision = 1;
+    assert!(matches!(store.save_import(stale, 1), Err(Error::Conflict)));
+
+    let mut changed_identity = saved.clone();
+    changed_identity.view.source.package_name = "other-package".into();
+    assert!(matches!(
+        store.save_import(changed_identity, 2),
+        Err(Error::Invalid(message)) if message.contains("immutable identity")
+    ));
+}
+
+#[test]
+fn import_validation_rejects_unsafe_or_incoherent_staging_state() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let user = UserId::new();
+    let collection = CollectionId::new();
+
+    let mut path = provisional_import(user, collection);
+    path.view.source.package_name = "/private/inbox/disc".into();
+    assert!(matches!(store.create_import(path), Err(Error::Invalid(_))));
+
+    let mut collision = provisional_import(user, collection);
+    collision.view.files.push(ImportDeclaredFile {
+        name: "TRACK01.BIN".into(),
+        bytes: ByteLength(4),
+        received_bytes: ByteLength(0),
+        digest: None,
+    });
+    assert!(matches!(
+        store.create_import(collision),
+        Err(Error::Invalid(message)) if message.contains("case-colliding")
+    ));
+
+    let mut bad_offset = provisional_import(user, collection);
+    bad_offset.view.files[0].received_bytes = ByteLength(5);
+    assert!(matches!(
+        store.create_import(bad_offset),
+        Err(Error::Invalid(message)) if message.contains("offset")
+    ));
+
+    let mut absent_candidate = provisional_import(user, collection);
+    absent_candidate.view.phase = ImportPhase::AwaitingReview;
+    absent_candidate.view.review = Some(ImportReviewDecision {
+        identity: ImportIdentityDecision::Candidate {
+            key: "missing".into(),
+        },
+        association: CaptureAssociation::default(),
+    });
+    assert!(matches!(
+        store.create_import(absent_candidate),
+        Err(Error::Invalid(message)) if message.contains("absent candidate")
+    ));
+
+    let mut incomplete = provisional_import(user, collection);
+    incomplete.view.phase = ImportPhase::Publishing;
+    incomplete.view.review = Some(ImportReviewDecision {
+        identity: ImportIdentityDecision::Unidentified,
+        association: CaptureAssociation::default(),
+    });
+    assert!(matches!(
+        store.create_import(incomplete),
+        Err(Error::Invalid(message)) if message.contains("completely staged")
+    ));
+}
+
+#[test]
+fn durable_import_allows_published_unidentified_unattached_capture_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let mut record = provisional_import(UserId::new(), CollectionId::new());
+    record.view.files[0].received_bytes = ByteLength(4);
+    record.view.files[0].digest = Some(Digest::sha256(b"data"));
+    record.view.review = Some(ImportReviewDecision {
+        identity: ImportIdentityDecision::Unidentified,
+        association: CaptureAssociation::default(),
+    });
+    record.view.phase = ImportPhase::Published;
+    let stored = store.create_import(record).unwrap();
+    assert_eq!(stored.view.association, CaptureAssociation::default());
+    assert!(stored.view.expected_item_revision.is_none());
+    assert!(matches!(
+        stored.view.review.unwrap().identity,
+        ImportIdentityDecision::Unidentified
+    ));
 }

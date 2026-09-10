@@ -1,5 +1,31 @@
 # Validation recorded for the foundation
 
+## Wave 3 P03.1 durable provisional Import model — 2026-09-10
+
+- Private schema v9 creates typed `imports` columns for ownership, collection,
+  safe source summary, stable Capture/Representation identities, optional physical
+  chain and expected Item revision, analysis Job, phase, revisions, and timestamps.
+  Declared files, candidates, limitations, and review JSON have explicit storage
+  bounds. Schema inspection confirms there is no inbox-root, source/scratch path,
+  or archive-path column; local recovery accepts the new private schema.
+- `schema_nine_persists_durable_imports_without_private_path_columns` creates a
+  real record, closes the store, reopens it, and compares the complete serialized
+  workflow. `durable_import_updates_preserve_identity_and_raw_review_observations`
+  covers optimistic revision conflict, immutable source/preallocated identities,
+  analysis Job association, phase movement, timestamping, and lossless unknown/raw
+  candidate JSON.
+- `import_validation_rejects_unsafe_or_incoherent_staging_state` probes path-shaped
+  source summaries, case-colliding names, offsets beyond declared length, selection
+  of an absent candidate, and publication before all bytes have valid digests.
+  `durable_import_allows_published_unidentified_unattached_capture_identity` proves
+  the persisted workflow does not require a fabricated Item or Specimen.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 124
+  locked workspace tests, and warning-free all-target clippy pass.
+- **Not implemented:** P03.2 browser/inbox staging convergence and restart resume;
+  P03.3 analyzer dispatch and review commands; P03.4 journal publication and legacy
+  adapters; public Import DTO/routes; P04 UI. **Externally unqualified:** none for
+  this local persistence child; independent P03 review follows its root checkpoint.
+
 ## Wave 3 U04.3 supporting image UI and root review — 2026-09-10
 
 - The curation workbench exposes only implemented PNG/JPEG/WebP Cover, Photo,

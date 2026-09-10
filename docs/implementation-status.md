@@ -99,15 +99,26 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   focus restoration, reduced motion, viewer filtering, and responsive layout are
   browser tested. U04 is locally complete; document uploads, offline artwork, and
   independent review remain outstanding.
+- P03.1 advances private state to schema v9 and persists provisional Import
+  workflows under an `ImportId` distinct from Jobs and command transactions.
+  Records retain a safe source summary, bounded file inventory with offsets and
+  digests, preallocated Capture/Representation IDs, optional physical association
+  and expected Item revision, lossless candidate observations, limitations, review
+  decision, analysis Job link, and phase. Optimistic updates preserve immutable
+  source/identity fields across restart, and the model permits a fully staged,
+  reviewed, unidentified and unattached published state. No private filesystem
+  locator is part of the model.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Implement the configured inbox/import-review UI. U04 supporting images and
-   physical lifecycle behavior are locally complete; document attachments and
-   offline artwork remain unimplemented.
+2. Complete P03.2-P03.4 source convergence, review, and publication, then build
+   the P04 configured inbox/import-review and durable-job UI. P03.1 persistence,
+   U04 supporting images, and physical lifecycle behavior are locally complete;
+   no public Import routes/UI exist yet. Document attachments and offline artwork
+   remain unimplemented.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

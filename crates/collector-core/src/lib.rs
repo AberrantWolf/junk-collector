@@ -39,6 +39,7 @@ identity!(
     EnrollmentId,
     NativeCredentialId,
     JobId,
+    ImportId,
     TransactionId,
     LoanId
 );

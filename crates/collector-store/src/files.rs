@@ -3,7 +3,7 @@ use sha2::{Digest as _, Sha256};
 use std::io::{Read, Seek, SeekFrom};
 
 const CHUNK_LIMIT: usize = 8 * 1024 * 1024;
-fn safe_name(name: &str) -> Result<()> {
+pub(crate) fn safe_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 1024
         || name.contains('\\')

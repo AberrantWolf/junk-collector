@@ -198,6 +198,97 @@ pub struct Upload {
     pub state: JobState,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportPhase {
+    Staging,
+    Analyzing,
+    AwaitingReview,
+    Publishing,
+    Published,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportSourceKind {
+    Browser,
+    Inbox,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportSourceSummary {
+    pub kind: ImportSourceKind,
+    pub label: Option<String>,
+    pub package_name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportDeclaredFile {
+    pub name: String,
+    pub bytes: ByteLength,
+    pub received_bytes: ByteLength,
+    pub digest: Option<Digest>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCandidate {
+    pub key: String,
+    pub module: ModuleId,
+    pub label: String,
+    #[schema(value_type = serde_json::Value)]
+    pub observation: RawJson,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(tag = "identity", rename_all = "snake_case")]
+pub enum ImportIdentityDecision {
+    Candidate { key: String },
+    Unidentified,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportReviewDecision {
+    pub identity: ImportIdentityDecision,
+    pub association: CaptureAssociation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ImportView {
+    pub id: ImportId,
+    pub revision: u64,
+    pub collection_id: CollectionId,
+    pub source: ImportSourceSummary,
+    pub files: Vec<ImportDeclaredFile>,
+    pub capture_id: CaptureId,
+    pub representation_id: RepresentationId,
+    pub association: CaptureAssociation,
+    pub expected_item_revision: Option<Revision>,
+    pub candidates: Vec<ImportCandidate>,
+    pub limitations: Vec<String>,
+    pub review: Option<ImportReviewDecision>,
+    pub analysis_job_id: Option<JobId>,
+    pub phase: ImportPhase,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportRecord {
+    pub user_id: UserId,
+    pub view: ImportView,
+}
+
+pub trait ProvisionalImportPort: Send + Sync {
+    fn create_import(&self, record: ImportRecord) -> Result<ImportRecord>;
+    fn import_record(&self, id: ImportId) -> Result<ImportRecord>;
+    fn save_import(&self, record: ImportRecord, expected_revision: u64) -> Result<ImportRecord>;
+}
+
 pub trait ImportPort: Send + Sync {
     fn create_upload(
         &self,

@@ -6,6 +6,7 @@ mod files;
 mod jobs;
 mod migration;
 mod migration_v3;
+mod provisional_imports;
 mod publication;
 use chrono::Utc;
 use collector_app::{
@@ -1389,7 +1390,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 8 {
+    if private_version > 9 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -1687,6 +1688,40 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         tx.execute_batch(
             "DROP TABLE private.jobs_v7;
             PRAGMA private.user_version = 8;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
+    if private_version < 9 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "CREATE TABLE private.imports (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              revision INTEGER NOT NULL CHECK(revision >= 1),
+              collection_id TEXT NOT NULL,
+              source_kind TEXT NOT NULL CHECK(source_kind IN ('browser','inbox')),
+              source_label TEXT,
+              package_name TEXT NOT NULL,
+              files TEXT NOT NULL CHECK(length(files) <= 16777216),
+              capture_id TEXT NOT NULL UNIQUE,
+              representation_id TEXT NOT NULL UNIQUE,
+              item_id TEXT,
+              specimen_id TEXT,
+              component_id TEXT,
+              carrier_id TEXT,
+              expected_item_revision INTEGER,
+              candidates TEXT NOT NULL CHECK(length(candidates) <= 1048576),
+              limitations TEXT NOT NULL CHECK(length(limitations) <= 262144),
+              review TEXT CHECK(review IS NULL OR length(review) <= 1048576),
+              analysis_job_id TEXT,
+              phase TEXT NOT NULL CHECK(phase IN ('staging','analyzing','awaiting_review','publishing','published','cancelled')),
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX private.imports_owner_order ON imports(user_id,created_at,id);
+            CREATE INDEX private.imports_collection_phase ON imports(collection_id,phase,updated_at);
+            PRAGMA private.user_version = 9;",
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
