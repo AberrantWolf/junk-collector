@@ -24,7 +24,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 - S03 advances private state to v6 with expiring targeted enrollment and separately hashed/revocable native credentials. Same-user recent browser approval, cancellation/expiry/replay protection, one-time issuance, header-independent native authentication, and native-device inventory/revocation are implemented. `collector-client` owns an injectable secure-storage port, refuses redirects/cross-origin credential delivery, validates enrolled server identity/certificate material, and completes the LAN TLS integration through real enrollment.
 - U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted.
 - Private SQLite advances through explicit migrations and stores a durable default UserId selected once from legacy first-row behavior. First-account creation sets it transactionally; later accounts do not change it.
-- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04, and D02-D05 runtime work remains outstanding.
+- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 are implemented locally, while D04/D05 runtime integration remains outstanding.
 - Separate private operational database; collection roles, private field filtering, revisioned accounts/grants, password/passkey recovery, browser-session inventory, and revocable paired native credentials.
 - Separate public/private HTTP routers and direct LAN TLS. Public curation/admin independently configured; disabled APIs and management bundles are absent.
 - WebAuthn passkey registration/login backend and browser integration when an HTTPS authentication origin is configured. Registration and passwordless login pass a Chromium virtual-authenticator end-to-end test; real password-manager/hardware acceptance remains a release gate.
@@ -215,6 +215,11 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   readers, and resampling are optional mechanisms. Compressed shared decoding,
   richer effects, event delivery, published dependency pins, and hardware/private
   qualification remain required or external as recorded in the Wave 3 ledger.
+- W3.R traces every Wave 3 root to executable tests, browser interaction, or an
+  explicit external qualification in [the integration review](wave-3-review.md).
+  The complete local Collector gate and affected sibling gates pass; no D04/D05,
+  provider, derivative, event-streaming, document-upload, plugin, or Wave 4
+  capability is counted as implemented.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
@@ -225,7 +230,10 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
    P04 workspace and Job controls. The legacy upload and administrator inbox routes
    remain compatibility adapters scheduled for API-major removal. Document
    attachments, event streaming, and offline artwork remain unimplemented.
-3. Complete D03-D05 shared audio and analyzer/provider adapters, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. D02 completes the reusable parsers/readers/hash/disc-ID/AccurateRip primitives locally; no Collector catalog verification is currently claimed.
+3. Complete D04-D05 analyzer/provider adapters, DAT/catalog ingestion,
+   MusicBrainz/CAA enrichment and independent real-dump verification oracles.
+   D02/D03 complete the reusable disc and headless audio primitives locally; no
+   Collector catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
 6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.

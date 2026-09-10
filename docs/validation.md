@@ -1,5 +1,30 @@
 # Validation recorded for the foundation
 
+# Wave 3 integration review — 2026-09-10
+
+- The permanent root-by-root acceptance trace is
+  [the Wave 3 integration review](wave-3-review.md). Collector's architecture and
+  API contract checks, literal workspace fmt, all 139 Rust tests, warning-free
+  full clippy, TypeScript check/build, and rebuilt embedded server pass.
+- Normal HTTPS and `LOCAL_SETUP=1` private Chromium suites pass. Focused final
+  probes pass for three SIGKILL publication gaps, six cancellation boundaries,
+  reindex/restart, durable-claim takeover, Import listener/security composition,
+  Asset role filtering, and Job scoping/secret redaction.
+- Junk Libs whole-workspace formatting, all-feature tests, and strict clippy pass;
+  `91dd63d` is the formatting-only cleanup of previously detected unrelated
+  workspace drift. Phono full tests/clippy pass. Retro full tests and focused
+  changed-package clippy pass; its known unrelated whole-workspace warnings remain
+  recorded rather than claimed green. Trash Amp fmt, all 42 executable tests, and
+  strict clippy pass with one hardware-oriented test ignored.
+- Sibling state was preserved: Retro's untracked sync scripts, Phono's untracked
+  `AGENTS.md`, and Trash Amp's user-owned core/presentation/docs/browse/lock hunks
+  remain outside Wave 3 commits.
+- **Implemented:** P02, U03, U04, P03, P04, D02, D03, and the local W3.R review.
+  **Not implemented:** D04/D05, D06, D07, C06, document uploads, runtime plugins,
+  distributed scheduling, and Wave 4. **Externally unqualified:** target Linux/NAS,
+  abrupt power loss, private fixtures/codecs, live providers/drives, hardware
+  playback, published shared pins, and independent security/accessibility review.
+
 # Wave 3 D03.5 cross-repository review — 2026-09-10
 
 - Junk Libs reran `cargo test --workspace --all-features` and
@@ -13,10 +38,8 @@
 - Collector explicit-package fmt passes. `cargo test --workspace` exits zero with
   139 tests passing, and `cargo clippy --workspace --all-targets -- -D warnings`
   exits zero. Architecture and diff checks pass.
-- The literal whole-workspace fmt command currently traverses a sibling path
-  workspace and reports older formatting drift in unrelated PDF/docview sources.
-  W3.R owns resolving or recording that final integration gate; D03 did not absorb
-  unrelated formatting changes merely to claim a pass.
+- The literal whole-workspace fmt issue found here was resolved during W3.R by the
+  formatting-only Junk Libs commit `91dd63d`; no behavior or dependency changed.
 - **Implemented:** the D03 headless contracts, qualified WAV/CUE/redumper decode,
   exact frame seeking, bounded resampling, gain/clipping, queue policy, and local
   consumer migrations. **Not implemented:** shared compressed codecs, richer DSP,
@@ -794,18 +817,20 @@ application pass on either failed attempt.
   reviewed per-account/per-peer buckets.
 - **Open, assigned to S03:** native bearer issuance is still selected by the
   caller-supplied `x-collector-client` header and is not a paired-device credential.
-- **Open, assigned to D02-D05:** junk-libs and Retro Junk contain divergent CUE/CHD
-  implementations; Phono Junk pins an older junk-libs revision; Trash Amp consumes
-  a sibling path and has unrelated dirty changes. All remain user-owned.
+- **Resolved by D02/D03 locally:** the reviewed CUE/CHD, disc identity,
+  AccurateRip, DAT, audio-reader, resampling, and queue seams now use narrow Junk
+  Libs crates in their migrated consumers. Publishing the shared commits and
+  replacing review-workspace sibling paths with immutable pins remain external
+  release work; Trash Amp's unrelated dirty changes remain user-owned.
 - **Open, assigned to D02/D04:** Retro Junk's MIT file retains placeholder
   attribution. Its Track-1/largest-track hash helpers are identification only and
   must not be promoted to complete verification.
 - **Open, assigned to D04:** Retro Junk's NES DAT normalization skips the 16-byte
   iNES header but does not separately skip a trainer advertised in that header;
   trainer-bearing images remain unqualified.
-- **Open, assigned to D02/D05:** Phono documentation still describes offset work as
-  future even though offset-search code exists. Qualification must cite the code and
-  independent vectors, then correct the documentation in the owning checkout.
+- **Resolved by D02.4 locally:** Phono's offset-search behavior and documentation
+  now consume the shared implementation. Live/private qualification must cite the
+  code and independent vectors; the owned-fixture gate remains external.
 - **Unqualified, assigned to D03/D05/R03:** real redumper/audio/hardware tests are
   ignored or require environment-supplied owned dumps/devices and were not run.
   Missing private dumps, `chdman`, hardware, or network remain explicit skips and

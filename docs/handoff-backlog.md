@@ -485,7 +485,8 @@ Execute reviewed narrow extractions of parsers, normalized hashing, disc identit
 
 ### D03 — Extract reusable audio services and reader contract
 
-**Status (2026-09-10): complete locally; W3.R is next.** Junk
+**Status (2026-09-10): complete locally; W3.R passed. D04 is the next
+implementable ticket.** Junk
 Libs now has executable source/PCM coordinate contracts, opaque playback identity/
 position contracts, qualified PCM-WAV decode with exact integer-frame seeks, and
 path-free adapters for already-open CUE/redumper readers. It also has bounded
