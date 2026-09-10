@@ -1,0 +1,6 @@
+schema_version = 2
+entity_type = "work"
+entity_id = "018f0000-0000-7000-8000-000000000020"
+collection_id = "018f0000-0000-7000-8000-000000000001"
+revision = 1
+record_sha256 = "048769f0ea800a4c589dee4ecb774523b0dc7b81d1f0ff41dca5eea4cc3fa358"

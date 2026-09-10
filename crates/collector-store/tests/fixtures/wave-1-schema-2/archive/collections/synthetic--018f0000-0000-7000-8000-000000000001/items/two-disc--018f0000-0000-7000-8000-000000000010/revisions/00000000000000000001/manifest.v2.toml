@@ -1,0 +1,6 @@
+schema_version = 2
+entity_type = "item"
+item_id = "018f0000-0000-7000-8000-000000000010"
+collection_id = "018f0000-0000-7000-8000-000000000001"
+revision = 1
+record_sha256 = "622f8b7bcf437ceb16b4ee243cc8ebe5873b3ba6ed92ab78af70b040f5c2c932"

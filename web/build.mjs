@@ -2,5 +2,5 @@ import {build} from 'esbuild';
 import {copyFile} from 'node:fs/promises';
 await build({entryPoints:['src/app.tsx'],bundle:true,minify:true,format:'esm',outfile:'dist/app.js',define:{'process.env.NODE_ENV':'"production"'}});
 // Management entrypoints use the same React instance exported by app.js.
-for(const entry of ['curation','administration']) await build({entryPoints:[`src/${entry}.tsx`],bundle:true,minify:true,format:'esm',outfile:`dist/${entry}.js`,plugins:[{name:'runtime',setup(b){b.onResolve({filter:/^@collector\/runtime$/},()=>({path:'/app.js',external:true}))}}],jsxFactory:'React.createElement',jsxFragment:'React.Fragment',jsx:'transform'});
+for(const entry of ['curation','administration','security']) await build({entryPoints:[`src/${entry}.tsx`],bundle:true,minify:true,format:'esm',outfile:`dist/${entry}.js`,plugins:[{name:'runtime',setup(b){b.onResolve({filter:/^@collector\/runtime$/},()=>({path:'/app.js',external:true}))}}],jsxFactory:'React.createElement',jsxFragment:'React.Fragment',jsx:'transform'});
 await copyFile('src/app.css','dist/app.css');

@@ -442,17 +442,22 @@ dependencies = [
 name = "collector-app"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "collector-core",
  "collector-modules",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]
 name = "collector-client"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "collector-core",
  "hex",
  "reqwest",
@@ -462,6 +467,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "url",
+ "utoipa",
 ]
 
 [[package]]
@@ -476,6 +482,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 2.0.20",
+ "utoipa",
  "uuid",
 ]
 
@@ -488,6 +495,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+ "utoipa",
 ]
 
 [[package]]
@@ -504,6 +512,7 @@ dependencies = [
  "collector-core",
  "collector-modules",
  "collector-store",
+ "futures-util",
  "hex",
  "http",
  "rcgen",
@@ -519,6 +528,9 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "url",
+ "utoipa",
+ "utoipa-axum",
  "uuid",
  "webauthn-rs",
 ]
@@ -527,6 +539,7 @@ dependencies = [
 name = "collector-store"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "argon2",
  "chrono",
  "collector-app",
@@ -1226,6 +1239,8 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1547,6 +1562,12 @@ dependencies = [
  "rand_core 0.6.4",
  "subtle",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pastey"
@@ -2589,6 +2610,43 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utoipa"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bde15df68e80b16c7d16b9616e80770ad158988daa56a27dccd1e55558b0160"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-axum"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c25bae5bccc842449ec0c5ddc5cbb6a3a1eaeac4503895dc105a1138f8234a0"
+dependencies = [
+ "axum",
+ "paste",
+ "tower-layer",
+ "tower-service",
+ "utoipa",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba0b99ee52df3028635d93840c797102da61f8a7bb3cf751032455895b52ef8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "uuid",
+]
 
 [[package]]
 name = "uuid"

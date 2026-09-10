@@ -1,0 +1,20 @@
+PRAGMA user_version = 2;
+
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, administrator INTEGER NOT NULL);
+CREATE TABLE grants (collection_id TEXT NOT NULL, user_id TEXT NOT NULL, role INTEGER NOT NULL, PRIMARY KEY(collection_id,user_id));
+CREATE TABLE sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL, label TEXT NOT NULL, expires INTEGER NOT NULL);
+CREATE TABLE jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+CREATE TABLE passkeys (credential_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, record TEXT NOT NULL);
+CREATE TABLE activity (user_id TEXT NOT NULL, item_id TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY(user_id,item_id));
+
+INSERT INTO settings VALUES ('default_user_id','018f0000-0000-7000-8000-000000000090');
+INSERT INTO settings VALUES ('server_id','018f0000-0000-7000-8000-000000000099');
+INSERT INTO users VALUES ('018f0000-0000-7000-8000-000000000090','fixture-owner','$argon2id$v=19$m=19456,t=2,p=1$c3ludGhldGljLXNhbHQ$c3ludGhldGljLWhhc2g',1);
+INSERT INTO users VALUES ('018f0000-0000-7000-8000-000000000091','fixture-viewer','$argon2id$v=19$m=19456,t=2,p=1$YW5vdGhlci1zYWx0$YW5vdGhlci1oYXNo',0);
+INSERT INTO grants VALUES ('018f0000-0000-7000-8000-000000000001','018f0000-0000-7000-8000-000000000090',2);
+INSERT INTO grants VALUES ('018f0000-0000-7000-8000-000000000001','018f0000-0000-7000-8000-000000000091',0);
+INSERT INTO sessions VALUES ('synthetic-session-hash','018f0000-0000-7000-8000-000000000090','018f0000-0000-7000-8000-000000000092','Fixture browser',4102444800);
+INSERT INTO passkeys VALUES ('"c3ludGhldGljLWNyZWRlbnRpYWw"','018f0000-0000-7000-8000-000000000090','{"fixture":"opaque-passkey-record","counter":7}');
+INSERT INTO activity VALUES ('018f0000-0000-7000-8000-000000000090','018f0000-0000-7000-8000-000000000010','{"favorite":true,"private_note":"synthetic activity"}');
+INSERT INTO jobs VALUES ('018f0000-0000-7000-8000-000000000093','{"id":"018f0000-0000-7000-8000-000000000093","user_id":"018f0000-0000-7000-8000-000000000090","kind":"fixture.import","state":"completed","completed_bytes":14,"total_bytes":14,"error":null}');

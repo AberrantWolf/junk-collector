@@ -45,6 +45,12 @@ try{
  await page.getByLabel('Password',{exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Account & security',exact:true}).click();
+ const security=page.getByRole('dialog',{name:/Your durable profile/});
+ await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();
+ await security.getByText('Save these codes now.',{exact:false}).waitFor();
+ assert.equal(await security.getByRole('listitem').count(),10);
+ await page.getByRole('button',{name:'Close account and security'}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
  const administration=page.getByRole('dialog',{name:/Make room for a collection/});
  await administration.getByLabel('Collection name').fill('Shelf & stereo');
@@ -67,6 +73,7 @@ try{
  await page.getByText('Original artwork and thumbnail saved.').waitFor();
  await page.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('button',{name:/A test pressing/}).waitFor();
+ await page.locator('.collection-row img').waitFor({state:'visible'});
  assert.equal(await page.locator('.collection-row img').count(),1);
  if(localSetup){
   const clientPage=await context.newPage();
@@ -83,8 +90,8 @@ try{
  await page.evaluate(async()=>{
   const collection=(await(await fetch('/api/v1/collections')).json())[0];
   const id=crypto.randomUUID();
-  const item={id,collection_id:collection.id,revision:0,title:'Opaque module fixture',subtitle:'Unavailable schema',identity_link:{kind:'none'},domain:{module:'org.example.absent',schema_version:8,payload:{z:100,a:null}},identity:'unidentified',translations:[],identifiers:[],specimens:[],wishlist:true,captures:[],assets:[],metadata:{candidates:[],selected:null,overrides:{}},deleted:false,updated_at:new Date().toISOString()};
-  const response=await fetch(`/api/v1/items/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({item,expected_revision:0})});
+  const command={collection_id:collection.id,title:'Opaque module fixture',subtitle:'Unavailable schema',identity_link:{kind:'none'},domain:{module:'org.example.absent',schema_version:8,payload:{z:100,a:null}},identity:'unidentified',translations:[],identifiers:[],specimens:[],wishlist:true};
+  const response=await fetch(`/api/v1/items/${id}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command,expected_revision:0})});
   if(!response.ok)throw new Error(`opaque module fixture: ${response.status} ${await response.text()}`);
  });
  await page.getByRole('searchbox').fill('Opaque module');
@@ -101,6 +108,18 @@ try{
  await cdp.send('WebAuthn.addVirtualAuthenticator',{options:{protocol:'ctap2',transport:'internal',hasResidentKey:true,hasUserVerification:true,isUserVerified:true,automaticPresenceSimulation:true}});
  await page.getByRole('button',{name:'Add a passkey',exact:true}).click();
  await page.getByText('Passkey registered.',{exact:false}).waitFor();
+ // Two ceremonies verify against the same credential snapshot. Completing the
+ // newer assertion first must not let an older ceremony rebase onto its revision.
+ const race=await page.evaluate(async()=>{
+  const start=async()=>{const r=await fetch('/api/v1/auth/passkeys/login/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'owner'})});if(!r.ok)throw new Error(await r.text());return r.json();};
+  const first=await start();const second=await start();
+  const assertion=async ceremony=>{const credential=await navigator.credentials.get({publicKey:PublicKeyCredential.parseRequestOptionsFromJSON(ceremony.options.publicKey)});return {ceremony_id:ceremony.ceremony_id,credential:credential.toJSON()};};
+  const older=await assertion(first);const newer=await assertion(second);
+  const finish=async body=>(await fetch('/api/v1/auth/passkeys/login/finish',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).status;
+  return [await finish(newer),await finish(older)];
+ });
+ assert.deepEqual(race,[200,401],'stale passkey ceremony issued a session');
+
  await page.getByRole('button',{name:'Sign out',exact:true}).click();
  await page.getByRole('button',{name:'Sign in with a passkey',exact:true}).click();
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
@@ -112,7 +131,7 @@ try{
  await page.setViewportSize({width:1440,height:1000});
  const viewerPassword=randomBytes(24).toString('hex');
  await page.evaluate(async viewerPassword=>{
-  const request=async(path,init={})=>{const response=await fetch(`/api/v1${path}`,{...init,headers:{...(init.body?{'content-type':'application/json'}:{}),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.status===204?undefined:response.json();};
+  const request=async(path,init={})=>{const needsKey=init.method&&init.method!=='GET'&&!path.startsWith('/auth/');const response=await fetch(`/api/v1${path}`,{...init,headers:{...(init.body?{'content-type':'application/json'}:{}),...(needsKey?{'idempotency-key':crypto.randomUUID()}:{}),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.status===204?undefined:response.json();};
   const collections=await request('/collections');
   const created=await request('/admin/users',{method:'POST',body:JSON.stringify({username:'viewer',password:viewerPassword,administrator:false})});
   await request('/admin/grants',{method:'POST',body:JSON.stringify({collection_id:collections[0].id,user_id:created.user_id,role:'viewer'})});
@@ -120,16 +139,11 @@ try{
   await request('/auth/login',{method:'POST',body:JSON.stringify({username:'viewer',password:viewerPassword,device_name:'Viewer browser'})});
  },viewerPassword);
  await page.reload();
- await page.getByRole('button',{name:'Curate collection',exact:true}).waitFor();
- await page.getByRole('button',{name:'Add item',exact:true}).click();
- const curator=page.getByRole('dialog',{name:/Add an entry/});
- await curator.getByLabel('Title',{exact:true}).fill('Unsaved viewer entry');
- await curator.getByRole('button',{name:'Add',exact:true}).click();
- await curator.getByText('your collection role does not allow this change',{exact:false}).waitFor();
- assert.equal(await curator.getByLabel('Title',{exact:true}).inputValue(),'Unsaved viewer entry');
- assert.equal(await curator.getByText('Inventory saved.',{exact:false}).count(),0);
- await page.getByRole('button',{name:'Close curator'}).click();
- await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE'});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});
+ await page.getByRole('button',{name:'Account & security',exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Curate collection',exact:true}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Add item',exact:true}).count(),0);
+ assert.equal(await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],specimens:[],wishlist:false},expected_revision:0})});return response.status;}),403);
+ await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});
  await page.getByRole('searchbox').fill('session expired');
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);

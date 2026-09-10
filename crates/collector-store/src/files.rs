@@ -3,24 +3,6 @@ use sha2::{Digest as _, Sha256};
 use std::io::{Read, Seek, SeekFrom};
 
 const CHUNK_LIMIT: usize = 8 * 1024 * 1024;
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct UploadFile {
-    pub name: String,
-    pub bytes: ByteLength,
-    pub sha256: Option<String>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Upload {
-    pub id: JobId,
-    pub user_id: UserId,
-    pub item_id: ItemId,
-    pub expected_revision: Revision,
-    pub representation_id: RepresentationId,
-    pub capture_id: CaptureId,
-    pub files: Vec<UploadFile>,
-    pub offsets: Vec<u64>,
-    pub state: JobState,
-}
 fn safe_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 1024
@@ -59,14 +41,98 @@ fn hash_file(path: &Path) -> Result<(ByteLength, Digest)> {
         },
     ))
 }
+
+fn write_new_or_verify(path: &Path, bytes: &[u8]) -> Result<()> {
+    if path.exists() {
+        if fs::read(path).map_err(storage)? == bytes {
+            return Ok(());
+        }
+        return Err(Error::Storage(
+            "existing Asset payload differs from the retried command".into(),
+        ));
+    }
+    write_new(path, bytes)
+}
+
 impl Store {
     fn upload_directory(&self, id: JobId) -> PathBuf {
         self.state.join("uploads").join(id.to_string())
     }
+    pub(crate) fn recover_private_publications(&self) -> Result<()> {
+        // Reconcile private bookkeeping after the portable archive has been rebuilt.
+        for entry in fs::read_dir(self.state.join("uploads")).map_err(storage)? {
+            let path = entry.map_err(storage)?.path();
+            let Some(id) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.parse::<JobId>().ok())
+            else {
+                continue;
+            };
+            if !path.join("upload.json").exists() {
+                continue;
+            }
+            let mut upload = self.upload_record(id)?;
+            if self
+                .evidence(upload.item_id)?
+                .iter()
+                .any(|evidence| evidence.id == EvidenceId(id.0))
+            {
+                upload.state = JobState::Completed;
+            }
+            self.persist_upload(&upload)?;
+        }
+        let staging = self.state.join("asset-publication");
+        if staging.exists() {
+            for entry in fs::read_dir(&staging).map_err(storage)? {
+                let path = entry.map_err(storage)?.path();
+                let Some(id) = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(|name| name.parse::<AssetId>().ok())
+                else {
+                    continue;
+                };
+                let record: Option<String> = lock(&self.db)?
+                    .query_row(
+                        "SELECT record FROM assets WHERE id=?",
+                        [id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(storage)?;
+                if let Some(record) = record {
+                    let record: archive_v3::AssetRecordV3 =
+                        serde_json::from_str(&record).map_err(storage)?;
+                    for payload in &record.legacy_payloads {
+                        if hash_file(&self.archive.join(&payload.relative_path))?.1.hex
+                            != payload.sha256
+                        {
+                            return Err(Error::Storage(
+                                "published asset differs from recovery record".into(),
+                            ));
+                        }
+                    }
+                    fs::remove_dir_all(&path).map_err(storage)?;
+                    sync_directory(&staging)?;
+                }
+            }
+        }
+        Ok(())
+    }
     fn persist_upload(&self, upload: &Upload) -> Result<()> {
         let dir = self.upload_directory(upload.id);
         let temp = dir.join(format!("{}.tmp", TransactionId::new()));
-        write_new(&temp, &serde_json::to_vec_pretty(upload).map_err(storage)?)?;
+        let bytes = serde_json::to_vec_pretty(upload).map_err(storage)?;
+        if let Some(result) = &self.command_result {
+            self.prepare_command(
+                "state",
+                &relative(&self.state, &dir.join("upload.json"))?,
+                &Digest::sha256(&bytes).hex,
+                result,
+            )?;
+        }
+        write_new(&temp, &bytes)?;
         fs::rename(temp, dir.join("upload.json")).map_err(storage)?;
         sync_directory(&dir)?;
         let job = Job {
@@ -79,23 +145,23 @@ impl Store {
             total_bytes: upload.files.iter().map(|f| f.bytes.0).sum(),
             error: None,
         };
-        lock(&self.db)?.execute("INSERT INTO private.jobs VALUES (?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![job.id.to_string(),serde_json::to_string(&job).map_err(storage)?]).map_err(storage)?;
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute("INSERT INTO private.jobs VALUES (?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![job.id.to_string(),serde_json::to_string(&job).map_err(storage)?]).map_err(storage)?;
+        if let Some(result) = &self.command_result {
+            self.record_command(&tx, result)?;
+        }
+        tx.commit().map_err(storage)?;
         Ok(())
     }
-    pub fn create_upload(
+    pub(crate) fn create_upload_record(
         &self,
-        actor: &Principal,
+        user: UserId,
         item_id: ItemId,
         expected_revision: Revision,
         files: Vec<UploadFile>,
     ) -> Result<Upload> {
         let item = self.item(item_id)?;
-        if !self
-            .role(actor.user_id, item.collection_id)?
-            .allows(Action::Curate)
-        {
-            return Err(Error::Forbidden);
-        }
         if item.revision != expected_revision {
             return Err(Error::Conflict);
         }
@@ -134,7 +200,7 @@ impl Store {
         let _guard = lock(&self.uploads)?;
         let upload = Upload {
             id: JobId::new(),
-            user_id: actor.user_id,
+            user_id: user,
             item_id,
             expected_revision,
             representation_id: RepresentationId::new(),
@@ -144,10 +210,11 @@ impl Store {
             state: JobState::Queued,
         };
         fs::create_dir(self.upload_directory(upload.id)).map_err(storage)?;
-        self.persist_upload(&upload)?;
+        sync_directory(&self.state.join("uploads"))?;
+        self.with_command_result(&upload)?.persist_upload(&upload)?;
         Ok(upload)
     }
-    pub fn upload(&self, actor: &Principal, id: JobId) -> Result<Upload> {
+    pub(crate) fn upload_record(&self, id: JobId) -> Result<Upload> {
         let path = self.upload_directory(id).join("upload.json");
         let bytes = fs::read(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -157,16 +224,6 @@ impl Store {
             }
         })?;
         let mut upload: Upload = serde_json::from_slice(&bytes).map_err(storage)?;
-        if upload.user_id != actor.user_id {
-            return Err(Error::Forbidden);
-        }
-        let item = self.item(upload.item_id)?;
-        if !self
-            .role(actor.user_id, item.collection_id)?
-            .allows(Action::Curate)
-        {
-            return Err(Error::Forbidden);
-        }
         // File length is the durable upload cursor after a crash between fsync and metadata update.
         if matches!(upload.state, JobState::Queued | JobState::Running) {
             for (i, offset) in upload.offsets.iter_mut().enumerate() {
@@ -177,9 +234,8 @@ impl Store {
         }
         Ok(upload)
     }
-    pub fn upload_chunk(
+    pub(crate) fn upload_chunk_record(
         &self,
-        actor: &Principal,
         id: JobId,
         index: usize,
         offset: u64,
@@ -189,7 +245,7 @@ impl Store {
             return Err(Error::Invalid("chunk exceeds 8 MiB".into()));
         }
         let _guard = lock(&self.uploads)?;
-        let mut upload = self.upload(actor, id)?;
+        let mut upload = self.upload_record(id)?;
         if !matches!(upload.state, JobState::Queued | JobState::Running) {
             return Err(Error::Conflict);
         }
@@ -232,24 +288,36 @@ impl Store {
         self.persist_upload(&upload)?;
         Ok(upload)
     }
-    pub fn cancel_upload(&self, actor: &Principal, id: JobId) -> Result<()> {
+    pub(crate) fn cancel_upload_record(&self, id: JobId) -> Result<()> {
         let _guard = lock(&self.uploads)?;
-        let mut upload = self.upload(actor, id)?;
+        let mut upload = self.upload_record(id)?;
         if upload.state == JobState::Completed {
             return Err(Error::Conflict);
         }
         upload.state = JobState::Cancelled;
-        self.persist_upload(&upload)
+        self.with_command_result(&())?.persist_upload(&upload)
     }
-    pub fn commit_upload(&self, actor: &Principal, id: JobId) -> Result<Item> {
+    pub(crate) fn commit_upload_record(&self, id: JobId) -> Result<Item> {
         let _guard = lock(&self.uploads)?;
-        let mut upload = self.upload(actor, id)?;
+        let _writer = lock(&self.writer)?;
+        let mut upload = self.upload_record(id)?;
         let mut item = self.item(upload.item_id)?;
-        if item
+        let existing_capture = item
             .captures
             .iter()
-            .flat_map(|c| &c.representations)
-            .any(|r| r.id == upload.representation_id)
+            .find(|capture| {
+                capture
+                    .representations
+                    .iter()
+                    .any(|representation| representation.id == upload.representation_id)
+            })
+            .cloned();
+        let evidence_id = EvidenceId(upload.id.0);
+        if existing_capture.is_some()
+            && self
+                .evidence(item.id)?
+                .iter()
+                .any(|evidence| evidence.id == evidence_id)
         {
             upload.state = JobState::Completed;
             self.persist_upload(&upload)?;
@@ -258,7 +326,7 @@ impl Store {
         if upload.state == JobState::Cancelled {
             return Err(Error::Conflict);
         }
-        if item.revision != upload.expected_revision {
+        if item.revision != upload.expected_revision && existing_capture.is_none() {
             return Err(Error::Conflict);
         }
         let total = upload.files.iter().map(|f| f.bytes.0).sum::<u64>();
@@ -267,11 +335,6 @@ impl Store {
         {
             return Err(Error::Unavailable("insufficient archive space".into()));
         }
-        let stage = self
-            .archive
-            .join(".staging")
-            .join(TransactionId::new().to_string());
-        fs::create_dir(&stage).map_err(storage)?;
         let mut files = Vec::new();
         for (index, file) in upload.files.iter().enumerate() {
             let source = self.upload_directory(id).join(format!("{index}.part"));
@@ -289,68 +352,47 @@ impl Store {
                     "uploaded bytes do not match package manifest".into(),
                 ));
             }
-            let target = stage.join(&file.name);
-            fs::create_dir_all(target.parent().unwrap()).map_err(storage)?;
-            fs::copy(&source, &target).map_err(storage)?;
-            File::open(&target)
-                .and_then(|f| f.sync_all())
-                .map_err(storage)?;
-            if hash_file(&target)? != (length, digest.clone()) {
-                return Err(Error::Storage("destination verification failed".into()));
-            }
-            sync_directory(target.parent().unwrap())?;
             files.push(StoredFile {
                 name: file.name.clone(),
                 bytes: length,
                 digest,
             });
         }
-        sync_directory(&stage)?;
         let item_root = self.item_path(item.id)?;
         let collection_root = item_root
             .parent()
             .and_then(std::path::Path::parent)
             .ok_or_else(|| Error::Storage("item path has no collection parent".into()))?;
-        let package_root = collection_root
-            .join("captures")
-            .join(upload.capture_id.to_string())
-            .join("payload");
-        fs::create_dir_all(&package_root).map_err(storage)?;
-        let destination = package_root.join(upload.representation_id.to_string());
-        if destination.exists() {
-            // an earlier attempt published files but not the item revision
-            for file in &files {
-                if hash_file(&destination.join(&file.name))? != (file.bytes, file.digest.clone()) {
-                    return Err(Error::Storage("orphan package differs from retry".into()));
-                }
-            }
-            fs::remove_dir_all(&stage).map_err(storage)?;
-        } else {
-            fs::rename(&stage, &destination).map_err(storage)?;
-        }
-        sync_directory(&package_root)?;
         let inputs = files.iter().map(|f| f.digest.clone()).collect();
-        item.captures.push(Capture {
-            id: upload.capture_id,
-            collection_id: item.collection_id,
-            revision: Revision(1),
-            association: CaptureAssociation {
-                item_id: Some(item.id),
-                ..Default::default()
-            },
-            created_at: Utc::now(),
-            representations: vec![Representation {
-                id: upload.representation_id,
-                role: RepresentationRole::PreservationMaster,
-                format: "original-package".into(),
-                files,
-                source: None,
-                profile: None,
-            }],
-            legacy_payload_locator: None,
-        });
+        let capture = match existing_capture {
+            Some(capture) => capture,
+            None => {
+                let capture = Capture {
+                    id: upload.capture_id,
+                    collection_id: item.collection_id,
+                    revision: Revision(1),
+                    association: CaptureAssociation {
+                        item_id: Some(item.id),
+                        ..Default::default()
+                    },
+                    created_at: Utc::now(),
+                    representations: vec![Representation {
+                        id: upload.representation_id,
+                        role: RepresentationRole::PreservationMaster,
+                        format: "original-package".into(),
+                        files,
+                        source: None,
+                        profile: None,
+                    }],
+                };
+                self.publish_upload_capture(&upload, collection_root, capture)?
+            }
+        };
+        if !item.captures.iter().any(|value| value.id == capture.id) {
+            item.captures.push(capture.clone());
+        }
         let evidence = Evidence {
-            id: EvidenceId::new(),
+            id: evidence_id,
             item_id: item.id,
             representation_id: upload.representation_id,
             kind: EvidenceKind::Integrity,
@@ -360,14 +402,171 @@ impl Store {
             implementation_version: env!("CARGO_PKG_VERSION").into(),
             catalog: None,
             details: serde_json::json!({"claim":"destination bytes equal uploaded bytes; no catalog verification asserted"}),
-            created_at: Utc::now(),
+            created_at: capture.created_at,
         };
-        let result = self.publish(item, upload.expected_revision, vec![evidence])?;
+        let result = self.publish_under_writer(item.clone(), item.revision, vec![evidence])?;
         upload.state = JobState::Completed;
         self.persist_upload(&upload)?;
         Ok(result)
     }
-    pub fn jobs(&self, actor: &Principal) -> Result<Vec<Job>> {
+
+    fn publish_upload_capture(
+        &self,
+        upload: &Upload,
+        collection_root: &Path,
+        capture: Capture,
+    ) -> Result<Capture> {
+        let transaction_id = TransactionId(upload.id.0);
+        let record = archive_v3::CaptureRecordV3 {
+            capture: capture.clone(),
+            legacy_root: None,
+        };
+        let envelope = archive_v3::RevisionEnvelopeV3::new(transaction_id, record, vec![]);
+        let record_bytes = serde_json::to_vec_pretty(&envelope).map_err(storage)?;
+        let manifest = V3TypedManifest {
+            schema_version: 3,
+            entity_type: "capture".into(),
+            entity_id: capture.id.to_string(),
+            collection_id: capture.collection_id,
+            revision: capture.revision,
+            record_sha256: Digest::sha256(&record_bytes).hex,
+            transaction_id: Some(transaction_id),
+        };
+        let manifest_bytes = toml::to_string_pretty(&manifest)
+            .map_err(storage)?
+            .into_bytes();
+        let collection_relative = relative(&self.archive, collection_root)?;
+        let stage_relative = format!(".staging/{transaction_id}");
+        let payload_relative = format!(
+            "{collection_relative}/captures/{}/payload/{}",
+            capture.id, upload.representation_id
+        );
+        let revision_relative = format!(
+            "{collection_relative}/captures/{}/revisions/{:020}",
+            capture.id, capture.revision.0
+        );
+        let mut artifacts = Vec::new();
+        for (index, file) in capture.representations[0].files.iter().enumerate() {
+            artifacts.push(publication::JournalArtifact {
+                kind: publication::ArtifactKind::Payload,
+                staged_path: format!("{stage_relative}/payload/{}", file.name),
+                published_path: format!("{payload_relative}/{}", file.name),
+                sha256: file.digest.hex.clone(),
+            });
+            if upload.files[index].name != file.name {
+                return Err(Error::Storage("upload file identity changed".into()));
+            }
+        }
+        artifacts.extend([
+            publication::JournalArtifact {
+                kind: publication::ArtifactKind::Revision,
+                staged_path: format!("{stage_relative}/revision/record.v3.json"),
+                published_path: format!("{revision_relative}/record.v3.json"),
+                sha256: Digest::sha256(&record_bytes).hex,
+            },
+            publication::JournalArtifact {
+                kind: publication::ArtifactKind::Revision,
+                staged_path: format!("{stage_relative}/revision/manifest.v3.toml"),
+                published_path: format!("{revision_relative}/manifest.v3.toml"),
+                sha256: Digest::sha256(&manifest_bytes).hex,
+            },
+        ]);
+        let journal = publication::PublicationJournal::new(
+            transaction_id,
+            "capture_import",
+            capture.id.to_string(),
+            Some(capture.collection_id),
+            Revision(0),
+            capture.revision,
+            artifacts,
+        )?;
+        let journals = publication::PublicationJournalStore::new(&self.archive);
+        journals.write_new(&journal)?;
+        self.publication_fault
+            .check(PublicationFaultPoint::Prepared)?;
+
+        let stage = self.archive.join(&stage_relative);
+        let payload_stage = stage.join("payload");
+        let revision_stage = stage.join("revision");
+        fs::create_dir_all(&payload_stage).map_err(storage)?;
+        fs::create_dir_all(&revision_stage).map_err(storage)?;
+        for (index, file) in capture.representations[0].files.iter().enumerate() {
+            let source = self
+                .upload_directory(upload.id)
+                .join(format!("{index}.part"));
+            let target = payload_stage.join(&file.name);
+            fs::create_dir_all(target.parent().unwrap()).map_err(storage)?;
+            fs::copy(source, &target).map_err(storage)?;
+            File::open(&target)
+                .and_then(|file| file.sync_all())
+                .map_err(storage)?;
+            if hash_file(&target)? != (file.bytes, file.digest.clone()) {
+                return Err(Error::Storage("destination verification failed".into()));
+            }
+            sync_directory(target.parent().unwrap())?;
+        }
+        write_new(&revision_stage.join("record.v3.json"), &record_bytes)?;
+        write_new(&revision_stage.join("manifest.v3.toml"), &manifest_bytes)?;
+        sync_directory(&revision_stage)?;
+        sync_directory(&stage)?;
+        journals.advance(transaction_id, publication::PublicationPhase::BytesStaged)?;
+        self.publication_fault
+            .check(PublicationFaultPoint::BytesStaged)?;
+
+        let payload_destination = self.archive.join(&payload_relative);
+        fs::create_dir_all(payload_destination.parent().unwrap()).map_err(storage)?;
+        if payload_destination.exists() {
+            for file in &capture.representations[0].files {
+                if hash_file(&payload_destination.join(&file.name))?
+                    != (file.bytes, file.digest.clone())
+                {
+                    return Err(Error::Storage("orphan package differs from retry".into()));
+                }
+            }
+            fs::remove_dir_all(&payload_stage).map_err(storage)?;
+        } else {
+            fs::rename(&payload_stage, &payload_destination).map_err(storage)?;
+        }
+        sync_directory(payload_destination.parent().unwrap())?;
+        journals.advance(
+            transaction_id,
+            publication::PublicationPhase::PayloadPublished,
+        )?;
+        self.publication_fault
+            .check(PublicationFaultPoint::PayloadPublished)?;
+
+        let revision_destination = self.archive.join(&revision_relative);
+        fs::create_dir_all(revision_destination.parent().unwrap()).map_err(storage)?;
+        if revision_destination.exists() {
+            if fs::read(revision_destination.join("record.v3.json")).map_err(storage)?
+                != record_bytes
+                || fs::read(revision_destination.join("manifest.v3.toml")).map_err(storage)?
+                    != manifest_bytes
+            {
+                return Err(Error::Storage(
+                    "orphan Capture revision differs from retry".into(),
+                ));
+            }
+            fs::remove_dir_all(&revision_stage).map_err(storage)?;
+        } else {
+            fs::rename(&revision_stage, &revision_destination).map_err(storage)?;
+        }
+        sync_directory(revision_destination.parent().unwrap())?;
+        journals.advance(
+            transaction_id,
+            publication::PublicationPhase::RevisionCommitted,
+        )?;
+        self.publication_fault
+            .check(PublicationFaultPoint::RevisionCommitted)?;
+
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        project_capture(&tx, &capture)?;
+        tx.commit().map_err(storage)?;
+        finish_v3_publication(self, transaction_id)?;
+        Ok(capture)
+    }
+    pub(crate) fn jobs_for_user(&self, user: UserId) -> Result<Vec<Job>> {
         let db = lock(&self.db)?;
         let mut stmt = db
             .prepare("SELECT record FROM private.jobs ORDER BY id DESC LIMIT 500")
@@ -378,21 +577,19 @@ impl Store {
         let mut jobs = Vec::new();
         for row in rows {
             let job: Job = serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
-            if job.user_id == actor.user_id {
+            if job.user_id == user {
                 jobs.push(job);
             }
         }
         Ok(jobs)
     }
-    pub fn representation_file(
+    pub(crate) fn representation_path(
         &self,
-        actor: &Principal,
         item_id: ItemId,
         representation: RepresentationId,
         index: usize,
     ) -> Result<(PathBuf, StoredFile)> {
         let item = self.item(item_id)?;
-        self.role(actor.user_id, item.collection_id)?;
         if item.deleted {
             return Err(Error::NotFound);
         }
@@ -415,15 +612,24 @@ impl Store {
             .clone();
         safe_name(&file.name)?;
         let item_root = self.item_path(item.id)?;
-        let root = if let Some(locator) = &capture.legacy_payload_locator {
-            if locator.relative_path != "files" {
+        let legacy_locator: Option<(String, String)> = lock(&self.db)?
+            .query_row(
+                "SELECT item_id,relative_path FROM legacy_payload_locators WHERE capture_id=?",
+                [capture.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(storage)?;
+        let root = if let Some((legacy_item_id, relative_path)) = legacy_locator {
+            if relative_path != "files" {
                 return Err(Error::Invalid("unsupported legacy payload locator".into()));
             }
-            let original_item = self.item(locator.item_id)?;
+            let legacy_item_id: ItemId = legacy_item_id.parse().map_err(storage)?;
+            let original_item = self.item(legacy_item_id)?;
             if original_item.collection_id != item.collection_id {
                 return Err(Error::Forbidden);
             }
-            self.item_path(locator.item_id)?
+            self.item_path(legacy_item_id)?
                 .join("files")
                 .join(representation.to_string())
         } else {
@@ -443,20 +649,32 @@ impl Store {
         }
         Ok((path, file))
     }
-    pub fn add_cover(
+    pub(crate) fn publish_cover_record(
         &self,
-        actor: &Principal,
         item_id: ItemId,
+        asset_id: AssetId,
         expected: Revision,
         bytes: &[u8],
         alt_text: String,
     ) -> Result<Item> {
         let mut item = self.item(item_id)?;
-        if !self
-            .role(actor.user_id, item.collection_id)?
-            .allows(Action::Curate)
-        {
-            return Err(Error::Forbidden);
+        if let Some(existing) = item.assets.iter().find(|asset| asset.id == asset_id) {
+            if existing.file.digest == Digest::sha256(bytes) && existing.alt_text == alt_text {
+                let staging = self
+                    .state
+                    .join("asset-publication")
+                    .join(asset_id.to_string());
+                if staging.exists() {
+                    fs::remove_dir_all(&staging).map_err(storage)?;
+                    sync_directory(
+                        staging
+                            .parent()
+                            .ok_or_else(|| Error::Storage("Asset staging has no parent".into()))?,
+                    )?;
+                }
+                return Ok(item);
+            }
+            return Err(Error::IdempotencyConflict);
         }
         if item.revision != expected {
             return Err(Error::Conflict);
@@ -488,16 +706,18 @@ impl Store {
             .write_to(&mut thumbnail, image::ImageFormat::Png)
             .map_err(storage)?;
         let thumbnail = thumbnail.into_inner();
-        let id = AssetId::new();
-        let root = self.item_path(item_id)?.join("assets").join(id.to_string());
+        let root = self
+            .state
+            .join("asset-publication")
+            .join(asset_id.to_string());
         fs::create_dir_all(&root).map_err(storage)?;
         let name = format!("original.{extension}");
-        write_new(&root.join(&name), bytes)?;
-        write_new(&root.join("thumbnail.png"), &thumbnail)?;
+        write_new_or_verify(&root.join(&name), bytes)?;
+        write_new_or_verify(&root.join("thumbnail.png"), &thumbnail)?;
         sync_directory(&root)?;
         sync_directory(root.parent().unwrap())?;
         item.assets.push(Asset {
-            id,
+            id: asset_id,
             subject: AssetSubject::Item { item_id },
             kind: AssetKind::Cover,
             visibility: Visibility::Shared,
@@ -516,15 +736,13 @@ impl Store {
         });
         self.publish(item, expected, vec![])
     }
-    pub fn asset_file(
+    pub(crate) fn asset_path(
         &self,
-        actor: &Principal,
         item_id: ItemId,
         asset_id: AssetId,
         thumbnail: bool,
-    ) -> Result<(PathBuf, String, Digest)> {
+    ) -> Result<(PathBuf, String, Digest, String)> {
         let item = self.item(item_id)?;
-        let role = self.role(actor.user_id, item.collection_id)?;
         if item.deleted {
             return Err(Error::NotFound);
         }
@@ -533,22 +751,32 @@ impl Store {
             .iter()
             .find(|a| a.id == asset_id)
             .ok_or(Error::NotFound)?;
-        if role == Role::Viewer && asset.visibility == Visibility::Curators {
-            return Err(Error::Forbidden);
-        }
         let file = if thumbnail {
             asset.thumbnail.as_ref().ok_or(Error::NotFound)?
         } else {
             &asset.file
         };
         safe_name(&file.name)?;
-        let root = self
-            .item_path(item_id)?
-            .join("assets")
-            .join(asset_id.to_string());
-        let path = fs::canonicalize(root.join(&file.name)).map_err(storage)?;
-        if !path.starts_with(fs::canonicalize(root).map_err(storage)?) {
+        let record: String = lock(&self.db)?
+            .query_row(
+                "SELECT record FROM assets WHERE id=?",
+                [asset_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        let record: archive_v3::AssetRecordV3 = serde_json::from_str(&record).map_err(storage)?;
+        let role = if thumbnail { "thumbnail" } else { "original" };
+        let locator = record
+            .legacy_payloads
+            .iter()
+            .find(|locator| locator.role == role)
+            .ok_or_else(|| Error::Storage("Asset payload locator is missing".into()))?;
+        let path = fs::canonicalize(self.archive.join(&locator.relative_path)).map_err(storage)?;
+        if !path.starts_with(fs::canonicalize(&self.archive).map_err(storage)?) {
             return Err(Error::Forbidden);
+        }
+        if Digest::sha256(&fs::read(&path).map_err(storage)?).hex != locator.sha256 {
+            return Err(Error::Storage("Asset payload digest mismatch".into()));
         }
         Ok((
             path,
@@ -558,23 +786,18 @@ impl Store {
                 asset.media_type.clone()
             },
             file.digest.clone(),
+            file.name.clone(),
         ))
     }
-    pub fn verify_integrity(&self, actor: &Principal, item_id: ItemId) -> Result<Item> {
+    pub(crate) fn verify_integrity_record(&self, item_id: ItemId) -> Result<Item> {
         let item = self.item(item_id)?;
-        if !self
-            .role(actor.user_id, item.collection_id)?
-            .allows(Action::Curate)
-        {
-            return Err(Error::Forbidden);
-        }
         let mut evidence = Vec::new();
         for representation in item.captures.iter().flat_map(|c| &c.representations) {
             let mut passed = true;
             let mut details = Vec::new();
             for (index, file) in representation.files.iter().enumerate() {
                 let check = self
-                    .representation_file(actor, item.id, representation.id, index)
+                    .representation_path(item.id, representation.id, index)
                     .and_then(|(path, _)| hash_file(&path));
                 let matches = check
                     .is_ok_and(|(length, digest)| length == file.bytes && digest == file.digest);
@@ -610,9 +833,9 @@ impl Store {
 
 impl Store {
     /// Record a failed background attempt durably. The source chunks remain available for retry.
-    pub fn fail_upload(&self, actor: &Principal, id: JobId, message: &str) -> Result<()> {
+    pub(crate) fn fail_upload_record(&self, id: JobId, message: &str) -> Result<()> {
         let _guard = lock(&self.uploads)?;
-        let mut upload = self.upload(actor, id)?;
+        let mut upload = self.upload_record(id)?;
         if upload.state == JobState::Completed {
             return Ok(());
         }
@@ -620,7 +843,7 @@ impl Store {
         self.persist_upload(&upload)?;
         let job = Job {
             id,
-            user_id: actor.user_id,
+            user_id: upload.user_id,
             item_id: upload.item_id,
             kind: "preservation_import".into(),
             state: JobState::Failed,
@@ -681,33 +904,5 @@ impl Store {
         walk(source, source, &mut files, 0)?;
         files.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(files)
-    }
-    /// Copy a previously inventoried package through the same upload/commit path as browser imports.
-    pub fn stage_directory(&self, actor: &Principal, id: JobId, source: &Path) -> Result<Item> {
-        let upload = self.upload(actor, id)?;
-        let root = fs::canonicalize(source).map_err(storage)?;
-        for (index, entry) in upload.files.iter().enumerate() {
-            let path = root.join(&entry.name);
-            if fs::symlink_metadata(&path)
-                .map_err(storage)?
-                .file_type()
-                .is_symlink()
-                || !fs::canonicalize(&path).map_err(storage)?.starts_with(&root)
-            {
-                return Err(Error::Invalid("inbox package changed while staging".into()));
-            }
-            let mut file = File::open(path).map_err(storage)?;
-            let mut buffer = vec![0u8; 1024 * 1024];
-            let mut offset = 0;
-            loop {
-                let read = file.read(&mut buffer).map_err(storage)?;
-                if read == 0 {
-                    break;
-                }
-                self.upload_chunk(actor, id, index, offset, &buffer[..read])?;
-                offset += read as u64;
-            }
-        }
-        self.commit_upload(actor, id)
     }
 }

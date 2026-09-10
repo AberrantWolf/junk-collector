@@ -1,0 +1,6 @@
+schema_version = 2
+entity_type = "edition"
+entity_id = "018f0000-0000-7000-8000-000000000021"
+collection_id = "018f0000-0000-7000-8000-000000000001"
+revision = 1
+record_sha256 = "27fbc8d0251eef1b6edba4c96dbcd54e9e8306ef64eb7a57e92460534d3895cd"

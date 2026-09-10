@@ -29,6 +29,15 @@ for manifest in (ROOT / "crates").glob("*/Cargo.toml"):
         if name in {"collector-core", "collector-modules"} and dependency in FORBIDDEN_IN_DOMAIN:
             errors.append(f"{name} -> {dependency}: domain code cannot own infrastructure")
 
+for source in [
+    ROOT / "crates/collector-server/src/lib.rs",
+    ROOT / "crates/collector-server/src/passkeys.rs",
+]:
+    if re.search(r"\bstate\.store\b", source.read_text()):
+        errors.append(
+            f"{source.relative_to(ROOT)}: HTTP policy must call application services, not Store"
+        )
+
 # Check concrete document links. Prose coverage and security decisions require
 # review; keyword matching cannot establish that a design is complete.
 for document in [ROOT / "README.md", *(ROOT / "docs").rglob("*.md")]:

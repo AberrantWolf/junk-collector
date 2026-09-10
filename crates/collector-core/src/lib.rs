@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 macro_rules! identity {
     ($($name:ident),+ $(,)?) => {$ (
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, utoipa::ToSchema)]
         #[serde(transparent)]
         pub struct $name(pub Uuid);
         impl $name { pub fn new() -> Self { Self(Uuid::now_v7()) } }
@@ -34,30 +34,46 @@ identity!(
     EvidenceId,
     UserId,
     DeviceId,
+    SessionId,
+    PasskeyId,
+    EnrollmentId,
+    NativeCredentialId,
     JobId,
     TransactionId,
     LoanId
 );
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    utoipa::ToSchema,
+)]
 #[serde(transparent)]
 pub struct Revision(pub u64);
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct ByteLength(pub u64);
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct SampleFrame(pub u64);
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct DiscLba(pub i32);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct Digest {
     pub algorithm: HashAlgorithm,
     pub hex: String,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HashAlgorithm {
     Sha256,
@@ -110,7 +126,7 @@ impl<'de> Deserialize<'de> for Digest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct ModuleId(pub String);
 impl ModuleId {
@@ -182,14 +198,15 @@ impl<'de> Deserialize<'de> for RawJson {
 
 /// JSON is the versioned module boundary; known modules parse borrowed/owned views
 /// while the original envelope remains the provenance record.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ModuleData {
     pub module: ModuleId,
     pub schema_version: u32,
+    #[schema(value_type = serde_json::Value)]
     pub payload: RawJson,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct CurrencyCode(String);
 impl CurrencyCode {
@@ -223,7 +240,7 @@ impl<'de> Deserialize<'de> for CurrencyCode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct LanguageTag(String);
 impl LanguageTag {
@@ -269,7 +286,7 @@ impl<'de> Deserialize<'de> for LanguageTag {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct GeoCoordinate {
     pub latitude: f64,
     pub longitude: f64,
@@ -303,7 +320,7 @@ impl<'de> Deserialize<'de> for GeoCoordinate {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Money {
     pub minor_units: i64,
     pub currency: CurrencyCode,
@@ -313,17 +330,17 @@ impl Money {
         CurrencyCode::new(self.currency.as_str()).map(|_| ())
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LocalizedText {
     pub language: LanguageTag,
     pub text: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ProviderIdentity {
     pub provider: ModuleId,
     pub value: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Collection {
     pub id: CollectionId,
     pub revision: Revision,
@@ -331,7 +348,7 @@ pub struct Collection {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Work {
     pub id: WorkId,
     pub collection_id: CollectionId,
@@ -359,7 +376,7 @@ impl Work {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Edition {
     pub id: EditionId,
     pub collection_id: CollectionId,
@@ -377,7 +394,7 @@ pub struct Edition {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LegacyRelationshipProvenance {
     pub item_id: ItemId,
     pub legacy_field: String,
@@ -408,14 +425,14 @@ impl Edition {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ExpectedComponent {
     pub position: u16,
     pub label: String,
     pub kind: ComponentKind,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ItemIdentityLink {
     None,
@@ -423,7 +440,7 @@ pub enum ItemIdentityLink {
     Edition { edition_id: EditionId },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Item {
     pub id: ItemId,
     pub collection_id: CollectionId,
@@ -587,7 +604,7 @@ impl Item {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IdentityState {
     Unidentified,
@@ -595,7 +612,7 @@ pub enum IdentityState {
     Selected,
     Confirmed,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Specimen {
     pub id: SpecimenId,
     pub label: String,
@@ -607,7 +624,7 @@ pub struct Specimen {
     pub private_notes: Option<String>,
     pub loans: Vec<Loan>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Condition {
     Unknown,
@@ -618,7 +635,7 @@ pub enum Condition {
     Poor,
     Incomplete,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Ownership {
     Owned,
@@ -626,7 +643,7 @@ pub enum Ownership {
     Unknown,
     Disposed { date: NaiveDate, reason: String },
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Possession {
     Present,
@@ -634,7 +651,7 @@ pub enum Possession {
     Elsewhere,
     Unknown,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Acquisition {
     pub date: Option<NaiveDate>,
     pub cost: Option<Money>,
@@ -642,7 +659,7 @@ pub struct Acquisition {
     #[serde(default)]
     pub coordinates: Option<GeoCoordinate>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Loan {
     pub id: LoanId,
     pub contact: String,
@@ -650,7 +667,7 @@ pub struct Loan {
     pub due_at: Option<NaiveDate>,
     pub returned_at: Option<NaiveDate>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Component {
     pub id: ComponentId,
     pub label: String,
@@ -660,13 +677,13 @@ pub struct Component {
     #[serde(default)]
     pub migration_provenance: Option<LegacyComponentProvenance>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LegacyComponentProvenance {
     pub legacy_carrier_id: CarrierId,
     pub legacy_kind: CarrierKind,
     pub legacy_position: Option<u16>,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentKind {
     Cartridge,
@@ -687,13 +704,13 @@ impl ComponentKind {
         )
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Carrier {
     pub id: CarrierId,
     pub label: String,
     pub kind: CarrierKind,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CarrierKind {
     Cartridge,
@@ -704,7 +721,7 @@ pub enum CarrierKind {
     Case,
     Other,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Capture {
     pub id: CaptureId,
     pub collection_id: CollectionId,
@@ -712,8 +729,6 @@ pub struct Capture {
     pub association: CaptureAssociation,
     pub created_at: DateTime<Utc>,
     pub representations: Vec<Representation>,
-    #[serde(default)]
-    pub legacy_payload_locator: Option<LegacyPayloadLocator>,
 }
 impl Capture {
     pub fn validate(&self) -> Result<()> {
@@ -747,19 +762,14 @@ impl Capture {
         Ok(())
     }
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CaptureAssociation {
     pub item_id: Option<ItemId>,
     pub specimen_id: Option<SpecimenId>,
     pub component_id: Option<ComponentId>,
     pub carrier_id: Option<CarrierId>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LegacyPayloadLocator {
-    pub item_id: ItemId,
-    pub relative_path: String,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Representation {
     pub id: RepresentationId,
     pub role: RepresentationRole,
@@ -768,26 +778,26 @@ pub struct Representation {
     pub source: Option<RepresentationId>,
     pub profile: Option<ConversionProfile>,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RepresentationRole {
     PreservationMaster,
     LosslessDerivative,
     LossyDerivative,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct StoredFile {
     pub name: String,
     pub bytes: ByteLength,
     pub digest: Digest,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "codec", rename_all = "snake_case")]
 pub enum ConversionProfile {
     Flac,
     Opus { bitrate_kbps: u16 },
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Asset {
     pub id: AssetId,
     pub subject: AssetSubject,
@@ -798,7 +808,7 @@ pub struct Asset {
     pub thumbnail: Option<StoredFile>,
     pub alt_text: String,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AssetSubject {
     Item { item_id: ItemId },
@@ -808,7 +818,7 @@ pub enum AssetSubject {
     Work { work_id: WorkId },
     Edition { edition_id: EditionId },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
     Cover,
@@ -817,7 +827,7 @@ pub enum AssetKind {
     Document,
     Other,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Shared,
@@ -827,7 +837,7 @@ pub enum Visibility {
 /// Canonical collection-level aggregate used by schema-2 migration and reindex.
 /// `Item.captures`/`Item.assets` remain compatibility projections for the existing
 /// HTTP shape; new persistence treats these vectors as views of these top-level rows.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CollectionGraph {
     pub works: Vec<Work>,
     pub editions: Vec<Edition>,
@@ -1109,7 +1119,7 @@ impl CollectionGraph {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Evidence {
     pub id: EvidenceId,
     pub item_id: ItemId,
@@ -1123,7 +1133,7 @@ pub struct Evidence {
     pub details: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceKind {
     Integrity,
@@ -1133,7 +1143,7 @@ pub enum EvidenceKind {
     Reconstruction,
     DerivativeValidation,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceOutcome {
     Passed,
@@ -1141,19 +1151,19 @@ pub enum EvidenceOutcome {
     Inconclusive,
     Unsupported,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CatalogSnapshot {
     pub provider: ModuleId,
     pub digest: Digest,
     pub retrieved_at: DateTime<Utc>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MetadataState {
     pub candidates: Vec<MetadataCandidate>,
     pub selected: Option<String>,
     pub overrides: BTreeMap<String, serde_json::Value>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MetadataCandidate {
     pub id: String,
     pub provider: ModuleId,
@@ -1161,9 +1171,12 @@ pub struct MetadataCandidate {
     pub subtitle: String,
     pub language: LanguageTag,
     pub strength: MatchStrength,
+    #[schema(value_type = serde_json::Value)]
     pub observation: RawJson,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchStrength {
     Name,
@@ -1172,7 +1185,9 @@ pub enum MatchStrength {
     CompleteHashes,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Viewer,
@@ -1194,13 +1209,13 @@ impl Role {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Principal {
     pub user_id: UserId,
     pub administrator: bool,
     pub device_id: Option<DeviceId>,
 }
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Exposure {
     #[serde(default)]
     pub public_curation: bool,
@@ -1228,19 +1243,19 @@ impl Exposure {
             }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Page<T> {
     pub items: Vec<T>,
     pub next_cursor: Option<String>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BrowseQuery {
     pub collection_id: Option<CollectionId>,
     pub search: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<u16>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Job {
     pub id: JobId,
     pub user_id: UserId,
@@ -1251,7 +1266,7 @@ pub struct Job {
     pub total_bytes: u64,
     pub error: Option<String>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
     Queued,
@@ -1271,8 +1286,28 @@ pub enum Error {
     Unauthenticated,
     #[error("permission denied")]
     Forbidden,
+    #[error("recent authentication required")]
+    RecentAuthenticationRequired,
+    #[error("the last enabled administrator cannot be removed")]
+    LastAdministrator,
+    #[error("the last enabled collection owner cannot be removed")]
+    LastOwner,
+    #[error("the durable default account must be reassigned first")]
+    DefaultReassignmentRequired,
+    #[error("enrollment expired")]
+    EnrollmentExpired,
+    #[error("enrollment was cancelled")]
+    EnrollmentCancelled,
+    #[error("credential was revoked or expired")]
+    CredentialRevoked,
     #[error("revision conflict")]
     Conflict,
+    #[error("idempotency key was reused with a different request")]
+    IdempotencyConflict,
+    #[error("command is already in progress")]
+    CommandInProgress,
+    #[error("rate limited; retry after {0} seconds")]
+    RateLimited(u64),
     #[error("{0}")]
     Unavailable(String),
     #[error("storage failure: {0}")]
@@ -1376,7 +1411,6 @@ mod tests {
             association: CaptureAssociation::default(),
             created_at: Utc::now(),
             representations: vec![],
-            legacy_payload_locator: None,
         };
         CollectionGraph {
             items: vec![item],
@@ -1417,7 +1451,6 @@ mod tests {
                 source: Some(representation),
                 profile: None,
             }],
-            legacy_payload_locator: None,
         };
         assert!(capture.validate().is_err());
     }

@@ -1,0 +1,247 @@
+{
+  "item": {
+    "id": "018f0000-0000-7000-8000-000000000010",
+    "collection_id": "018f0000-0000-7000-8000-000000000001",
+    "revision": 2,
+    "title": "Synthetic two-disc edition",
+    "subtitle": "second revision",
+    "identity_link": {
+      "kind": "edition",
+      "edition_id": "018f0000-0000-7000-8000-000000000021"
+    },
+    "domain": {
+      "module": "org.example.unavailable",
+      "schema_version": 7,
+      "payload": {"z":1e+02,"a":null,"ordered":[3,2,1]}
+    },
+    "identity": "selected",
+    "translations": [
+      {
+        "language": "en-US",
+        "text": "Synthetic edition"
+      }
+    ],
+    "identifiers": [
+      {
+        "provider": "org.example.provider",
+        "value": "fixture-1"
+      }
+    ],
+    "specimens": [
+      {
+        "id": "018f0000-0000-7000-8000-000000000030",
+        "label": "Copy one",
+        "condition": "good",
+        "ownership": {
+          "state": "owned"
+        },
+        "possession": "present",
+        "components": [
+          {
+            "id": "010d00f0-374d-511f-b6a4-6fcd659d27e7",
+            "label": "Disc 1",
+            "kind": "optical_disc",
+            "position": 1,
+            "carrier": {
+              "id": "018f0000-0000-7000-8000-000000000040",
+              "label": "Disc 1",
+              "kind": "optical_disc"
+            },
+            "migration_provenance": {
+              "legacy_carrier_id": "018f0000-0000-7000-8000-000000000040",
+              "legacy_kind": "optical_disc",
+              "legacy_position": 1
+            }
+          },
+          {
+            "id": "553b91e7-5d9a-50e2-ab05-86eeb07a74e1",
+            "label": "Disc 2",
+            "kind": "optical_disc",
+            "position": 2,
+            "carrier": {
+              "id": "018f0000-0000-7000-8000-000000000041",
+              "label": "Disc 2",
+              "kind": "optical_disc"
+            },
+            "migration_provenance": {
+              "legacy_carrier_id": "018f0000-0000-7000-8000-000000000041",
+              "legacy_kind": "optical_disc",
+              "legacy_position": 2
+            }
+          },
+          {
+            "id": "110b6d26-b0b9-5082-8c00-2d2b3ee76cb2",
+            "label": "Case",
+            "kind": "case",
+            "position": 3,
+            "carrier": null,
+            "migration_provenance": {
+              "legacy_carrier_id": "018f0000-0000-7000-8000-000000000042",
+              "legacy_kind": "case",
+              "legacy_position": 3
+            }
+          },
+          {
+            "id": "3fd1bfe7-d898-5ea0-9842-49ed3a545cea",
+            "label": "Booklet",
+            "kind": "booklet",
+            "position": 4,
+            "carrier": null,
+            "migration_provenance": {
+              "legacy_carrier_id": "018f0000-0000-7000-8000-000000000043",
+              "legacy_kind": "booklet",
+              "legacy_position": 4
+            }
+          }
+        ],
+        "acquisition": {
+          "date": "2024-01-01",
+          "cost": {
+            "minor_units": 1200,
+            "currency": "JPY"
+          },
+          "source": "Fixture shop",
+          "coordinates": null
+        },
+        "private_notes": "synthetic private note",
+        "loans": []
+      },
+      {
+        "id": "018f0000-0000-7000-8000-000000000031",
+        "label": "Copy two",
+        "condition": "fair",
+        "ownership": {
+          "state": "owned"
+        },
+        "possession": "elsewhere",
+        "components": [],
+        "acquisition": null,
+        "private_notes": null,
+        "loans": []
+      }
+    ],
+    "wishlist": false,
+    "captures": [
+      {
+        "id": "018f0000-0000-7000-8000-000000000050",
+        "collection_id": "018f0000-0000-7000-8000-000000000001",
+        "revision": 2,
+        "association": {
+          "item_id": "018f0000-0000-7000-8000-000000000010",
+          "specimen_id": null,
+          "component_id": null,
+          "carrier_id": "018f0000-0000-7000-8000-000000000040"
+        },
+        "created_at": "2024-01-02T00:00:00Z",
+        "representations": [
+          {
+            "id": "018f0000-0000-7000-8000-000000000060",
+            "role": "preservation_master",
+            "format": "raw-two-disc",
+            "files": [
+              {
+                "name": "disc-1.bin",
+                "bytes": 9,
+                "digest": {
+                  "algorithm": "sha256",
+                  "hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              },
+              {
+                "name": "disc-2.bin",
+                "bytes": 9,
+                "digest": {
+                  "algorithm": "sha256",
+                  "hex": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+              }
+            ],
+            "source": null,
+            "profile": null
+          },
+          {
+            "id": "018f0000-0000-7000-8000-000000000061",
+            "role": "lossless_derivative",
+            "format": "flac",
+            "files": [],
+            "source": "018f0000-0000-7000-8000-000000000060",
+            "profile": {
+              "codec": "flac"
+            }
+          }
+        ],
+        "legacy_payload_locator": {
+          "item_id": "018f0000-0000-7000-8000-000000000010",
+          "relative_path": "files"
+        }
+      }
+    ],
+    "assets": [
+      {
+        "id": "018f0000-0000-7000-8000-000000000070",
+        "subject": {
+          "kind": "item",
+          "item_id": "018f0000-0000-7000-8000-000000000010"
+        },
+        "kind": "cover",
+        "visibility": "shared",
+        "media_type": "image/png",
+        "file": {
+          "name": "original.png",
+          "bytes": 8,
+          "digest": {
+            "algorithm": "sha256",
+            "hex": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        },
+        "thumbnail": null,
+        "alt_text": "Synthetic cover"
+      }
+    ],
+    "metadata": {
+      "candidates": [
+        {
+          "id": "candidate-1",
+          "provider": "org.example.provider",
+          "title": "Provider title",
+          "subtitle": "Provider subtitle",
+          "language": "ja-JP",
+          "strength": "identifier",
+          "observation": {"providerOrder":2,"number":1.00,"missing":null}
+        }
+      ],
+      "selected": "candidate-1",
+      "overrides": {
+        "title": "Manual title survives"
+      }
+    },
+    "deleted": false,
+    "updated_at": "2024-01-03T00:00:00Z"
+  },
+  "evidence": [
+    {
+      "id": "018f0000-0000-7000-8000-000000000080",
+      "item_id": "018f0000-0000-7000-8000-000000000010",
+      "representation_id": "018f0000-0000-7000-8000-000000000060",
+      "kind": "integrity",
+      "outcome": "passed",
+      "inputs": [
+        {
+          "algorithm": "sha256",
+          "hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "implementation": "synthetic fixture",
+      "implementation_version": "1",
+      "catalog": null,
+      "details": {
+        "claim": "fixture bytes only; no catalog verification"
+      },
+      "created_at": "2024-01-02T00:00:00Z"
+    }
+  ],
+  "legacy": {
+    "relative_path": "collections/synthetic--018f0000-0000-7000-8000-000000000001/items/two-disc--018f0000-0000-7000-8000-000000000010/revisions/00000000000000000002/record.json",
+    "record_sha256": "f28b81e98d85585d54a0d758240ee9326ad0670eb51bec09b47f3d7c33b42ed1"
+  }
+}

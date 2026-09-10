@@ -1,6 +1,7 @@
 //! WebAuthn ceremony state is server-side, single-use, bounded and expires after five minutes.
 use super::*;
 use std::collections::HashMap;
+use std::time::Duration;
 use webauthn_rs::prelude::*;
 pub struct Passkeys {
     webauthn: Webauthn,
@@ -8,7 +9,7 @@ pub struct Passkeys {
 }
 enum Ceremony {
     Register(PasskeyRegistration, DeviceId),
-    Authenticate(PasskeyAuthentication),
+    Authenticate(PasskeyAuthentication, Vec<LoadedPasskey>),
 }
 struct Pending {
     user: UserId,
@@ -76,17 +77,23 @@ impl Passkeys {
         Ok(pending)
     }
 }
-fn keys(store: &Store, user: UserId) -> ApiResult<Vec<Passkey>> {
-    store
+struct LoadedPasskey {
+    stored: collector_app::StoredPasskey,
+    key: Passkey,
+}
+
+fn keys(service: &CollectionService, user: UserId) -> ApiResult<Vec<LoadedPasskey>> {
+    service
         .passkeys(user)?
         .into_iter()
-        .map(|v| {
-            serde_json::from_value(v)
-                .map_err(|_| ApiError(Error::Storage("invalid passkey record".into())))
+        .map(|stored| {
+            let key = serde_json::from_value(stored.record.clone())
+                .map_err(|_| ApiError(Error::Storage("invalid passkey record".into())))?;
+            Ok(LoadedPasskey { stored, key })
         })
         .collect()
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct Begin {
     username: String,
 }
@@ -100,101 +107,128 @@ pub struct Authentication {
     ceremony_id: String,
     credential: PublicKeyCredential,
 }
-pub async fn register_start(
+#[utoipa::path(post, path = "/api/v1/auth/passkeys/register/start", responses((status = 200, body = serde_json::Value), (status = 401), (status = 503)))]
+pub(crate) async fn register_start(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let actor = principal(&state, &headers)?;
+    let actor = authenticated(&state, &headers)?;
     let passkeys = state.passkeys.as_ref().ok_or(Error::Unavailable(
         "configure authentication_origin to enable passkeys".into(),
     ))?;
-    let username = state.store.username(actor.user_id)?;
-    let exclude = keys(&state.store, actor.user_id)?
+    state.service.require_recent_authentication(&actor)?;
+    let username = state.service.username(&actor.principal)?;
+    let exclude = keys(&state.service, actor.principal.user_id)?
         .iter()
-        .map(|k| k.cred_id().clone())
+        .map(|loaded| loaded.key.cred_id().clone())
         .collect();
     let (options, ceremony) = passkeys
         .webauthn
-        .start_passkey_registration(actor.user_id.0, &username, &username, Some(exclude))
+        .start_passkey_registration(
+            actor.principal.user_id.0,
+            &username,
+            &username,
+            Some(exclude),
+        )
         .map_err(|_| Error::Invalid("could not start passkey registration".into()))?;
     let id = passkeys.insert(
-        actor.user_id,
-        Ceremony::Register(ceremony, actor.device_id.ok_or(Error::Unauthenticated)?),
+        actor.principal.user_id,
+        Ceremony::Register(
+            ceremony,
+            actor.principal.device_id.ok_or(Error::Unauthenticated)?,
+        ),
     )?;
     Ok(Json(
         serde_json::json!({"ceremony_id":id,"options":options}),
     ))
 }
-pub async fn register_finish(
+#[utoipa::path(post, path = "/api/v1/auth/passkeys/register/finish", request_body = serde_json::Value, responses((status = 204), (status = 401)))]
+pub(crate) async fn register_finish(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(input): Json<Registration>,
 ) -> ApiResult<StatusCode> {
-    let actor = principal(&state, &headers)?;
+    let actor = authenticated(&state, &headers)?;
     let passkeys = state.passkeys.as_ref().ok_or(Error::Unauthenticated)?;
     let pending = passkeys.take(&input.ceremony_id)?;
-    if pending.user != actor.user_id {
+    if pending.user != actor.principal.user_id {
         return Err(Error::Unauthenticated.into());
     }
     let Ceremony::Register(ceremony, device) = pending.ceremony else {
         return Err(Error::Unauthenticated.into());
     };
-    if actor.device_id != Some(device) {
+    if actor.principal.device_id != Some(device) {
         return Err(Error::Unauthenticated.into());
     }
     let key = passkeys
         .webauthn
         .finish_passkey_registration(&input.credential, &ceremony)
         .map_err(|_| Error::Unauthenticated)?;
-    state.store.insert_passkey(
-        actor.user_id,
+    state.service.register_passkey(
+        &actor,
         &serde_json::to_string(key.cred_id()).map_err(|_| Error::Unauthenticated)?,
         serde_json::to_value(&key).map_err(|_| Error::Unauthenticated)?,
     )?;
     Ok(StatusCode::NO_CONTENT)
 }
-pub async fn login_start(
+#[utoipa::path(post, path = "/api/v1/auth/passkeys/login/start", request_body = Begin, responses((status = 200, body = serde_json::Value), (status = 401), (status = 503)))]
+pub(crate) async fn login_start(
     State(state): State<AppState>,
+    peer: Option<axum::Extension<DirectPeer>>,
     Json(input): Json<Begin>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    let peer = peer
+        .as_ref()
+        .map(|peer| peer.0.0.as_str())
+        .unwrap_or("unknown-direct-peer");
+    state
+        .rate_limits
+        .check_authentication(&input.username, peer)?;
     let passkeys = state
         .passkeys
         .as_ref()
         .ok_or(Error::Unavailable("passkeys are not configured".into()))?;
-    let user = state.store.user_by_name(&input.username)?;
-    let keys = keys(&state.store, user)?;
+    let user = state
+        .service
+        .user_by_name_for_authentication(&input.username)?;
+    let keys = keys(&state.service, user)?;
+    let public_keys: Vec<_> = keys.iter().map(|loaded| loaded.key.clone()).collect();
     let (options, ceremony) = passkeys
         .webauthn
-        .start_passkey_authentication(&keys)
+        .start_passkey_authentication(&public_keys)
         .map_err(|_| Error::Unauthenticated)?;
-    let id = passkeys.insert(user, Ceremony::Authenticate(ceremony))?;
+    let id = passkeys.insert(user, Ceremony::Authenticate(ceremony, keys))?;
     Ok(Json(
         serde_json::json!({"ceremony_id":id,"options":options}),
     ))
 }
-pub async fn login_finish(
+#[utoipa::path(post, path = "/api/v1/auth/passkeys/login/finish", request_body = serde_json::Value, responses((status = 200, body = serde_json::Value), (status = 401)))]
+pub(crate) async fn login_finish(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(input): Json<Authentication>,
 ) -> ApiResult<Response> {
     let passkeys = state.passkeys.as_ref().ok_or(Error::Unauthenticated)?;
     let pending = passkeys.take(&input.ceremony_id)?;
-    let Ceremony::Authenticate(ceremony) = pending.ceremony else {
+    let Ceremony::Authenticate(ceremony, verified_keys) = pending.ceremony else {
         return Err(Error::Unauthenticated.into());
     };
     let result = passkeys
         .webauthn
         .finish_passkey_authentication(&input.credential, &ceremony)
         .map_err(|_| Error::Unauthenticated)?;
-    for mut key in keys(&state.store, pending.user)? {
-        if key.update_credential(&result) == Some(true) {
-            state.store.update_passkey(
+    for mut loaded in verified_keys {
+        if loaded.key.update_credential(&result).is_some() {
+            let (token, actor) = state.service.complete_verified_passkey_authentication(
                 pending.user,
-                &serde_json::to_string(key.cred_id()).map_err(|_| Error::Unauthenticated)?,
-                serde_json::to_value(key).map_err(|_| Error::Unauthenticated)?,
+                loaded.stored.view.id,
+                loaded.stored.view.revision,
+                loaded.stored.record,
+                serde_json::to_value(loaded.key).map_err(|_| Error::Unauthenticated)?,
+                "Passkey login",
             )?;
+            return session_response(token, actor, &headers);
         }
     }
-    let (token, actor) = state.store.issue_session(pending.user, "Passkey login")?;
-    session_response(token, actor, &headers)
+    Err(Error::Unauthenticated.into())
 }

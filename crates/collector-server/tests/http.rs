@@ -2,12 +2,23 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use collector_app::{AuthenticatedPrincipal, Catalog, CommandContext, CredentialKind};
 use collector_client::Pairing;
 use collector_core::*;
 use collector_server::*;
-use collector_store::Store;
+use collector_store::{Store, UploadFile};
 use std::sync::Arc;
 use tower::ServiceExt;
+fn command() -> CommandContext {
+    CommandContext::new(TransactionId::new().to_string()).unwrap()
+}
+fn test_authentication(principal: &Principal) -> AuthenticatedPrincipal {
+    AuthenticatedPrincipal {
+        principal: principal.clone(),
+        credential_kind: CredentialKind::TestLocal,
+        authenticated_at: chrono::Utc::now(),
+    }
+}
 fn state() -> (tempfile::TempDir, AppState) {
     let root = tempfile::tempdir().unwrap();
     let store =
@@ -68,6 +79,7 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
                     Request::builder()
                         .method("POST")
                         .uri("/api/v1/admin/collections")
+                        .header("origin", "https://collector.example")
                         .header("content-type", "application/json")
                         .body(Body::from("{\"name\":\"Test\"}"))
                         .unwrap(),
@@ -149,6 +161,413 @@ async fn private_surface_still_requires_authentication_and_csrf_origin() {
     let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(error["error"]["code"], "origin_not_allowed");
 }
+
+#[tokio::test]
+async fn browser_origin_attack_matrix() {
+    let (_root, state) = state();
+    let app = router(state);
+    for origin in [
+        None,
+        Some("null"),
+        Some("not-an-origin"),
+        Some("https://collector.example/"),
+        Some("https://sibling.collector.example"),
+        Some("https://collector.example:444"),
+        Some("http://collector.example"),
+    ] {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login")
+            .header("content-type", "application/json");
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                request
+                    .body(Body::from(
+                        "{\"username\":\"owner\",\"password\":\"wrong password\"}",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{origin:?}");
+        let body = axum::body::to_bytes(response.into_body(), 8192)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"]["code"], "origin_not_allowed");
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    "{\"username\":\"owner\",\"password\":\"wrong password\"}",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn browser_approved_enrollment_issues_and_revokes_native_credential() {
+    let (_root, state) = state();
+    state
+        .store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let app = router(state);
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("origin", "https://collector.example")
+                .header("x-collector-client", "native")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"username\":\"owner\",\"password\":\"a sufficiently long password\",\"device_name\":\"Browser\"}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let cookie = login.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let login_body = axum::body::to_bytes(login.into_body(), 8192).await.unwrap();
+    assert!(serde_json::from_slice::<serde_json::Value>(&login_body).unwrap()["token"].is_null());
+
+    let started = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/enrollments/start")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"device_name\":\"Native test\"}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(started.status(), StatusCode::OK);
+    let started: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(started.into_body(), 8192)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(started["verification_url"], "/pair");
+
+    let approved = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/enrollments/approve")
+                .header("origin", "https://collector.example")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"user_code": started["user_code"]}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(approved.status(), StatusCode::OK);
+
+    let completed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/enrollments/{}/complete",
+                    started["id"].as_str().unwrap()
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"completion_secret": started["completion_secret"]})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(completed.status(), StatusCode::OK);
+    let completed: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(completed.into_body(), 16384)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let credential = completed["credential"].as_str().unwrap();
+
+    let accepted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/collections")
+                .header("authorization", format!("Bearer {credential}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    let revoked = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/security/native-devices/{}?expected_revision=1",
+                    completed["device_id"].as_str().unwrap()
+                ))
+                .header("origin", "https://collector.example")
+                .header("cookie", &cookie)
+                .header("idempotency-key", "revoke-native-test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/collections")
+                .header("authorization", format!("Bearer {credential}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn direct_grant_api_matches_owner_policy_and_removal_is_immediate() {
+    let (_root, mut state) = state();
+    state.exposure.public_curation = true;
+    let owner = state
+        .store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let member = state
+        .store
+        .create_user("member", "another sufficiently long password", false)
+        .unwrap();
+    let administrator = state
+        .store
+        .create_user("administrator", "administrator long password", true)
+        .unwrap();
+    let (owner_token, owner_auth) = state.store.issue_session(owner, "owner browser").unwrap();
+    let (member_token, _) = state.store.issue_session(member, "member browser").unwrap();
+    let (administrator_token, _) = state
+        .store
+        .issue_session(administrator, "administrator browser")
+        .unwrap();
+    let collection = state
+        .service
+        .create_collection(&owner_auth, "Access policy", &command())
+        .unwrap();
+    let app = router(state);
+
+    let added = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/collections/{}/grants/member",
+                    collection.id
+                ))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("idempotency-key", "add-member")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"expected_revision\":0,\"role\":\"viewer\"}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(added.status(), StatusCode::OK);
+
+    for token in [&member_token, &administrator_token] {
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/collections/{}/grants", collection.id))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    let removed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/collections/{}/grants/member?expected_revision=1",
+                    collection.id
+                ))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("idempotency-key", "remove-member")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::NO_CONTENT);
+    let no_access = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items?collection_id={}", collection.id))
+                .header("authorization", format!("Bearer {member_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_access.status(), StatusCode::FORBIDDEN);
+
+    let last_owner = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/collections/{}/grants/owner?expected_revision=1",
+                    collection.id
+                ))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("idempotency-key", "remove-last-owner")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(last_owner.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn account_revisions_and_last_admin_default_guards_surface_stable_errors() {
+    let (_root, mut state) = state();
+    state.exposure.public_administration = true;
+    let administrator = state
+        .store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let member = state
+        .store
+        .create_user("member", "another sufficiently long password", false)
+        .unwrap();
+    let (token, _) = state
+        .store
+        .issue_session(administrator, "administrator browser")
+        .unwrap();
+    let app = router(state);
+    let update = |expected_revision: u64, key: &str| {
+        Request::builder()
+            .method("PUT")
+            .uri(format!("/api/v1/admin/users/{member}"))
+            .header("origin", "https://collector.example")
+            .header("authorization", format!("Bearer {token}"))
+            .header("idempotency-key", key)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({"expected_revision":expected_revision,"display_name":"Member profile","enabled":true,"administrator":false}).to_string(),
+            ))
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone()
+            .oneshot(update(1, "member-update-first"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(update(1, "member-update-stale"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+
+    let demote_last = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/admin/users/{administrator}"))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("idempotency-key", "demote-last-administrator")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"expected_revision\":1,\"display_name\":\"Owner\",\"enabled\":true,\"administrator\":false}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(demote_last.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(demote_last.into_body(), 8192)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error"]["code"],
+        "last_administrator"
+    );
+
+    let disable_default = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/admin/users/{administrator}"))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("idempotency-key", "disable-default-account")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"expected_revision\":1,\"display_name\":\"Owner\",\"enabled\":false,\"administrator\":true}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(disable_default.into_body(), 8192)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error"]["code"],
+        "default_reassignment_required"
+    );
+}
+
 #[test]
 fn range_boundaries() {
     assert_eq!(parse_range("bytes=0-0", 10), Some((0, 0)));
@@ -159,6 +578,54 @@ fn range_boundaries() {
     assert_eq!(parse_range("bytes=0-0,2-2", 10), None);
     assert_eq!(parse_range("bytes=-0", 10), None);
     assert_eq!(parse_range("bytes=0-0", 0), None);
+}
+
+#[tokio::test]
+async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
+    let document = serde_json::to_value(openapi()).unwrap();
+    let paths = document["paths"].as_object().unwrap();
+    assert_eq!(paths.len(), 48);
+    assert!(paths.values().all(|path| {
+        path.as_object().is_some_and(|operations| {
+            operations.values().all(|operation| {
+                operation
+                    .get("responses")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|responses| !responses.is_empty())
+            })
+        })
+    }));
+    for path in paths.values() {
+        for operation in path.as_object().unwrap().values() {
+            if let Some(body) = operation.get("requestBody") {
+                assert!(body["x-body-limit-bytes"].as_u64().is_some());
+            }
+        }
+    }
+    assert!(
+        document["components"]["schemas"]["PresentedCapture"]["properties"]
+            .get("legacy_payload_locator")
+            .is_none()
+    );
+    assert_eq!(
+        document["components"]["schemas"]["SaveItemEnvelope"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let (_root, state) = state();
+    let response = router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/api/openapi.v1.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -176,7 +643,7 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
     };
     let collection = state
         .service
-        .create_collection(&actor, "Unknown data")
+        .create_collection(&test_authentication(&actor), "Unknown data", &command())
         .unwrap();
     let item = Item {
         id: ItemId::new(),
@@ -201,7 +668,10 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
         deleted: false,
         updated_at: chrono::Utc::now(),
     };
-    let saved = state.service.save(&actor, item, Revision(0)).unwrap();
+    let saved = state
+        .service
+        .save_item(&actor, item.id, item.into(), Revision(0), &command())
+        .unwrap();
     let (token, _) = state.store.issue_session(user, "test").unwrap();
     let response = router(state)
         .oneshot(
@@ -230,4 +700,639 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
             .unwrap()
             .contains(r#""z":1e+02,"a":null"#)
     );
+}
+
+#[tokio::test]
+async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let owner = state
+        .store
+        .create_user("read-model-owner", "a long owner password", true)
+        .unwrap();
+    let viewer = state
+        .store
+        .create_user("read-model-viewer", "a long viewer password", false)
+        .unwrap();
+    let curator = state
+        .store
+        .create_user("read-model-curator", "a long curator password", false)
+        .unwrap();
+    let ungranted_admin = state
+        .store
+        .create_user("ungranted-admin", "a long admin password", true)
+        .unwrap();
+    let owner_actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&owner_actor),
+            "Read model firewall",
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .grant(
+            &test_authentication(&owner_actor),
+            collection.id,
+            viewer,
+            Role::Viewer,
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .grant(
+            &test_authentication(&owner_actor),
+            collection.id,
+            curator,
+            Role::Curator,
+            &command(),
+        )
+        .unwrap();
+    let item_id = ItemId::new();
+    let item = Item {
+        id: item_id,
+        collection_id: collection.id,
+        revision: Revision(0),
+        title: "Viewer-safe title".into(),
+        subtitle: String::new(),
+        identity_link: ItemIdentityLink::None,
+        domain: ModuleData {
+            module: ModuleId("org.example.private-unknown".into()),
+            schema_version: 7,
+            payload: RawJson::from_json(r#"{"private_raw_marker":"do-not-serialize"}"#).unwrap(),
+        },
+        identity: IdentityState::Unidentified,
+        translations: vec![],
+        identifiers: vec![],
+        specimens: vec![Specimen {
+            id: SpecimenId::new(),
+            label: "Owned copy".into(),
+            condition: Condition::Good,
+            ownership: Ownership::Owned,
+            possession: Possession::Present,
+            components: vec![],
+            acquisition: Some(Acquisition {
+                date: None,
+                cost: None,
+                source: Some("private shop marker".into()),
+                coordinates: None,
+            }),
+            private_notes: Some("private note marker".into()),
+            loans: vec![],
+        }],
+        wishlist: false,
+        captures: vec![],
+        assets: vec![],
+        metadata: MetadataState {
+            candidates: vec![],
+            selected: Some("private provider marker".into()),
+            overrides: Default::default(),
+        },
+        deleted: false,
+        updated_at: chrono::Utc::now(),
+    };
+    // Seed a trusted stored record with provider metadata; the public item
+    // command intentionally cannot submit this server-owned state.
+    let saved = Catalog::save(&*state.store, item, Revision(0)).unwrap();
+    let png = [
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let mut saved = state
+        .service
+        .publish_cover(
+            &owner_actor,
+            saved.id,
+            saved.revision,
+            &png,
+            "private asset marker".into(),
+            &command(),
+        )
+        .unwrap();
+    let private_asset_id = saved.assets[0].id;
+    saved.assets[0].visibility = Visibility::Curators;
+    let saved = Catalog::save(&*state.store, saved.clone(), saved.revision).unwrap();
+    let upload_bytes = b"read-model-evidence-fixture";
+    let upload = state
+        .service
+        .create_upload(
+            &owner_actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "fixture.bin".into(),
+                bytes: ByteLength(upload_bytes.len() as u64),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .upload_chunk(&owner_actor, upload.id, 0, 0, upload_bytes)
+        .unwrap();
+    let saved = state
+        .service
+        .commit_upload(&owner_actor, upload.id, &command())
+        .unwrap();
+    let (viewer_token, _) = state.store.issue_session(viewer, "browser").unwrap();
+    let (curator_token, _) = state.store.issue_session(curator, "browser").unwrap();
+    let (admin_token, _) = state
+        .store
+        .issue_session(ungranted_admin, "browser")
+        .unwrap();
+    let viewer_actor = Principal {
+        user_id: viewer,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        state.service.upload(&viewer_actor, upload.id),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        state
+            .service
+            .asset(&viewer_actor, saved.id, private_asset_id, false),
+        Err(Error::Forbidden)
+    ));
+    let app = router(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{}", saved.id))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    for private_marker in [
+        "private_raw_marker",
+        "do-not-serialize",
+        "private shop marker",
+        "private note marker",
+        "private provider marker",
+    ] {
+        assert!(
+            !text.contains(private_marker),
+            "viewer response leaked {private_marker}: {text}"
+        );
+    }
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(body["domain"].get("payload").is_none());
+    assert!(body.get("metadata").is_none());
+    assert!(body["specimens"][0].get("acquisition").is_none());
+    assert!(body["specimens"][0].get("private_notes").is_none());
+    assert!(body["specimens"][0].get("loans").is_none());
+    assert_eq!(body["effective_permissions"]["can_browse"], true);
+    assert_eq!(body["effective_permissions"]["can_curate"], false);
+    assert_eq!(body["effective_permissions"]["can_manage_access"], false);
+    assert_eq!(body["presentation"]["values"], serde_json::json!([]));
+    assert!(body["captures"][0].get("legacy_payload_locator").is_none());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{}/evidence", saved.id))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let evidence: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(evidence[0]["kind"], "integrity");
+    assert_eq!(evidence[0]["outcome"], "passed");
+    for private_field in [
+        "inputs",
+        "implementation",
+        "implementation_version",
+        "catalog",
+        "details",
+    ] {
+        assert!(evidence[0].get(private_field).is_none());
+    }
+
+    for private_path in [
+        format!("/api/v1/uploads/{}", upload.id),
+        format!("/api/v1/items/{}/assets/{private_asset_id}", saved.id),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(private_path)
+                    .header("authorization", format!("Bearer {viewer_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{}", saved.id))
+                .header("authorization", format!("Bearer {curator_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        body["domain"]["payload"]["private_raw_marker"],
+        "do-not-serialize"
+    );
+    assert_eq!(body["metadata"]["selected"], "private provider marker");
+    assert_eq!(body["specimens"][0]["private_notes"], "private note marker");
+    assert_eq!(body["effective_permissions"]["can_curate"], true);
+    assert_eq!(body["effective_permissions"]["can_manage_access"], false);
+    assert!(body["captures"][0].get("legacy_payload_locator").is_none());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{}", saved.id))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn bounded_item_command_accepts_editable_fields_and_rejects_owned_state() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let owner = state
+        .store
+        .create_user("command-owner", "a long owner password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(&test_authentication(&actor), "Commands", &command())
+        .unwrap();
+    let (token, _) = state.store.issue_session(owner, "browser").unwrap();
+    let id = ItemId::new();
+    let command = serde_json::json!({
+        "collection_id": collection.id,
+        "title": "Bounded command",
+        "subtitle": "Editable",
+        "identity_link": {"kind":"none"},
+        "domain": {
+            "module": "org.example.command-fixture",
+            "schema_version": 1,
+            "payload": {"preserved":true}
+        },
+        "identity": "unidentified",
+        "translations": [],
+        "identifiers": [],
+        "specimens": [],
+        "wishlist": false
+    });
+    let app = router(state);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{id}"))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("idempotency-key", "bounded-item-create")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "command": command,
+                        "expected_revision": 0
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&response_body)
+    );
+
+    for forbidden_field in [
+        "captures",
+        "assets",
+        "evidence",
+        "representations",
+        "legacy_payload_locator",
+        "metadata",
+        "revision",
+        "updated_at",
+    ] {
+        let mut injected = command.clone();
+        injected
+            .as_object_mut()
+            .unwrap()
+            .insert(forbidden_field.into(), serde_json::json!([]));
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/v1/items/{id}"))
+                    .header("origin", "https://collector.example")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header(
+                        "idempotency-key",
+                        format!("forbidden-field-{forbidden_field}"),
+                    )
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "command": injected,
+                            "expected_revision": 1
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "server-owned field {forbidden_field} was accepted"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mutation_requires_key_and_http_replay_has_stable_conflict_code() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let owner = state
+        .store
+        .create_user("idempotency-owner", "a long owner password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(&test_authentication(&actor), "Idempotency", &command())
+        .unwrap();
+    let (token, _) = state.store.issue_session(owner, "browser").unwrap();
+    let id = ItemId::new();
+    let command = serde_json::json!({
+        "collection_id": collection.id,
+        "title": "One effect",
+        "subtitle": "",
+        "identity_link": {"kind":"none"},
+        "domain": {"module":"org.example.idempotency","schema_version":1,"payload":{}},
+        "identity": "unidentified",
+        "translations": [],
+        "identifiers": [],
+        "specimens": [],
+        "wishlist": false
+    });
+    let body = serde_json::to_vec(&serde_json::json!({
+        "command": command,
+        "expected_revision": 0
+    }))
+    .unwrap();
+    let app = router(state);
+
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{id}"))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
+
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/v1/items/{id}"))
+                    .header("origin", "https://collector.example")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("idempotency-key", "http-retry-key")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let mut changed = command;
+    changed["title"] = serde_json::json!("Changed payload");
+    let conflict = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{id}"))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("idempotency-key", "http-retry-key")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "command": changed,
+                        "expected_revision": 0
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(conflict.into_body(), 8192)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error"]["code"],
+        "idempotency_conflict"
+    );
+}
+
+#[tokio::test]
+async fn wave1_item_envelope_preserves_server_owned_state_and_rejects_changes() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let owner = state
+        .store
+        .create_user("legacy-owner", "a long owner password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(&test_authentication(&actor), "Legacy client", &command())
+        .unwrap();
+    let stored = Item {
+        id: ItemId::new(),
+        collection_id: collection.id,
+        revision: Revision(0),
+        title: "Before".into(),
+        subtitle: String::new(),
+        identity_link: ItemIdentityLink::None,
+        domain: ModuleData {
+            module: ModuleId("org.example.legacy".into()),
+            schema_version: 1,
+            payload: RawJson::from_value(serde_json::json!({})),
+        },
+        identity: IdentityState::Unidentified,
+        translations: vec![],
+        identifiers: vec![],
+        specimens: vec![],
+        wishlist: false,
+        captures: vec![],
+        assets: vec![],
+        metadata: MetadataState::default(),
+        deleted: false,
+        updated_at: chrono::Utc::now(),
+    };
+    let saved = state
+        .service
+        .save_item(&actor, stored.id, stored.into(), Revision(0), &command())
+        .unwrap();
+    let mut legacy = Catalog::item(&*state.store, saved.id).unwrap();
+    legacy.title = "Updated through Wave 1 envelope".into();
+    let store = state.store.clone();
+    let (token, _) = store.issue_session(owner, "browser").unwrap();
+    let app = router(state);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{}", saved.id))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("idempotency-key", "wave1-compatible-update")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "item": legacy,
+                        "expected_revision": saved.revision
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        Catalog::item(&*store, saved.id).unwrap().title,
+        "Updated through Wave 1 envelope"
+    );
+
+    let mut tampered = Catalog::item(&*store, saved.id).unwrap();
+    tampered.deleted = true;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{}", saved.id))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("idempotency-key", "wave1-owned-field-change")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "item": tampered,
+                        "expected_revision": Revision(2)
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(!Catalog::item(&*store, saved.id).unwrap().deleted);
+}
+
+#[tokio::test]
+async fn static_modules_load_for_wrong_origin_guidance_but_api_stays_protected() {
+    let (_root, state) = state();
+    let app = router(state);
+    for (path, status) in [
+        ("/app.js", StatusCode::OK),
+        ("/api/v1/features", StatusCode::FORBIDDEN),
+        ("/administration.js", StatusCode::NOT_FOUND),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("origin", "http://127.0.0.1:9842")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "{path}");
+    }
 }

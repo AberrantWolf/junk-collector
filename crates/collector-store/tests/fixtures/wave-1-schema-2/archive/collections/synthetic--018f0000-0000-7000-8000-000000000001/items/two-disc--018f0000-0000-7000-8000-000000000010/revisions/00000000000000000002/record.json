@@ -1,0 +1,26 @@
+{
+  "item": {
+    "id": "018f0000-0000-7000-8000-000000000010",
+    "collection_id": "018f0000-0000-7000-8000-000000000001",
+    "revision": 2,
+    "title": "Synthetic two-disc edition",
+    "subtitle": "second revision",
+    "work_id": "018f0000-0000-7000-8000-000000000020",
+    "edition_id": "018f0000-0000-7000-8000-000000000021",
+    "domain": {"module":"org.example.unavailable","schema_version":7,"payload":{"z":1e+02,"a":null,"ordered":[3,2,1]}},
+    "identity": "selected",
+    "translations": [{"language":"EN-us","text":"Synthetic edition"}],
+    "identifiers": [{"provider":"org.example.provider","value":"fixture-1"}],
+    "specimens": [
+      {"id":"018f0000-0000-7000-8000-000000000030","label":"Copy one","condition":"good","ownership":{"state":"owned"},"possession":"present","carriers":[{"id":"018f0000-0000-7000-8000-000000000040","label":"Disc 1","kind":"optical_disc","position":1},{"id":"018f0000-0000-7000-8000-000000000041","label":"Disc 2","kind":"optical_disc","position":2},{"id":"018f0000-0000-7000-8000-000000000042","label":"Case","kind":"case","position":3},{"id":"018f0000-0000-7000-8000-000000000043","label":"Booklet","kind":"booklet","position":4}],"acquisition":{"date":"2024-01-01","cost":{"minor_units":1200,"currency":"jpy"},"source":"Fixture shop"},"private_notes":"synthetic private note","loans":[]},
+      {"id":"018f0000-0000-7000-8000-000000000031","label":"Copy two","condition":"fair","ownership":{"state":"owned"},"possession":"elsewhere","carriers":[],"acquisition":null,"private_notes":null,"loans":[]}
+    ],
+    "wishlist": false,
+    "captures": [{"id":"018f0000-0000-7000-8000-000000000050","carrier_id":"018f0000-0000-7000-8000-000000000040","created_at":"2024-01-02T00:00:00Z","representations":[{"id":"018f0000-0000-7000-8000-000000000060","role":"preservation_master","format":"raw-two-disc","files":[{"name":"disc-1.bin","bytes":9,"digest":{"algorithm":"sha256","hex":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}},{"name":"disc-2.bin","bytes":9,"digest":{"algorithm":"sha256","hex":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}}],"source":null,"profile":null},{"id":"018f0000-0000-7000-8000-000000000061","role":"lossless_derivative","format":"flac","files":[],"source":"018f0000-0000-7000-8000-000000000060","profile":{"codec":"flac"}}]}],
+    "assets": [{"id":"018f0000-0000-7000-8000-000000000070","kind":"cover","visibility":"shared","media_type":"image/png","file":{"name":"original.png","bytes":8,"digest":{"algorithm":"sha256","hex":"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"}},"thumbnail":null,"alt_text":"Synthetic cover"}],
+    "metadata": {"candidates":[{"id":"candidate-1","provider":"org.example.provider","title":"Provider title","subtitle":"Provider subtitle","language":"ja-JP","strength":"identifier","observation":{"providerOrder":2,"number":1.00,"missing":null}}],"selected":"candidate-1","overrides":{"title":"Manual title survives"}},
+    "deleted": false,
+    "updated_at": "2024-01-03T00:00:00Z"
+  },
+  "evidence": [{"id":"018f0000-0000-7000-8000-000000000080","item_id":"018f0000-0000-7000-8000-000000000010","representation_id":"018f0000-0000-7000-8000-000000000060","kind":"integrity","outcome":"passed","inputs":[{"algorithm":"sha256","hex":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}],"implementation":"synthetic fixture","implementation_version":"1","catalog":null,"details":{"claim":"fixture bytes only; no catalog verification"},"created_at":"2024-01-02T00:00:00Z"}]
+}

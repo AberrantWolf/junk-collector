@@ -1,0 +1,53 @@
+{
+  "id": "018f0000-0000-7000-8000-000000000050",
+  "collection_id": "018f0000-0000-7000-8000-000000000001",
+  "revision": 2,
+  "association": {
+    "item_id": "018f0000-0000-7000-8000-000000000010",
+    "specimen_id": null,
+    "component_id": null,
+    "carrier_id": "018f0000-0000-7000-8000-000000000040"
+  },
+  "created_at": "2024-01-02T00:00:00Z",
+  "representations": [
+    {
+      "id": "018f0000-0000-7000-8000-000000000060",
+      "role": "preservation_master",
+      "format": "raw-two-disc",
+      "files": [
+        {
+          "name": "disc-1.bin",
+          "bytes": 9,
+          "digest": {
+            "algorithm": "sha256",
+            "hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "name": "disc-2.bin",
+          "bytes": 9,
+          "digest": {
+            "algorithm": "sha256",
+            "hex": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      ],
+      "source": null,
+      "profile": null
+    },
+    {
+      "id": "018f0000-0000-7000-8000-000000000061",
+      "role": "lossless_derivative",
+      "format": "flac",
+      "files": [],
+      "source": "018f0000-0000-7000-8000-000000000060",
+      "profile": {
+        "codec": "flac"
+      }
+    }
+  ],
+  "legacy_payload_locator": {
+    "item_id": "018f0000-0000-7000-8000-000000000010",
+    "relative_path": "files"
+  }
+}

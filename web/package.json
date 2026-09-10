@@ -6,6 +6,8 @@
   "scripts": {
     "build": "node build.mjs",
     "check": "tsc --noEmit",
+    "check:api": "python3 ../scripts/api_contract.py",
+    "generate:api": "python3 ../scripts/api_contract.py --write",
     "test:smoke": "node tests/smoke.mjs"
   },
   "dependencies": {
@@ -17,6 +19,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "esbuild": "^0.25.0",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.8.0"
   }
 }

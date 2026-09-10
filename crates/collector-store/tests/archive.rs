@@ -1,9 +1,89 @@
-use collector_app::{Catalog, CollectionService};
+use collector_app::{
+    AccessPort, AuthenticatedPrincipal, Catalog, CollectionService, CommandContext, ContentPort,
+    CredentialKind, IdempotencyPort, ImportPort, MediaResource, ReceiptDecision, SaveItemCommand,
+};
 use collector_core::*;
 use collector_modules::Registry;
-use collector_store::{Store, UploadFile};
-use std::path::Path;
+use collector_store::{Clock, Store, UploadFile};
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+struct TestClock {
+    seconds: std::sync::atomic::AtomicI64,
+    millis: std::sync::atomic::AtomicU64,
+}
+
+impl TestClock {
+    fn new(seconds: i64) -> Self {
+        Self {
+            seconds: std::sync::atomic::AtomicI64::new(seconds),
+            millis: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    fn advance(&self, seconds: i64) {
+        self.seconds.fetch_add(seconds, Ordering::SeqCst);
+        self.millis
+            .fetch_add((seconds as u64) * 1_000, Ordering::SeqCst);
+    }
+}
+
+impl Clock for TestClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(self.seconds.load(Ordering::SeqCst), 0).unwrap()
+    }
+
+    fn monotonic_millis(&self) -> u64 {
+        self.millis.load(Ordering::SeqCst)
+    }
+}
+
+fn command() -> CommandContext {
+    CommandContext::new(TransactionId::new().to_string()).unwrap()
+}
+
+fn test_authentication(principal: &Principal) -> AuthenticatedPrincipal {
+    AuthenticatedPrincipal {
+        principal: principal.clone(),
+        credential_kind: CredentialKind::TestLocal,
+        authenticated_at: chrono::Utc::now(),
+    }
+}
+
+fn resource_bytes(mut resource: MediaResource) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    resource.reader.read_to_end(&mut bytes).unwrap();
+    bytes
+}
+
+fn find_file_with_bytes(root: &Path, expected: &[u8]) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(root).ok()? {
+        let path = entry.ok()?.path();
+        if path.is_dir() {
+            if let Some(found) = find_file_with_bytes(&path, expected) {
+                return Some(found);
+            }
+        } else if std::fs::read(&path).is_ok_and(|bytes| bytes == expected) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn files_named(root: &Path, name: &str) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            result.extend(files_named(&entry.path(), name));
+        } else if entry.file_name() == name {
+            result.push(entry.path());
+        }
+    }
+    result
+}
 
 fn copy_tree(source: &Path, target: &Path) {
     std::fs::create_dir_all(target).unwrap();
@@ -16,6 +96,570 @@ fn copy_tree(source: &Path, target: &Path) {
             std::fs::copy(entry.path(), destination).unwrap();
         }
     }
+}
+fn tree_hashes(root: &Path) -> std::collections::BTreeMap<PathBuf, Digest> {
+    fn visit(
+        root: &Path,
+        directory: &Path,
+        values: &mut std::collections::BTreeMap<PathBuf, Digest>,
+    ) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                visit(root, &entry.path(), values);
+            } else {
+                values.insert(
+                    entry.path().strip_prefix(root).unwrap().to_owned(),
+                    Digest::sha256(&std::fs::read(entry.path()).unwrap()),
+                );
+            }
+        }
+    }
+    let mut values = std::collections::BTreeMap::new();
+    visit(root, root, &mut values);
+    values
+}
+
+struct FailPublicationOnce {
+    point: collector_store::PublicationFaultPoint,
+    failed: AtomicBool,
+}
+
+impl collector_store::PublicationFaultInjector for FailPublicationOnce {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == self.point && !self.failed.swap(true, Ordering::SeqCst) {
+            Err(Error::Unavailable(format!(
+                "controlled publication failure at {point:?}"
+            )))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn entity_fault_at_each_publication_phase_recovers_to_pre_or_post_state() {
+    use collector_store::PublicationFaultPoint as Point;
+    for point in [
+        Point::Prepared,
+        Point::BytesStaged,
+        Point::PayloadPublished,
+        Point::RevisionCommitted,
+        Point::ProjectionApplied,
+        Point::Completed,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let store = Store::open(&archive, &state).unwrap();
+        let user = store
+            .create_user("owner", "a long test password", true)
+            .unwrap();
+        let collection = store
+            .create_collection(
+                user,
+                Collection {
+                    id: CollectionId::new(),
+                    revision: Revision(1),
+                    name: "fault fixture".into(),
+                    created_at: chrono::Utc::now(),
+                },
+            )
+            .unwrap();
+        drop(store);
+
+        let store = Store::open_with_publication_fault(
+            &archive,
+            &state,
+            Arc::new(FailPublicationOnce {
+                point,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap();
+        let candidate = item(collection.id);
+        let id = candidate.id;
+        assert!(Catalog::save(&store, candidate, Revision(0)).is_err());
+        drop(store);
+
+        let reopened = Store::open(&archive, &state).unwrap();
+        let committed = matches!(
+            point,
+            Point::RevisionCommitted | Point::ProjectionApplied | Point::Completed
+        );
+        if committed {
+            assert_eq!(Catalog::item(&reopened, id).unwrap().revision, Revision(1));
+        } else {
+            assert!(matches!(Catalog::item(&reopened, id), Err(Error::NotFound)));
+        }
+        assert!(
+            std::fs::read_dir(archive.join(".transactions"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn targeted_projection_and_full_reindex_are_equivalent() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let before_item = serde_json::to_value(Catalog::item(&*store, saved.id).unwrap()).unwrap();
+    let before_evidence =
+        serde_json::to_value(Catalog::evidence(&*store, saved.id).unwrap()).unwrap();
+    store.reindex().unwrap();
+    assert_eq!(
+        serde_json::to_value(Catalog::item(&*store, saved.id).unwrap()).unwrap(),
+        before_item
+    );
+    assert_eq!(
+        serde_json::to_value(Catalog::evidence(&*store, saved.id).unwrap()).unwrap(),
+        before_evidence
+    );
+}
+
+fn publication_points() -> [collector_store::PublicationFaultPoint; 6] {
+    use collector_store::PublicationFaultPoint as Point;
+    [
+        Point::Prepared,
+        Point::BytesStaged,
+        Point::PayloadPublished,
+        Point::RevisionCommitted,
+        Point::ProjectionApplied,
+        Point::Completed,
+    ]
+}
+
+fn ready_upload(
+    store: &Arc<Store>,
+    actor: &Principal,
+    service: &CollectionService,
+    collection: CollectionId,
+    bytes: &[u8],
+) -> (Item, collector_app::Upload) {
+    let saved = save_inventory(service, actor, item(collection), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "payload.bin".into(),
+                bytes: ByteLength(bytes.len() as u64),
+                sha256: Some(Digest::sha256(bytes).hex),
+            }],
+            &command(),
+        )
+        .unwrap();
+    ImportPort::upload_chunk(&**store, upload.id, 0, 0, bytes).unwrap();
+    (saved, upload)
+}
+
+#[test]
+fn upload_fault_at_each_phase_recovers_with_stable_identities() {
+    let bytes = b"durable payload fixture";
+    for point in publication_points() {
+        let (root, store, actor, service, collection) = setup();
+        let (saved, upload) = ready_upload(&store, &actor, &service, collection.id, bytes);
+        drop(service);
+        drop(store);
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let faulted = Store::open_with_publication_fault(
+            &archive,
+            &state,
+            Arc::new(FailPublicationOnce {
+                point,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap();
+        assert!(ImportPort::commit_upload(&faulted, upload.id).is_err());
+        drop(faulted);
+
+        let recovered = Store::open(&archive, &state)
+            .unwrap_or_else(|error| panic!("recovery after {point:?} failed: {error}"));
+        let committed = ImportPort::commit_upload(&recovered, upload.id).unwrap();
+        assert_eq!(committed.captures.len(), 1);
+        assert_eq!(committed.captures[0].id, upload.capture_id);
+        assert_eq!(
+            committed.captures[0].representations[0].id,
+            upload.representation_id
+        );
+        assert_eq!(Catalog::evidence(&recovered, saved.id).unwrap().len(), 1);
+        assert_eq!(
+            resource_bytes(
+                ContentPort::representation(&recovered, saved.id, upload.representation_id, 0)
+                    .unwrap()
+            ),
+            bytes
+        );
+        assert!(
+            recovered
+                .upload(upload.id)
+                .unwrap()
+                .state
+                .eq(&JobState::Completed)
+        );
+        assert!(
+            state
+                .join("uploads")
+                .join(upload.id.to_string())
+                .join("0.part")
+                .exists()
+        );
+    }
+}
+
+struct BlockAtPublicationPoint(collector_store::PublicationFaultPoint);
+
+impl collector_store::PublicationFaultInjector for BlockAtPublicationPoint {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == self.0 {
+            use std::io::Write as _;
+            println!("P01_PHASE:{point:?}");
+            std::io::stdout().flush().unwrap();
+            loop {
+                std::thread::park();
+            }
+        }
+        Ok(())
+    }
+}
+
+fn parse_publication_point(value: &str) -> collector_store::PublicationFaultPoint {
+    use collector_store::PublicationFaultPoint as Point;
+    match value {
+        "Prepared" => Point::Prepared,
+        "BytesStaged" => Point::BytesStaged,
+        "PayloadPublished" => Point::PayloadPublished,
+        "RevisionCommitted" => Point::RevisionCommitted,
+        "ProjectionApplied" => Point::ProjectionApplied,
+        "Completed" => Point::Completed,
+        _ => panic!("unknown publication point"),
+    }
+}
+
+#[test]
+fn subprocess_upload_commit_worker() {
+    let Ok(archive) = std::env::var("P01_CHILD_ARCHIVE") else {
+        return;
+    };
+    let state = std::env::var("P01_CHILD_STATE").unwrap();
+    let upload: JobId = std::env::var("P01_CHILD_UPLOAD").unwrap().parse().unwrap();
+    let point = parse_publication_point(&std::env::var("P01_CHILD_POINT").unwrap());
+    let store = Store::open_with_publication_fault(
+        archive,
+        state,
+        Arc::new(BlockAtPublicationPoint(point)),
+    )
+    .unwrap();
+    let _ = ImportPort::commit_upload(&store, upload);
+    panic!("child publication unexpectedly returned");
+}
+
+#[test]
+fn sigkill_at_each_upload_publication_phase_recovers() {
+    use std::io::BufRead as _;
+    let bytes = b"subprocess termination payload";
+    for point in publication_points() {
+        let (root, store, actor, service, collection) = setup();
+        let (saved, upload) = ready_upload(&store, &actor, &service, collection.id, bytes);
+        drop(service);
+        drop(store);
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "subprocess_upload_commit_worker", "--nocapture"])
+            .env("P01_CHILD_ARCHIVE", &archive)
+            .env("P01_CHILD_STATE", &state)
+            .env("P01_CHILD_UPLOAD", upload.id.to_string())
+            .env("P01_CHILD_POINT", format!("{point:?}"))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert_ne!(
+                output.read_line(&mut line).unwrap(),
+                0,
+                "child exited before phase marker"
+            );
+            if line.contains("P01_PHASE:") {
+                break;
+            }
+        }
+        child.kill().unwrap();
+        let status = child.wait().unwrap();
+        assert!(!status.success());
+
+        let recovered = Store::open(&archive, &state).unwrap();
+        let committed = ImportPort::commit_upload(&recovered, upload.id).unwrap();
+        assert_eq!(committed.captures.len(), 1);
+        assert_eq!(committed.captures[0].id, upload.capture_id);
+        assert_eq!(Catalog::evidence(&recovered, saved.id).unwrap().len(), 1);
+        assert_eq!(
+            resource_bytes(
+                ContentPort::representation(&recovered, saved.id, upload.representation_id, 0)
+                    .unwrap()
+            ),
+            bytes
+        );
+    }
+}
+
+fn collection_recovery_points() -> [collector_store::PublicationFaultPoint; 4] {
+    use collector_store::PublicationFaultPoint as Point;
+    [
+        Point::Prepared,
+        Point::RevisionCommitted,
+        Point::ProjectionApplied,
+        Point::Completed,
+    ]
+}
+
+#[test]
+fn collection_and_owner_grant_recover_as_one_retryable_effect() {
+    for point in collection_recovery_points() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let store = Store::open(&archive, &state).unwrap();
+        let user = store
+            .create_user("owner", "a long test password", true)
+            .unwrap();
+        drop(store);
+        let actor = Principal {
+            user_id: user,
+            administrator: true,
+            device_id: None,
+        };
+        let faulted = Arc::new(
+            Store::open_with_publication_fault(
+                &archive,
+                &state,
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(faulted.clone(), Arc::new(Registry::builtins()));
+        let context = CommandContext::new("stable-collection-create").unwrap();
+        assert!(
+            service
+                .create_collection(
+                    &test_authentication(&actor),
+                    "Recovered collection",
+                    &context
+                )
+                .is_err()
+        );
+        drop(service);
+        drop(faulted);
+
+        let recovered = Arc::new(Store::open(&archive, &state).unwrap());
+        let service = CollectionService::new(recovered.clone(), Arc::new(Registry::builtins()));
+        let collection = service
+            .create_collection(
+                &test_authentication(&actor),
+                "Recovered collection",
+                &context,
+            )
+            .unwrap();
+        assert_eq!(
+            Catalog::role(&*recovered, user, collection.id).unwrap(),
+            Role::Owner
+        );
+        assert_eq!(Catalog::collections(&*recovered, user).unwrap().len(), 1);
+        let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+        assert_eq!(
+            private
+                .query_row("SELECT COUNT(*) FROM publication_recovery", [], |row| {
+                    row.get::<_, u32>(0)
+                })
+                .unwrap(),
+            0
+        );
+        drop(service);
+        drop(recovered);
+
+        let restored = Store::open(&archive, root.path().join("archive-only-state")).unwrap();
+        assert!(Catalog::collections(&restored, user).unwrap().is_empty());
+        assert!(matches!(
+            Catalog::role(&restored, user, collection.id),
+            Err(Error::Forbidden)
+        ));
+    }
+}
+
+#[test]
+fn subprocess_collection_create_worker() {
+    let Ok(archive) = std::env::var("P01_COLLECTION_CHILD_ARCHIVE") else {
+        return;
+    };
+    let state = std::env::var("P01_COLLECTION_CHILD_STATE").unwrap();
+    let user: UserId = std::env::var("P01_COLLECTION_CHILD_USER")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let point = parse_publication_point(&std::env::var("P01_COLLECTION_CHILD_POINT").unwrap());
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            archive,
+            state,
+            Arc::new(BlockAtPublicationPoint(point)),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store, Arc::new(Registry::builtins()));
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let _ = service.create_collection(
+        &test_authentication(&actor),
+        "Terminated collection",
+        &CommandContext::new("terminated-collection-create").unwrap(),
+    );
+    panic!("child collection creation unexpectedly returned");
+}
+
+#[test]
+fn sigkill_collection_create_recovers_exactly_one_owner_grant() {
+    use std::io::BufRead as _;
+    for point in collection_recovery_points() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let store = Store::open(&archive, &state).unwrap();
+        let user = store
+            .create_user("owner", "a long test password", true)
+            .unwrap();
+        drop(store);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "subprocess_collection_create_worker",
+                "--nocapture",
+            ])
+            .env("P01_COLLECTION_CHILD_ARCHIVE", &archive)
+            .env("P01_COLLECTION_CHILD_STATE", &state)
+            .env("P01_COLLECTION_CHILD_USER", user.to_string())
+            .env("P01_COLLECTION_CHILD_POINT", format!("{point:?}"))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert_ne!(
+                output.read_line(&mut line).unwrap(),
+                0,
+                "child exited before phase marker"
+            );
+            if line.contains("P01_PHASE:") {
+                break;
+            }
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        let recovered = Arc::new(Store::open(&archive, &state).unwrap());
+        let actor = Principal {
+            user_id: user,
+            administrator: true,
+            device_id: None,
+        };
+        let service = CollectionService::new(recovered.clone(), Arc::new(Registry::builtins()));
+        let collection = service
+            .create_collection(
+                &test_authentication(&actor),
+                "Terminated collection",
+                &CommandContext::new("terminated-collection-create").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(Catalog::collections(&*recovered, user).unwrap().len(), 1);
+        assert_eq!(
+            Catalog::role(&*recovered, user, collection.id).unwrap(),
+            Role::Owner
+        );
+    }
+}
+
+#[test]
+fn startup_retains_and_reports_unknown_staging() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    std::fs::create_dir_all(archive.join(".staging/operator-copy")).unwrap();
+    std::fs::write(
+        archive.join(".staging/operator-copy/unrecognized.bin"),
+        b"do not delete",
+    )
+    .unwrap();
+
+    let store = Store::open(&archive, &state).unwrap();
+    assert_eq!(
+        store.recovery_report().unknown_staging,
+        vec!["operator-copy"]
+    );
+    assert_eq!(
+        std::fs::read(archive.join(".staging/operator-copy/unrecognized.bin")).unwrap(),
+        b"do not delete"
+    );
+}
+
+#[test]
+fn corrupt_known_publication_blocks_store_open() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let transaction = TransactionId::new();
+    std::fs::create_dir_all(archive.join(".transactions")).unwrap();
+    std::fs::create_dir_all(archive.join(".staging").join(transaction.to_string())).unwrap();
+    std::fs::write(
+        archive
+            .join(".staging")
+            .join(transaction.to_string())
+            .join("record.json"),
+        b"corrupt",
+    )
+    .unwrap();
+    let journal = serde_json::json!({
+        "schema_version": 1,
+        "transaction_id": transaction,
+        "entity_type": "item",
+        "entity_id": ItemId::new().to_string(),
+        "expected_revision": 0,
+        "target_revision": 1,
+        "phase": "bytes_staged",
+        "artifacts": [{
+            "kind": "revision",
+            "staged_path": format!(".staging/{transaction}/record.json"),
+            "published_path": format!("collections/fixture/items/revisions/{transaction}/record.json"),
+            "sha256": Digest::sha256(b"expected").hex
+        }]
+    });
+    std::fs::write(
+        archive
+            .join(".transactions")
+            .join(format!("{transaction}.json")),
+        serde_json::to_vec_pretty(&journal).unwrap(),
+    )
+    .unwrap();
+
+    let error = match Store::open(&archive, &state) {
+        Ok(_) => panic!("corrupt known transaction must fail closed"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("digest mismatch"));
 }
 fn rewrite_record(path: &Path, update: impl FnOnce(&mut serde_json::Value)) {
     let mut value: serde_json::Value =
@@ -59,7 +703,9 @@ fn setup() -> (
         device_id: None,
     };
     let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
-    let collection = service.create_collection(&actor, "日本の音楽").unwrap();
+    let collection = service
+        .create_collection(&test_authentication(&actor), "日本の音楽", &command())
+        .unwrap();
     (root, store, actor, service, collection)
 }
 fn item(collection: CollectionId) -> Item {
@@ -86,6 +732,783 @@ fn item(collection: CollectionId) -> Item {
         deleted: false,
         updated_at: chrono::Utc::now(),
     }
+}
+
+#[test]
+fn same_key_replays_after_restart_and_changed_payload_conflicts() {
+    let (root, store, actor, service, collection) = setup();
+    let original = item(collection.id);
+    let id = original.id;
+    let command = SaveItemCommand::from(original);
+    let context = CommandContext::new("stable-item-command").unwrap();
+    let saved = service
+        .save_item(&actor, id, command.clone(), Revision(0), &context)
+        .unwrap();
+    drop(service);
+    drop(store);
+
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let replay = service
+        .save_item(&actor, id, command.clone(), Revision(0), &context)
+        .unwrap();
+    assert_eq!(replay.revision, saved.revision);
+    assert_eq!(replay.title, saved.title);
+
+    let mut changed = command;
+    changed.title = "different request".into();
+    assert!(matches!(
+        service.save_item(&actor, id, changed, Revision(0), &context),
+        Err(Error::IdempotencyConflict)
+    ));
+    assert_eq!(Catalog::item(&*store, id).unwrap().revision, Revision(1));
+}
+
+#[test]
+fn concurrent_receipt_claim_has_one_executor_and_replays_completion() {
+    let (_root, store, actor, _service, _collection) = setup();
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut threads = Vec::new();
+    for _ in 0..2 {
+        let store = store.clone();
+        let barrier = barrier.clone();
+        threads.push(std::thread::spawn(move || {
+            barrier.wait();
+            match store.begin_command(actor.user_id, 1, "test.concurrent", "same-key", "digest") {
+                Ok(ReceiptDecision::Execute) => "execute",
+                Err(Error::CommandInProgress) => "in_progress",
+                _ => "unexpected",
+            }
+        }));
+    }
+    barrier.wait();
+    let mut outcomes = threads
+        .into_iter()
+        .map(|thread| thread.join().unwrap())
+        .collect::<Vec<_>>();
+    outcomes.sort_unstable();
+    assert_eq!(outcomes, ["execute", "in_progress"]);
+
+    store
+        .complete_command(
+            actor.user_id,
+            1,
+            "test.concurrent",
+            "same-key",
+            "digest",
+            serde_json::json!({"entity":"one"}),
+        )
+        .unwrap();
+    assert!(matches!(
+        store
+            .begin_command(actor.user_id, 1, "test.concurrent", "same-key", "digest")
+            .unwrap(),
+        ReceiptDecision::Replay(value) if value == serde_json::json!({"entity":"one"})
+    ));
+}
+
+#[test]
+fn stale_revision_abandons_receipt_without_publishing() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let mut update = SaveItemCommand::from(saved.clone());
+    update.title = "accepted after retry".into();
+    let context = CommandContext::new("stale-then-corrected").unwrap();
+    assert!(matches!(
+        service.save_item(&actor, saved.id, update.clone(), Revision(0), &context),
+        Err(Error::Conflict)
+    ));
+    assert_eq!(
+        Catalog::item(&*store, saved.id).unwrap().revision,
+        Revision(1)
+    );
+    assert!(
+        std::fs::read_dir(root.path().join("archive/.transactions"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    let accepted = service
+        .save_item(&actor, saved.id, update, Revision(1), &context)
+        .unwrap();
+    assert_eq!(accepted.revision, Revision(2));
+    assert_eq!(accepted.title, "accepted after retry");
+}
+
+#[test]
+fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/wave-1-schema-2"
+    ));
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    copy_tree(&fixture.join("archive"), &archive);
+    std::fs::create_dir_all(&state).unwrap();
+    let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    private
+        .execute_batch(&std::fs::read_to_string(fixture.join("private-v2.sql")).unwrap())
+        .unwrap();
+    drop(private);
+    let before = tree_hashes(&archive);
+
+    let store = Store::open(&archive, &state).unwrap();
+    for (path, digest) in before {
+        assert_eq!(
+            Digest::sha256(&std::fs::read(archive.join(path)).unwrap()),
+            digest
+        );
+    }
+    let item_id: ItemId = "018f0000-0000-7000-8000-000000000010".parse().unwrap();
+    let capture_id: CaptureId = "018f0000-0000-7000-8000-000000000050".parse().unwrap();
+    assert_eq!(
+        Catalog::capture(&store, capture_id).unwrap().revision,
+        Revision(3)
+    );
+    assert_eq!(
+        Catalog::item(&store, item_id).unwrap().captures[0].revision,
+        Revision(3)
+    );
+    let v3_item = archive.join(
+        "collections/synthetic--018f0000-0000-7000-8000-000000000001/items/two-disc--018f0000-0000-7000-8000-000000000010/revisions/00000000000000000002/record.v3.json",
+    );
+    let v3_text = std::fs::read_to_string(v3_item).unwrap();
+    let v3_json: serde_json::Value = serde_json::from_str(&v3_text).unwrap();
+    assert!(v3_json["record"].get("captures").is_none());
+    assert!(v3_json["record"].get("assets").is_none());
+    assert!(v3_text.contains(r#""payload": {"z":1e+02,"a":null,"ordered":[3,2,1]}"#));
+    assert!(archive
+        .join("collections/synthetic--018f0000-0000-7000-8000-000000000001/evidence/018f0000-0000-7000-8000-000000000080/record.v3.json")
+        .exists());
+    assert!(archive
+        .join("collections/synthetic--018f0000-0000-7000-8000-000000000001/assets/018f0000-0000-7000-8000-000000000070/revisions/00000000000000000001/record.v3.json")
+        .exists());
+
+    let catalog = rusqlite::Connection::open(state.join("catalog.sqlite")).unwrap();
+    assert_eq!(
+        catalog
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+            .unwrap(),
+        3
+    );
+
+    let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    assert_eq!(
+        private
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        private
+            .query_row("SELECT COUNT(*) FROM publication_recovery", [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        private
+            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get::<_, u32>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        private
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE enabled=1 AND revision=1 AND display_name=username",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        private
+            .query_row("SELECT COUNT(*) FROM grants WHERE revision=1", [], |row| {
+                row.get::<_, u32>(0)
+            },)
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        private
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE authenticated_at=0 AND created_at=0",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        1
+    );
+    let migrated_passkey_id: String = private
+        .query_row("SELECT passkey_id FROM passkeys", [], |row| row.get(0))
+        .unwrap();
+    migrated_passkey_id.parse::<PasskeyId>().unwrap();
+    assert_eq!(
+        private
+            .query_row("SELECT COUNT(*) FROM grants", [], |row| row
+                .get::<_, u32>(0))
+            .unwrap(),
+        2
+    );
+    for table in ["sessions", "passkeys", "activity", "jobs"] {
+        let count = private
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1, "lost private-v2 {table}");
+    }
+    assert_eq!(
+        private
+            .query_row(
+                "SELECT value FROM settings WHERE key='default_user_id'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        "018f0000-0000-7000-8000-000000000090"
+    );
+    assert!(archive.join("collections/synthetic--018f0000-0000-7000-8000-000000000001/items/two-disc--018f0000-0000-7000-8000-000000000010/assets/018f0000-0000-7000-8000-000000000070/original.png").is_file());
+    assert!(archive.join("collections/synthetic--018f0000-0000-7000-8000-000000000001/items/two-disc--018f0000-0000-7000-8000-000000000010/files/018f0000-0000-7000-8000-000000000060/disc-1.bin").is_file());
+}
+
+#[test]
+fn private_lock_prevents_two_servers_using_the_same_auth_state() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let first = Store::open(root.path().join("archive-one"), &state).unwrap();
+    assert!(matches!(
+        Store::open(root.path().join("archive-two"), &state),
+        Err(Error::Unavailable(message)) if message.contains("private state")
+    ));
+    drop(first);
+    Store::open(root.path().join("archive-two"), &state).unwrap();
+}
+
+#[test]
+fn recent_auth_expires_at_exact_boundary_and_activity_does_not_refresh_it() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock.clone(),
+        )
+        .unwrap(),
+    );
+    let user = store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let (token, authenticated) = store
+        .login("owner", "a sufficiently long password", "browser")
+        .unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service
+        .require_recent_authentication(&authenticated)
+        .unwrap();
+
+    clock.advance(299);
+    let authenticated_again = service.authenticate(&token).unwrap();
+    service
+        .require_recent_authentication(&authenticated_again)
+        .unwrap();
+    assert_eq!(authenticated_again.principal.user_id, user);
+
+    clock.advance(1);
+    let still_same_authentication = service.authenticate(&token).unwrap();
+    assert!(matches!(
+        service.require_recent_authentication(&still_same_authentication),
+        Err(Error::RecentAuthenticationRequired)
+    ));
+    assert_eq!(
+        still_same_authentication.authenticated_at,
+        authenticated.authenticated_at
+    );
+}
+
+#[test]
+fn recovery_code_replacement_and_concurrent_consumption_have_one_winner() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Arc::new(Store::open(&archive, &state).unwrap());
+    let user = store
+        .create_user("owner", "the original long password", true)
+        .unwrap();
+    let (old_token, authenticated) = store
+        .login("owner", "the original long password", "old browser")
+        .unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let first_batch = service.replace_recovery_codes(&authenticated).unwrap();
+    let second_batch = service.replace_recovery_codes(&authenticated).unwrap();
+    assert_eq!(first_batch.len(), 10);
+    assert_eq!(second_batch.len(), 10);
+    assert!(first_batch.iter().all(|code| code.len() == 40));
+    assert!(
+        store
+            .consume_recovery_code(
+                "owner",
+                &first_batch[0],
+                "an invalidated new password",
+                "recovered browser"
+            )
+            .is_err()
+    );
+
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut workers = Vec::new();
+    for password in ["first concurrent password", "second concurrent password"] {
+        let store = store.clone();
+        let barrier = barrier.clone();
+        let code = second_batch[0].clone();
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            store.consume_recovery_code("owner", &code, password, "recovered browser")
+        }));
+    }
+    barrier.wait();
+    let results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+    assert!(store.authenticate(&old_token).is_err());
+    assert!(
+        store
+            .login("owner", "the original long password", "old password")
+            .is_err()
+    );
+    assert!(
+        store
+            .consume_recovery_code(
+                "owner",
+                &second_batch[1],
+                "another replacement password",
+                "replay"
+            )
+            .is_err()
+    );
+    assert_eq!(store.sessions(user, None).unwrap().len(), 1);
+
+    let first_won = store
+        .login("owner", "first concurrent password", "verification")
+        .is_ok();
+    let second_won = store
+        .login("owner", "second concurrent password", "verification")
+        .is_ok();
+    assert_ne!(first_won, second_won);
+
+    for entry in std::fs::read_dir(&state).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let bytes = std::fs::read(path).unwrap();
+            for code in first_batch.iter().chain(second_batch.iter()) {
+                assert!(
+                    !bytes
+                        .windows(code.len())
+                        .any(|window| window == code.as_bytes())
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn concurrent_passkey_counter_update_fails_stale_assertion_and_revocation_is_immediate() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let user = store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let original = serde_json::json!({"credential": "synthetic", "counter": 7});
+    store
+        .insert_passkey(user, "synthetic-credential", original.clone())
+        .unwrap();
+    let stored = store.passkeys(user).unwrap().remove(0);
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut workers = Vec::new();
+    for counter in [8, 9] {
+        let store = store.clone();
+        let barrier = barrier.clone();
+        let stored = stored.clone();
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            store.complete_passkey_authentication(
+                user,
+                stored.view.id,
+                stored.view.revision,
+                stored.record,
+                serde_json::json!({"credential": "synthetic", "counter": counter}),
+                "passkey browser",
+            )
+        }));
+    }
+    barrier.wait();
+    let results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(store.sessions(user, None).unwrap().len(), 1);
+
+    let current = store.passkeys(user).unwrap().remove(0);
+    store
+        .revoke_passkey(user, current.view.id, current.view.revision)
+        .unwrap();
+    assert!(store.passkeys(user).unwrap().is_empty());
+    assert!(
+        store
+            .complete_passkey_authentication(
+                user,
+                current.view.id,
+                Revision(current.view.revision.0 + 1),
+                current.record,
+                serde_json::json!({"credential": "synthetic", "counter": 10}),
+                "replayed browser",
+            )
+            .is_err()
+    );
+    assert_eq!(store.sessions(user, None).unwrap().len(), 1);
+}
+
+#[test]
+fn concurrent_last_authority_changes_cannot_both_commit() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let first = store
+        .create_user("first", "a sufficiently long password", true)
+        .unwrap();
+    let second = store
+        .create_user("second", "another sufficiently long password", true)
+        .unwrap();
+    let collection = store
+        .create_collection(
+            first,
+            Collection {
+                id: CollectionId::new(),
+                revision: Revision(1),
+                name: "Guarded collection".into(),
+                created_at: chrono::Utc::now(),
+            },
+        )
+        .unwrap();
+    Catalog::grant(&*store, collection.id, second, Role::Owner).unwrap();
+
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut workers = Vec::new();
+    for user in [first, second] {
+        let store = store.clone();
+        let barrier = barrier.clone();
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            store.update_account(user, Revision(1), "Demoted", true, false)
+        }));
+    }
+    barrier.wait();
+    let admin_results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(
+        admin_results.iter().filter(|result| result.is_ok()).count(),
+        1
+    );
+    assert!(
+        store
+            .accounts()
+            .unwrap()
+            .iter()
+            .any(|account| account.enabled && account.administrator)
+    );
+
+    let grants = AccessPort::grants(&*store, collection.id).unwrap();
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut workers = Vec::new();
+    for grant in grants {
+        let store = store.clone();
+        let barrier = barrier.clone();
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            AccessPort::set_grant(&*store, collection.id, grant.user_id, grant.revision, None)
+        }));
+    }
+    barrier.wait();
+    let owner_results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(
+        owner_results.iter().filter(|result| result.is_ok()).count(),
+        1
+    );
+    assert_eq!(
+        AccessPort::grants(&*store, collection.id)
+            .unwrap()
+            .iter()
+            .filter(|grant| grant.role == Role::Owner)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn local_recovery_requires_exclusive_lock_and_preserves_grants() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Store::open(&archive, &state).unwrap();
+    let user = store
+        .create_user("owner", "the original long password", true)
+        .unwrap();
+    let collection = store
+        .create_collection(
+            user,
+            Collection {
+                id: CollectionId::new(),
+                revision: Revision(1),
+                name: "Preserved access".into(),
+                created_at: chrono::Utc::now(),
+            },
+        )
+        .unwrap();
+    store.issue_session(user, "browser").unwrap();
+    store
+        .insert_passkey(
+            user,
+            "local-recovery-passkey",
+            serde_json::json!({"counter": 0}),
+        )
+        .unwrap();
+    assert!(matches!(
+        Store::local_recover(&state, user, "the replacement password"),
+        Err(Error::Unavailable(_))
+    ));
+    drop(store);
+
+    Store::local_recover(&state, user, "the replacement password").unwrap();
+    let recovered = Store::open(&archive, &state).unwrap();
+    assert!(
+        recovered
+            .login("owner", "the original long password", "old")
+            .is_err()
+    );
+    let (_, actor) = recovered
+        .login("owner", "the replacement password", "new")
+        .unwrap();
+    assert!(actor.principal.administrator);
+    assert_eq!(
+        Catalog::role(&recovered, user, collection.id).unwrap(),
+        Role::Owner
+    );
+    assert!(recovered.passkeys(user).unwrap().is_empty());
+}
+
+#[test]
+fn enrollment_terminal_states_wrong_user_and_issuance_race_are_enforced() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let clock = Arc::new(TestClock::new(1_800_100_000));
+    let store = Arc::new(
+        Store::open_with_clock(root.path().join("archive"), &state, clock.clone()).unwrap(),
+    );
+    let requested = store
+        .create_user("requested", "a sufficiently long password", true)
+        .unwrap();
+    let wrong_user = store
+        .create_user("wrong", "another sufficiently long password", false)
+        .unwrap();
+
+    let enrollment = store
+        .start_enrollment(requested, "Living-room client", "/pair")
+        .unwrap();
+    assert!(
+        store
+            .approve_enrollment(wrong_user, &enrollment.user_code)
+            .is_err()
+    );
+    store
+        .approve_enrollment(requested, &enrollment.user_code)
+        .unwrap();
+    assert!(
+        store
+            .complete_enrollment(enrollment.id, &"0".repeat(64))
+            .is_err()
+    );
+
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let store = store.clone();
+        let barrier = barrier.clone();
+        let secret = enrollment.completion_secret.clone();
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            store.complete_enrollment(enrollment.id, &secret)
+        }));
+    }
+    barrier.wait();
+    let results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let issued = results.into_iter().find_map(Result::ok).unwrap();
+    assert!(
+        store
+            .complete_enrollment(enrollment.id, &enrollment.completion_secret)
+            .is_err()
+    );
+
+    let cancelled = store
+        .start_enrollment(requested, "Cancelled client", "/pair")
+        .unwrap();
+    store.cancel_enrollment(requested, cancelled.id).unwrap();
+    assert!(matches!(
+        store.approve_enrollment(requested, &cancelled.user_code),
+        Err(Error::EnrollmentCancelled)
+    ));
+    assert!(matches!(
+        store.complete_enrollment(cancelled.id, &cancelled.completion_secret),
+        Err(Error::EnrollmentCancelled)
+    ));
+
+    let expired = store
+        .start_enrollment(requested, "Expired client", "/pair")
+        .unwrap();
+    clock.advance(600);
+    assert!(matches!(
+        store.approve_enrollment(requested, &expired.user_code),
+        Err(Error::EnrollmentExpired)
+    ));
+
+    for entry in std::fs::read_dir(&state).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let bytes = std::fs::read(path).unwrap();
+            for secret in [&enrollment.completion_secret, &issued.credential] {
+                assert!(
+                    !bytes
+                        .windows(secret.len())
+                        .any(|window| window == secret.as_bytes())
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn conflicting_duplicate_evidence_id_blocks_schema3_migration() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wave-1-schema-2/archive");
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    copy_tree(&fixture, &archive);
+    let revision = archive.join(
+        "collections/synthetic--018f0000-0000-7000-8000-000000000001/items/two-disc--018f0000-0000-7000-8000-000000000010/revisions/00000000000000000002",
+    );
+    let record_path = revision.join("record.v2.json");
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+    record["evidence"][0]["details"]["claim"] =
+        serde_json::json!("conflicting body under a reused EvidenceId");
+    let bytes = serde_json::to_vec_pretty(&record).unwrap();
+    std::fs::write(&record_path, &bytes).unwrap();
+    let manifest_path = revision.join("manifest.v2.toml");
+    let manifest = std::fs::read_to_string(&manifest_path)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            if line.starts_with("record_sha256 =") {
+                format!("record_sha256 = \"{}\"", Digest::sha256(&bytes).hex)
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(manifest_path, manifest).unwrap();
+
+    let error = match Store::open(&archive, &state) {
+        Ok(_) => panic!("conflicting Evidence identity must block migration"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("conflicting schema-2 bodies"));
+    assert!(
+        !archive
+            .join(".archive-migrations/schema-2-to-3/complete")
+            .exists()
+    );
+    let catalog = rusqlite::Connection::open(state.join("catalog.sqlite")).unwrap();
+    assert_eq!(
+        catalog
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get::<_, u32>(0))
+            .unwrap(),
+        0
+    );
+}
+
+fn save_inventory(
+    service: &CollectionService,
+    actor: &Principal,
+    item: Item,
+    expected: Revision,
+) -> Result<Item> {
+    let id = item.id;
+    service.save_item(actor, id, item.into(), expected, &command())
+}
+
+fn save_work_record(
+    service: &CollectionService,
+    actor: &Principal,
+    work: Work,
+    expected: Revision,
+) -> Result<Work> {
+    let id = work.id;
+    service.save_work(actor, id, work.into(), expected, &command())
+}
+
+fn save_edition_record(
+    service: &CollectionService,
+    actor: &Principal,
+    edition: Edition,
+    expected: Revision,
+) -> Result<Edition> {
+    let id = edition.id;
+    service.save_edition(actor, id, edition.into(), expected, &command())
+}
+
+fn save_capture_record(
+    service: &CollectionService,
+    actor: &Principal,
+    capture: Capture,
+    expected: Revision,
+) -> Result<Capture> {
+    let id = capture.id;
+    service.save_capture(actor, id, capture.into(), expected, &command())
+}
+
+fn stage_directory(
+    service: &CollectionService,
+    actor: &Principal,
+    id: JobId,
+    source: &Path,
+) -> Result<Item> {
+    let upload = service.upload(actor, id)?;
+    for (index, entry) in upload.files.iter().enumerate() {
+        let bytes = std::fs::read(source.join(&entry.name)).unwrap();
+        service.upload_chunk(actor, id, index, 0, &bytes)?;
+    }
+    service.commit_upload(actor, id, &command())
 }
 
 #[test]
@@ -155,20 +1578,14 @@ fn committed_schema_one_fixture_migrates_additively_and_restarts() {
         .create_user("fixture-owner", "a sufficiently long password", true)
         .unwrap();
     store.grant(item.collection_id, user, Role::Owner).unwrap();
-    let actor = Principal {
-        user_id: user,
-        administrator: true,
-        device_id: None,
-    };
-    let (legacy_file, _) = store
-        .representation_file(
-            &actor,
-            item.id,
-            "018f0000-0000-7000-8000-000000000060".parse().unwrap(),
-            0,
-        )
-        .unwrap();
-    assert_eq!(std::fs::read(legacy_file).unwrap(), b"disc-one\n");
+    let legacy_file = ContentPort::representation(
+        &store,
+        item.id,
+        "018f0000-0000-7000-8000-000000000060".parse().unwrap(),
+        0,
+    )
+    .unwrap();
+    assert_eq!(resource_bytes(legacy_file), b"disc-one\n");
     drop(store);
     std::fs::remove_file(archive.join(".archive-migrations/schema-1-to-2/complete")).unwrap();
     let second = archive.join("collections/synthetic--018f0000-0000-7000-8000-000000000001/items/two-disc--018f0000-0000-7000-8000-000000000010/revisions/00000000000000000002");
@@ -218,9 +1635,8 @@ fn standalone_unidentified_capture_round_trips_without_fabricated_links() {
         association: CaptureAssociation::default(),
         created_at: chrono::Utc::now(),
         representations: vec![],
-        legacy_payload_locator: None,
     };
-    let saved = service.save_capture(&actor, capture, Revision(0)).unwrap();
+    let saved = save_capture_record(&service, &actor, capture, Revision(0)).unwrap();
     assert_eq!(saved.revision, Revision(1));
     assert_eq!(saved.association, CaptureAssociation::default());
     store.reindex().unwrap();
@@ -231,52 +1647,52 @@ fn standalone_unidentified_capture_round_trips_without_fabricated_links() {
 #[test]
 fn clean_work_edition_and_edition_linked_item_round_trip() {
     let (_root, store, actor, service, collection) = setup();
-    let work = service
-        .save_work(
-            &actor,
-            Work {
-                id: WorkId::new(),
-                collection_id: collection.id,
-                revision: Revision(0),
-                provisional: false,
-                title: "A work".into(),
-                translations: vec![],
-                identifiers: vec![],
-                migration_provenance: vec![],
-                deleted: false,
-                updated_at: chrono::Utc::now(),
-            },
-            Revision(0),
-        )
-        .unwrap();
-    let edition = service
-        .save_edition(
-            &actor,
-            Edition {
-                id: EditionId::new(),
-                collection_id: collection.id,
-                revision: Revision(0),
-                work_id: Some(work.id),
-                provisional: false,
-                title: "An edition".into(),
-                expected_components: vec![ExpectedComponent {
-                    position: 1,
-                    label: "Disc 1".into(),
-                    kind: ComponentKind::OpticalDisc,
-                }],
-                identifiers: vec![],
-                migration_provenance: vec![],
-                deleted: false,
-                updated_at: chrono::Utc::now(),
-            },
-            Revision(0),
-        )
-        .unwrap();
+    let work = save_work_record(
+        &service,
+        &actor,
+        Work {
+            id: WorkId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            provisional: false,
+            title: "A work".into(),
+            translations: vec![],
+            identifiers: vec![],
+            migration_provenance: vec![],
+            deleted: false,
+            updated_at: chrono::Utc::now(),
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let edition = save_edition_record(
+        &service,
+        &actor,
+        Edition {
+            id: EditionId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            work_id: Some(work.id),
+            provisional: false,
+            title: "An edition".into(),
+            expected_components: vec![ExpectedComponent {
+                position: 1,
+                label: "Disc 1".into(),
+                kind: ComponentKind::OpticalDisc,
+            }],
+            identifiers: vec![],
+            migration_provenance: vec![],
+            deleted: false,
+            updated_at: chrono::Utc::now(),
+        },
+        Revision(0),
+    )
+    .unwrap();
     let mut value = item(collection.id);
     value.identity_link = ItemIdentityLink::Edition {
         edition_id: edition.id,
     };
-    let saved = service.save(&actor, value, Revision(0)).unwrap();
+    let saved = save_inventory(&service, &actor, value, Revision(0)).unwrap();
     store.reindex().unwrap();
     assert_eq!(service.work(&actor, work.id).unwrap().revision, Revision(1));
     assert_eq!(
@@ -284,7 +1700,7 @@ fn clean_work_edition_and_edition_linked_item_round_trip() {
         Some(work.id)
     );
     assert!(
-        matches!(service.item(&actor, saved.id).unwrap().identity_link, ItemIdentityLink::Edition { edition_id } if edition_id == edition.id)
+        matches!(service.item_presented(&actor, saved.id).unwrap().identity_link, ItemIdentityLink::Edition { edition_id } if edition_id == edition.id)
     );
 }
 
@@ -364,12 +1780,12 @@ fn revisions_recover_unknown_module_data_and_do_not_restore_grants() {
         )
         .unwrap(),
     };
-    let saved = service.save(&actor, value, Revision(0)).unwrap();
+    let saved = save_inventory(&service, &actor, value, Revision(0)).unwrap();
     let mut edited = saved.clone();
     edited.title = "Updated".into();
-    service.save(&actor, edited, saved.revision).unwrap();
+    save_inventory(&service, &actor, edited, saved.revision).unwrap();
     assert!(matches!(
-        service.save(&actor, saved.clone(), saved.revision),
+        save_inventory(&service, &actor, saved.clone(), saved.revision),
         Err(Error::Conflict)
     ));
     drop(service);
@@ -390,12 +1806,10 @@ fn revisions_recover_unknown_module_data_and_do_not_restore_grants() {
 }
 #[test]
 fn upload_retries_preserve_bytes_and_evidence_detects_changes() {
-    let (_root, store, actor, service, collection) = setup();
-    let saved = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let bytes = b"independent original payload";
-    let upload = store
+    let upload = service
         .create_upload(
             &actor,
             saved.id,
@@ -405,28 +1819,30 @@ fn upload_retries_preserve_bytes_and_evidence_detects_changes() {
                 bytes: ByteLength(bytes.len() as u64),
                 sha256: Some(Digest::sha256(bytes).hex),
             }],
+            &command(),
         )
         .unwrap();
-    store
+    service
         .upload_chunk(&actor, upload.id, 0, 0, &bytes[..8])
         .unwrap();
-    store
+    service
         .upload_chunk(&actor, upload.id, 0, 0, &bytes[..8])
         .unwrap();
     assert!(matches!(
-        store.upload_chunk(&actor, upload.id, 0, 0, b"different"),
+        service.upload_chunk(&actor, upload.id, 0, 0, b"different"),
         Err(Error::Conflict)
     ));
-    store
+    service
         .upload_chunk(&actor, upload.id, 0, 8, &bytes[8..])
         .unwrap();
-    let committed = store.commit_upload(&actor, upload.id).unwrap();
-    let retry = store.commit_upload(&actor, upload.id).unwrap();
+    let commit = command();
+    let committed = service.commit_upload(&actor, upload.id, &commit).unwrap();
+    let retry = service.commit_upload(&actor, upload.id, &commit).unwrap();
     assert_eq!(retry.revision, committed.revision);
-    let (path, _) = store
-        .representation_file(&actor, saved.id, upload.representation_id, 0)
+    let resource = service
+        .representation(&actor, saved.id, upload.representation_id, 0)
         .unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(resource_bytes(resource), bytes);
     assert!(
         store
             .evidence(saved.id)
@@ -434,19 +1850,41 @@ fn upload_retries_preserve_bytes_and_evidence_detects_changes() {
             .iter()
             .all(|e| matches!(e.kind, EvidenceKind::Integrity))
     );
+    let path = find_file_with_bytes(&root.path().join("archive"), bytes).unwrap();
     std::fs::write(path, b"changed").unwrap();
-    store.verify_integrity(&actor, saved.id).unwrap();
+    service
+        .verify_integrity(&actor, saved.id, &command())
+        .unwrap();
     assert_eq!(
         store.evidence(saved.id).unwrap().last().unwrap().outcome,
         EvidenceOutcome::Failed
     );
+    let evidence_records = files_named(&root.path().join("archive/collections"), "record.v3.json")
+        .into_iter()
+        .filter(|path| path.components().any(|part| part.as_os_str() == "evidence"))
+        .collect::<Vec<_>>();
+    assert_eq!(evidence_records.len(), 2);
+    let latest_item_envelope =
+        files_named(&root.path().join("archive/collections"), "record.v3.json")
+            .into_iter()
+            .filter_map(|path| {
+                let value: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+                (value["record"]["id"] == saved.id.to_string()).then_some((path, value))
+            })
+            .max_by_key(|(path, _)| path.clone())
+            .unwrap()
+            .1;
+    assert_eq!(
+        latest_item_envelope["evidence"].as_array().unwrap().len(),
+        2
+    );
+    assert!(latest_item_envelope["evidence"][0].get("details").is_none());
 }
 #[test]
 fn malicious_paths_and_invented_file_references_are_rejected() {
-    let (_root, store, actor, service, collection) = setup();
-    let saved = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
+    let (_root, _store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     for name in [
         "../secret",
         "/absolute",
@@ -456,7 +1894,7 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
         "a//b",
     ] {
         assert!(
-            store
+            service
                 .create_upload(
                     &actor,
                     saved.id,
@@ -465,7 +1903,8 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
                         name: name.into(),
                         bytes: ByteLength(1),
                         sha256: None
-                    }]
+                    }],
+                    &command(),
                 )
                 .is_err()
         );
@@ -481,12 +1920,17 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
         },
         created_at: chrono::Utc::now(),
         representations: vec![],
-        legacy_payload_locator: None,
     });
-    assert!(matches!(
-        service.save(&actor, edited.clone(), edited.revision),
-        Err(Error::Invalid(_))
-    ));
+    let mut command =
+        serde_json::to_value(collector_app::SaveItemCommand::from(edited.clone())).unwrap();
+    command.as_object_mut().unwrap().insert(
+        "captures".into(),
+        serde_json::to_value(edited.captures).unwrap(),
+    );
+    assert!(
+        serde_json::from_value::<collector_app::SaveItemCommand>(command).is_err(),
+        "item commands accepted invented capture records"
+    );
 }
 #[test]
 fn viewer_redaction_and_cross_collection_access() {
@@ -534,63 +1978,171 @@ fn viewer_redaction_and_cross_collection_access() {
             returned_at: None,
         }],
     });
-    let saved = service.save(&owner, value, Revision(0)).unwrap();
-    let public = service.item(&viewer, saved.id).unwrap();
+    let saved = save_inventory(&service, &owner, value, Revision(0)).unwrap();
+    let public = service.item_presented(&viewer, saved.id).unwrap();
     assert!(public.specimens[0].acquisition.is_none());
-    assert!(public.specimens[0].loans.is_empty());
+    assert!(public.specimens[0].loans.is_none());
     assert!(public.specimens[0].private_notes.is_none());
-    assert!(service.item(&stranger, saved.id).is_err());
+    assert!(service.item_presented(&stranger, saved.id).is_err());
     assert!(
         service
-            .browse(&stranger, BrowseQuery::default())
+            .browse_presented(&stranger, BrowseQuery::default())
             .unwrap()
             .items
             .is_empty()
     );
-    assert!(
-        service
-            .save(&viewer, saved.clone(), saved.revision)
-            .is_err()
-    );
+    assert!(save_inventory(&service, &viewer, saved.clone(), saved.revision).is_err());
 }
 #[test]
 fn cover_upload_retains_original_and_has_bounded_thumbnail() {
-    let (_root, store, actor, service, collection) = setup();
-    let saved = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let expected = saved.revision;
     let image = image::RgbImage::new(900, 450);
     let mut data = std::io::Cursor::new(Vec::new());
     image.write_to(&mut data, image::ImageFormat::Png).unwrap();
     let bytes = data.into_inner();
-    let saved = store
-        .add_cover(
+    let context = command();
+    let saved = service
+        .publish_cover(
             &actor,
             saved.id,
-            saved.revision,
+            expected,
             &bytes,
             "Album cover".into(),
+            &context,
         )
         .unwrap();
     let asset = &saved.assets[0];
-    let (original, _, _) = store.asset_file(&actor, saved.id, asset.id, false).unwrap();
-    assert_eq!(std::fs::read(original).unwrap(), bytes);
-    let (thumbnail, _, _) = store.asset_file(&actor, saved.id, asset.id, true).unwrap();
-    let thumbnail = image::open(thumbnail).unwrap();
+    let original = service.asset(&actor, saved.id, asset.id, false).unwrap();
+    assert_eq!(resource_bytes(original), bytes);
+    let thumbnail = service.asset(&actor, saved.id, asset.id, true).unwrap();
+    let thumbnail = image::load_from_memory(&resource_bytes(thumbnail)).unwrap();
     assert_eq!((thumbnail.width(), thumbnail.height()), (192, 96));
+    let stored = find_file_with_bytes(root.path(), &bytes).unwrap();
+    let stored = stored.to_string_lossy();
+    assert!(stored.contains(&format!("/assets/{}/payload/", asset.id)));
+    assert!(!stored.contains("/items/"));
+    let replayed = service
+        .publish_cover(
+            &actor,
+            saved.id,
+            expected,
+            &bytes,
+            "Album cover".into(),
+            &context,
+        )
+        .unwrap();
+    assert_eq!(replayed.assets.len(), 1);
+    assert_eq!(replayed.assets[0].id, asset.id);
     store.reindex().unwrap();
     assert_eq!(store.item(saved.id).unwrap().assets[0].id, asset.id);
 }
+
+#[test]
+fn cover_payload_faults_recover_with_one_collection_asset() {
+    for point in publication_points() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let store = Arc::new(Store::open(&archive, &state).unwrap());
+        let user = store
+            .create_user("owner", "a long test password", true)
+            .unwrap();
+        let actor = Principal {
+            user_id: user,
+            administrator: true,
+            device_id: None,
+        };
+        let collection = store
+            .create_collection(
+                user,
+                Collection {
+                    id: CollectionId::new(),
+                    revision: Revision(1),
+                    name: "cover fault fixture".into(),
+                    created_at: chrono::Utc::now(),
+                },
+            )
+            .unwrap();
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        drop(service);
+        drop(store);
+
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                &archive,
+                &state,
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let mut image = std::io::Cursor::new(Vec::new());
+        image::RgbImage::new(2, 2)
+            .write_to(&mut image, image::ImageFormat::Png)
+            .unwrap();
+        let bytes = image.into_inner();
+        let context = CommandContext::new("stable-cover-command").unwrap();
+        assert!(
+            service
+                .publish_cover(
+                    &actor,
+                    saved.id,
+                    saved.revision,
+                    &bytes,
+                    "cover".into(),
+                    &context,
+                )
+                .is_err()
+        );
+        drop(service);
+        drop(store);
+
+        let store = Arc::new(Store::open(&archive, &state).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let recovered = service
+            .publish_cover(
+                &actor,
+                saved.id,
+                saved.revision,
+                &bytes,
+                "cover".into(),
+                &context,
+            )
+            .unwrap();
+        assert_eq!(recovered.assets.len(), 1, "fault at {point:?}");
+        assert_eq!(
+            resource_bytes(
+                service
+                    .asset(&actor, recovered.id, recovered.assets[0].id, false)
+                    .unwrap()
+            ),
+            bytes
+        );
+        assert!(
+            !state
+                .join("asset-publication")
+                .join(recovered.assets[0].id.to_string())
+                .exists()
+        );
+    }
+}
+
 #[test]
 fn pagination_and_fts_do_not_cross_grants() {
     let (_root, _store, actor, service, collection) = setup();
     for title in ["Golden Sun", "Golden Axe", "Other"] {
         let mut v = item(collection.id);
         v.title = title.into();
-        service.save(&actor, v, Revision(0)).unwrap();
+        save_inventory(&service, &actor, v, Revision(0)).unwrap();
     }
     let first = service
-        .browse(
+        .browse_presented(
             &actor,
             BrowseQuery {
                 search: Some("Golden".into()),
@@ -602,7 +2154,7 @@ fn pagination_and_fts_do_not_cross_grants() {
     assert_eq!(first.items.len(), 1);
     assert!(first.next_cursor.is_some());
     let second = service
-        .browse(
+        .browse_presented(
             &actor,
             BrowseQuery {
                 search: Some("Golden".into()),
@@ -618,26 +2170,29 @@ fn pagination_and_fts_do_not_cross_grants() {
 }
 #[test]
 fn revoked_devices_and_password_recovery() {
-    let (_root, store, actor, _service, _collection) = setup();
-    let (token, device) = store
+    let (_root, store, actor, service, _collection) = setup();
+    let (token, device) = service
         .login("owner", "a long test password", "test")
         .unwrap();
-    assert_eq!(store.authenticate(&token).unwrap().user_id, actor.user_id);
-    store
-        .revoke_device(&device, device.device_id.unwrap())
+    assert_eq!(
+        service.authenticate(&token).unwrap().principal.user_id,
+        actor.user_id
+    );
+    service
+        .revoke_session(&device, device.principal.device_id.unwrap(), &command())
         .unwrap();
-    assert!(store.authenticate(&token).is_err());
-    let (token, _) = store
+    assert!(service.authenticate(&token).is_err());
+    let (token, _) = service
         .login("owner", "a long test password", "test")
         .unwrap();
     store.reset_password("owner", "new long password").unwrap();
-    assert!(store.authenticate(&token).is_err());
+    assert!(service.authenticate(&token).is_err());
     assert!(
-        store
+        service
             .login("owner", "a long test password", "test")
             .is_err()
     );
-    assert!(store.login("owner", "new long password", "test").is_ok());
+    assert!(service.login("owner", "new long password", "test").is_ok());
 }
 #[test]
 fn archive_lock_prevents_second_writer() {
@@ -651,19 +2206,17 @@ fn archive_lock_prevents_second_writer() {
 #[test]
 fn configured_inbox_preserves_sources_and_reuses_import_evidence() {
     let (root, store, actor, service, collection) = setup();
-    let saved = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let source = root.path().join("inbox/package");
     std::fs::create_dir_all(source.join("tracks")).unwrap();
     std::fs::write(source.join("disc.cue"), b"REM synthetic package\n").unwrap();
     std::fs::write(source.join("tracks/disc.bin"), b"payload").unwrap();
     let files = Store::inventory_directory(&source).unwrap();
     assert_eq!(files.len(), 2);
-    let upload = store
-        .create_upload(&actor, saved.id, saved.revision, files)
+    let upload = service
+        .create_upload(&actor, saved.id, saved.revision, files, &command())
         .unwrap();
-    let result = store.stage_directory(&actor, upload.id, &source).unwrap();
+    let result = stage_directory(&service, &actor, upload.id, &source).unwrap();
     assert_eq!(result.captures.len(), 1);
     assert_eq!(
         std::fs::read(source.join("tracks/disc.bin")).unwrap(),
@@ -689,9 +2242,7 @@ fn inbox_symlinks_are_rejected() {
 #[test]
 fn tampered_metadata_blocks_recovery_instead_of_silently_downgrading_revision() {
     let (root, store, actor, service, collection) = setup();
-    let saved = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     drop(service);
     drop(store);
     fn corrupt(path: &std::path::Path) {
@@ -699,7 +2250,10 @@ fn tampered_metadata_blocks_recovery_instead_of_silently_downgrading_revision() 
             let path = entry.unwrap().path();
             if path.is_dir() {
                 corrupt(&path);
-            } else if path.file_name().unwrap() == "record.json" {
+            } else if matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("record.json" | "record.v3.json")
+            ) {
                 std::fs::write(path, b"{}").unwrap();
             }
         }
@@ -713,11 +2267,9 @@ fn tampered_metadata_blocks_recovery_instead_of_silently_downgrading_revision() 
 }
 #[test]
 fn failed_background_import_is_reported_and_retains_source_chunks() {
-    let (_root, store, actor, service, collection) = setup();
-    let saved = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
-    let upload = store
+    let (_root, _store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
         .create_upload(
             &actor,
             saved.id,
@@ -727,15 +2279,16 @@ fn failed_background_import_is_reported_and_retains_source_chunks() {
                 bytes: ByteLength(4),
                 sha256: None,
             }],
+            &command(),
         )
         .unwrap();
-    store
+    service
         .upload_chunk(&actor, upload.id, 0, 0, b"data")
         .unwrap();
-    store
+    service
         .fail_upload(&actor, upload.id, "Test failure")
         .unwrap();
-    let job = store
+    let job = service
         .jobs(&actor)
         .unwrap()
         .into_iter()
@@ -743,16 +2296,14 @@ fn failed_background_import_is_reported_and_retains_source_chunks() {
         .unwrap();
     assert_eq!(job.state, JobState::Failed);
     assert_eq!(job.error.as_deref(), Some("Test failure"));
-    assert!(store.commit_upload(&actor, upload.id).is_ok());
+    assert!(service.commit_upload(&actor, upload.id, &command()).is_ok());
 }
 
 #[test]
 fn review_capture_update_survives_reindex() {
     let (_root, store, actor, service, collection) = setup();
-    let saved = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
-    let upload = store
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
         .create_upload(
             &actor,
             saved.id,
@@ -762,17 +2313,18 @@ fn review_capture_update_survives_reindex() {
                 bytes: ByteLength(4),
                 sha256: None,
             }],
+            &command(),
         )
         .unwrap();
-    store
+    service
         .upload_chunk(&actor, upload.id, 0, 0, b"data")
         .unwrap();
-    let uploaded = store.commit_upload(&actor, upload.id).unwrap();
+    let uploaded = service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
     let mut capture = uploaded.captures[0].clone();
     capture.association = CaptureAssociation::default();
-    let revised = service
-        .save_capture(&actor, capture.clone(), capture.revision)
-        .unwrap();
+    let revised = save_capture_record(&service, &actor, capture.clone(), capture.revision).unwrap();
     assert_eq!(
         service.capture(&actor, capture.id).unwrap().revision,
         revised.revision
@@ -788,21 +2340,20 @@ fn review_capture_update_survives_reindex() {
 #[test]
 fn review_cannot_move_another_users_capture() {
     let (_root, store, owner, service, private_collection) = setup();
-    let capture = service
-        .save_capture(
-            &owner,
-            Capture {
-                id: CaptureId::new(),
-                collection_id: private_collection.id,
-                revision: Revision(0),
-                association: CaptureAssociation::default(),
-                created_at: chrono::Utc::now(),
-                representations: vec![],
-                legacy_payload_locator: None,
-            },
-            Revision(0),
-        )
-        .unwrap();
+    let capture = save_capture_record(
+        &service,
+        &owner,
+        Capture {
+            id: CaptureId::new(),
+            collection_id: private_collection.id,
+            revision: Revision(0),
+            association: CaptureAssociation::default(),
+            created_at: chrono::Utc::now(),
+            representations: vec![],
+        },
+        Revision(0),
+    )
+    .unwrap();
     let attacker_id = store
         .create_user("other", "another long password", true)
         .unwrap();
@@ -811,14 +2362,14 @@ fn review_cannot_move_another_users_capture() {
         administrator: true,
         device_id: None,
     };
-    let other_collection = service.create_collection(&attacker, "Other").unwrap();
+    let other_collection = service
+        .create_collection(&test_authentication(&attacker), "Other", &command())
+        .unwrap();
     assert!(service.capture(&attacker, capture.id).is_err());
     let mut stolen = capture.clone();
     stolen.collection_id = other_collection.id;
     assert!(
-        service
-            .save_capture(&attacker, stolen, capture.revision)
-            .is_err(),
+        save_capture_record(&service, &attacker, stolen, capture.revision).is_err(),
         "unauthorized capture move was accepted"
     );
 }
@@ -859,9 +2410,9 @@ fn review_same_specimen_cannot_belong_to_two_items() {
     });
     let mut second = first.clone();
     second.id = ItemId::new();
-    service.save(&actor, first, Revision(0)).unwrap();
+    save_inventory(&service, &actor, first, Revision(0)).unwrap();
     assert!(
-        service.save(&actor, second, Revision(0)).is_err(),
+        save_inventory(&service, &actor, second, Revision(0)).is_err(),
         "duplicate physical identity was accepted"
     );
 }
@@ -869,9 +2420,7 @@ fn review_same_specimen_cannot_belong_to_two_items() {
 #[test]
 fn review_capture_links_must_form_chain_when_middle_links_omitted() {
     let (_root, _store, actor, service, collection) = setup();
-    let first = service
-        .save(&actor, item(collection.id), Revision(0))
-        .unwrap();
+    let first = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let mut second = item(collection.id);
     let carrier_id = CarrierId::new();
     second.specimens.push(Specimen {
@@ -896,7 +2445,7 @@ fn review_capture_links_must_form_chain_when_middle_links_omitted() {
         private_notes: None,
         loans: vec![],
     });
-    service.save(&actor, second, Revision(0)).unwrap();
+    save_inventory(&service, &actor, second, Revision(0)).unwrap();
     let capture = Capture {
         id: CaptureId::new(),
         collection_id: collection.id,
@@ -908,10 +2457,9 @@ fn review_capture_links_must_form_chain_when_middle_links_omitted() {
         },
         created_at: chrono::Utc::now(),
         representations: vec![],
-        legacy_payload_locator: None,
     };
     assert!(
-        service.save_capture(&actor, capture, Revision(0)).is_err(),
+        save_capture_record(&service, &actor, capture, Revision(0)).is_err(),
         "links to one item and another item's carrier were accepted"
     );
 }
@@ -943,40 +2491,35 @@ fn capture_reassociation_retains_payload_and_survives_restart() {
         device_id: None,
     };
     let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
-    let new_item = service
-        .save(&actor, item(original.collection_id), Revision(0))
-        .unwrap();
+    let new_item =
+        save_inventory(&service, &actor, item(original.collection_id), Revision(0)).unwrap();
     let mut capture = original.captures[0].clone();
     capture.association = CaptureAssociation {
         item_id: Some(new_item.id),
         ..Default::default()
     };
-    let updated = service
-        .save_capture(&actor, capture.clone(), capture.revision)
-        .unwrap();
+    let updated = save_capture_record(&service, &actor, capture.clone(), capture.revision).unwrap();
     // A stale item compatibility snapshot cannot downgrade the capture.
     assert!(matches!(
         store.save(original.clone(), original.revision),
         Err(Error::Conflict)
     ));
     store.reindex().unwrap();
-    let moved = service.item(&actor, new_item.id).unwrap();
+    let moved = service.item_presented(&actor, new_item.id).unwrap();
     assert_eq!(moved.captures[0].revision, updated.revision);
     let representation = moved.captures[0].representations[0].id;
-    let (path, _) = store
-        .representation_file(&actor, new_item.id, representation, 0)
+    let resource = service
+        .representation(&actor, new_item.id, representation, 0)
         .unwrap();
-    assert_eq!(std::fs::read(path).unwrap(), b"disc-one\n");
-    let mut malicious = updated.clone();
-    malicious
-        .legacy_payload_locator
-        .as_mut()
-        .unwrap()
-        .relative_path = "/private".into();
+    assert_eq!(resource_bytes(resource), b"disc-one\n");
     assert!(
-        service
-            .save_capture(&actor, malicious, updated.revision)
-            .is_err()
+        serde_json::from_value::<collector_app::SaveCaptureCommand>(serde_json::json!({
+            "collection_id": updated.collection_id,
+            "association": updated.association,
+            "legacy_payload_locator": {"item_id": new_item.id, "relative_path": "/private"}
+        }))
+        .is_err(),
+        "capture commands accepted a private archive locator"
     );
     drop(service);
     drop(store);
@@ -1035,10 +2578,13 @@ fn nested_identity_cannot_be_reused_across_collections() {
     });
     let mut second = first.clone();
     second.id = ItemId::new();
-    second.collection_id = service.create_collection(&actor, "Other").unwrap().id;
-    service.save(&actor, first, Revision(0)).unwrap();
+    second.collection_id = service
+        .create_collection(&test_authentication(&actor), "Other", &command())
+        .unwrap()
+        .id;
+    save_inventory(&service, &actor, first, Revision(0)).unwrap();
     assert!(
-        matches!(service.save(&actor, second, Revision(0)), Err(Error::Invalid(message)) if message.contains("across collections"))
+        matches!(save_inventory(&service, &actor, second, Revision(0)), Err(Error::Invalid(message)) if message.contains("across collections"))
     );
 }
 
@@ -1064,9 +2610,9 @@ fn removed_components_are_removed_from_projection() {
         private_notes: None,
         loans: vec![],
     });
-    let mut saved = service.save(&actor, value, Revision(0)).unwrap();
+    let mut saved = save_inventory(&service, &actor, value, Revision(0)).unwrap();
     saved.specimens[0].components.clear();
-    service.save(&actor, saved.clone(), saved.revision).unwrap();
+    save_inventory(&service, &actor, saved.clone(), saved.revision).unwrap();
     let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
     let count: u64 = db
         .query_row("SELECT COUNT(*) FROM components", [], |row| row.get(0))
@@ -1078,5 +2624,428 @@ fn removed_components_are_removed_from_projection() {
             .get::<_, u64>(0))
             .unwrap(),
         0
+    );
+}
+
+#[test]
+fn subprocess_command_receipt_worker() {
+    use collector_app::CommandReceipt;
+    let Ok(root) = std::env::var("W2_RECEIPT_ROOT") else {
+        return;
+    };
+    let root = Path::new(&root);
+    let operation = std::env::var("W2_RECEIPT_OPERATION").unwrap();
+    let fault: Arc<dyn collector_store::PublicationFaultInjector> =
+        if std::env::var_os("W2_RECEIPT_EARLY").is_some() {
+            Arc::new(BlockAtPublicationPoint(
+                collector_store::PublicationFaultPoint::RevisionCommitted,
+            ))
+        } else {
+            Arc::new(collector_store::NoPublicationFault)
+        };
+    let store = Store::open_with_publication_fault(root.join("archive"), root.join("state"), fault)
+        .unwrap();
+    let data: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("command.json")).unwrap()).unwrap();
+    let user: UserId = serde_json::from_value(data["user"].clone()).unwrap();
+    let target: UserId = serde_json::from_value(data["target"].clone()).unwrap();
+    let collection: CollectionId = serde_json::from_value(data["collection"].clone()).unwrap();
+    let item_id: ItemId = serde_json::from_value(data["item"].clone()).unwrap();
+    let upload_id: JobId = serde_json::from_value(data["upload"].clone()).unwrap();
+    assert!(matches!(
+        store
+            .begin_command(user, 1, &operation, "crash-command", "digest")
+            .unwrap(),
+        ReceiptDecision::Execute
+    ));
+    let effects = store.command_effects(CommandReceipt {
+        user,
+        api_major: 1,
+        operation: operation.clone(),
+        key: "crash-command".into(),
+        request_sha256: "digest".into(),
+    });
+    let result = match operation.as_str() {
+        "account.create" => serde_json::to_value(
+            effects
+                .create_user("created-once", "a sufficiently long password", false)
+                .unwrap(),
+        )
+        .unwrap(),
+        "account.update" => serde_json::to_value(
+            effects
+                .update_account(target, Revision(1), "Changed", true, false)
+                .unwrap(),
+        )
+        .unwrap(),
+        "grant.update" => serde_json::to_value(
+            effects
+                .set_grant(collection, target, Revision(0), Some(Role::Viewer))
+                .unwrap(),
+        )
+        .unwrap(),
+        "activity.save" => {
+            effects
+                .save_activity(user, item_id, serde_json::json!({"favorite":true}))
+                .unwrap();
+            serde_json::Value::Null
+        }
+        "session.revoke" => {
+            effects
+                .revoke_session(
+                    user,
+                    serde_json::from_value(data["session"].clone()).unwrap(),
+                )
+                .unwrap();
+            serde_json::Value::Null
+        }
+        "passkey.revoke" => {
+            effects
+                .revoke_passkey(
+                    user,
+                    serde_json::from_value(data["passkey"].clone()).unwrap(),
+                    Revision(1),
+                )
+                .unwrap();
+            serde_json::Value::Null
+        }
+        "native_credential.revoke" => {
+            effects
+                .revoke_native_device(
+                    user,
+                    serde_json::from_value(data["native"].clone()).unwrap(),
+                    Revision(1),
+                )
+                .unwrap();
+            serde_json::Value::Null
+        }
+        "account.default.reassign" => {
+            effects.reassign_default(target).unwrap();
+            serde_json::Value::Null
+        }
+        "projection.reindex" => {
+            effects.reindex().unwrap();
+            serde_json::Value::Null
+        }
+        "item.save" => {
+            let mut item = store.item(item_id).unwrap();
+            item.title = "Updated once".into();
+            serde_json::to_value(effects.save(item, Revision(1)).unwrap()).unwrap()
+        }
+        "collection.create" => serde_json::to_value(
+            effects
+                .create_collection(
+                    user,
+                    Collection {
+                        id: CollectionId::new(),
+                        revision: Revision(1),
+                        name: "New collection".into(),
+                        created_at: chrono::Utc::now(),
+                    },
+                )
+                .unwrap(),
+        )
+        .unwrap(),
+        "work.save" => serde_json::to_value(
+            effects
+                .save_work(
+                    Work {
+                        id: WorkId::new(),
+                        collection_id: collection,
+                        revision: Revision(0),
+                        provisional: true,
+                        title: "Work".into(),
+                        translations: vec![],
+                        identifiers: vec![],
+                        migration_provenance: vec![],
+                        deleted: false,
+                        updated_at: chrono::Utc::now(),
+                    },
+                    Revision(0),
+                )
+                .unwrap(),
+        )
+        .unwrap(),
+        "edition.save" => serde_json::to_value(
+            effects
+                .save_edition(
+                    Edition {
+                        id: EditionId::new(),
+                        collection_id: collection,
+                        revision: Revision(0),
+                        work_id: None,
+                        provisional: true,
+                        title: "Edition".into(),
+                        expected_components: vec![],
+                        identifiers: vec![],
+                        migration_provenance: vec![],
+                        deleted: false,
+                        updated_at: chrono::Utc::now(),
+                    },
+                    Revision(0),
+                )
+                .unwrap(),
+        )
+        .unwrap(),
+        "capture.save" => serde_json::to_value(
+            effects
+                .save_capture(
+                    Capture {
+                        id: CaptureId::new(),
+                        collection_id: collection,
+                        revision: Revision(0),
+                        association: Default::default(),
+                        created_at: chrono::Utc::now(),
+                        representations: vec![],
+                    },
+                    Revision(0),
+                )
+                .unwrap(),
+        )
+        .unwrap(),
+        "upload.create" => serde_json::to_value(
+            effects
+                .create_upload(
+                    user,
+                    item_id,
+                    Revision(1),
+                    vec![UploadFile {
+                        name: "another.bin".into(),
+                        bytes: ByteLength(3),
+                        sha256: None,
+                    }],
+                )
+                .unwrap(),
+        )
+        .unwrap(),
+        "upload.cancel" => {
+            effects.cancel_upload(upload_id).unwrap();
+            serde_json::Value::Null
+        }
+        "upload.commit" => serde_json::to_value(effects.commit_upload(upload_id).unwrap()).unwrap(),
+        "integrity.verify" => {
+            // Complete the fixture import outside this command scope.
+            store.commit_upload(upload_id).unwrap();
+            serde_json::to_value(effects.verify_integrity(item_id).unwrap()).unwrap()
+        }
+        "cover.publish" => {
+            let mut png = std::io::Cursor::new(Vec::new());
+            image::RgbaImage::new(2, 2)
+                .write_to(&mut png, image::ImageFormat::Png)
+                .unwrap();
+            serde_json::to_value(
+                effects
+                    .publish_cover(
+                        item_id,
+                        AssetId::new(),
+                        Revision(1),
+                        png.get_ref(),
+                        "Cover".into(),
+                    )
+                    .unwrap(),
+            )
+            .unwrap()
+        }
+        _ => panic!("unknown operation"),
+    };
+    // The application has not called complete_command. Terminate at this exact gap.
+    println!("W2_EFFECT:{}", serde_json::to_string(&result).unwrap());
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    loop {
+        std::thread::park();
+    }
+}
+
+#[test]
+fn sigkill_receipt_effect_gap_replays_every_mutation_family() {
+    use std::io::BufRead;
+    let operations = [
+        "account.create",
+        "account.update",
+        "grant.update",
+        "activity.save",
+        "session.revoke",
+        "passkey.revoke",
+        "native_credential.revoke",
+        "account.default.reassign",
+        "projection.reindex",
+        "item.save",
+        "collection.create",
+        "work.save",
+        "edition.save",
+        "capture.save",
+        "upload.create",
+        "upload.cancel",
+        "upload.commit",
+        "integrity.verify",
+        "cover.publish",
+    ];
+    for operation in operations {
+        for early in [false, true] {
+            if early
+                && !matches!(
+                    operation,
+                    "item.save"
+                        | "collection.create"
+                        | "work.save"
+                        | "edition.save"
+                        | "capture.save"
+                )
+            {
+                continue;
+            }
+            let (root, store, actor, service, collection) = setup();
+            let saved = store.save(item(collection.id), Revision(0)).unwrap();
+            let upload = store
+                .create_upload(
+                    actor.user_id,
+                    saved.id,
+                    Revision(1),
+                    vec![UploadFile {
+                        name: "raw.bin".into(),
+                        bytes: ByteLength(3),
+                        sha256: None,
+                    }],
+                )
+                .unwrap();
+            store.upload_chunk(upload.id, 0, 0, b"raw").unwrap();
+            let target = store
+                .create_user("member", "a long test password", false)
+                .unwrap();
+            let (_, session) = store.issue_session(actor.user_id, "session").unwrap();
+            store
+                .insert_passkey(
+                    actor.user_id,
+                    "fixture-key",
+                    serde_json::json!({"synthetic":true}),
+                )
+                .unwrap();
+            let passkey = store.passkeys(actor.user_id).unwrap().remove(0).view.id;
+            let enrollment = store
+                .start_enrollment(actor.user_id, "native", "https://example.test")
+                .unwrap();
+            store
+                .approve_enrollment(actor.user_id, &enrollment.user_code)
+                .unwrap();
+            let native = store
+                .complete_enrollment(enrollment.id, &enrollment.completion_secret)
+                .unwrap()
+                .device_id;
+            std::fs::write(root.path().join("command.json"),serde_json::to_vec(&serde_json::json!({"user":actor.user_id,"target":target,"collection":collection.id,"item":saved.id,"upload":upload.id,"session":session.principal.device_id,"passkey":passkey,"native":native})).unwrap()).unwrap();
+            drop(service);
+            drop(store);
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "subprocess_command_receipt_worker",
+                    "--nocapture",
+                ])
+                .env("W2_RECEIPT_ROOT", root.path())
+                .env("W2_RECEIPT_OPERATION", operation)
+                .stdout(std::process::Stdio::piped());
+            if early {
+                command.env("W2_RECEIPT_EARLY", "1");
+            }
+            let mut child = command.spawn().unwrap();
+            let output = child.stdout.take().unwrap();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let reader = std::thread::spawn(move || {
+                for line in std::io::BufReader::new(output).lines() {
+                    let line = line.unwrap();
+                    if line.starts_with("W2_EFFECT:") || line.starts_with("P01_PHASE:") {
+                        sender.send(line).unwrap();
+                        return;
+                    }
+                }
+            });
+            let marker = receiver.recv_timeout(std::time::Duration::from_secs(30));
+            child.kill().unwrap();
+            child.wait().unwrap();
+            reader.join().unwrap();
+            let marker =
+                marker.unwrap_or_else(|error| panic!("{operation} early={early}: {error}"));
+            let expected: serde_json::Value = if early {
+                let private =
+                    rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+                let result: String = private
+                    .query_row(
+                        "SELECT result FROM command_outcomes WHERE operation=?",
+                        [operation],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                serde_json::from_str(&result).unwrap()
+            } else {
+                serde_json::from_str(marker.strip_prefix("W2_EFFECT:").unwrap()).unwrap()
+            };
+            let recovered =
+                Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+            let ReceiptDecision::Replay(actual) = recovered
+                .begin_command(actor.user_id, 1, operation, "crash-command", "digest")
+                .unwrap()
+            else {
+                panic!("{operation} early={early}: committed effect lost its receipt")
+            };
+            assert_eq!(actual, expected, "{operation} early={early}");
+            assert!(matches!(
+                recovered.begin_command(actor.user_id, 1, operation, "crash-command", "changed"),
+                Err(Error::IdempotencyConflict)
+            ));
+            if operation == "upload.commit" {
+                assert!(matches!(
+                    recovered.upload(upload.id).unwrap().state,
+                    JobState::Completed
+                ));
+            }
+        }
+    }
+}
+
+#[test]
+fn successful_command_replay_is_not_revalidated_against_later_revisions() {
+    let (_root, store, actor, service, collection) = setup();
+    let viewer = store
+        .create_user("viewer", "a long viewer password", false)
+        .unwrap();
+    let grant_key = command();
+    for _ in 0..2 {
+        service
+            .grant(
+                &test_authentication(&actor),
+                collection.id,
+                viewer,
+                Role::Viewer,
+                &grant_key,
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        store
+            .grant_for_user(collection.id, viewer)
+            .unwrap()
+            .unwrap()
+            .revision,
+        Revision(1)
+    );
+    let saved = store.save(item(collection.id), Revision(0)).unwrap();
+    let upload_key = command();
+    let files = vec![UploadFile {
+        name: "raw.bin".into(),
+        bytes: ByteLength(3),
+        sha256: None,
+    }];
+    let original = service
+        .create_upload(&actor, saved.id, Revision(1), files.clone(), &upload_key)
+        .unwrap();
+    let mut changed = saved.clone();
+    changed.title = "Later edit".into();
+    store.save(changed, Revision(1)).unwrap();
+    let replay = service
+        .create_upload(&actor, saved.id, Revision(1), files, &upload_key)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(original).unwrap(),
+        serde_json::to_value(replay).unwrap()
     );
 }

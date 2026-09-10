@@ -1,6 +1,6 @@
 # Handoff backlog
 
-Baseline: `98e9187`, 2026-09-09. Ticket status is recorded individually below; Wave 1 foundation work, including review corrections, is complete and later waves remain unstarted. Existing mechanisms alone are not evidence that a ticket is complete. This document is a proposed execution breakdown of the [accepted requirements](release-requirements.md), not a new product scope.
+Baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Wave 2 is complete, including review corrections and receipt/publication coordination; external qualification gates remain open.** Ticket status is recorded individually below; existing mechanisms alone are not evidence that a ticket is complete. The approved child sequence and TDD/review contract are in [the Wave 2 execution plan](wave-2-plan.md).
 
 ## How to use this backlog
 
@@ -89,6 +89,30 @@ Move shared command/authorization policy behind application services as identifi
 
 **Limit:** do not generate business logic into frontends. Split by service family if necessary, retaining one documented policy owner.
 
+Planned children (complete in order): [A04.1 DTO firewall/read services](wave-2-plan.md#a04--applicationapi-foundation), A04.2 command/mechanism service ports, A04.3 optimistic revisions/idempotency, and A04.4 generated contracts/Wave 1 compatibility. A04.2 and A04.4 have mandatory architecture and contract/security review checkpoints. All children, including review follow-up A04.5, are complete.
+
+**Root status (2026-09-09): complete; included in Wave 2.** All four children and the architecture/contract/security checkpoints pass. The generated contract, migration note, full repository gates, normal browser smoke, and local-setup browser smoke use only repository fixtures and temporary state.
+
+#### A04.1 — DTO firewall and authorized read services
+
+**Status (2026-09-09): complete; included in Wave 2.** Collection reads use a Principal-free port; CollectionService owns authorization/redaction and emits explicit collection, item, Capture, Specimen, and Evidence response shapes with effective permissions. Viewer JSON omits private fields and unavailable-module raw values structurally. Capture archive locators are absent for every role. A real temporary Store/archive HTTP test covers viewer bytes, curator fields, detailed-Evidence filtering, and an administrator without a grant. Owning tests, architecture/fmt/workspace/clippy gates, web check/build, server rebuild, and browser smoke pass.
+
+#### A04.2 — Application-owned command and mechanism service families
+
+**Status (2026-09-09): complete; included in Wave 2.** A04.2a–d and architecture review pass. Entity writes use bounded commands that cannot express server-owned files/Evidence/Assets/revisions/locators; media is an opaque reader capability; activity, import/job, administration, authentication, and passkey persistence use Principal-free Store ports. Inbox collection authorization precedes filesystem inventory. An architecture check rejects direct Store calls from HTTP/passkey source. Real archive/SQLite and HTTP tests cover command injection, service/HTTP upload ownership, private-asset visibility, role denial, retry/media ranges, and admin denial. Full Rust/web gates and browser smoke pass.
+
+#### A04.3 — Optimistic revisions and durable idempotency
+
+**Status (2026-09-09): complete; included in Wave 2.** Private SQLite schema v3 stores operation-scoped command receipts keyed by user/API major/idempotency key and a typed-request SHA-256 digest. Application mutations require a validated command context; authentication ceremonies, logout, upload chunks, and internal failure bookkeeping retain their explicit state-machine/offset semantics. Successful responses replay across restart, changed requests conflict, concurrent receipt claims have one executor, and validation/authorization/stale-revision failures abandon the claim. HTTP requires `Idempotency-Key` and returns stable `idempotency_conflict`/`command_in_progress` codes. Real SQLite/archive tests cover restart replay, concurrency, and stale publication.
+
+#### A04.4 — Generated OpenAPI/TypeScript contracts and Wave 1 compatibility
+
+**Status (2026-09-09): complete; included in Wave 2.** Runtime API composition now uses `utoipa-axum` route groups, which generate checked [OpenAPI v1](../api/openapi.v1.json) and [TypeScript types](../web/src/generated/api.ts). A temporary regeneration check detects either artifact drifting. The React application imports generated response/command types and no longer constructs response-shaped Items for saves. Every request body records the matching router body limit, and the contract/Swagger UI is not served. The deprecated Wave 1 `{item,expected_revision}` adapter compares canonical server-owned state before delegating editable fields and cannot publish Capture/Asset snapshots. Real HTTP tests cover route/schema completeness, absence of locator response fields, the unavailable public schema route, compatible legacy editing, and owned-field tampering. The contract/security review and all full A04 gates, including both browser smoke modes, pass. **Next child: P01.1.**
+
+#### A04.5 — Receipt/effect crash-window review
+
+**Status (2026-09-10): complete; included in Wave 2.** Explicit command-scoped adapters commit private effect/results in one SQLite transaction or prepare the exact response against an immutable filesystem publication marker. Private schema v7 adds command outcomes; startup settles committed responses before accepting writes, repairs upload bookkeeping, and removes completed artwork scratch. A real subprocess matrix terminates after effects across 19 mutation families and additionally at early archive commit points; every committed command replays the exact response and rejects changed payloads. Prepared partial files and interrupted journal replacements recover without weakening committed-byte checks.
+
 ## Onboarding, inventory and management
 
 ### U01 — Explain local setup and denied operations in the WebUI
@@ -105,13 +129,17 @@ Build on existing setup/doctor rather than replacing it. Add clear local-versus-
 
 ### U02 — Account, profile and grant administration
 
-**Routine after review of role operations · Dependencies:** A02, A04, S01. **Owner:** app authorization, private store, administration UI. **Start:** store `auth.rs`, app `grant`, web administration bundle.
+**Routine after review of role operations · Dependencies:** A02, A04, S01, S02.5. **Owner:** app authorization, private store, administration UI. **Start:** store `auth.rs`, app `grant`, web administration bundle.
 
 Implement account/profile listing/editing and collection grant assignment/removal, with explicit permitted actions and useful empty states. Expose effective collection permissions for UI affordances through authorized queries. Hide account switching in single-user mode while retaining device security.
 
 **Acceptance:** owner/curator/viewer and server-admin cases are exercised; server administration does not silently bypass collection policy. A viewer cannot curate via direct API. Grant removal takes effect on subsequent requests. Last-administrator/owner removal follows S01's reviewed recovery rules and cannot accidentally strand access.
 
 **Limit:** credential recovery/revocation ceremonies belong to S02/S03; UI hiding is not authorization.
+
+Children: [U02.1 account/profile APIs and UI, U02.2 grant APIs and owner UI, and U02.3 effective permissions/security controls](wave-2-plan.md#u02--account-profile-and-grant-administration). U02.3 additionally depends on S03.3.
+
+**Status (2026-09-10): complete; included in Wave 2.** Revisioned account/profile/default-user APIs and UI preserve disabled identities, enforce recent authentication and surface last-admin/default conflicts. Collection owners can list, add, revise, and remove exact-username grants; disabled users cannot receive new grants, removal applies on the next request, and transactionally protected last-owner races fail. Account security screens list/revoke sessions, passkeys, and native devices and display recovery codes once. All curation/access affordances use `EffectivePermissions`, while direct API tests prove UI hiding is not authorization. **External usability review remains part of W2.R.**
 
 ### U03 — Physical inventory lifecycle editing
 
@@ -139,7 +167,7 @@ Add photos/scans and visibility controls using existing original/thumbnail stora
 
 **Gate · Dependencies:** none. **Owner:** application/security design. **Start:** server middleware/passkeys, store auth, client pairing, exposure tests.
 
-**Status (2026-09-09): complete; included in the Wave 1 delivery.** [Security contracts](decisions/security.md) records trust/ingress boundaries, distinct administrator and collection authority, five-minute recent authentication, recovery-code/local-recovery rules, last-admin/owner refusal, passkey CAS, Exact-Origin/native credential rules, initial rate buckets, current defects, and attack-test ownership. S02-S04 remain unimplemented.
+**Status (2026-09-09): complete; included in the Wave 1 delivery.** [Security contracts](decisions/security.md) records trust/ingress boundaries, distinct administrator and collection authority, five-minute recent authentication, recovery-code/local-recovery rules, last-admin/owner refusal, passkey CAS, Exact-Origin/native credential rules, initial rate buckets, and attack-test ownership. S02/S03 are now implemented; S04 remains unimplemented.
 
 Write `docs/decisions/security.md` with trust boundaries, principal/role and ingress matrix, enrollment binding, recent-authentication policy, recovery-code lifecycle, last-admin recovery, passkey counter/concurrency handling, session/credential storage and revocation scope. Audit CSRF, rate limits, upload/provider resource abuse, log redaction and proxy behavior against code. List concrete defects separately from hypotheses.
 
@@ -157,6 +185,18 @@ Implement the reviewed recent-authentication gates, recovery-code creation/use/r
 
 **Limit:** no change to collection roles as an undocumented recovery side effect.
 
+Planned children: [S02.1 private auth model/migration, S02.2 Origin/freshness/rate limits, S02.3 recovery/session lifecycle, S02.4 passkey CAS/inventory, and S02.5 authority guards/local recovery](wave-2-plan.md#s02--credential-lifecycle-and-recovery).
+
+**Root status (2026-09-10): complete; included in Wave 2; independent security/hardware review pending.** All five children pass deterministic real-SQLite/application/HTTP tests. No hardware password-manager or remote browser-trusted HTTPS qualification is claimed.
+
+#### S02.1 — Private auth model, clock, lock, and v5 migration
+
+**Status (2026-09-10): complete; included in Wave 2.** Core now has distinct Session, Passkey, Enrollment, and NativeCredential IDs; application auth models distinguish credential kind and authentication instant. Store construction accepts an injected wall/monotonic clock and exclusively locks private state independently of the archive. Incremental private schema v5 adds enabled/revisioned account profiles and grants, explicit browser sessions with non-fresh migrated authentication instants, revisioned/labeled passkeys with stable migrated IDs, recovery batches/codes, and redacted security-audit storage. The committed v2 fixture proves every existing row survives and no session becomes a native credential.
+
+#### S02.2–S02.5 — Browser defenses, recovery, credential inventory, and authority guards
+
+**Status (2026-09-10): complete; included in Wave 2.** Exact normalized Origin is mandatory for browser ceremonies/cookie mutations; forwarded addresses never choose rate keys, and injected clocks cover the exact five-minute freshness and account/peer/global bucket boundaries. Ten-code 160-bit recovery batches are hash-only, replacement and concurrent consumption are atomic, successful recovery replaces the password/revokes browser sessions/issues one fresh session, and disabled accounts cannot recover online. Passkey inventory/revocation and counter/session CAS fail stale assertions closed. Concurrent account/grant changes cannot remove the last enabled administrator or owner; disabling the default requires reassignment. Explicit stopped-server local recovery holds the private lock, revokes all credential kinds, audits, and preserves grants/administrator state.
+
 ### S03 — Browser-mediated device enrollment
 
 **Review · Dependencies:** S01, S02, A04. **Owner:** auth application services, private device state, HTTP enrollment, client credential adapter.
@@ -166,6 +206,10 @@ Implement bounded, expiring, single-use enrollment bound to the requesting devic
 **Acceptance:** replay, cross-device completion, wrong-user approval and expired enrollment fail; sign-in remains reachable on public client ingress with management off; a paired client authenticates over an enrolled alternate TLS route. Secrets do not enter URLs/logs or archive exports.
 
 **Limit:** manual enrollment first; discovery is C02, key rotation S04. No unauthenticated identity response counts as trusted pairing.
+
+Children: [S03.1 enrollment persistence/state, S03.2 browser approval/native transport, and S03.3 client credential/TLS integration](wave-2-plan.md#s03--browser-mediated-native-enrollment).
+
+**Status (2026-09-10): complete; included in Wave 2; protocol/platform review pending.** Private schema v6 stores expiring targeted enrollment, hashed completion secrets, terminal phases, revisioned native devices, and credential hashes. Wrong-user approval, wrong-secret/cross-device completion, expiry, cancellation, replay, simultaneous completion, revocation, and plaintext scanning are permanent tests. Client-surface bootstrap endpoints grant no authority before same-user recent browser approval; only native-table lookup selects bearer authentication and `x-collector-client` cannot issue or authenticate credentials. `collector-client` supplies the secure-storage port, validates Pairing/server identity and enrolled certificates, refuses redirects/cross-origin credential delivery, and the LAN TLS integration performs the complete enrollment/persist/authenticated-range/revocation path. A production macOS secure-storage adapter remains C01/C03 external work.
 
 ### S04 — Authenticated local TLS identity rotation
 
@@ -181,6 +225,8 @@ Implement a reviewed rotation protocol covering authenticated old-to-new identit
 
 ### P01 — Durable archive publication and recovery gaps
 
+**Status (2026-09-10): implemented; included in Wave 2; independent target-Linux storage review pending.** P01.1–P01.6 are complete with real archive/SQLite, deterministic fault, and subprocess-termination coverage. The remaining external qualification is explicitly not a power-loss/NAS certification.
+
 **Review · Dependencies:** A01, A02, A04. **Owner:** store transaction adapter; application transaction ports. **Start:** store publication/reindex and archive tests.
 
 Implement A01's reviewed evidence and transaction design, including collection manifest/grant crash gaps, payload publication, projection commits, revisions/tombstones and pre-write recovery. Preserve baseline archives through a versioned migration.
@@ -188,6 +234,32 @@ Implement A01's reviewed evidence and transaction design, including collection m
 **Acceptance:** fault injection at staging, durable-record write, payload/manifest publication and projection/grant update recovers deterministically; no accepted write references partial bytes; stale revision conflicts do not publish; process termination/restart preserves overrides/loans/evidence. Unknown data and IDs survive directory renames/reindex. Archive-only recovery requires explicit grants.
 
 **Limit:** one writer, no replication or cross-collection deduplication. A passing ordinary save test is insufficient.
+
+Planned children: [P01.1 Wave 1 fixture/schema 3, P01.2 journal kernel, P01.3 compatible migration, P01.4 entity/Evidence/Asset publication, P01.5 payload publication/termination, and P01.6 collection-grant recovery/write barrier](wave-2-plan.md#p01--durable-archive-publication).
+
+#### P01.1 — Wave 1 format fixture and archive-schema-3 records
+
+**Status (2026-09-09): complete; included in Wave 2.** A reproducible example materializes a synthetic schema-2 archive from Wave 1 behavior, including a standalone Capture newer than its embedded compatibility copy. A paired private-v2 SQL fixture covers accounts, sessions, passkeys, grants, settings, activity, and jobs without personal data. Schema-3 item, Asset, standalone Evidence, tombstone, legacy-locator, and revision-envelope shapes are defined. Real archive/SQLite tests prove upgrade opening does not alter existing archive bytes, private rows survive the incremental v3 migration, and the standalone Capture remains authoritative. **Next child: P01.2.**
+
+#### P01.2 — Durable journal and recovery kernel
+
+**Status (2026-09-09): complete; included in Wave 2.** Archive publication journals validate adjacent revisions, lowercase SHA-256 digests, and strictly normal relative paths. Journal writes and phase replacements fsync their file and parent directory. Startup inspects actual staged/published bytes, classifies lagging journals, retains and reports unknown staging, cleans completed journals, and refuses corrupt known transactions before migrations or writes. Private SQLite advances incrementally to v4 with a publication-recovery table. Named fault points cover every durable phase with real temporary archive files and deterministic injection; subprocess termination is intentionally P01.5. **Next child: P01.3.**
+
+#### P01.3 — Compatible schema-2-to-3 migration and projection rebuild
+
+**Status (2026-09-09): complete; included in Wave 2.** The additive migration writes deterministic schema-3 Item and Capture sidecars, standalone immutable Evidence, revisioned collection-level Asset metadata, legacy payload locators, per-Item checkpoints, and a last completion marker. Canonical Item records exclude Capture/Asset compatibility vectors, and the portable Capture domain no longer contains archive paths. Catalog SQLite advances rebuildably to v3 with standalone Evidence/Asset projections. Opening the committed Wave 1 fixture preserves every pre-existing byte, all private rows, raw envelopes, manual metadata, loans, artwork, evidence, and IDs; the newer standalone Capture remains authoritative. Conflicting duplicate Evidence IDs block completion and projection creation. **Next child: P01.4.**
+
+#### P01.4 — Transactional entity, Evidence, Asset, and projection publication
+
+**Status (2026-09-09): complete; included in Wave 2.** Normal Item, Work, Edition, Capture, standalone Evidence, and Asset revisions now publish as schema-3 envelopes through the durable phase journal. New cover payloads use deterministic command-bound Asset IDs and collection-level payload paths in the same journal; migrated item-local artwork remains reachable through verified legacy locators. Item envelopes reference immutable Evidence by ID/digest rather than copying bodies; compatibility Capture/Asset views are projections only. Evidence projection uses exact-content conflict checks instead of `INSERT OR IGNORE`. Startup aborts pre-commit journals, rebuilds projections for committed revisions, and then durably completes them. Real fault injection at every phase proves pre-command or exactly-one post-command recovery, and targeted projections equal a full reindex. Reverification produces new standalone Evidence bodies and reference-only Item revisions. **Next child: P01.5.**
+
+#### P01.5 — Transactional payload/import publication with process termination
+
+**Status (2026-09-10): complete; included in Wave 2.** Resumable private upload chunks remain separate from archive publication. Commit uses the durable upload/Job identity as its transaction, copies and fsyncs verified bytes into archive-local staging, publishes payloads, commits the standalone Capture revision, repairs its projection, then publishes deterministic Evidence and the Item reference. Pre-Capture recovery removes only hash-verified known payload artifacts; post-Capture recovery preserves and completes the same Capture/Representation/Evidence identities. Real child test processes block on pipe-visible phase markers and are killed at all six phases without timing sleeps; every retry yields one complete capture and retained source chunks. **Next child: P01.6.**
+
+#### P01.6 — Collection/owner-grant recovery and startup write barrier
+
+**Status (2026-09-10): complete; included in Wave 2.** Collection IDs are deterministically bound to the authorized idempotency scope before the effect. A private v4 recovery row containing the intended collection/owner is committed before archive mutation. Startup under the archive lock migrates private state, reconciles collection recovery, resolves prepared command outcomes and releases uncommitted claims, performs archive migrations/reindex, and only then returns a writable Store. A valid committed collection gains exactly its intended owner; absent archive commit aborts the recovery; malformed known state fails closed. Controlled faults and killed child processes cover every collection boundary, and archive-only recovery receives no grants. **P01 is complete pending its independent Linux/filesystem review. Next child: S02.1.**
 
 ### P02 — Durable job scheduler and cancellation
 
@@ -384,6 +456,14 @@ Add server enrollment, music browsing and authorized playback through an adapter
 **Limit:** product merger or replacement of Trash Amp is not required by this ticket.
 
 ## Migration and release validation
+
+### W2.R — Wave 2 integration and independent review
+
+**Review · Dependencies:** P01.6, S03.3, U02.3. **Owner:** cross-layer validation and documentation.
+
+Run the approved Wave 2 migration, attack, restart, browser, secret-scan, and independent-review matrix; reconcile architecture, implementation status, validation, security decisions, and API migration documentation. See [the bounded W2.R contract](wave-2-plan.md#u02--account-profile-and-grant-administration).
+
+**Status (2026-09-10): complete with review corrections; included in Wave 2.** The independent source review found seven issues, now corrected: interrupted staging/journal recovery, disable/re-enable credential resurrection, misplaced recovery-code revocation, stale passkey snapshot rebasing, receipt/effect crash coordination, grant revision reuse, and storage-owned security policy. Permanent tests cover these behaviors, the 19-family process-kill matrix, and the real WebAuthn browser-handler race. Both normal and local-setup Chromium smoke flows pass using temporary servers/profiles outside the sandbox. Target-Linux termination/filesystem and hardware/browser/platform qualifications remain external release gates; local process-kill tests are not power-loss/NAS certification.
 
 ### R01 — One-way Retro Junk archive migration
 

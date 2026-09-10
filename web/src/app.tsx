@@ -1,6 +1,12 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import type {Collection,Features,Item,Page,Principal} from './types';
+import type {components} from './generated/api';
+
+type Collection=components['schemas']['PresentedCollection'];
+type Features=components['schemas']['FeaturesResponse'];
+type Item=components['schemas']['PresentedItem'];
+type Page=components['schemas']['Page_PresentedItem'];
+type Principal=components['schemas']['Principal'];
 
 export {React as default,useState,useEffect};
 
@@ -21,7 +27,14 @@ export function requestErrorMessage(error:unknown,forbiddenMessage?:string):stri
 }
 
 export async function api<T=unknown>(path:string,init:RequestInit={}):Promise<T>{
- const response=await fetch(`/api/v1${path}`,{credentials:'same-origin',...init,headers:{...(init.body&&typeof init.body==='string'?{'Content-Type':'application/json'}:{}),...init.headers}});
+ const method=(init.method||'GET').toUpperCase();
+ const needsCommandKey=!['GET','HEAD','OPTIONS'].includes(method)&&!path.startsWith('/auth/')&&!/^\/uploads\/[^/]+\/files\//.test(path);
+ const headers=new Headers(init.headers);
+ if(init.body&&typeof init.body==='string'&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');
+ if(needsCommandKey&&!headers.has('Idempotency-Key'))headers.set('Idempotency-Key',crypto.randomUUID());
+ const request:RequestInit={credentials:'same-origin',...init,headers};
+ let response:Response;
+ try{response=await fetch(`/api/v1${path}`,request);}catch(error){if(!needsCommandKey)throw error;response=await fetch(`/api/v1${path}`,request);}
  if(!response.ok){
   let code=`http_${response.status}`;let message=`Request failed (${response.status})`;
   try{const body=await response.json() as {error?:{code?:string;message?:string}};code=body.error?.code||code;message=body.error?.message||message;}catch{}
@@ -74,12 +87,12 @@ function App(){
  useEffect(()=>{let active=true;if(actor)api<Collection[]>('/collections').then(value=>{if(active){setCollections(value);if(collection&&!value.some(c=>c.id===collection))setCollection('');}}).catch(e=>{if(active)handleFailure(e);});return()=>{active=false;};},[actor,refresh]);
  useEffect(()=>{if(!actor)return;const current=++generation.current;setBusy(true);const timer=setTimeout(()=>{
   const query=new URLSearchParams({limit:'50'});if(collection)query.set('collection_id',collection);if(search)query.set('search',search);
-  api<Page>(`/items?${query}`).then(page=>{if(current===generation.current){setItems(page.items);setCursor(page.next_cursor);}}).catch(e=>{if(current===generation.current)handleFailure(e);}).finally(()=>{if(current===generation.current)setBusy(false);});
+  api<Page>(`/items?${query}`).then(page=>{if(current===generation.current){setItems(page.items);setCursor(page.next_cursor??null);}}).catch(e=>{if(current===generation.current)handleFailure(e);}).finally(()=>{if(current===generation.current)setBusy(false);});
  },180);return()=>{clearTimeout(timer);generation.current++;};},[actor,collection,search,refresh]);
 
- async function loadMore(){if(!cursor)return;const current=generation.current;setBusy(true);const query=new URLSearchParams({limit:'50',cursor});if(collection)query.set('collection_id',collection);if(search)query.set('search',search);try{const page=await api<Page>(`/items?${query}`);if(current===generation.current){setItems(previous=>[...previous,...page.items]);setCursor(page.next_cursor);}}catch(e){if(current===generation.current)handleFailure(e);}finally{if(current===generation.current)setBusy(false);}}
- async function openManagement(kind:'curation'|'administration',adding=false){
-  try{const module=await import(/* @vite-ignore */ `/${kind}.js`);setManagement(React.createElement(module.default,{collections,selected:adding?undefined:selected,onClose:()=>{setManagement(null);setRefresh(n=>n+1);},onSaved:(item:Item)=>{setSelected(item);setRefresh(n=>n+1);},onSessionExpired:()=>clearSession('Your session expired or was revoked. Sign in again; the failed operation was not saved.')}));}
+ async function loadMore(){if(!cursor)return;const current=generation.current;setBusy(true);const query=new URLSearchParams({limit:'50',cursor});if(collection)query.set('collection_id',collection);if(search)query.set('search',search);try{const page=await api<Page>(`/items?${query}`);if(current===generation.current){setItems(previous=>[...previous,...page.items]);setCursor(page.next_cursor??null);}}catch(e){if(current===generation.current)handleFailure(e);}finally{if(current===generation.current)setBusy(false);}}
+ async function openManagement(kind:'curation'|'administration'|'security',adding=false){
+  try{const module=await import(/* @vite-ignore */ `/${kind}.js`);setManagement(React.createElement(module.default,{collections:kind==='curation'?collections.filter(value=>value.effective_permissions.can_curate):collections,selected:adding?undefined:selected,onClose:()=>{setManagement(null);setRefresh(n=>n+1);},onSaved:(item:Item)=>{setSelected(item);setRefresh(n=>n+1);},onSessionExpired:()=>clearSession('Your session expired or was revoked. Sign in again; the failed operation was not saved.')}));}
   catch(e){setError(`Management tools could not be opened at this address. ${requestErrorMessage(e)}`);}
  }
  async function signOut(){
@@ -92,13 +105,13 @@ function App(){
  const clientOnly=!!features&&!features.curation&&!features.administration;
  const noCollections=collections.length===0;
  const selectedCollection=collections.find(c=>c.id===collection);
- return <div className="shell"><aside className="sidebar"><a className="brand" href="/">Junk<br/>Collector<span className="brand-mark">✳</span></a><p className="sidebar-note">Keep the collection.<br/>Keep the evidence.</p><nav aria-label="Collections"><button className={!collection?'active':''} onClick={()=>setCollection('')}>All collections</button>{collections.map(c=><button key={c.id} className={collection===c.id?'active':''} onClick={()=>setCollection(c.id)}>{c.name}</button>)}</nav><div className="sidebar-bottom">{features?.passkeys&&<button onClick={async()=>{try{await registerPasskey();setNotice('Passkey registered. You can use it on the next sign-in.');}catch(e){handleFailure(e);}}}>Add a passkey</button>}{features?.curation&&!noCollections&&<button onClick={()=>openManagement('curation')}>Curate collection</button>}{features?.administration&&actor.administrator&&<button onClick={()=>openManagement('administration')}>Administration</button>}<button onClick={signOut}>Sign out</button></div></aside>
+ return <div className="shell"><aside className="sidebar"><a className="brand" href="/">Junk<br/>Collector<span className="brand-mark">✳</span></a><p className="sidebar-note">Keep the collection.<br/>Keep the evidence.</p><nav aria-label="Collections"><button className={!collection?'active':''} onClick={()=>setCollection('')}>All collections</button>{collections.map(c=><button key={c.id} className={collection===c.id?'active':''} onClick={()=>setCollection(c.id)}>{c.name}</button>)}</nav><div className="sidebar-bottom">{features?.passkeys&&<button onClick={async()=>{try{await registerPasskey();setNotice('Passkey registered. You can use it on the next sign-in.');}catch(e){handleFailure(e);}}}>Add a passkey</button>}<button onClick={()=>openManagement('security')}>Account &amp; security</button>{features?.curation&&collections.some(value=>value.effective_permissions.can_curate)&&<button onClick={()=>openManagement('curation')}>Curate collection</button>}{features?.administration&&actor.administrator&&<button onClick={()=>openManagement('administration')}>Administration</button>}<button onClick={signOut}>Sign out</button></div></aside>
  <main><header className="page-heading"><div><p className="eyebrow">Your archive</p><h1>{selectedCollection?.name||'Collection'}</h1></div><span className="collection-count">{items.length}{cursor?'+':''} {items.length===1&&!cursor?'entry':'entries'}</span></header>
  {clientOnly&&<div className="notice" role="note"><strong>Client access only at this address.</strong> You can browse and play permitted media here. To create collections or change inventory, open the private management address printed by the server. Never publish that private listener through a public tunnel.</div>}
- <div className="toolbar"><label className="search"><span aria-hidden="true">⌕</span><input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Find a title, artist, or platform" aria-label="Search collection"/></label>{features?.curation&&!noCollections&&<button className="primary" onClick={()=>openManagement('curation',true)}>Add item</button>}</div>
+ <div className="toolbar"><label className="search"><span aria-hidden="true">⌕</span><input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Find a title, artist, or platform" aria-label="Search collection"/></label>{features?.curation&&collections.some(value=>value.effective_permissions.can_curate)&&<button className="primary" onClick={()=>openManagement('curation',true)}>Add item</button>}</div>
  {notice&&<div role="status" className="notice">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss notice">×</button></div>}{error&&<div role="alert" className="notice error">{error}<button onClick={()=>setError('')} aria-label="Dismiss error">×</button></div>}
  <div className="browser"><section aria-label="Collection entries" aria-busy={busy}><div className="list-heading"><span>Title / edition</span><span>Identity</span></div>{!items.length&&!busy?<EmptyState search={search} noCollections={noCollections} canAdminister={!!features?.administration&&actor.administrator} canCurate={!!features?.curation} onCreate={()=>openManagement('administration')}/>:items.map(item=><button className={`collection-row ${selected?.id===item.id?'selected':''}`} key={item.id} onClick={()=>setSelected(item)}><Artwork item={item}/><span className="row-text"><strong>{item.title}</strong><span>{item.subtitle||'Edition details not yet added'}</span><small>{item.domain.module==='org.junk.music'?'Music CD':item.domain.module==='org.junk.games'?'Video game':item.domain.module}{item.wishlist?' · Wishlist':''}</small></span><span className={`identity ${item.identity}`}>{item.identity==='tentative'?'Tentative match':item.identity==='unidentified'?'Unidentified':item.identity==='confirmed'?'Confirmed identity':'Selected identity'}</span></button>)}{cursor&&<button className="load-more" disabled={busy} onClick={loadMore}>Load more</button>}{busy&&<p role="status" className="muted">Loading entries…</p>}</section>
- {selected&&<Detail item={selected} curation={!!features?.curation} onEdit={()=>openManagement('curation')} onClose={()=>setSelected(undefined)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>}</div></main>{management}</div>;
+ {selected&&<Detail item={selected} curation={!!features?.curation&&!!collections.find(value=>value.id===selected.collection_id)?.effective_permissions.can_curate} onEdit={()=>openManagement('curation')} onClose={()=>setSelected(undefined)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>}</div></main>{management}</div>;
 }
 
 function EmptyState({search,noCollections,canAdminister,canCurate,onCreate}:{search:string;noCollections:boolean;canAdminister:boolean;canCurate:boolean;onCreate:()=>void}){

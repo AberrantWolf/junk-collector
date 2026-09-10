@@ -25,6 +25,9 @@ toml = "0.8"
 rusqlite = { version = "0.33", features = ["bundled"] }
 anyhow = "1"
 tempfile = "3"
+utoipa = { version = "5", features = ["chrono", "uuid"] }
+utoipa-axum = "0.2"
+url = "2"
 
 [profile.release]
 lto = "thin"

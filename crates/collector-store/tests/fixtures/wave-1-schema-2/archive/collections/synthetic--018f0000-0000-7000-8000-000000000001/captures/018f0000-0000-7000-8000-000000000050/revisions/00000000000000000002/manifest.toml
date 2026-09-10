@@ -1,0 +1,6 @@
+schema_version = 2
+entity_type = "capture"
+entity_id = "018f0000-0000-7000-8000-000000000050"
+collection_id = "018f0000-0000-7000-8000-000000000001"
+revision = 2
+record_sha256 = "2b5640f70f1eaf428972d1ff3643e160d4e97b3aed182fc83c0d59ef4a9245dc"

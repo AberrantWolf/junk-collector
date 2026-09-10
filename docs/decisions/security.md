@@ -1,8 +1,7 @@
 # Security, recovery, and enrollment contract (S01)
 
-Status: accepted design gate, 2026-09-09. Implementation is assigned to S02, S03,
-S04, and R03. This decision does not make the current authentication mechanisms
-conformant.
+Status: accepted design gate, 2026-09-09. S02 and S03 were implemented on
+2026-09-10; S04 certificate rotation and R03 external qualification remain open.
 
 ## Trust boundaries and ingress
 
@@ -41,9 +40,9 @@ old; ordinary session activity does not refresh that instant:
 - disabling an account; and
 - rotating server TLS identity.
 
-Collection curation and ordinary owner-authorized grant changes use their normal
-role checks and do not require recent authentication. Refusing last-owner removal
-is nevertheless mandatory. Reauthentication produces a narrow, time-bounded proof
+Collection curation uses its normal role checks. Grant changes require both owner
+authority and recent authentication because they alter durable access. Refusing
+last-owner removal is mandatory. Reauthentication produces a narrow, time-bounded proof
 for the requested account; it does not mint a more privileged role.
 
 ## Recovery codes and local recovery
@@ -53,7 +52,9 @@ Codes are displayed once. The database stores only SHA-256 hashes plus batch ID,
 creation time, optional consumption time, and audit metadata. Replacement and
 consumption are transactions: replacement invalidates the prior batch atomically;
 compare-and-swap consumption makes concurrent replay yield at most one success.
-Successful recovery revokes existing browser sessions before issuing a new one.
+Successful online recovery atomically replaces the password, invalidates the
+active batch, revokes existing browser sessions, and issues one fresh browser
+session. Native credentials and collection grants are unchanged.
 
 Local recovery is a server-stopped, exclusive CLI operation against explicitly
 selected private state and an explicit `UserId`. It resets credentials, revokes all
@@ -72,12 +73,16 @@ counter follow the WebAuthn library's counter semantics, but bypassing the CAS i
 not permitted.
 
 Browser login, passkey registration/authentication ceremonies, and every
-cookie-authenticated mutation require an exact `Origin` match. A missing `Origin`
-is rejected for cookie and browser-ceremony requests. It is accepted only with a
-verified paired-native credential; a caller-supplied header cannot select native
-semantics. Browser sessions and native credentials have separate tables/types,
-labels, expiration and revocation. Native secrets are returned once at enrollment
-and stored by a platform secure-storage adapter, never in the portable archive.
+cookie-authenticated mutation require an exact `Origin` match. Missing, `null`,
+malformed, sibling-host, and alternate-port origins are rejected. Missing Origin
+is accepted for an authenticated paired-native request and for the narrow native
+enrollment start/complete bootstrap protocol. Bootstrap requests grant no
+authority before same-user recent browser approval and completion requires the
+server-generated high-entropy secret whose hash is stored privately; a
+caller-supplied header cannot select native semantics. Browser sessions and native
+credentials have separate tables/types, labels, expiration and revocation. Native
+secrets are returned once at enrollment and stored by a platform secure-storage
+adapter, never in the portable archive.
 
 Chromium's localhost treatment permits the tested local Secure-cookie workflow.
 That is a qualified onboarding path, not a promise for Safari or every embedded
@@ -100,30 +105,22 @@ limits. Logs contain stable error categories and opaque IDs, not passwords,
 recovery codes, bearer credentials, cookies, WebAuthn challenges, provider secrets,
 filesystem payload paths, or raw credential-bearing request bodies.
 
-## Current-code audit and assigned defects
+## Implemented controls and remaining qualification
 
-The following are observed defects, not hypothetical risks:
+S02/S03 now implement recent-authentication proof, recovery-code lifecycle,
+transactional last-administrator/owner refusal, passkey counter/session CAS,
+account/peer/global browser and enrollment rate buckets, exact transport-aware
+Origin handling, explicit local recovery, and browser-approved native enrollment.
+The former `x-collector-client: native` issuance path is removed; only successful
+lookup in the native-credential table selects native authentication. Public/private
+routes remain separately composed, forwarded headers do not infer trust, cookies
+are Secure/HttpOnly/SameSite=Strict, and upload/image/range bounds remain enforced.
 
-- There is no recent-authentication proof, recovery-code lifecycle, last-admin or
-  last-owner guard, or native enrollment implementation. S02 owns the first four;
-  S03 owns enrollment.
-- Passkey counters are updated by a read/modify/write sequence and can lose a
-  concurrent update. S02 owns the transactional CAS.
-- Password limiting is global and process-local, and passkey challenge creation has
-  no equivalent account/peer buckets. S02 owns browser limits; S03 adds enrollment
-  limits; R03 qualifies load behavior.
-- `x-collector-client: native` currently asks login to issue a bearer token. It is
-  caller-selected and is not a paired-device credential. S03 replaces this path;
-  it must not be treated as proof in the interim.
-- Missing-Origin handling is coupled to the presence of a cookie rather than an
-  authenticated transport type. S02 replaces it with the rules above.
-- Local password reset revokes sessions but does not implement the complete local
-  recovery revocation/audit contract. S02 owns it.
-
-Existing positive properties remain requirements: public/private routes are
-composed separately, forwarded headers do not infer trust, cookies are Secure,
-HttpOnly and SameSite=Strict, and upload/image/range bounds exist. Their presence
-does not close the defects above.
+The rate buckets are intentionally process-local and reset on restart. A production
+native secure-storage implementation, real password-manager/hardware passkey runs,
+browser-trusted remote HTTPS, independent security/protocol review, authenticated
+TLS identity rotation, and deployment/load qualification remain external or later
+ticket gates. These are not implied by virtual-authenticator or loopback tests.
 
 ## Attack-test assignments
 
@@ -138,3 +135,9 @@ All tests use temporary private state and synthetic credentials. Hardware passwo
 managers, remote browser-trusted HTTPS, and deployment/load gates are recorded as
 external qualifications when unavailable; a virtual authenticator alone is not a
 release security certification.
+
+## Wave 2 review boundary corrections
+
+Application security policies operate on stable account/grant snapshots gathered within the adapter's transaction. Disable, recovery-code replacement, password recovery, and local recovery each return an explicit revocation set; adapters apply that set atomically. Disabling does not merely rely on an enabled-account join: it marks native credentials revoked and cancels pending enrollments, so re-enabling cannot restore them. Replacement recovery codes only invalidate previous recovery batches.
+
+Passkey ceremony state includes the original stored credential revision and record. The final CAS uses that snapshot, never a post-verification reload; a browser test completes two overlapping ceremonies in reverse order and rejects the stale one. Persistent grant revision counters prevent removal/recreation from accepting an old optimistic revision.

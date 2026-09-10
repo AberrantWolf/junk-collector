@@ -301,7 +301,10 @@ pub(crate) fn migrate_schema_one(archive: &Path) -> Result<()> {
                 .filter(|item| item.collection_id == collection.id)
                 .cloned()
                 .collect(),
-            captures: super::read_latest_records(&collection_dir.join("captures"), collection.id)?,
+            captures: super::migration_v3::read_captures(&collection_dir, collection.id)?
+                .into_iter()
+                .map(|record| record.capture)
+                .collect(),
             assets: latest_items
                 .values()
                 .filter(|item| item.collection_id == collection.id)
@@ -586,7 +589,7 @@ fn claim_owner<K: Ord + Copy>(
     owners.entry(id).or_insert(collection);
     Ok(())
 }
-fn write_immutable(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_immutable(path: &Path, bytes: &[u8]) -> Result<()> {
     if path.exists() {
         if fs::read(path).map_err(storage)? == bytes {
             return Ok(());
@@ -601,7 +604,7 @@ fn write_immutable(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// Write and sync a sibling temporary file before publishing its name. Callers
 /// decide whether the destination is an uncommitted output or immutable checkpoint.
-fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| Error::Storage("migration output has no parent".into()))?;

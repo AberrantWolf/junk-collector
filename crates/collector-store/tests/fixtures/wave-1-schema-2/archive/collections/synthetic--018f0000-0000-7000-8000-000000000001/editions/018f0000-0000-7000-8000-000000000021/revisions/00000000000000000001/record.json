@@ -1,0 +1,18 @@
+{
+  "id": "018f0000-0000-7000-8000-000000000021",
+  "collection_id": "018f0000-0000-7000-8000-000000000001",
+  "revision": 1,
+  "work_id": "018f0000-0000-7000-8000-000000000020",
+  "provisional": true,
+  "title": "",
+  "expected_components": [],
+  "identifiers": [],
+  "migration_provenance": [
+    {
+      "item_id": "018f0000-0000-7000-8000-000000000010",
+      "legacy_field": "edition_id"
+    }
+  ],
+  "deleted": false,
+  "updated_at": "2024-01-01T00:00:00Z"
+}

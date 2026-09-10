@@ -2,21 +2,193 @@
 use collector_core::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EnrolledCredential {
+    pub server_id: ServerId,
+    pub credential_id: NativeCredentialId,
+    pub credential: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub pairing: Pairing,
+}
+
+/// Platform clients implement this port with Keychain, Credential Manager, or
+/// an equivalent OS-protected secret store. Core client code never chooses a
+/// filesystem location for bearer credentials.
+pub trait NativeCredentialStorage: Send + Sync {
+    fn save(&self, credential: &EnrolledCredential) -> Result<()>;
+    fn load(&self, server: ServerId) -> Result<Option<EnrolledCredential>>;
+    fn remove(&self, server: ServerId) -> Result<()>;
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct EnrollmentStart {
+    pub id: EnrollmentId,
+    pub completion_secret: String,
+    pub user_code: String,
+    pub verification_url: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub struct PendingEnrollment {
+    base_url: Url,
+    expected_server: ServerId,
+    pub start: EnrollmentStart,
+}
+
+#[derive(Deserialize)]
+struct Identity {
+    server_id: ServerId,
+}
+
+#[derive(Deserialize)]
+struct CompletedEnrollment {
+    device_id: NativeCredentialId,
+    credential: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    pairing: Pairing,
+}
+
+impl PendingEnrollment {
+    pub async fn start(
+        client: &reqwest::Client,
+        base_url: Url,
+        username: Option<&str>,
+        device_name: &str,
+    ) -> Result<Self> {
+        if base_url.scheme() != "https" || base_url.host_str().is_none() {
+            return Err(Error::Invalid(
+                "enrollment requires an HTTPS server URL".into(),
+            ));
+        }
+        let identity: Identity = client
+            .get(base_url.join("api/v1/identity").map_err(invalid_url)?)
+            .send()
+            .await
+            .map_err(client_error)?
+            .error_for_status()
+            .map_err(client_error)?
+            .json()
+            .await
+            .map_err(client_error)?;
+        let start = client
+            .post(
+                base_url
+                    .join("api/v1/enrollments/start")
+                    .map_err(invalid_url)?,
+            )
+            .json(&serde_json::json!({"username": username, "device_name": device_name}))
+            .send()
+            .await
+            .map_err(client_error)?
+            .error_for_status()
+            .map_err(client_error)?
+            .json()
+            .await
+            .map_err(client_error)?;
+        Ok(Self {
+            base_url,
+            expected_server: identity.server_id,
+            start,
+        })
+    }
+
+    pub async fn complete(
+        self,
+        client: &reqwest::Client,
+        storage: &dyn NativeCredentialStorage,
+    ) -> Result<EnrolledCredential> {
+        let completed: CompletedEnrollment = client
+            .post(
+                self.base_url
+                    .join(&format!("api/v1/enrollments/{}/complete", self.start.id))
+                    .map_err(invalid_url)?,
+            )
+            .json(&serde_json::json!({"completion_secret": self.start.completion_secret}))
+            .send()
+            .await
+            .map_err(client_error)?
+            .error_for_status()
+            .map_err(client_error)?
+            .json()
+            .await
+            .map_err(client_error)?;
+        if completed.pairing.server_id != self.expected_server {
+            return Err(Error::Invalid(
+                "server identity changed during enrollment".into(),
+            ));
+        }
+        completed.pairing.lan_client()?;
+        let enrolled = EnrolledCredential {
+            server_id: completed.pairing.server_id,
+            credential_id: completed.device_id,
+            credential: completed.credential,
+            expires_at: completed.expires_at,
+            pairing: completed.pairing,
+        };
+        storage.save(&enrolled)?;
+        Ok(enrolled)
+    }
+}
+
+pub struct EnrolledClient {
+    client: reqwest::Client,
+    enrolled: EnrolledCredential,
+}
+
+impl EnrolledClient {
+    pub fn from_storage(storage: &dyn NativeCredentialStorage, server: ServerId) -> Result<Self> {
+        let enrolled = storage.load(server)?.ok_or(Error::Unauthenticated)?;
+        if enrolled.expires_at <= chrono::Utc::now() {
+            return Err(Error::CredentialRevoked);
+        }
+        let client = enrolled.pairing.lan_client()?;
+        Ok(Self { client, enrolled })
+    }
+
+    pub fn get(&self, url: Url) -> Result<reqwest::RequestBuilder> {
+        let allowed = self.enrolled.pairing.endpoints.iter().any(|endpoint| {
+            endpoint.healthy
+                && endpoint.url.scheme() == url.scheme()
+                && endpoint.url.host_str() == url.host_str()
+                && endpoint.url.port_or_known_default() == url.port_or_known_default()
+        });
+        if !allowed {
+            return Err(Error::Invalid(
+                "credentials may only be sent to an enrolled server endpoint".into(),
+            ));
+        }
+        Ok(self.client.get(url).bearer_auth(&self.enrolled.credential))
+    }
+}
+
+fn invalid_url(error: url::ParseError) -> Error {
+    Error::Invalid(error.to_string())
+}
+
+fn client_error(error: reqwest::Error) -> Error {
+    if error.status() == Some(reqwest::StatusCode::UNAUTHORIZED) {
+        Error::Unauthenticated
+    } else {
+        Error::Unavailable(error.to_string())
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Pairing {
     pub server_id: ServerId,
     pub certificate_pem: String,
     pub certificate_sha256: String,
     pub endpoints: Vec<Endpoint>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Endpoint {
+    #[schema(value_type = String)]
     pub url: Url,
     pub route: Route,
     pub latency_ms: Option<u32>,
     pub healthy: bool,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Route {
     Lan,

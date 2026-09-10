@@ -7,7 +7,9 @@ use std::{
     io::{Read, Seek},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(transparent)]
 pub struct CapabilityId(String);
 impl CapabilityId {
@@ -33,20 +35,20 @@ impl CapabilityId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Availability {
     Available,
     Unavailable { limitation: String },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Capability {
     pub id: CapabilityId,
     pub display_name: String,
     pub availability: Availability,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ModuleDescriptor {
     pub id: ModuleId,
     pub schema_version: u32,
@@ -83,17 +85,17 @@ impl From<ModuleError> for Error {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PresentationText {
     pub label: String,
     pub value: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PresentationBadge {
     pub label: String,
     pub tone: BadgeTone,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BadgeTone {
     Neutral,
@@ -101,23 +103,23 @@ pub enum BadgeTone {
     Warning,
     Negative,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PresentationValue {
     pub label: String,
     pub value: serde_json::Value,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ArtworkReference {
     pub asset_id: AssetId,
     pub alt_text: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CapabilityAffordance {
     pub id: CapabilityId,
     pub label: String,
     pub availability: Availability,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ModulePresentation {
     pub module_id: String,
     pub schema_version: u32,
@@ -488,7 +490,7 @@ fn generic_presentation(data: &ModuleData, limitation: &str) -> ModulePresentati
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GameEdition {
     pub platform: Option<String>,
@@ -496,7 +498,7 @@ pub struct GameEdition {
     pub publisher: Option<String>,
     pub release_year: Option<u16>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MusicEdition {
     pub artist: Option<String>,
@@ -505,7 +507,7 @@ pub struct MusicEdition {
     #[serde(default)]
     pub tracks: Vec<Track>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Track {
     pub position: u16,
     pub title: String,

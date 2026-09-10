@@ -40,6 +40,13 @@ enum Command {
         #[arg(long, default_value = "owner")]
         username: String,
     },
+    /// Recover exactly one account while the server is stopped. New password is read from stdin.
+    RecoverAccount {
+        #[arg(long)]
+        private_state: PathBuf,
+        #[arg(long)]
+        user_id: UserId,
+    },
     /// Export trusted enrollment material. Transfer this file through a trusted channel.
     Pairing,
 }
@@ -190,6 +197,24 @@ async fn main() -> Result<()> {
     } else {
         Config::default()
     };
+    match &cli.command {
+        Command::RecoverAccount {
+            private_state,
+            user_id,
+        } => {
+            Store::local_recover(private_state, *user_id, &password()?)?;
+            println!(
+                "Recovered account {user_id}; browser sessions and passkeys were revoked. Grants and administrator status were preserved."
+            );
+            return Ok(());
+        }
+        Command::ResetPassword { .. } => {
+            bail!(
+                "reset-password is retired because it cannot identify private state and account safely; use recover-account --private-state PATH --user-id USER_ID"
+            );
+        }
+        _ => {}
+    }
     if !config.public_bind.ip().is_loopback() || !config.private_bind.ip().is_loopback() {
         bail!(
             "HTTP listeners must bind loopback; use a dedicated trusted proxy for public/private access. Direct LAN clients use the TLS listener."
@@ -278,10 +303,7 @@ async fn main() -> Result<()> {
                 pairing.server_id, pairing.certificate_sha256
             );
         }
-        Command::ResetPassword { username } => {
-            store.reset_password(&username, &password()?)?;
-            println!("Password reset; existing device sessions revoked.");
-        }
+        Command::ResetPassword { .. } | Command::RecoverAccount { .. } => unreachable!(),
         Command::Reindex => {
             store.reindex()?;
             println!("Catalog rebuilt. Access grants were not reconstructed from archive records.");
@@ -330,16 +352,16 @@ async fn main() -> Result<()> {
                 match config.private_tls_bind {
                     Some(address) => {
                         axum_server::bind_rustls(address, private_tls_config)
-                            .serve(private_tls.into_make_service())
+                            .serve(private_tls.into_make_service_with_connect_info::<SocketAddr>())
                             .await
                     }
                     None => std::future::pending::<std::io::Result<()>>().await,
                 }
             };
             tokio::select! {
-                result=axum::serve(public_listener,public)=>{result?;},
-                result=axum::serve(private_listener,private)=>{result?;},
-                result=axum_server::bind_rustls(config.lan_bind,tls_config).serve(lan.into_make_service())=>{result?;},
+                result=axum::serve(public_listener,public.into_make_service_with_connect_info::<SocketAddr>())=>{result?;},
+                result=axum::serve(private_listener,private.into_make_service_with_connect_info::<SocketAddr>())=>{result?;},
+                result=axum_server::bind_rustls(config.lan_bind,tls_config).serve(lan.into_make_service_with_connect_info::<SocketAddr>())=>{result?;},
                 result=private_tls_server=>{result?;},
                 _=tokio::signal::ctrl_c()=>{tracing::info!("stopping listeners; durable uploads remain resumable");}
             }
