@@ -1,5 +1,28 @@
 # Validation recorded for the foundation
 
+# Wave 3 D03.3 resampling, queue, and DSP — 2026-09-10
+
+- TDD first failed on absent resampling/DSP and queue APIs. The resampling vector
+  uses a generated stereo impulse at 24 kHz, streams it through a bounded 2x sinc
+  service, checks channel symmetry, exact 400-frame output, contiguous chunk
+  coordinates, and impulse timing within one output frame. It also rejects a
+  discontinuous source chunk.
+- The initial delay-compensation assumption moved the impulse to frame 73 instead
+  of 200; the vector caught it. The corrected service retains timeline alignment
+  and truncates only to the mathematically rounded final length.
+- Gain and hard-clipping vectors check exact samples, peak/count reporting, and
+  reject NaN/zero-invalid parameters. Queue vectors cover replace, seek, stale
+  generation, next/previous, truncate, failed-command atomicity, exhaustion, and
+  append-resume behavior with opaque string/u64 keys.
+- Commit: Junk Libs `8f139fd`. Passed focused package tests/clippy and complete
+  `cargo test --workspace --all-features` plus
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+- **Implemented:** bounded resampling, gain/clipping primitives, deterministic
+  queue transitions, and generation-safe integer-frame seek policy. **Not
+  implemented:** Trash Amp/Collector consumption, compressed codecs, output-device
+  policy, or broader effects. **Externally unqualified:** hardware playback and
+  independent review.
+
 # Wave 3 D03.2 decode and exact seeking — 2026-09-10
 
 - TDD first failed on the absent `WavDecoder`. Generated PCM-WAV vectors now

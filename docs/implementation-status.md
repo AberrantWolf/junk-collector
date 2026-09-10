@@ -199,6 +199,11 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   quality observations are returned with playback PCM. No compressed codec is
   advertised. Resampling, shared queue transitions/DSP, and consumer migrations
   remain required under D03.3-D03.5.
+- D03.3 adds bounded streaming sinc resampling with exact final length, qualified
+  linear gain and explicit hard clipping, and a generic queue state machine for
+  replace/append/truncate/track transitions. Seeks are generation-fenced and use
+  integer track-local frames. Consumer adapters and their end-to-end behavior
+  remain required under D03.4-D03.5.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
