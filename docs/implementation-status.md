@@ -193,6 +193,12 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   executable contracts only: decoding, resampling, queue transitions, DSP, and
   consumer migrations remain required under D03.2-D03.5, and AccurateRip remains
   entirely on integer CD PCM.
+- D03.2 adds feature-gated PCM-WAV decoding from those opaque readers with bounded
+  output and exact track-local frame seeking. Path-free adapters accept already-
+  opened CUE and redumper readers; CUE boundaries remain explicit and redumper
+  quality observations are returned with playback PCM. No compressed codec is
+  advertised. Resampling, shared queue transitions/DSP, and consumer migrations
+  remain required under D03.3-D03.5.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 

@@ -1,5 +1,23 @@
 # Validation recorded for the foundation
 
+# Wave 3 D03.2 decode and exact seeking — 2026-09-10
+
+- TDD first failed on the absent `WavDecoder`. Generated PCM-WAV vectors now
+  assert format discovery, bounded reads, exact frame 17 and EOF seeking, sample
+  values, and explicit rejection of non-WAV hints, zero-sized reads, and
+  out-of-range positions.
+- Feature-gated CUE/redumper tests assert a two-track boundary and an exact seek
+  within track two, plus in-memory raw playback with retained per-block quality.
+  Shared adapters accept opened readers; they expose no path constructor.
+- Commit: Junk Libs `28317d9`. Passed focused audio tests and clippy, followed by
+  `cargo test --workspace --all-features` and
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+- **Implemented:** qualified PCM-WAV decode and exact integer-frame seeking plus
+  opened-reader CUE/redumper playback adapters. **Not implemented:** compressed
+  codecs, resampling, queue transitions, DSP, or either consumer migration.
+  **Externally unqualified:** compressed/private audio vectors, physical media,
+  hardware playback, and independent review.
+
 # Wave 3 D03.1 headless audio contracts — 2026-09-10
 
 - TDD first failed because the two new crates exported none of the requested
