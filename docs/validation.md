@@ -1,5 +1,37 @@
 # Validation recorded for the foundation
 
+# Wave 3 D02.2 generic format/hash consolidation — 2026-09-10
+
+- TDD red probes first failed for the absent shared CUE-span and CHD-track visitor
+  APIs. `junk-libs-core` now passes the published `123456789` CRC32/MD5/SHA-1
+  vector across chunk boundaries.
+- Shared reader fixtures cover an in-file `INDEX 00`, synthetic `PREGAP` and
+  `POSTGAP`, combined and multi-file CUEs, 2352-byte raw and 2048-byte cooked
+  frames, duplicate/unaligned/traversal rejection, and every true frame in a
+  two-track CHD while excluding four-frame alignment padding and 96-byte
+  subchannel tails. The CHD was generated with `chdman` 0.285 and compared with
+  both source tracks.
+- Retro's consumer regression proves altering only the non-primary track preserves
+  the primary digest but changes the complete ordered set. Its old `MultiHasher`,
+  hash/error/reader types, and ordered-CHD hasher were removed; the complete CUE/
+  CHD path consumes Junk Libs while platform/catalog policy stays in Retro.
+- Commits: Junk Libs `dadc40d`; Retro Junk `5f2bc45`. Retro's pre-existing
+  untracked sync documentation/scripts were not staged.
+- Passed: Junk Libs `cargo test --workspace --all-features` and
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`; focused
+  package fmt; Retro `cargo test --workspace`, focused package fmt, and
+  `cargo clippy -p retro-junk-core -p retro-junk-disc -p retro-junk-lib
+  --all-targets -- -D warnings`.
+- Existing gate findings: all-workspace formatting traverses unrelated pre-existing
+  junk-libs document-crate drift; all-workspace Retro clippy reports pre-existing
+  warnings in untouched backend/import code. Neither was modified to manufacture a
+  green child.
+- **Implemented:** reusable generic hashing plus complete CUE/CHD byte-reader
+  contracts and Retro consumer migration. **Not implemented:** D02.3 disc identity,
+  D02.4 AccurateRip, D02.5 neutral DAT parsing, and Collector integration.
+  **Externally unqualified:** private real-dump coverage; synthetic CHD/CUE results
+  are not a real-disc preservation qualification.
+
 # Wave 3 D02.1 drift/provenance gate — 2026-09-10
 
 - Re-read the four sibling checkouts at full object IDs and compared their branch,

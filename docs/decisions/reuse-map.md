@@ -50,6 +50,14 @@ do not implement or verify any D02 extraction.
 Coordinates are explicit: bytes are file bytes unless a row names normalized ROM
 bytes, CD frames/sectors, DVD units, or decoded PCM frames.
 
+D02.2 update (2026-09-10): `junk-libs-core` is now the only implementation of
+`MultiHasher` and its generic hash/reader/error types. `junk-libs-disc` now exposes
+`compute_cue_track_spans` for stored file-byte ownership and
+`visit_chd_raw_tracks` for ordered 2352-byte CHD main-channel frames. Retro's
+complete-disc CUE/CHD hashing uses both; its platform normalization and catalog
+matching remain outside the shared crates. Synthetic gaps are retained as metadata
+but never fabricated into hashed source bytes.
+
 | Operation | Source API and domain | Optional dependencies | Consumers / extraction target | Independent fixture | Status |
 |---|---|---|---|---|---|
 | Streaming CRC32, MD5, SHA-1 | `junk-libs-core` `MultiHasher`; exact bytes read | hash crates only | D02 → `junk-libs-core`; Retro, Collector | generated empty/short/chunked vectors compared with published digest values | supported |

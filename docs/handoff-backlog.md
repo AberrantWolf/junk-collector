@@ -452,13 +452,14 @@ Inspect sibling manifests/source/instructions and record exact algorithms, crate
 
 ### D02 — Extract format/hash/disc verification primitives
 
-**Status (2026-09-10): D02.1 implemented/reviewed; D02.2 is next.** The
-documentation-only drift gate reconfirmed exact sibling SHAs, upstream divergence,
-dirty paths, licenses, and fixture/tool availability without changing sibling code.
-Retro source redistribution remains blocked by its placeholder MIT attribution;
-the Phono owned-dump/live-provider oracle remains externally gated. No shared API
-or compiling scaffold was added. D02.2 may now consolidate the generic reader/hash
-consumer path while preserving all recorded user changes.
+**Status (2026-09-10): D02.1-D02.2 implemented/reviewed; D02.3 is next.** The
+documentation-only drift gate reconfirmed exact sibling state. D02.2 then moved
+generic hashing types and executable ordered CUE/CHD reader contracts into Junk
+Libs and migrated Retro's complete-disc consumer in separate commits. Retro keeps
+platform normalization and catalog policy; its user-owned untracked sync scripts
+remain untouched. Published/synthetic/chdman vectors and affected test gates pass.
+Private real dumps remain external, and pre-existing unrelated whole-workspace
+format/clippy findings are recorded rather than swept into this child.
 
 **Review · Dependencies:** D01. **Owner:** independently consumable junk-libs crates and affected sibling consumers.
 

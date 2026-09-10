@@ -157,6 +157,14 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   shared algorithm, consumer migration, or catalog verification capability exists
   yet, and Retro-owned source cannot be redistributed while its MIT attribution is
   a placeholder.
+- D02.2 makes `junk-libs-core` the single implementation of generic streaming
+  multi-hashing and its byte-reader/result contracts. `junk-libs-disc` now computes
+  complete stored CUE file-byte spans and visits each true CHD 2352-byte
+  main-channel track frame without padding or subchannel bytes. Retro's complete
+  ordered-track hashing consumes those contracts, so changing a non-primary track
+  changes the complete result while platform normalization and catalog matching
+  remain product policy. Disc identity, AccurateRip, DAT extraction, Collector
+  integration, and real-dump qualification remain required under D02.3-D02.5.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
