@@ -1,5 +1,27 @@
 # Validation recorded for the foundation
 
+# Wave 3 D03.4 consumer migration — 2026-09-10
+
+- Junk Libs `c3c133b` adds validated queue restoration so a device adapter can
+  reconstruct current audible state from atomics without putting locks in the
+  callback. Its queue tests/clippy pass.
+- Trash Amp `3f5b400` changes only the clean `amp-audio` crate, root dependency
+  declaration, owned `Cargo.lock` hunks, and a new dedicated validation document.
+  User browsing/UI/docs changes and their two lock hunks remain unstaged. WAV,
+  CUE/redumper, resampling, and transport commands use shared services; existing
+  compressed decoding and CPAL remain product adapters.
+- Trash Amp passed all 42 workspace tests (one live MusicBrainz test ignored) and
+  `cargo clippy --workspace --all-targets -- -D warnings`. Its focused audio crate
+  format/test/clippy gates pass. Whole-workspace fmt still traverses and reports
+  recorded unrelated Junk Libs formatting drift outside the changed shared crates.
+- Collector's new test proves an authorized media resource retains length,
+  extension, media type, read, and seek through `ByteSource` while exposing no
+  filesystem path. Focused collector-app test/clippy and architecture checks pass.
+- **Implemented:** local consumer migration for the qualified shared services.
+  **Not implemented:** shared compressed codecs or D03.5 final review. **Externally
+  unqualified:** published Git pins, physical CPAL/loopback, real dumps, private
+  codec vectors, target platforms, and independent review.
+
 # Wave 3 D03.3 resampling, queue, and DSP — 2026-09-10
 
 - TDD first failed on absent resampling/DSP and queue APIs. The resampling vector

@@ -94,9 +94,9 @@ but never fabricated into hashed source bytes.
 | Integer-frame seek | `junk-libs-audio` WAV plus opened-reader CUE/redumper adapters; decoded sample frames, never bytes or seconds | decoder-specific | D03 | generated WAV ramp plus two-track CUE and in-memory redumper vectors | implemented for WAV/CUE/redumper; compressed unqualified |
 | Resampling | `junk-libs-audio`; contiguous bounded interleaved PCM and exact rounded output length | optional `resample` (Rubato) | D03 DSP service | generated 2x stereo impulse timing/channel/length vector | implemented; consumer migration pending D03.4 |
 | Playback coordinate contract | `junk-libs-playback`; opaque consumer keys, generations and track-local integer frames | none | D03 queue service | generic-key/range contract tests | implemented; transitions pending D03.3 |
-| Playback queue | `junk-libs-playback`; opaque keys, track-local frames and generation-fenced transitions | none | D03 service | replace/append/truncate/seek/transition and failed-mutation vectors | implemented; consumer migration pending D03.4 |
+| Playback queue | `junk-libs-playback`; opaque keys, track-local frames and generation-fenced transitions | none | D03 service | replace/append/truncate/seek/transition, restoration and failed-mutation vectors | implemented; Trash Amp transport adapter migrated |
 | DSP primitives | `junk-libs-audio`; explicit linear gain and symmetric hard clipping | none | D03 service | exact gain/peak/clipped-count vectors and invalid numeric probes | implemented; broader effects not implemented |
-| Device output | Trash Amp CPAL path; host device frames | CPAL/hardware | D03 optional output adapter only | manual hardware matrix | unqualified; unavailable in headless CI |
+| Device output | Trash Amp CPAL adapter; shared PCM enters bounded ring-buffer frames | CPAL/hardware | D03 optional output adapter only | automated callback-independent pipeline plus manual hardware matrix | adapter implemented; physical output unqualified |
 
 ## Extraction ownership
 

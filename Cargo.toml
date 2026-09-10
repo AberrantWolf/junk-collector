@@ -28,6 +28,7 @@ tempfile = "3"
 utoipa = { version = "5", features = ["chrono", "uuid"] }
 utoipa-axum = "0.2"
 url = "2"
+junk-libs-audio = { path = "../junk-libs/junk-libs-audio" }
 
 [profile.release]
 lto = "thin"

@@ -204,6 +204,12 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   replace/append/truncate/track transitions. Seeks are generation-fenced and use
   integer track-local frames. Consumer adapters and their end-to-end behavior
   remain required under D03.4-D03.5.
+- D03.4 migrates Trash Amp's WAV, CUE/redumper, resampling, and transport-policy
+  paths to the shared crates while keeping filesystem discovery, compressed-codec
+  compatibility, and CPAL output in its adapters. Collector can consume an
+  already-authorized representation as the shared opaque byte source without
+  exposing an archive path. Shared compressed codec support remains required;
+  physical output and private fixtures remain external qualifications.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 

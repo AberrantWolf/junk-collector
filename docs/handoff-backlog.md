@@ -485,15 +485,18 @@ Execute reviewed narrow extractions of parsers, normalized hashing, disc identit
 
 ### D03 — Extract reusable audio services and reader contract
 
-**Status (2026-09-10): D03.1-D03.3 implemented/reviewed; D03.4 is next.** Junk
+**Status (2026-09-10): D03.1-D03.4 implemented/reviewed; D03.5 is next.** Junk
 Libs now has executable source/PCM coordinate contracts, opaque playback identity/
 position contracts, qualified PCM-WAV decode with exact integer-frame seeks, and
 path-free adapters for already-open CUE/redumper readers. It also has bounded
 streaming sinc resampling, qualified gain/clipping, deterministic queue transitions,
 and generation-fenced seeks. Compressed codecs are still unavailable. The Trash
-Amp audit found its audio crate clean while user
-changes occupy `amp-core`, desktop presentation, documentation, and the lockfile;
-later migration must avoid those hunks and stage only owned lockfile changes.
+Amp now consumes the shared WAV/CUE/redumper, resampling, and queue-policy
+boundaries while retaining its compressed fallback and CPAL adapter. Only owned
+audio and lockfile hunks were committed; user changes in `amp-core`, desktop
+presentation, documentation, and the remaining lockfile hunks are preserved.
+Collector's authorized representation becomes an opaque audio source only after
+application authorization, without exposing its archive path.
 
 **Review · Dependencies:** D01, A03. **Owner:** shared audio crates; collector application media-reader port; Trash Amp adapters.
 

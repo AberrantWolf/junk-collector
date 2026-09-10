@@ -102,6 +102,21 @@ pub struct MediaResource {
     pub download_name: String,
 }
 
+impl MediaResource {
+    /// Consume an already-authorized representation as an opaque audio source.
+    /// Archive paths remain confined to the storage adapter.
+    pub fn into_audio_source(self) -> junk_libs_audio::ByteSource {
+        let extension = self
+            .download_name
+            .rsplit_once('.')
+            .map(|(_, extension)| extension);
+        junk_libs_audio::ByteSource::new(
+            self.reader,
+            junk_libs_audio::MediaHint::new(Some(self.length), extension, Some(&self.media_type)),
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetState {
     pub collection_id: CollectionId,
