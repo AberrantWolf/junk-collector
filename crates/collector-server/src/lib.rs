@@ -44,7 +44,6 @@ pub struct AppState {
     pub allowed_origins: Arc<Vec<String>>,
     pub passkeys: Option<Arc<passkeys::Passkeys>>,
     pub rate_limits: Arc<RateLimits>,
-    pub jobs: Arc<tokio::sync::Semaphore>,
 }
 impl AppState {
     pub fn new(store: Arc<Store>, pairing: Pairing) -> Self {
@@ -61,7 +60,6 @@ impl AppState {
             allowed_origins: Arc::new(vec![]),
             rate_limits: Arc::new(RateLimits::default()),
             passkeys: None,
-            jobs: Arc::new(tokio::sync::Semaphore::new(2)),
         }
     }
 }
@@ -329,6 +327,16 @@ impl IntoResponse for ApiError {
                 StatusCode::CONFLICT,
                 "command_in_progress",
                 "That command is already in progress; retry with the same key".into(),
+            ),
+            Error::JobCancelled => (
+                StatusCode::CONFLICT,
+                "job_cancelled",
+                "That job was cancelled".into(),
+            ),
+            Error::CancellationTooLate => (
+                StatusCode::CONFLICT,
+                "cancellation_too_late",
+                "Publication is already committed and will finish recovery".into(),
             ),
             Error::RateLimited(_) => unreachable!("handled above"),
             Error::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m.clone()),
@@ -1478,12 +1486,7 @@ async fn commit_upload(
     let actor = principal(&state, &headers)?;
     let context = command_context(&headers)?;
     state.service.upload(&actor, id)?;
-    let _permit = state
-        .jobs
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| Error::Unavailable("import workers are busy; retry shortly".into()))?;
-    blocking(move || state.service.commit_upload(&actor, id, &context)).await?;
+    blocking(move || state.service.enqueue_upload_commit(&actor, id, &context)).await?;
     Ok((StatusCode::ACCEPTED, Json(serde_json::json!({"job_id":id}))).into_response())
 }
 #[utoipa::path(post, path = "/api/v1/items/{id}/verify", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = serde_json::Value), (status = 409)))]
@@ -1785,60 +1788,11 @@ async fn import_inbox(
         &context,
     )?;
     let id = upload.id;
-    let permit = state
-        .jobs
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| Error::Unavailable("import workers busy".into()))?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        if let Err(error) = stage_inbox_upload(&state.service, &actor, id, &source, &context) {
-            tracing::error!(%error,%id,"inbox import failed");
-            let _ = state.service.fail_upload(
-                &actor,
-                id,
-                "Inbox import failed. Sources are retained; check the server log.",
-            );
-        }
-    });
+    let source_locator = source
+        .to_str()
+        .ok_or_else(|| Error::Invalid("inbox source path must be UTF-8".into()))?;
+    state
+        .service
+        .enqueue_inbox_upload(&actor, id, source_locator, &context)?;
     Ok((StatusCode::ACCEPTED, Json(serde_json::json!({"job_id":id}))).into_response())
-}
-
-fn stage_inbox_upload(
-    service: &CollectionService,
-    actor: &Principal,
-    id: JobId,
-    source: &std::path::Path,
-    context: &CommandContext,
-) -> Result<Item> {
-    let upload = service.upload(actor, id)?;
-    let root = std::fs::canonicalize(source).map_err(|error| Error::Storage(error.to_string()))?;
-    for (index, entry) in upload.files.iter().enumerate() {
-        let path = root.join(&entry.name);
-        if std::fs::symlink_metadata(&path)
-            .map_err(|error| Error::Storage(error.to_string()))?
-            .file_type()
-            .is_symlink()
-            || !std::fs::canonicalize(&path)
-                .map_err(|error| Error::Storage(error.to_string()))?
-                .starts_with(&root)
-        {
-            return Err(Error::Invalid("inbox package changed while staging".into()));
-        }
-        let mut file =
-            std::fs::File::open(path).map_err(|error| Error::Storage(error.to_string()))?;
-        let mut buffer = vec![0u8; 1024 * 1024];
-        let mut offset = 0;
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .map_err(|error| Error::Storage(error.to_string()))?;
-            if read == 0 {
-                break;
-            }
-            service.upload_chunk(actor, id, index, offset, &buffer[..read])?;
-            offset += read as u64;
-        }
-    }
-    service.commit_upload(actor, id, context)
 }

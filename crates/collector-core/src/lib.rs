@@ -1306,6 +1306,10 @@ pub enum Error {
     IdempotencyConflict,
     #[error("command is already in progress")]
     CommandInProgress,
+    #[error("job cancellation requested")]
+    JobCancelled,
+    #[error("publication is already committed; cancellation is too late")]
+    CancellationTooLate,
     #[error("rate limited; retry after {0} seconds")]
     RateLimited(u64),
     #[error("{0}")]

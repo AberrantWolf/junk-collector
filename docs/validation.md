@@ -47,6 +47,37 @@
   and process-local semaphore. P02.4 cursor `JobView`, detail, cancellation, and
   retry routes are absent. Event streaming remains C06.
 
+## Wave 3 P02.3 cancellation, retry, and publication reconciliation — 2026-09-10
+
+- `upload_source_staging_is_not_claimable_until_commit_is_enqueued` proves an
+  incomplete or fully staged source is not executable until the commit command
+  durably changes its phase. The HTTP commit action only enqueues; worker threads
+  perform archive hashing, copying, and publication.
+- `configured_inbox_staging_runs_through_the_durable_worker` proves inbox copying
+  and publication use the same claim/fence path and preserve the configured source.
+  Source locators remain private job requests and are absent from public DTOs. The
+  process-local server semaphore and ad-hoc inbox task are removed.
+- `queued_and_running_upload_cancellation_retain_source_material`,
+  `integrity_job_observes_cancellation_between_files`, and
+  `cancellation_at_payload_boundary_aborts_before_revision_commit` cover immediate
+  queued cancellation, bounded-unit checks, and the final payload/revision race.
+  Pre-commit payloads/journals are aborted while private source chunks remain.
+- `cancellation_after_revision_commit_has_a_stable_too_late_result` proves the
+  stable conflict after the durable commit point. Startup reconciliation marks
+  committed upload/integrity work before routes open, and the worker completes the
+  committed result instead of accepting cancellation or duplicating Evidence.
+- `failed_upload_retry_reuses_job_and_publication_identities` injects a real
+  publication failure, then proves retry keeps Job/Capture/Representation IDs,
+  source bytes, and failure history while incrementing attempt to two.
+- Full local gate: architecture/link/fixture checks, Rust formatting, 109 locked
+  workspace tests, warning-free all-target clippy, TypeScript check/build, and the
+  rebuilt embedded-assets server pass.
+- **Not implemented:** P02.4 cursor `JobView`, job detail, and generic job
+  cancel/retry routes remain absent. `GET /jobs` is still the legacy bounded vector;
+  the existing upload cancellation route is only a compatibility adapter. Event
+  streaming remains C06. Target-Linux process/filesystem behavior remains
+  externally unqualified.
+
 Validated locally on macOS, Rust 1.95.0 and Node 24.3.0.
 
 - `cargo test --workspace`: 20 integration tests pass, covering module registration, archive recovery and tamper detection, upload/inbox source preservation and retries, authorization/redaction, image bounds, search/pagination, credential revocation, exposure routing, HTTP ranges, cache keys, and direct enrolled TLS.

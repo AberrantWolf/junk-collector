@@ -44,6 +44,7 @@ pub struct Store {
     pub(crate) db: Arc<Mutex<Connection>>,
     pub(crate) writer: Arc<Mutex<()>>,
     pub(crate) uploads: Arc<Mutex<()>>,
+    pub(crate) job_publication_gate: Arc<Mutex<()>>,
     recovery_report: RecoveryReport,
     receipt: Option<collector_app::CommandReceipt>,
     command_result: Option<serde_json::Value>,
@@ -214,6 +215,7 @@ impl Store {
             db: Arc::new(Mutex::new(db)),
             writer: Arc::new(Mutex::new(())),
             uploads: Arc::new(Mutex::new(())),
+            job_publication_gate: Arc::new(Mutex::new(())),
             recovery_report,
             receipt: None,
             command_result: None,
@@ -224,6 +226,7 @@ impl Store {
         };
         store.reindex()?;
         store.recover_private_publications()?;
+        store.reconcile_job_publications()?;
         let journal_store = publication::PublicationJournalStore::new(&store.archive);
         for transaction_id in &store.recovery_report.committed {
             journal_store.advance(
@@ -984,6 +987,22 @@ impl ImportPort for Store {
         self.commit_upload_record(id)
     }
 
+    fn commit_upload_for_job(&self, id: JobId, claim_token: &str) -> Result<Item> {
+        self.commit_upload_job_record(id, claim_token)
+    }
+
+    fn queue_upload(&self, id: JobId) -> Result<JobId> {
+        self.queue_upload_record(id, false)
+    }
+
+    fn queue_inbox_upload(&self, id: JobId, source_locator: &str) -> Result<JobId> {
+        self.queue_inbox_upload_record(id, source_locator)
+    }
+
+    fn retry_upload(&self, id: JobId) -> Result<JobId> {
+        self.queue_upload_record(id, true)
+    }
+
     fn fail_upload(&self, id: JobId, message: &str) -> Result<()> {
         self.fail_upload_record(id, message)
     }
@@ -996,9 +1015,11 @@ impl ImportPort for Store {
         &self,
         item: ItemId,
         job: JobId,
+        claim_token: &str,
         created_at: chrono::DateTime<Utc>,
+        progress: &mut dyn FnMut(u64) -> Result<()>,
     ) -> Result<Item> {
-        self.verify_integrity_job_record(item, job, created_at)
+        self.verify_integrity_job_record(item, job, claim_token, created_at, progress)
     }
 
     fn jobs(&self, user: UserId) -> Result<Vec<Job>> {
@@ -1036,6 +1057,18 @@ impl JobPort for Store {
 
     fn fail_job(&self, id: JobId, claim_token: &str, message: &str) -> Result<()> {
         self.fail_job_record(id, claim_token, message)
+    }
+
+    fn cancel_claimed_job(&self, id: JobId, claim_token: &str) -> Result<()> {
+        self.cancel_claimed_job_record(id, claim_token)
+    }
+
+    fn cancellation_requested(&self, id: JobId, claim_token: &str) -> Result<bool> {
+        self.cancellation_requested_record(id, claim_token)
+    }
+
+    fn request_job_cancellation(&self, id: JobId, user: UserId) -> Result<()> {
+        self.request_job_cancellation_record(id, user)
     }
 }
 
@@ -1663,16 +1696,6 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         tx.commit().map_err(storage)?;
     }
     Ok(())
-}
-
-pub(crate) fn job_state_storage(state: &JobState) -> &'static str {
-    match state {
-        JobState::Queued => "queued",
-        JobState::Running => "running",
-        JobState::Completed => "completed",
-        JobState::Failed => "failed",
-        JobState::Cancelled => "cancelled",
-    }
 }
 
 pub(crate) fn job_phase_storage(state: &JobState) -> &'static str {

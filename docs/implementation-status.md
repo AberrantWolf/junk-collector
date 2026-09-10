@@ -40,14 +40,21 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   integrity verification as the first consumer. Its deterministic Evidence
   identity makes recovery after archive publication idempotent, and the existing
   verification HTTP action now returns the actual queued Job identity.
+- P02.3 separates incomplete upload staging from executable queue state and moves
+  browser upload publication plus configured-inbox copying/publication onto the
+  same durable workers. Queued and bounded-unit running cancellation retain source
+  material; a publication gate makes cancellation pre-commit or stably too late
+  after `RevisionCommitted`, with committed recovery completed exactly once. Failed
+  retries reuse the Job, Capture, and Representation identities, increment attempt,
+  retain source bytes, and preserve prior failure details. The process-local job
+  semaphore has been removed.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete P02.3-P02.4 cancellation/retry, publication reconciliation, migration
-   of upload/inbox work off request workers, and reviewed job APIs; complete
+2. Complete P02.4 cursor/detail/cancel/retry job APIs and independent review; complete
    physical component/condition/acquisition/loan editing,
    sensitive attachments, and the configured inbox/import-review UI.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.

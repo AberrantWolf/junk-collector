@@ -5,6 +5,77 @@ use rusqlite::TransactionBehavior;
 type StoredJobIdentity = (String, String, Option<String>, Option<String>, String);
 
 impl Store {
+    pub(crate) fn reconcile_job_publications(&self) -> Result<()> {
+        let candidates = {
+            let db = lock(&self.db)?;
+            let mut statement = db
+                .prepare(
+                    "SELECT id,kind,item_id FROM private.jobs
+                     WHERE state IN ('running','cancel_requested')",
+                )
+                .map_err(storage)?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        for (id, kind, item_id) in candidates {
+            let job_id: JobId = id.parse().map_err(storage)?;
+            let committed = if kind == "preservation_import" {
+                publication::PublicationJournalStore::new(&self.archive)
+                    .phase(TransactionId(job_id.0))?
+                    .is_some_and(|phase| phase >= publication::PublicationPhase::RevisionCommitted)
+                    || self
+                        .upload_record(job_id)
+                        .ok()
+                        .and_then(|upload| {
+                            self.item(upload.item_id).ok().map(|item| {
+                                item.captures
+                                    .iter()
+                                    .any(|capture| capture.id == upload.capture_id)
+                            })
+                        })
+                        .unwrap_or(false)
+            } else if kind == "integrity_verification" {
+                let Some(item_id) = item_id else { continue };
+                let item_id: ItemId = item_id.parse().map_err(storage)?;
+                let item = self.item(item_id)?;
+                let expected = item
+                    .captures
+                    .iter()
+                    .flat_map(|capture| &capture.representations)
+                    .map(|representation| {
+                        crate::files::deterministic_integrity_evidence_id(job_id, representation.id)
+                    })
+                    .collect::<Vec<_>>();
+                let evidence = self.evidence(item_id)?;
+                !expected.is_empty()
+                    && expected
+                        .iter()
+                        .all(|id| evidence.iter().any(|value| value.id == *id))
+            } else {
+                false
+            };
+            if committed {
+                lock(&self.db)?
+                    .execute(
+                        "UPDATE private.jobs SET state='running',phase='revision_committed',
+                           cancellation_requested=0 WHERE id=?",
+                        [id],
+                    )
+                    .map_err(storage)?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn enqueue_job_record(&self, spec: JobSpec) -> Result<JobId> {
         if spec.kind.is_empty()
             || spec.kind.len() > 120
@@ -100,8 +171,9 @@ impl Store {
             .query_row(
                 "SELECT candidate.id FROM private.jobs candidate
                  WHERE (
-                   candidate.state='queued' OR
+                   (candidate.state='queued' AND candidate.phase='queued') OR
                    (candidate.state='running' AND
+                     candidate.claim_token IS NOT NULL AND
                      (candidate.worker_instance IS NULL OR candidate.worker_instance<>? OR candidate.lease_expires<=?))
                  )
                  AND NOT EXISTS(
@@ -130,7 +202,9 @@ impl Store {
         let claim_token = TransactionId::new().to_string();
         if tx
             .execute(
-                "UPDATE private.jobs SET state='running',phase='starting',worker_instance=?,lease_expires=?,claim_token=?,updated_at=?
+                "UPDATE private.jobs SET state='running',
+                   phase=CASE WHEN phase='revision_committed' THEN phase ELSE 'starting' END,
+                   worker_instance=?,lease_expires=?,claim_token=?,updated_at=?
                  WHERE id=? AND (state='queued' OR (state='running' AND (worker_instance IS NULL OR worker_instance<>? OR lease_expires<=?)))",
                 params![worker_instance, lease_expires, claim_token, now, id, worker_instance, now],
             )
@@ -139,15 +213,36 @@ impl Store {
         {
             return Err(Error::CommandInProgress);
         }
-        let row: (String, Option<String>, String, String, u32, i64) = tx
+        let row: (
+            String,
+            Option<String>,
+            String,
+            String,
+            u32,
+            String,
+            u64,
+            i64,
+        ) = tx
             .query_row(
-                "SELECT user_id,item_id,kind,request,attempt,created_at FROM private.jobs WHERE id=? AND claim_token=?",
+                "SELECT user_id,item_id,kind,request,attempt,phase,completed_units,created_at
+                 FROM private.jobs WHERE id=? AND claim_token=?",
                 params![id, claim_token],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
             )
             .map_err(storage)?;
         tx.commit().map_err(storage)?;
-        let created_at = chrono::DateTime::from_timestamp(row.5, 0)
+        let created_at = chrono::DateTime::from_timestamp(row.7, 0)
             .ok_or_else(|| Error::Storage("job creation timestamp is invalid".into()))?;
         Ok(Some(JobClaim {
             id: id.parse().map_err(storage)?,
@@ -160,6 +255,8 @@ impl Store {
             request: serde_json::from_str(&row.3).map_err(storage)?,
             claim_token,
             attempt: row.4,
+            phase: row.5,
+            completed_units: row.6,
             created_at,
         }))
     }
@@ -241,11 +338,33 @@ impl Store {
         claim_token: &str,
         result: serde_json::Value,
     ) -> Result<()> {
+        let db = lock(&self.db)?;
+        let prior: Option<String> = db
+            .query_row(
+                "SELECT result FROM private.jobs WHERE id=? AND claim_token=? AND state='running'",
+                params![id.to_string(), claim_token],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .flatten();
+        let prior = prior
+            .as_deref()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .transpose()
+            .map_err(storage)?;
+        let result = match prior {
+            Some(mut history) if history.get("prior_failures").is_some() => {
+                history["completion"] = result;
+                history
+            }
+            _ => result,
+        };
         let result = serde_json::to_string(&result).map_err(storage)?;
         if result.len() > 1024 * 1024 {
             return Err(Error::Invalid("job result is too large".into()));
         }
-        let changed = lock(&self.db)?
+        let changed = db
             .execute(
                 "UPDATE private.jobs SET state='completed',phase='completed',completed_units=total_units,result=?,error=NULL,worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=? WHERE id=? AND claim_token=? AND state='running'",
                 params![result, self.clock.now().timestamp(), id.to_string(), claim_token],
@@ -273,6 +392,83 @@ impl Store {
         if changed != 1 {
             return Err(Error::CommandInProgress);
         }
+        Ok(())
+    }
+
+    pub(crate) fn cancel_claimed_job_record(&self, id: JobId, claim_token: &str) -> Result<()> {
+        let changed = lock(&self.db)?
+            .execute(
+                "UPDATE private.jobs SET state='cancelled',phase='cancelled',error=NULL,
+                   worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=?
+                 WHERE id=? AND claim_token=? AND state='cancel_requested'",
+                params![self.clock.now().timestamp(), id.to_string(), claim_token],
+            )
+            .map_err(storage)?;
+        if changed != 1 {
+            return Err(Error::CommandInProgress);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn cancellation_requested_record(
+        &self,
+        id: JobId,
+        claim_token: &str,
+    ) -> Result<bool> {
+        lock(&self.db)?
+            .query_row(
+                "SELECT state='cancel_requested' FROM private.jobs
+                 WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested')",
+                params![id.to_string(), claim_token],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::CommandInProgress)
+    }
+
+    pub(crate) fn request_job_cancellation_record(&self, id: JobId, user: UserId) -> Result<()> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
+        if publication::PublicationJournalStore::new(&self.archive)
+            .phase(TransactionId(id.0))?
+            .is_some_and(|phase| phase >= publication::PublicationPhase::RevisionCommitted)
+        {
+            return Err(Error::CancellationTooLate);
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let (state, phase, claim_token): (String, String, Option<String>) = tx
+            .query_row(
+                "SELECT state,phase,claim_token FROM private.jobs WHERE id=? AND user_id=?",
+                params![id.to_string(), user.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        if state == "completed" || phase == "revision_committed" {
+            return Err(Error::CancellationTooLate);
+        }
+        if matches!(state.as_str(), "running" | "cancel_requested") && claim_token.is_some() {
+            tx.execute(
+                "UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=?
+                 WHERE id=? AND claim_token IS NOT NULL AND state IN ('running','cancel_requested')",
+                params![self.clock.now().timestamp(), id.to_string()],
+            )
+            .map_err(storage)?;
+        } else if state != "cancelled" {
+            tx.execute(
+                "UPDATE private.jobs SET state='cancelled',phase='cancelled',
+                   cancellation_requested=1,worker_instance=NULL,lease_expires=NULL,
+                   claim_token=NULL,updated_at=? WHERE id=?",
+                params![self.clock.now().timestamp(), id.to_string()],
+            )
+            .map_err(storage)?;
+        }
+        self.record_command(&tx, &())?;
+        tx.commit().map_err(storage)?;
         Ok(())
     }
 }

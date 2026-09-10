@@ -145,6 +145,13 @@ impl Store {
             total_bytes: upload.files.iter().map(|f| f.bytes.0).sum(),
             error: None,
         };
+        let (durable_state, durable_phase) = match upload.state {
+            JobState::Queued => ("running", "awaiting_source"),
+            JobState::Running => ("running", "staging"),
+            JobState::Completed => ("completed", "completed"),
+            JobState::Failed => ("failed", "failed"),
+            JobState::Cancelled => ("cancelled", "cancelled"),
+        };
         let collection_id = self.item(upload.item_id)?.collection_id;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
@@ -157,17 +164,20 @@ impl Store {
               claim_token,cancellation_requested
             ) VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?,NULL,?,NULL,NULL,NULL,NULL,0)
             ON CONFLICT(id) DO UPDATE SET
-              state=excluded.state,phase=excluded.phase,
-              completed_units=excluded.completed_units,total_units=excluded.total_units,
-              updated_at=excluded.updated_at,error=excluded.error,request=excluded.request",
+              state=CASE WHEN jobs.claim_token IS NULL AND jobs.phase IN ('awaiting_source','staging') THEN excluded.state ELSE jobs.state END,
+              phase=CASE WHEN jobs.claim_token IS NULL AND jobs.phase IN ('awaiting_source','staging') THEN excluded.phase ELSE jobs.phase END,
+              completed_units=CASE WHEN jobs.claim_token IS NULL AND jobs.phase IN ('awaiting_source','staging') THEN excluded.completed_units ELSE jobs.completed_units END,
+              total_units=excluded.total_units,updated_at=excluded.updated_at,
+              error=CASE WHEN jobs.claim_token IS NULL AND jobs.phase IN ('awaiting_source','staging') THEN excluded.error ELSE jobs.error END,
+              request=CASE WHEN jobs.claim_token IS NULL AND jobs.phase IN ('awaiting_source','staging') THEN excluded.request ELSE jobs.request END",
             params![
                 job.id.to_string(),
                 job.user_id.to_string(),
                 collection_id.to_string(),
                 job.item_id.to_string(),
                 job.kind,
-                crate::job_state_storage(&job.state),
-                crate::job_phase_storage(&job.state),
+                durable_state,
+                durable_phase,
                 job.completed_bytes,
                 job.total_bytes,
                 now,
@@ -253,6 +263,21 @@ impl Store {
             }
         })?;
         let mut upload: Upload = serde_json::from_slice(&bytes).map_err(storage)?;
+        let durable_state: Option<String> = lock(&self.db)?
+            .query_row(
+                "SELECT state FROM private.jobs WHERE id=?",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        match durable_state.as_deref() {
+            Some("queued") => upload.state = JobState::Running,
+            Some("completed") => upload.state = JobState::Completed,
+            Some("failed") => upload.state = JobState::Failed,
+            Some("cancelled") => upload.state = JobState::Cancelled,
+            _ => {}
+        }
         // File length is the durable upload cursor after a crash between fsync and metadata update.
         if matches!(upload.state, JobState::Queued | JobState::Running) {
             for (i, offset) in upload.offsets.iter_mut().enumerate() {
@@ -318,17 +343,227 @@ impl Store {
         Ok(upload)
     }
     pub(crate) fn cancel_upload_record(&self, id: JobId) -> Result<()> {
+        let upload = self.upload_record(id)?;
+        self.request_job_cancellation_record(id, upload.user_id)
+    }
+    pub(crate) fn queue_upload_record(&self, id: JobId, retry: bool) -> Result<JobId> {
         let _guard = lock(&self.uploads)?;
-        let mut upload = self.upload_record(id)?;
-        if upload.state == JobState::Completed {
+        let upload = self.upload_record(id)?;
+        if upload
+            .files
+            .iter()
+            .zip(&upload.offsets)
+            .any(|(file, offset)| file.bytes.0 != *offset)
+        {
+            return Err(Error::Invalid(
+                "all declared upload bytes must be staged before publication".into(),
+            ));
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let (state, phase, claim_token, prior_result, error, attempt, failed_at): (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            u32,
+            i64,
+        ) = tx
+            .query_row(
+                "SELECT state,phase,claim_token,result,error,attempt,updated_at
+                 FROM private.jobs WHERE id=?",
+                [id.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .map_err(storage)?;
+        let eligible = if retry {
+            state == "failed"
+        } else {
+            state == "running"
+                && claim_token.is_none()
+                && matches!(phase.as_str(), "awaiting_source" | "staging")
+        };
+        if !eligible {
             return Err(Error::Conflict);
         }
-        upload.state = JobState::Cancelled;
-        self.with_command_result(&())?.persist_upload(&upload)
+        let result = if retry {
+            let mut result = prior_result
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(storage)?
+                .unwrap_or_else(|| serde_json::json!({"prior_failures":[]}));
+            let failures = result
+                .get_mut("prior_failures")
+                .and_then(serde_json::Value::as_array_mut)
+                .ok_or_else(|| Error::Storage("job failure history is malformed".into()))?;
+            failures.push(serde_json::json!({
+                "attempt": attempt,
+                "error": error,
+                "failed_at": failed_at,
+            }));
+            Some(serde_json::to_string(&result).map_err(storage)?)
+        } else {
+            None
+        };
+        tx.execute(
+            "UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,
+               attempt=attempt+?,error=NULL,result=?,cancellation_requested=0,updated_at=?
+             WHERE id=?",
+            params![
+                u8::from(retry),
+                result,
+                self.clock.now().timestamp(),
+                id.to_string()
+            ],
+        )
+        .map_err(storage)?;
+        self.record_command(&tx, &id)?;
+        tx.commit().map_err(storage)?;
+        Ok(id)
+    }
+    pub(crate) fn queue_inbox_upload_record(
+        &self,
+        id: JobId,
+        source_locator: &str,
+    ) -> Result<JobId> {
+        if source_locator.is_empty() || source_locator.len() > 4096 {
+            return Err(Error::Invalid("inbox source locator is invalid".into()));
+        }
+        let _guard = lock(&self.uploads)?;
+        let upload = self.upload_record(id)?;
+        let request = serde_json::to_string(&serde_json::json!({
+            "upload": upload,
+            "inbox_source_locator": source_locator,
+        }))
+        .map_err(storage)?;
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let changed = tx
+            .execute(
+                "UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,
+                   request=?,error=NULL,result=NULL,cancellation_requested=0,updated_at=?
+                 WHERE id=? AND state='running' AND claim_token IS NULL
+                   AND phase IN ('awaiting_source','staging')",
+                params![request, self.clock.now().timestamp(), id.to_string()],
+            )
+            .map_err(storage)?;
+        if changed != 1 {
+            return Err(Error::Conflict);
+        }
+        self.record_command(&tx, &id)?;
+        tx.commit().map_err(storage)?;
+        Ok(id)
     }
     pub(crate) fn commit_upload_record(&self, id: JobId) -> Result<Item> {
+        self.commit_upload_inner(id, None, None)
+    }
+    pub(crate) fn commit_upload_job_record(&self, id: JobId, claim_token: &str) -> Result<Item> {
+        let (created_at, request): (i64, String) = lock(&self.db)?
+            .query_row(
+                "SELECT created_at,request FROM private.jobs WHERE id=? AND claim_token=?",
+                params![id.to_string(), claim_token],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(storage)?;
+        let created_at = chrono::DateTime::from_timestamp(created_at, 0)
+            .ok_or_else(|| Error::Storage("job creation timestamp is invalid".into()))?;
+        let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+        if let Some(source_locator) = request
+            .get("inbox_source_locator")
+            .and_then(serde_json::Value::as_str)
+        {
+            self.stage_inbox_upload_record(id, claim_token, Path::new(source_locator))?;
+        }
+        let journals = publication::PublicationJournalStore::new(&self.archive);
+        let result = self.commit_upload_inner(id, Some(claim_token), Some(created_at));
+        if matches!(result, Err(Error::JobCancelled))
+            && journals
+                .phase(TransactionId(id.0))?
+                .is_some_and(|phase| phase < publication::PublicationPhase::RevisionCommitted)
+        {
+            journals.abort(TransactionId(id.0))?;
+        } else if result.is_err()
+            && journals
+                .phase(TransactionId(id.0))?
+                .is_some_and(|phase| phase >= publication::PublicationPhase::RevisionCommitted)
+        {
+            self.reindex()?;
+            finish_v3_publication(self, TransactionId(id.0))?;
+            return self.commit_upload_inner(id, Some(claim_token), Some(created_at));
+        }
+        result
+    }
+
+    fn stage_inbox_upload_record(&self, id: JobId, claim_token: &str, source: &Path) -> Result<()> {
+        if fs::symlink_metadata(source)
+            .map_err(storage)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(Error::Invalid("inbox package changed while staging".into()));
+        }
+        let root = fs::canonicalize(source).map_err(storage)?;
+        let upload = self.upload_record(id)?;
+        let mut completed = upload.offsets.iter().sum::<u64>();
+        for (index, entry) in upload.files.iter().enumerate() {
+            self.ensure_job_continues(id, Some(claim_token))?;
+            safe_name(&entry.name)?;
+            let path = root.join(&entry.name);
+            let metadata = fs::symlink_metadata(&path).map_err(storage)?;
+            let canonical = fs::canonicalize(&path).map_err(storage)?;
+            if metadata.file_type().is_symlink()
+                || !metadata.is_file()
+                || metadata.len() != entry.bytes.0
+                || !canonical.starts_with(&root)
+            {
+                return Err(Error::Invalid("inbox package changed while staging".into()));
+            }
+            let mut file = File::open(&canonical).map_err(storage)?;
+            let mut offset = upload.offsets[index];
+            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
+            let mut buffer = vec![0u8; 1024 * 1024];
+            loop {
+                let read = file.read(&mut buffer).map_err(storage)?;
+                if read == 0 {
+                    break;
+                }
+                self.upload_chunk_record(id, index, offset, &buffer[..read])?;
+                offset += read as u64;
+                completed += read as u64;
+                self.heartbeat_job_record(id, claim_token, "staging_inbox", completed, 30)?;
+                self.ensure_job_continues(id, Some(claim_token))?;
+            }
+            if file.metadata().map_err(storage)?.len() != entry.bytes.0 {
+                return Err(Error::Invalid("inbox package changed while staging".into()));
+            }
+        }
+        Ok(())
+    }
+    fn commit_upload_inner(
+        &self,
+        id: JobId,
+        claim_token: Option<&str>,
+        durable_created_at: Option<chrono::DateTime<Utc>>,
+    ) -> Result<Item> {
         let _guard = lock(&self.uploads)?;
         let _writer = lock(&self.writer)?;
+        self.ensure_job_continues(id, claim_token)?;
         let mut upload = self.upload_record(id)?;
         let mut item = self.item(upload.item_id)?;
         let existing_capture = item
@@ -366,6 +601,7 @@ impl Store {
         }
         let mut files = Vec::new();
         for (index, file) in upload.files.iter().enumerate() {
+            self.ensure_job_continues(id, claim_token)?;
             let source = self.upload_directory(id).join(format!("{index}.part"));
             if file.bytes.0 == 0 && !source.exists() {
                 write_new(&source, b"")?;
@@ -404,7 +640,7 @@ impl Store {
                         item_id: Some(item.id),
                         ..Default::default()
                     },
-                    created_at: Utc::now(),
+                    created_at: durable_created_at.unwrap_or_else(Utc::now),
                     representations: vec![Representation {
                         id: upload.representation_id,
                         role: RepresentationRole::PreservationMaster,
@@ -414,9 +650,10 @@ impl Store {
                         profile: None,
                     }],
                 };
-                self.publish_upload_capture(&upload, collection_root, capture)?
+                self.publish_upload_capture(&upload, collection_root, capture, claim_token)?
             }
         };
+        self.ensure_job_continues(id, claim_token)?;
         if !item.captures.iter().any(|value| value.id == capture.id) {
             item.captures.push(capture.clone());
         }
@@ -444,6 +681,7 @@ impl Store {
         upload: &Upload,
         collection_root: &Path,
         capture: Capture,
+        claim_token: Option<&str>,
     ) -> Result<Capture> {
         let transaction_id = TransactionId(upload.id.0);
         let record = archive_v3::CaptureRecordV3 {
@@ -520,6 +758,7 @@ impl Store {
         fs::create_dir_all(&payload_stage).map_err(storage)?;
         fs::create_dir_all(&revision_stage).map_err(storage)?;
         for (index, file) in capture.representations[0].files.iter().enumerate() {
+            self.ensure_job_continues(upload.id, claim_token)?;
             let source = self
                 .upload_directory(upload.id)
                 .join(format!("{index}.part"));
@@ -564,27 +803,40 @@ impl Store {
         self.publication_fault
             .check(PublicationFaultPoint::PayloadPublished)?;
 
-        let revision_destination = self.archive.join(&revision_relative);
-        fs::create_dir_all(revision_destination.parent().unwrap()).map_err(storage)?;
-        if revision_destination.exists() {
-            if fs::read(revision_destination.join("record.v3.json")).map_err(storage)?
-                != record_bytes
-                || fs::read(revision_destination.join("manifest.v3.toml")).map_err(storage)?
-                    != manifest_bytes
-            {
-                return Err(Error::Storage(
-                    "orphan Capture revision differs from retry".into(),
-                ));
+        {
+            let _publication_gate = lock(&self.job_publication_gate)?;
+            self.ensure_job_continues(upload.id, claim_token)?;
+            let revision_destination = self.archive.join(&revision_relative);
+            fs::create_dir_all(revision_destination.parent().unwrap()).map_err(storage)?;
+            if revision_destination.exists() {
+                if fs::read(revision_destination.join("record.v3.json")).map_err(storage)?
+                    != record_bytes
+                    || fs::read(revision_destination.join("manifest.v3.toml")).map_err(storage)?
+                        != manifest_bytes
+                {
+                    return Err(Error::Storage(
+                        "orphan Capture revision differs from retry".into(),
+                    ));
+                }
+                fs::remove_dir_all(&revision_stage).map_err(storage)?;
+            } else {
+                fs::rename(&revision_stage, &revision_destination).map_err(storage)?;
             }
-            fs::remove_dir_all(&revision_stage).map_err(storage)?;
-        } else {
-            fs::rename(&revision_stage, &revision_destination).map_err(storage)?;
+            sync_directory(revision_destination.parent().unwrap())?;
+            journals.advance(
+                transaction_id,
+                publication::PublicationPhase::RevisionCommitted,
+            )?;
+            if let Some(claim_token) = claim_token {
+                self.heartbeat_job_record(
+                    upload.id,
+                    claim_token,
+                    "revision_committed",
+                    upload.files.iter().map(|file| file.bytes.0).sum(),
+                    30,
+                )?;
+            }
         }
-        sync_directory(revision_destination.parent().unwrap())?;
-        journals.advance(
-            transaction_id,
-            publication::PublicationPhase::RevisionCommitted,
-        )?;
         self.publication_fault
             .check(PublicationFaultPoint::RevisionCommitted)?;
 
@@ -594,6 +846,15 @@ impl Store {
         tx.commit().map_err(storage)?;
         finish_v3_publication(self, transaction_id)?;
         Ok(capture)
+    }
+
+    fn ensure_job_continues(&self, id: JobId, claim_token: Option<&str>) -> Result<()> {
+        if let Some(token) = claim_token
+            && self.cancellation_requested_record(id, token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        Ok(())
     }
     pub(crate) fn jobs_for_user(&self, user: UserId) -> Result<Vec<Job>> {
         let db = lock(&self.db)?;
@@ -839,24 +1100,33 @@ impl Store {
         ))
     }
     pub(crate) fn verify_integrity_record(&self, item_id: ItemId) -> Result<Item> {
-        self.verify_integrity_inner(item_id, None, Utc::now())
+        self.verify_integrity_inner(item_id, None, Utc::now(), None)
     }
     pub(crate) fn verify_integrity_job_record(
         &self,
         item_id: ItemId,
         job_id: JobId,
+        claim_token: &str,
         created_at: chrono::DateTime<Utc>,
+        progress: &mut dyn FnMut(u64) -> Result<()>,
     ) -> Result<Item> {
-        self.verify_integrity_inner(item_id, Some(job_id), created_at)
+        self.verify_integrity_inner(
+            item_id,
+            Some((job_id, claim_token)),
+            created_at,
+            Some(progress),
+        )
     }
     fn verify_integrity_inner(
         &self,
         item_id: ItemId,
-        job_id: Option<JobId>,
+        job: Option<(JobId, &str)>,
         created_at: chrono::DateTime<Utc>,
+        mut progress: Option<&mut dyn FnMut(u64) -> Result<()>>,
     ) -> Result<Item> {
         let item = self.item(item_id)?;
         let mut evidence = Vec::new();
+        let mut completed_units = 0;
         for representation in item.captures.iter().flat_map(|c| &c.representations) {
             let mut passed = true;
             let mut details = Vec::new();
@@ -868,9 +1138,13 @@ impl Store {
                     .is_ok_and(|(length, digest)| length == file.bytes && digest == file.digest);
                 passed &= matches;
                 details.push(serde_json::json!({"file":file.name,"matches":matches}));
+                completed_units += 1;
+                if let Some(progress) = progress.as_deref_mut() {
+                    progress(completed_units)?;
+                }
             }
             evidence.push(Evidence {
-                id: job_id.map_or_else(EvidenceId::new, |job_id| {
+                id: job.map_or_else(EvidenceId::new, |(job_id, _)| {
                     deterministic_integrity_evidence_id(job_id, representation.id)
                 }),
                 item_id: item.id,
@@ -893,7 +1167,7 @@ impl Store {
                 created_at,
             });
         }
-        if job_id.is_some() {
+        if job.is_some() {
             let existing = self.evidence(item.id)?;
             let mut present = 0usize;
             for intended in &evidence {
@@ -918,11 +1192,27 @@ impl Store {
             }
         }
         let expected = item.revision;
-        self.publish(item, expected, evidence)
+        if let Some((job_id, claim_token)) = job {
+            let _publication_gate = lock(&self.job_publication_gate)?;
+            if let Some(progress) = progress {
+                progress(completed_units)?;
+            }
+            let result = self.publish(item, expected, evidence)?;
+            self.heartbeat_job_record(
+                job_id,
+                claim_token,
+                "revision_committed",
+                completed_units,
+                30,
+            )?;
+            Ok(result)
+        } else {
+            self.publish(item, expected, evidence)
+        }
     }
 }
 
-fn deterministic_integrity_evidence_id(
+pub(crate) fn deterministic_integrity_evidence_id(
     job_id: JobId,
     representation_id: RepresentationId,
 ) -> EvidenceId {
@@ -958,7 +1248,8 @@ impl Store {
         };
         lock(&self.db)?
             .execute(
-                "UPDATE private.jobs SET state='failed',phase='failed',updated_at=?,error=? WHERE id=?",
+                "UPDATE private.jobs SET state='failed',phase='failed',updated_at=?,error=?
+                 WHERE id=? AND claim_token IS NULL",
                 params![Utc::now().timestamp(), job.error, id.to_string()],
             )
             .map_err(storage)?;

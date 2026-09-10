@@ -183,6 +183,14 @@ impl<'a> PublicationJournalStore<'a> {
         Ok(())
     }
 
+    pub(crate) fn phase(&self, transaction_id: TransactionId) -> Result<Option<PublicationPhase>> {
+        let path = self.journal_path(transaction_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(self.read(&path)?.phase))
+    }
+
     pub(crate) fn write_new(&self, journal: &PublicationJournal) -> Result<()> {
         journal.validate()?;
         let path = self.journal_path(journal.transaction_id);

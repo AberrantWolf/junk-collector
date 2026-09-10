@@ -2238,6 +2238,34 @@ fn configured_inbox_preserves_sources_and_reuses_import_evidence() {
         EvidenceOutcome::Passed
     );
 }
+
+#[test]
+fn configured_inbox_staging_runs_through_the_durable_worker() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let source = root.path().join("inbox/durable-package");
+    std::fs::create_dir_all(source.join("tracks")).unwrap();
+    std::fs::write(source.join("disc.cue"), b"REM durable package\n").unwrap();
+    std::fs::write(source.join("tracks/disc.bin"), b"durable payload").unwrap();
+    let files = Store::inventory_directory(&source).unwrap();
+    let upload = service
+        .create_upload(&actor, saved.id, saved.revision, files, &command())
+        .unwrap();
+    service
+        .enqueue_inbox_upload(&actor, upload.id, source.to_str().unwrap(), &command())
+        .unwrap();
+
+    assert!(service.run_next_job("server-a").unwrap());
+    assert_eq!(
+        service.upload(&actor, upload.id).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        std::fs::read(source.join("tracks/disc.bin")).unwrap(),
+        b"durable payload"
+    );
+    assert_eq!(store.evidence(saved.id).unwrap().len(), 1);
+}
 #[cfg(unix)]
 #[test]
 fn inbox_symlinks_are_rejected() {
@@ -2365,7 +2393,7 @@ fn durable_job_rows_store_typed_state_without_losing_upload_identity() {
         )
         .unwrap();
     assert_eq!(id, upload.id.to_string());
-    assert_eq!(state, "queued");
+    assert_eq!(state, "running");
     assert_eq!(completed, 0);
     assert_eq!(total, 4);
 }
@@ -2517,6 +2545,251 @@ fn durable_progress_is_monotonic_and_throttled_with_immediate_phase_changes() {
 }
 
 #[test]
+fn upload_source_staging_is_not_claimable_until_commit_is_enqueued() {
+    let (_root, store, actor, service, collection) = setup();
+    let (_saved, upload) = ready_upload(&store, &actor, &service, collection.id, b"ready");
+    assert!(store.claim_job("server-a", 30).unwrap().is_none());
+
+    assert_eq!(
+        service
+            .enqueue_upload_commit(&actor, upload.id, &command())
+            .unwrap(),
+        upload.id
+    );
+    assert!(service.run_next_job("server-a").unwrap());
+    assert_eq!(
+        service.upload(&actor, upload.id).unwrap().state,
+        JobState::Completed
+    );
+}
+
+#[test]
+fn queued_and_running_upload_cancellation_retain_source_material() {
+    let (root, store, actor, service, collection) = setup();
+    let (_saved, queued) = ready_upload(&store, &actor, &service, collection.id, b"queued");
+    service
+        .enqueue_upload_commit(&actor, queued.id, &command())
+        .unwrap();
+    service
+        .cancel_upload(&actor, queued.id, &command())
+        .unwrap();
+    assert_eq!(
+        service.upload(&actor, queued.id).unwrap().state,
+        JobState::Cancelled
+    );
+    assert!(store.claim_job("server-a", 30).unwrap().is_none());
+
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let running = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "running.bin".into(),
+                bytes: ByteLength(7),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, running.id, 0, 0, b"running")
+        .unwrap();
+    service
+        .enqueue_upload_commit(&actor, running.id, &command())
+        .unwrap();
+    let claim = store.claim_job("server-a", 30).unwrap().unwrap();
+    service
+        .cancel_upload(&actor, running.id, &command())
+        .unwrap();
+    assert!(
+        store
+            .cancellation_requested(claim.id, &claim.claim_token)
+            .unwrap()
+    );
+    assert!(matches!(
+        store.commit_upload_for_job(claim.id, &claim.claim_token),
+        Err(Error::JobCancelled)
+    ));
+    store
+        .cancel_claimed_job(claim.id, &claim.claim_token)
+        .unwrap();
+    assert_eq!(
+        service.upload(&actor, running.id).unwrap().state,
+        JobState::Cancelled
+    );
+    assert!(find_file_with_bytes(&root.path().join("state"), b"running").is_some());
+}
+
+#[test]
+fn failed_upload_retry_reuses_job_and_publication_identities() {
+    let bytes = b"retry source";
+    let (root, store, actor, service, collection) = setup();
+    let (_saved, upload) = ready_upload(&store, &actor, &service, collection.id, bytes);
+    drop(service);
+    drop(store);
+    let faulted = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::Prepared,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(faulted.clone(), Arc::new(Registry::builtins()));
+    service
+        .enqueue_upload_commit(&actor, upload.id, &command())
+        .unwrap();
+    assert!(service.run_next_job("server-a").unwrap());
+    assert_eq!(
+        service.upload(&actor, upload.id).unwrap().state,
+        JobState::Failed
+    );
+
+    assert_eq!(
+        service
+            .retry_upload_job(&actor, upload.id, &command())
+            .unwrap(),
+        upload.id
+    );
+    assert!(service.run_next_job("server-a").unwrap());
+    let retried_job = service
+        .jobs(&actor)
+        .unwrap()
+        .into_iter()
+        .find(|job| job.id == upload.id)
+        .unwrap();
+    assert_eq!(
+        retried_job.state,
+        JobState::Completed,
+        "retry failed: {:?}",
+        retried_job.error
+    );
+    let item = faulted.item(upload.item_id).unwrap();
+    assert!(
+        item.captures
+            .iter()
+            .any(|capture| capture.id == upload.capture_id)
+    );
+    assert!(item.captures.iter().any(|capture| {
+        capture
+            .representations
+            .iter()
+            .any(|representation| representation.id == upload.representation_id)
+    }));
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let (attempt, history): (u32, String) = private
+        .query_row(
+            "SELECT attempt,result FROM jobs WHERE id=?",
+            [upload.id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(attempt, 2);
+    let history: serde_json::Value = serde_json::from_str(&history).unwrap();
+    assert_eq!(history["prior_failures"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn cancellation_after_revision_commit_has_a_stable_too_late_result() {
+    let bytes = b"committed source";
+    let (root, store, actor, service, collection) = setup();
+    let (_saved, upload) = ready_upload(&store, &actor, &service, collection.id, bytes);
+    drop(service);
+    drop(store);
+    let faulted = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::RevisionCommitted,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(faulted, Arc::new(Registry::builtins()));
+    service
+        .enqueue_upload_commit(&actor, upload.id, &command())
+        .unwrap();
+    assert!(service.run_next_job("server-a").unwrap());
+    assert!(matches!(
+        service.cancel_upload(&actor, upload.id, &command()),
+        Err(Error::CancellationTooLate)
+    ));
+}
+
+#[test]
+fn cancellation_at_payload_boundary_aborts_before_revision_commit() {
+    struct PauseAtPayload {
+        arrived: std::sync::Barrier,
+        release: std::sync::Barrier,
+        paused: AtomicBool,
+    }
+    impl collector_store::PublicationFaultInjector for PauseAtPayload {
+        fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+            if point == collector_store::PublicationFaultPoint::PayloadPublished
+                && !self.paused.swap(true, Ordering::SeqCst)
+            {
+                self.arrived.wait();
+                self.release.wait();
+            }
+            Ok(())
+        }
+    }
+
+    let (root, store, actor, service, collection) = setup();
+    let (saved, upload) = ready_upload(&store, &actor, &service, collection.id, b"cancel me");
+    drop(service);
+    drop(store);
+    let pause = Arc::new(PauseAtPayload {
+        arrived: std::sync::Barrier::new(2),
+        release: std::sync::Barrier::new(2),
+        paused: AtomicBool::new(false),
+    });
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            pause.clone(),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service
+        .enqueue_upload_commit(&actor, upload.id, &command())
+        .unwrap();
+    let worker = {
+        let service = service.clone();
+        std::thread::spawn(move || service.run_next_job("server-a"))
+    };
+    pause.arrived.wait();
+    service
+        .cancel_upload(&actor, upload.id, &command())
+        .unwrap();
+    pause.release.wait();
+    assert!(worker.join().unwrap().unwrap());
+
+    assert_eq!(
+        service.upload(&actor, upload.id).unwrap().state,
+        JobState::Cancelled
+    );
+    assert!(store.item(saved.id).unwrap().captures.is_empty());
+    assert!(store.evidence(saved.id).unwrap().is_empty());
+    assert!(
+        std::fs::read_dir(root.path().join("archive/.transactions"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    assert!(find_file_with_bytes(&root.path().join("state"), b"cancel me").is_some());
+}
+
+#[test]
 fn integrity_verification_runs_as_a_real_durable_job() {
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
@@ -2567,7 +2840,7 @@ fn integrity_verification_runs_as_a_real_durable_job() {
 
 #[test]
 fn reclaimed_integrity_job_does_not_publish_twice() {
-    let (_root, store, actor, service, collection) = setup();
+    let (root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let upload = service
         .create_upload(
@@ -2594,10 +2867,21 @@ fn reclaimed_integrity_job_does_not_publish_twice() {
     let claim = store.claim_job("server-before-crash", 30).unwrap().unwrap();
     assert_eq!(claim.id, job);
     store
-        .verify_integrity_for_job(saved.id, job, claim.created_at)
+        .verify_integrity_for_job(
+            saved.id,
+            job,
+            &claim.claim_token,
+            claim.created_at,
+            &mut |_| Ok(()),
+        )
         .unwrap();
     let evidence_after_publication = store.evidence(saved.id).unwrap().len();
     let revision_after_publication = store.item(saved.id).unwrap().revision;
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
 
     assert!(service.run_next_job("server-after-restart").unwrap());
     assert_eq!(
@@ -2618,6 +2902,68 @@ fn reclaimed_integrity_job_does_not_publish_twice() {
             .state,
         JobState::Completed
     );
+}
+
+#[test]
+fn integrity_job_observes_cancellation_between_files() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![
+                UploadFile {
+                    name: "one.bin".into(),
+                    bytes: ByteLength(3),
+                    sha256: None,
+                },
+                UploadFile {
+                    name: "two.bin".into(),
+                    bytes: ByteLength(3),
+                    sha256: None,
+                },
+            ],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 0, 0, b"one")
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 1, 0, b"two")
+        .unwrap();
+    service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
+    let before = store.evidence(saved.id).unwrap().len();
+    let job = service
+        .enqueue_integrity_verification(&actor, saved.id, &command())
+        .unwrap();
+    let claim = store.claim_job("server-a", 30).unwrap().unwrap();
+    let mut progress = |completed| {
+        if completed == 1 {
+            store.request_job_cancellation(job, actor.user_id)?;
+        }
+        if store.cancellation_requested(job, &claim.claim_token)? {
+            Err(Error::JobCancelled)
+        } else {
+            Ok(())
+        }
+    };
+    assert!(matches!(
+        store.verify_integrity_for_job(
+            saved.id,
+            job,
+            &claim.claim_token,
+            claim.created_at,
+            &mut progress,
+        ),
+        Err(Error::JobCancelled)
+    ));
+    store.cancel_claimed_job(job, &claim.claim_token).unwrap();
+    assert_eq!(store.evidence(saved.id).unwrap().len(), before);
 }
 
 #[test]

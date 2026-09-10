@@ -155,13 +155,19 @@ pub trait ImportPort: Send + Sync {
     fn upload_chunk(&self, id: JobId, index: usize, offset: u64, bytes: &[u8]) -> Result<Upload>;
     fn cancel_upload(&self, id: JobId) -> Result<()>;
     fn commit_upload(&self, id: JobId) -> Result<Item>;
+    fn commit_upload_for_job(&self, id: JobId, claim_token: &str) -> Result<Item>;
+    fn queue_upload(&self, id: JobId) -> Result<JobId>;
+    fn queue_inbox_upload(&self, id: JobId, source_locator: &str) -> Result<JobId>;
+    fn retry_upload(&self, id: JobId) -> Result<JobId>;
     fn fail_upload(&self, id: JobId, message: &str) -> Result<()>;
     fn verify_integrity(&self, item: ItemId) -> Result<Item>;
     fn verify_integrity_for_job(
         &self,
         item: ItemId,
         job: JobId,
+        claim_token: &str,
         created_at: DateTime<Utc>,
+        progress: &mut dyn FnMut(u64) -> Result<()>,
     ) -> Result<Item>;
     fn jobs(&self, user: UserId) -> Result<Vec<Job>>;
 }
@@ -187,6 +193,8 @@ pub struct JobClaim {
     pub request: serde_json::Value,
     pub claim_token: String,
     pub attempt: u32,
+    pub phase: String,
+    pub completed_units: u64,
     pub created_at: chrono::DateTime<Utc>,
 }
 
@@ -204,6 +212,9 @@ pub trait JobPort: Send + Sync {
     ) -> Result<()>;
     fn complete_job(&self, id: JobId, claim_token: &str, result: serde_json::Value) -> Result<()>;
     fn fail_job(&self, id: JobId, claim_token: &str, message: &str) -> Result<()>;
+    fn cancel_claimed_job(&self, id: JobId, claim_token: &str) -> Result<()>;
+    fn cancellation_requested(&self, id: JobId, claim_token: &str) -> Result<bool>;
+    fn request_job_cancellation(&self, id: JobId, user: UserId) -> Result<()>;
 }
 
 pub trait AdministrationPort: Send + Sync {
@@ -1414,7 +1425,7 @@ impl CollectionService {
     ) -> Result<()> {
         self.authorized_upload(actor, id)?;
         self.execute_command(actor, context, "upload.cancel", &id, |effects| {
-            effects.cancel_upload(id)
+            effects.request_job_cancellation(id, actor.user_id)
         })
     }
     pub fn commit_upload(
@@ -1436,6 +1447,46 @@ impl CollectionService {
             );
         }
         result
+    }
+    pub fn enqueue_upload_commit(
+        &self,
+        actor: &Principal,
+        id: JobId,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.authorized_upload(actor, id)?;
+        self.execute_command(actor, context, "upload.commit.enqueue", &id, |effects| {
+            effects.queue_upload(id)
+        })
+    }
+    pub fn retry_upload_job(
+        &self,
+        actor: &Principal,
+        id: JobId,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.authorized_upload(actor, id)?;
+        self.execute_command(actor, context, "upload.retry", &id, |effects| {
+            effects.retry_upload(id)
+        })
+    }
+    pub fn enqueue_inbox_upload(
+        &self,
+        actor: &Principal,
+        id: JobId,
+        source_locator: &str,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.require_administrator(actor)?;
+        self.authorized_upload(actor, id)?;
+        let request = (id, source_locator);
+        self.execute_command(
+            actor,
+            context,
+            "upload.inbox.enqueue",
+            &request,
+            |effects| effects.queue_inbox_upload(id, source_locator),
+        )
     }
     pub fn fail_upload(&self, actor: &Principal, id: JobId, message: &str) -> Result<()> {
         self.authorized_upload(actor, id)?;
@@ -1478,6 +1529,11 @@ impl CollectionService {
                 .count() as u64,
             request: serde_json::json!({"item_id":item_id}),
         };
+        if spec.total_units == 0 {
+            return Err(Error::Invalid(
+                "integrity verification requires at least one stored file".into(),
+            ));
+        }
         self.execute_command(
             actor,
             context,
@@ -1491,8 +1547,13 @@ impl CollectionService {
         let Some(claim) = self.jobs.claim_job(worker_instance, 30)? else {
             return Ok(false);
         };
-        self.jobs
-            .heartbeat_job(claim.id, &claim.claim_token, "starting", 0, 30)?;
+        self.jobs.heartbeat_job(
+            claim.id,
+            &claim.claim_token,
+            &claim.phase,
+            claim.completed_units,
+            30,
+        )?;
         let (stop_heartbeat, heartbeat_stop) = std::sync::mpsc::channel();
         let heartbeat_jobs = self.jobs.clone();
         let heartbeat_id = claim.id;
@@ -1518,10 +1579,34 @@ impl CollectionService {
                 let item_id = claim
                     .item_id
                     .ok_or_else(|| Error::Storage("integrity job has no Item identity".into()))?;
+                let progress_jobs = self.jobs.clone();
+                let progress_token = claim.claim_token.clone();
+                let mut progress = |completed_units| {
+                    if progress_jobs.cancellation_requested(claim.id, &progress_token)? {
+                        return Err(Error::JobCancelled);
+                    }
+                    progress_jobs.heartbeat_job(
+                        claim.id,
+                        &progress_token,
+                        "verifying_integrity",
+                        completed_units,
+                        30,
+                    )
+                };
                 self.imports
-                    .verify_integrity_for_job(item_id, claim.id, claim.created_at)
+                    .verify_integrity_for_job(
+                        item_id,
+                        claim.id,
+                        &claim.claim_token,
+                        claim.created_at,
+                        &mut progress,
+                    )
                     .map(|item| serde_json::json!({"item_id":item.id,"revision":item.revision}))
             }
+            "preservation_import" => self
+                .imports
+                .commit_upload_for_job(claim.id, &claim.claim_token)
+                .map(|item| serde_json::json!({"item_id":item.id,"revision":item.revision})),
             _ => Err(Error::Unavailable(format!(
                 "job kind {} has no registered executor",
                 claim.kind
@@ -1535,7 +1620,13 @@ impl CollectionService {
             Ok(result) => self
                 .jobs
                 .complete_job(claim.id, &claim.claim_token, result)?,
+            Err(Error::JobCancelled) => {
+                self.jobs.cancel_claimed_job(claim.id, &claim.claim_token)?
+            }
             Err(error) => {
+                if claim.kind == "preservation_import" {
+                    let _ = self.imports.fail_upload(claim.id, &error.to_string());
+                }
                 self.jobs.fail_job(
                     claim.id,
                     &claim.claim_token,

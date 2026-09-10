@@ -746,6 +746,28 @@ async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work
         .service
         .save_item(&actor, item.id, item.into(), Revision(0), &command())
         .unwrap();
+    let upload = state
+        .service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "fixture.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .upload_chunk(&actor, upload.id, 0, 0, b"data")
+        .unwrap();
+    state
+        .service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
     let (token, _) = state.store.issue_session(user, "browser").unwrap();
     let service = state.service.clone();
     let response = router(state)
