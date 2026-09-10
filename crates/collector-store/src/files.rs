@@ -651,7 +651,23 @@ impl Store {
                         profile: None,
                     }],
                 };
-                self.publish_upload_capture(&upload, collection_root, capture, claim_token)?
+                let sources = upload
+                    .files
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| {
+                        self.upload_directory(upload.id)
+                            .join(format!("{index}.part"))
+                    })
+                    .collect::<Vec<_>>();
+                self.publish_capture_payloads(
+                    TransactionId(upload.id.0),
+                    upload.id,
+                    collection_root,
+                    capture,
+                    &sources,
+                    claim_token,
+                )?
             }
         };
         self.ensure_job_continues(id, claim_token)?;
@@ -677,14 +693,20 @@ impl Store {
         Ok(result)
     }
 
-    fn publish_upload_capture(
+    pub(crate) fn publish_capture_payloads(
         &self,
-        upload: &Upload,
+        transaction_id: TransactionId,
+        job_id: JobId,
         collection_root: &Path,
         capture: Capture,
+        sources: &[PathBuf],
         claim_token: Option<&str>,
     ) -> Result<Capture> {
-        let transaction_id = TransactionId(upload.id.0);
+        if sources.len() != capture.representations[0].files.len() {
+            return Err(Error::Storage(
+                "Capture payload source inventory changed".into(),
+            ));
+        }
         let record = archive_v3::CaptureRecordV3 {
             capture: capture.clone(),
             legacy_root: None,
@@ -707,23 +729,20 @@ impl Store {
         let stage_relative = format!(".staging/{transaction_id}");
         let payload_relative = format!(
             "{collection_relative}/captures/{}/payload/{}",
-            capture.id, upload.representation_id
+            capture.id, capture.representations[0].id
         );
         let revision_relative = format!(
             "{collection_relative}/captures/{}/revisions/{:020}",
             capture.id, capture.revision.0
         );
         let mut artifacts = Vec::new();
-        for (index, file) in capture.representations[0].files.iter().enumerate() {
+        for file in &capture.representations[0].files {
             artifacts.push(publication::JournalArtifact {
                 kind: publication::ArtifactKind::Payload,
                 staged_path: format!("{stage_relative}/payload/{}", file.name),
                 published_path: format!("{payload_relative}/{}", file.name),
                 sha256: file.digest.hex.clone(),
             });
-            if upload.files[index].name != file.name {
-                return Err(Error::Storage("upload file identity changed".into()));
-            }
         }
         artifacts.extend([
             publication::JournalArtifact {
@@ -759,10 +778,8 @@ impl Store {
         fs::create_dir_all(&payload_stage).map_err(storage)?;
         fs::create_dir_all(&revision_stage).map_err(storage)?;
         for (index, file) in capture.representations[0].files.iter().enumerate() {
-            self.ensure_job_continues(upload.id, claim_token)?;
-            let source = self
-                .upload_directory(upload.id)
-                .join(format!("{index}.part"));
+            self.ensure_job_continues(job_id, claim_token)?;
+            let source = &sources[index];
             let target = payload_stage.join(&file.name);
             fs::create_dir_all(target.parent().unwrap()).map_err(storage)?;
             fs::copy(source, &target).map_err(storage)?;
@@ -806,7 +823,7 @@ impl Store {
 
         {
             let _publication_gate = lock(&self.job_publication_gate)?;
-            self.ensure_job_continues(upload.id, claim_token)?;
+            self.ensure_job_continues(job_id, claim_token)?;
             let revision_destination = self.archive.join(&revision_relative);
             fs::create_dir_all(revision_destination.parent().unwrap()).map_err(storage)?;
             if revision_destination.exists() {
@@ -830,10 +847,14 @@ impl Store {
             )?;
             if let Some(claim_token) = claim_token {
                 self.heartbeat_job_record(
-                    upload.id,
+                    job_id,
                     claim_token,
                     "revision_committed",
-                    upload.files.iter().map(|file| file.bytes.0).sum(),
+                    capture.representations[0]
+                        .files
+                        .iter()
+                        .map(|file| file.bytes.0)
+                        .sum(),
                     30,
                 )?;
             }

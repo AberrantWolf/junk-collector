@@ -1,5 +1,5 @@
 use super::*;
-use collector_app::{JobClaim, JobRecord, JobSpec};
+use collector_app::{JobClaim, JobRecord, JobSpec, ProvisionalImportPort};
 use rusqlite::TransactionBehavior;
 
 type StoredJobIdentity = (String, String, Option<String>, Option<String>, String);
@@ -72,7 +72,7 @@ impl Store {
             let db = lock(&self.db)?;
             let mut statement = db
                 .prepare(
-                    "SELECT id,kind,item_id FROM private.jobs
+                    "SELECT id,kind,item_id,request FROM private.jobs
                      WHERE state IN ('running','cancel_requested')",
                 )
                 .map_err(storage)?;
@@ -82,13 +82,14 @@ impl Store {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 })
                 .map_err(storage)?
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(storage)?
         };
-        for (id, kind, item_id) in candidates {
+        for (id, kind, item_id, request) in candidates {
             let job_id: JobId = id.parse().map_err(storage)?;
             let committed = if kind == "preservation_import" {
                 publication::PublicationJournalStore::new(&self.archive)
@@ -105,6 +106,20 @@ impl Store {
                             })
                         })
                         .unwrap_or(false)
+            } else if kind == "import_publication" {
+                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+                let import_id: ImportId = request
+                    .get("import_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| Error::Storage("publication Job has no Import identity".into()))?
+                    .parse()
+                    .map_err(storage)?;
+                publication::PublicationJournalStore::new(&self.archive)
+                    .phase(TransactionId(job_id.0))?
+                    .is_some_and(|phase| phase >= publication::PublicationPhase::RevisionCommitted)
+                    || self
+                        .import_record(import_id)
+                        .is_ok_and(|record| self.capture(record.view.capture_id).is_ok())
             } else if kind == "integrity_verification" {
                 let Some(item_id) = item_id else { continue };
                 let item_id: ItemId = item_id.parse().map_err(storage)?;
@@ -501,11 +516,25 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        let (state, phase, claim_token): (String, String, Option<String>) = tx
+        let (state, phase, claim_token, kind, request): (
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+        ) = tx
             .query_row(
-                "SELECT state,phase,claim_token FROM private.jobs WHERE id=? AND user_id=?",
+                "SELECT state,phase,claim_token,kind,request FROM private.jobs WHERE id=? AND user_id=?",
                 params![id.to_string(), user.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .optional()
             .map_err(storage)?
@@ -528,6 +557,19 @@ impl Store {
                 params![self.clock.now().timestamp(), id.to_string()],
             )
             .map_err(storage)?;
+            if kind.starts_with("import_") {
+                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+                if let Some(import_id) =
+                    request.get("import_id").and_then(serde_json::Value::as_str)
+                {
+                    tx.execute(
+                        "UPDATE private.imports SET phase='cancelled',revision=revision+1,updated_at=?
+                         WHERE id=? AND phase<>'published' AND phase<>'cancelled'",
+                        params![self.clock.now().timestamp(), import_id],
+                    )
+                    .map_err(storage)?;
+                }
+            }
         }
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
@@ -645,7 +687,10 @@ impl Store {
         if state != "failed"
             || !matches!(
                 kind.as_str(),
-                "integrity_verification" | "import_staging" | "import_analysis"
+                "integrity_verification"
+                    | "import_staging"
+                    | "import_analysis"
+                    | "import_publication"
             )
         {
             return Err(Error::Conflict);

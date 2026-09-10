@@ -88,7 +88,7 @@ The public app and management entrypoints are separate bundles. Rebuild the Rust
 
 ## Server inboxes
 
-Configure named inbox roots in `[inboxes]`, for example `rips = "/srv/incoming"`. Administrators can list configured names with `GET /api/v1/admin/inboxes` and import a direct child package directory with `POST /api/v1/admin/inboxes/{name}/import`, supplying `item_id`, `expected_revision`, and `package`. Sources are retained; symlinks and special files are rejected. The browser inbox selector is not yet implemented.
+Configure named inbox roots in `[inboxes]`, for example `rips = "/srv/incoming"`. Curators can list safe package names through the collection-scoped Import API and stage a direct child directory into the unified review workflow; configured roots are never returned. The deprecated administrator endpoints remain compatibility adapters: `GET /api/v1/admin/inboxes` lists configured names and `POST /api/v1/admin/inboxes/{name}/import`, with `item_id`, `expected_revision`, and `package`, creates a provisional Import plus staging Job that still requires review before publication. Sources are retained; symlinks and special files are rejected. The browser inbox/review workspace is not yet implemented. The `/api/v1/uploads` surface is also a compatibility adapter and is scheduled with the administrator inbox surface for removal in a future API major.
 
 ## Recovery
 

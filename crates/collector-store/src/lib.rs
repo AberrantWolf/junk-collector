@@ -2723,6 +2723,38 @@ fn project_capture(tx: &Connection, capture: &Capture) -> Result<()> {
     Ok(())
 }
 
+fn project_evidence_record(tx: &Connection, evidence: &archive_v3::EvidenceRecordV3) -> Result<()> {
+    evidence.validate()?;
+    let serialized = serde_json::to_string(evidence).map_err(storage)?;
+    let existing: Option<String> = tx
+        .query_row(
+            "SELECT record FROM evidence WHERE id=?",
+            [evidence.id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage)?;
+    match existing {
+        Some(value) if value == serialized => Ok(()),
+        Some(_) => Err(Error::Storage(
+            "Evidence identity conflicts with its immutable body".into(),
+        )),
+        None => {
+            tx.execute(
+                "INSERT INTO evidence(id,collection_id,item_id,record) VALUES(?,?,?,?)",
+                params![
+                    evidence.id.to_string(),
+                    evidence.collection_id.to_string(),
+                    evidence.item_id.map(|id| id.to_string()),
+                    serialized
+                ],
+            )
+            .map_err(storage)?;
+            Ok(())
+        }
+    }
+}
+
 fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
     let mut statement = db
         .prepare("SELECT record FROM captures WHERE item_id=? AND collection_id=? ORDER BY id")

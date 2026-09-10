@@ -1,10 +1,10 @@
 use collector_app::{
     AccessPort, ActiveOwnership, AuthenticatedPrincipal, CarrierDetails, Catalog,
     CollectionService, CommandContext, ComponentDetails, ContentPort, CreateAssetCommand,
-    CredentialKind, DisposeSpecimenCommand, IdempotencyPort, ImportCandidate, ImportDeclaredFile,
-    ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord, ImportReviewDecision,
-    ImportSourceKind, ImportSourceSummary, ImportView, JobPort, JobSpec, MediaResource,
-    ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand, ReturnedPossession,
+    CreateImportCommand, CredentialKind, DisposeSpecimenCommand, IdempotencyPort, ImportCandidate,
+    ImportDeclaredFile, ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord,
+    ImportReviewDecision, ImportSourceKind, ImportSourceSummary, ImportView, JobPort, JobSpec,
+    MediaResource, ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand, ReturnedPossession,
     ReviewImportCommand, SaveItemCommand, SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_core::*;
@@ -207,6 +207,23 @@ fn tree_hashes(root: &Path) -> std::collections::BTreeMap<PathBuf, Digest> {
 struct FailPublicationOnce {
     point: collector_store::PublicationFaultPoint,
     failed: AtomicBool,
+}
+
+struct PauseAtRevisionCommit {
+    reached: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl collector_store::PublicationFaultInjector for PauseAtRevisionCommit {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == collector_store::PublicationFaultPoint::RevisionCommitted
+            && let Some(sender) = self.reached.lock().unwrap().take()
+        {
+            sender.send(()).unwrap();
+            self.resume.lock().unwrap().recv().unwrap();
+        }
+        Ok(())
+    }
 }
 
 impl collector_store::PublicationFaultInjector for FailPublicationOnce {
@@ -4887,13 +4904,17 @@ fn browser_and_inbox_sources_converge_on_the_same_durable_staging_state() {
     let browser = service
         .create_provisional_import(
             &actor,
-            collection.id,
-            ImportSourceSummary {
-                kind: ImportSourceKind::Browser,
-                label: None,
-                package_name: "browser-disc".into(),
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "browser-disc".into(),
+                },
+                files: declared.clone(),
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
             },
-            declared.clone(),
             &command(),
         )
         .unwrap();
@@ -4908,13 +4929,17 @@ fn browser_and_inbox_sources_converge_on_the_same_durable_staging_state() {
     let inbox = service
         .create_provisional_import(
             &actor,
-            collection.id,
-            ImportSourceSummary {
-                kind: ImportSourceKind::Inbox,
-                label: Some("Optical shelf".into()),
-                package_name: "inbox-disc".into(),
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Inbox,
+                    label: Some("Optical shelf".into()),
+                    package_name: "inbox-disc".into(),
+                },
+                files: Store::inventory_directory(&package).unwrap(),
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
             },
-            Store::inventory_directory(&package).unwrap(),
             &command(),
         )
         .unwrap();
@@ -4949,6 +4974,58 @@ fn browser_and_inbox_sources_converge_on_the_same_durable_staging_state() {
 }
 
 #[test]
+fn zero_byte_import_files_are_complete_without_a_synthetic_chunk() {
+    let (_root, _store, actor, service, collection) = setup();
+    let empty = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "empty-file".into(),
+                },
+                files: vec![UploadFile {
+                    name: "empty.bin".into(),
+                    bytes: ByteLength(0),
+                    sha256: None,
+                }],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(empty.phase, ImportPhase::Analyzing);
+    assert_eq!(empty.files[0].received_bytes, ByteLength(0));
+    assert_eq!(empty.files[0].digest, Some(Digest::sha256(b"")));
+
+    assert!(matches!(
+        service.create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "bad-empty-file".into(),
+                },
+                files: vec![UploadFile {
+                    name: "empty.bin".into(),
+                    bytes: ByteLength(0),
+                    sha256: Some(Digest::sha256(b"not empty").hex),
+                }],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        ),
+        Err(Error::Invalid(message)) if message.contains("empty file")
+    ));
+}
+
+#[test]
 fn browser_import_resumes_from_durable_offsets_after_restart() {
     let (root, store, actor, service, collection) = setup();
     let create_key = command();
@@ -4965,14 +5042,28 @@ fn browser_import_resumes_from_durable_offsets_after_restart() {
     let created = service
         .create_provisional_import(
             &actor,
-            collection.id,
-            source.clone(),
-            files.clone(),
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: source.clone(),
+                files: files.clone(),
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
             &create_key,
         )
         .unwrap();
     let replay = service
-        .create_provisional_import(&actor, collection.id, source, files, &create_key)
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source,
+                files,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &create_key,
+        )
         .unwrap();
     assert_eq!(
         serde_json::to_value(&replay).unwrap(),
@@ -5010,13 +5101,17 @@ fn changed_inbox_input_fails_the_staging_job_and_retains_resumable_import() {
     let created = service
         .create_provisional_import(
             &actor,
-            collection.id,
-            ImportSourceSummary {
-                kind: ImportSourceKind::Inbox,
-                label: Some("Drop zone".into()),
-                package_name: "package".into(),
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Inbox,
+                    label: Some("Drop zone".into()),
+                    package_name: "package".into(),
+                },
+                files: Store::inventory_directory(&package).unwrap(),
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
             },
-            Store::inventory_directory(&package).unwrap(),
             &command(),
         )
         .unwrap();
@@ -5040,17 +5135,21 @@ fn staged_import(
     let created = service
         .create_provisional_import(
             actor,
-            collection,
-            ImportSourceSummary {
-                kind: ImportSourceKind::Browser,
-                label: None,
-                package_name: package.into(),
+            CreateImportCommand {
+                collection_id: collection,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: package.into(),
+                },
+                files: vec![UploadFile {
+                    name: "disc.bin".into(),
+                    bytes: ByteLength(4),
+                    sha256: None,
+                }],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
             },
-            vec![UploadFile {
-                name: "disc.bin".into(),
-                bytes: ByteLength(4),
-                sha256: None,
-            }],
             &command(),
         )
         .unwrap();
@@ -5161,4 +5260,270 @@ fn import_review_preserves_selection_on_stale_item_and_supports_unattached_revie
         .unwrap();
     assert_eq!(reviewed.association, CaptureAssociation::default());
     assert!(reviewed.limitations[0].contains("No analyzer was selected"));
+}
+
+fn reviewed_unattached_import(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    package: &str,
+) -> ImportView {
+    let staged = staged_import(service, actor, collection, package);
+    service
+        .review_provisional_import(
+            actor,
+            staged.id,
+            ReviewImportCommand {
+                expected_revision: staged.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap()
+}
+
+#[test]
+fn unattached_import_publication_commits_preallocated_capture_payload_and_evidence_once() {
+    let (root, store, actor, service, collection) = setup();
+    let reviewed =
+        reviewed_unattached_import(&service, &actor, collection.id, "publish-unattached");
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    assert!(service.run_next_job("publication-worker").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let published = service.provisional_import(&actor, reviewed.id).unwrap();
+    assert_eq!(published.phase, ImportPhase::Published);
+    let capture = Catalog::capture(&*store, reviewed.capture_id).unwrap();
+    assert_eq!(capture.association, CaptureAssociation::default());
+    assert_eq!(capture.representations[0].id, reviewed.representation_id);
+    assert_eq!(
+        capture.representations[0].files[0].digest,
+        Digest::sha256(b"data")
+    );
+    let private = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+    let evidence: String = private
+        .query_row(
+            "SELECT record FROM evidence WHERE id=?",
+            [EvidenceId(reviewed.id.0).to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let evidence: serde_json::Value = serde_json::from_str(&evidence).unwrap();
+    assert!(evidence["item_id"].is_null());
+    assert_eq!(
+        evidence["representation_ids"][0],
+        reviewed.representation_id.to_string()
+    );
+    assert!(
+        evidence["details"]["claim"]
+            .as_str()
+            .unwrap()
+            .contains("no catalog verification")
+    );
+    let payload = find_file_with_bytes(&root.path().join("archive"), b"data").unwrap();
+    assert!(
+        payload
+            .to_string_lossy()
+            .contains(&reviewed.capture_id.to_string())
+    );
+    drop(private);
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert_eq!(
+        Catalog::capture(&reopened, reviewed.capture_id)
+            .unwrap()
+            .revision,
+        Revision(1)
+    );
+    assert_eq!(
+        reopened.import_record(reviewed.id).unwrap().view.phase,
+        ImportPhase::Published
+    );
+}
+
+#[test]
+fn queued_import_publication_cancellation_retains_scratch_without_publishing() {
+    let (root, store, actor, service, collection) = setup();
+    let reviewed = reviewed_unattached_import(&service, &actor, collection.id, "cancel-publish");
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    service.cancel_job(&actor, job, &command()).unwrap();
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Cancelled);
+    assert_eq!(
+        service
+            .provisional_import(&actor, reviewed.id)
+            .unwrap()
+            .phase,
+        ImportPhase::Cancelled
+    );
+    assert!(matches!(
+        Catalog::capture(&*store, reviewed.capture_id),
+        Err(Error::NotFound)
+    ));
+    assert!(
+        root.path()
+            .join("state/imports")
+            .join(reviewed.id.to_string())
+            .join("0.part")
+            .exists()
+    );
+}
+
+#[test]
+fn import_cancellation_is_too_late_after_capture_revision_commit_and_finishes_once() {
+    let (root, store, actor, service, collection) = setup();
+    let reviewed = reviewed_unattached_import(&service, &actor, collection.id, "commit-boundary");
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    drop(service);
+    drop(store);
+
+    let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(PauseAtRevisionCommit {
+                reached: std::sync::Mutex::new(Some(reached_tx)),
+                resume: std::sync::Mutex::new(resume_rx),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let worker = {
+        let service = service.clone();
+        std::thread::spawn(move || service.run_next_job("commit-boundary-worker"))
+    };
+    reached_rx.recv().unwrap();
+    assert!(matches!(
+        service.cancel_job(&actor, job, &command()),
+        Err(Error::CancellationTooLate)
+    ));
+    resume_tx.send(()).unwrap();
+    assert!(worker.join().unwrap().unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    assert_eq!(
+        service
+            .provisional_import(&actor, reviewed.id)
+            .unwrap()
+            .phase,
+        ImportPhase::Published
+    );
+    assert_eq!(
+        Catalog::capture(&*store, reviewed.capture_id)
+            .unwrap()
+            .revision,
+        Revision(1)
+    );
+    let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM evidence WHERE id=?",
+            [EvidenceId(reviewed.id.0).to_string()],
+            |row| row.get::<_, u32>(0),
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn import_publication_returns_to_review_when_the_associated_item_changes() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let staged = staged_import(&service, &actor, collection.id, "publication-race");
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            staged.id,
+            ReviewImportCommand {
+                expected_revision: staged.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation {
+                    item_id: Some(saved.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(saved.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut changed = saved.clone();
+    changed.title = "Changed during review".into();
+    save_inventory(&service, &actor, changed, saved.revision).unwrap();
+
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    assert!(service.run_next_job("publication-race-worker").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Failed);
+    let preserved = service.provisional_import(&actor, reviewed.id).unwrap();
+    assert_eq!(preserved.phase, ImportPhase::AwaitingReview);
+    assert_eq!(
+        serde_json::to_value(&preserved.review).unwrap(),
+        serde_json::to_value(&reviewed.review).unwrap()
+    );
+    assert_eq!(preserved.association, reviewed.association);
+    assert!(matches!(
+        Catalog::capture(&*store, reviewed.capture_id),
+        Err(Error::NotFound)
+    ));
+}
+
+#[test]
+fn published_import_reconciles_a_crash_before_job_completion() {
+    let (root, store, actor, service, collection) = setup();
+    let reviewed = reviewed_unattached_import(&service, &actor, collection.id, "job-gap");
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    let claim = store
+        .claim_job("crashed-publication-worker", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.id, job);
+    store
+        .publish_import_for_job(reviewed.id, job, &claim.claim_token)
+        .unwrap();
+    assert_eq!(
+        service
+            .provisional_import(&actor, reviewed.id)
+            .unwrap()
+            .phase,
+        ImportPhase::Published
+    );
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Running);
+    drop(service);
+    drop(store);
+
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened.clone(), Arc::new(Registry::builtins()));
+    assert!(
+        service
+            .run_next_job("replacement-publication-worker")
+            .unwrap()
+    );
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    assert_eq!(
+        service
+            .provisional_import(&actor, reviewed.id)
+            .unwrap()
+            .phase,
+        ImportPhase::Published
+    );
+    assert_eq!(
+        Catalog::capture(&*reopened, reviewed.capture_id)
+            .unwrap()
+            .revision,
+        Revision(1)
+    );
 }

@@ -268,6 +268,15 @@ pub struct ReviewImportCommand {
     pub expected_item_revision: Option<Revision>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct CreateImportCommand {
+    pub collection_id: CollectionId,
+    pub source: ImportSourceSummary,
+    pub files: Vec<UploadFile>,
+    pub association: CaptureAssociation,
+    pub expected_item_revision: Option<Revision>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ImportView {
     pub id: ImportId,
@@ -312,6 +321,13 @@ pub trait ProvisionalImportPort: Send + Sync {
         claim_token: &str,
         source_locator: &str,
     ) -> Result<ImportRecord>;
+    fn publish_import_for_job(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+    ) -> Result<ImportRecord>;
+    fn cancel_import(&self, id: ImportId) -> Result<ImportRecord>;
 }
 
 pub trait ImportPort: Send + Sync {
@@ -417,6 +433,7 @@ impl From<JobRecord> for JobView {
                     | "preservation_import"
                     | "import_staging"
                     | "import_analysis"
+                    | "import_publication"
             );
         Self {
             id: record.id,
@@ -2314,13 +2331,69 @@ impl CollectionService {
     pub fn create_provisional_import(
         &self,
         actor: &Principal,
-        collection_id: CollectionId,
-        source: ImportSourceSummary,
-        files: Vec<UploadFile>,
+        command: CreateImportCommand,
         context: &CommandContext,
     ) -> Result<ImportView> {
+        let CreateImportCommand {
+            collection_id,
+            source,
+            files,
+            association,
+            expected_item_revision,
+        } = command;
         self.authorize(actor, collection_id, Action::Curate)?;
-        let request = (collection_id, source.clone(), files.clone());
+        let item = self.validate_import_association(collection_id, association)?;
+        if item.is_some() != expected_item_revision.is_some() {
+            return Err(Error::Invalid(
+                "an Item association requires its expected revision".into(),
+            ));
+        }
+        if let (Some(item), Some(expected)) = (item, expected_item_revision)
+            && item.revision != expected
+        {
+            return Err(Error::Conflict);
+        }
+        let request = (
+            collection_id,
+            source.clone(),
+            files.clone(),
+            association,
+            expected_item_revision,
+        );
+        let empty_digest = Digest::sha256(b"");
+        let declared_files = files
+            .into_iter()
+            .map(|file| {
+                let supplied_digest = file
+                    .sha256
+                    .map(|value| Digest::new(HashAlgorithm::Sha256, value))
+                    .transpose()?;
+                let digest = if file.bytes.0 == 0 {
+                    if supplied_digest
+                        .as_ref()
+                        .is_some_and(|digest| digest != &empty_digest)
+                    {
+                        return Err(Error::Invalid(
+                            "declared digest does not match the empty file".into(),
+                        ));
+                    }
+                    Some(empty_digest.clone())
+                } else {
+                    supplied_digest
+                };
+                Ok(ImportDeclaredFile {
+                    name: file.name,
+                    bytes: file.bytes,
+                    received_bytes: ByteLength(0),
+                    digest,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let phase = if declared_files.iter().all(|file| file.bytes.0 == 0) {
+            ImportPhase::Analyzing
+        } else {
+            ImportPhase::Staging
+        };
         let now = self.authentication.now();
         let record = ImportRecord {
             user_id: actor.user_id,
@@ -2333,20 +2406,7 @@ impl CollectionService {
                 revision: 1,
                 collection_id,
                 source,
-                files: files
-                    .into_iter()
-                    .map(|file| {
-                        Ok(ImportDeclaredFile {
-                            name: file.name,
-                            bytes: file.bytes,
-                            received_bytes: ByteLength(0),
-                            digest: file
-                                .sha256
-                                .map(|value| Digest::new(HashAlgorithm::Sha256, value))
-                                .transpose()?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?,
+                files: declared_files,
                 capture_id: CaptureId(deterministic_inventory_uuid(
                     actor.user_id,
                     "import-capture",
@@ -2357,13 +2417,13 @@ impl CollectionService {
                     "import-representation",
                     context.key(),
                 )),
-                association: CaptureAssociation::default(),
-                expected_item_revision: None,
+                association,
+                expected_item_revision,
                 candidates: vec![],
                 limitations: vec![],
                 review: None,
                 analysis_job_id: None,
-                phase: ImportPhase::Staging,
+                phase,
                 created_at: now,
                 updated_at: now,
             },
@@ -2434,9 +2494,6 @@ impl CollectionService {
     ) -> Result<JobId> {
         module.validate()?;
         let record = self.authorized_provisional_import(actor, id)?;
-        if record.view.phase != ImportPhase::Analyzing {
-            return Err(Error::Conflict);
-        }
         let job = deterministic_job_id(actor.user_id, "import.analyze", context.key());
         let spec = JobSpec {
             id: job,
@@ -2453,7 +2510,12 @@ impl CollectionService {
             context,
             "import.analyze.enqueue",
             &(id, module),
-            |effects| effects.enqueue_job(spec),
+            |effects| {
+                if effects.import_record(id)?.view.phase != ImportPhase::Analyzing {
+                    return Err(Error::Conflict);
+                }
+                effects.enqueue_job(spec)
+            },
         )
     }
     fn analyze_import_for_job(&self, claim: &JobClaim) -> Result<ImportView> {
@@ -2666,6 +2728,32 @@ impl CollectionService {
                 .map(|record| record.view)
         })
     }
+    pub fn enqueue_import_publication(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        let record = self.authorized_provisional_import(actor, id)?;
+        let job = deterministic_job_id(actor.user_id, "import.publish", context.key());
+        let spec = JobSpec {
+            id: job,
+            user_id: actor.user_id,
+            collection_id: Some(record.view.collection_id),
+            item_id: record.view.association.item_id,
+            kind: "import_publication".into(),
+            phase: "queued".into(),
+            total_units: record.view.files.iter().map(|file| file.bytes.0).sum(),
+            request: serde_json::json!({"import_id":id}),
+        };
+        self.execute_command(actor, context, "import.publish.enqueue", &id, |effects| {
+            let current = effects.import_record(id)?;
+            if current.view.phase != ImportPhase::AwaitingReview || current.view.review.is_none() {
+                return Err(Error::Conflict);
+            }
+            effects.enqueue_job(spec)
+        })
+    }
     fn authorized_upload(&self, actor: &Principal, id: JobId) -> Result<Upload> {
         let upload = self.imports.upload(id)?;
         if upload.user_id != actor.user_id {
@@ -2788,6 +2876,17 @@ impl CollectionService {
             &request,
             |effects| effects.queue_inbox_upload(id, source_locator),
         )
+    }
+    pub fn cancel_provisional_import(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+        context: &CommandContext,
+    ) -> Result<ImportView> {
+        self.authorized_provisional_import(actor, id)?;
+        self.execute_command(actor, context, "import.cancel", &id, |effects| {
+            effects.cancel_import(id).map(|record| record.view)
+        })
     }
     pub fn fail_upload(&self, actor: &Principal, id: JobId, message: &str) -> Result<()> {
         self.authorized_upload(actor, id)?;
@@ -2928,6 +3027,24 @@ impl CollectionService {
             "import_analysis" => self
                 .analyze_import_for_job(&claim)
                 .map(|view| serde_json::json!({"import_id":view.id,"revision":view.revision})),
+            "import_publication" => {
+                let import_id = claim
+                    .request
+                    .get("import_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| Error::Storage("publication job has no Import identity".into()))?
+                    .parse()
+                    .map_err(|error| Error::Storage(format!("invalid Import identity: {error}")))?;
+                self.provisional_imports
+                    .publish_import_for_job(import_id, claim.id, &claim.claim_token)
+                    .map(|record| {
+                        serde_json::json!({
+                            "import_id":record.view.id,
+                            "capture_id":record.view.capture_id,
+                            "representation_id":record.view.representation_id
+                        })
+                    })
+            }
             _ => Err(Error::Unavailable(format!(
                 "job kind {} has no registered executor",
                 claim.kind
@@ -2942,6 +3059,15 @@ impl CollectionService {
                 .jobs
                 .complete_job(claim.id, &claim.claim_token, result)?,
             Err(Error::JobCancelled) => {
+                if claim.kind.starts_with("import_")
+                    && let Some(import_id) = claim
+                        .request
+                        .get("import_id")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|value| value.parse().ok())
+                {
+                    let _ = self.provisional_imports.cancel_import(import_id);
+                }
                 self.jobs.cancel_claimed_job(claim.id, &claim.claim_token)?
             }
             Err(error) => {
@@ -3002,9 +3128,10 @@ impl CollectionService {
         self.execute_command(actor, context, "job.retry", &id, |effects| {
             match job.kind.as_str() {
                 "preservation_import" => effects.retry_upload(id),
-                "integrity_verification" | "import_staging" | "import_analysis" => {
-                    effects.retry_failed_job(id, actor.user_id)
-                }
+                "integrity_verification"
+                | "import_staging"
+                | "import_analysis"
+                | "import_publication" => effects.retry_failed_job(id, actor.user_id),
                 _ => Err(Error::Unavailable("this job kind cannot be retried".into())),
             }
         })

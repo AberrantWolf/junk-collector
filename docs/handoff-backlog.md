@@ -356,7 +356,7 @@ Separate package inventory/staging, analyzer candidates, user review/physical as
 
 **Limit:** use existing upload/inbox mechanisms, not a second importer; actual analyzer implementations arrive in D04/D05.
 
-**Status (2026-09-10): P03.1-P03.3 complete locally; P03.4 is next.** Private schema
+**Status (2026-09-10): complete locally; P04.1 is next.** Private schema
 v9 now persists a durable provisional Import separately from its execution Jobs:
 safe source summary, bounded declared-file inventory and resumable offsets/digests,
 preallocated Capture/Representation identities, optional physical association and
@@ -377,8 +377,16 @@ now runs as a P02 Job through the A03 owner capability and stores bounded raw
 alternatives/limitations. Built-in game/music analysis honestly yields no candidate
 until D04/D05. Review supports candidate or unidentified identity plus a canonical
 existing physical chain or no association; stale Item revision conflict preserves
-the submitted selection in `awaiting_review`. P03.4 publication, commit-boundary
-cancellation reconciliation, and legacy adapter delegation remain not implemented.
+the submitted selection in `awaiting_review`. Publication is a durable P02 Job that
+re-reads source scratch, preserves the preallocated Capture/Representation identities,
+and uses the P01 journal for payload and revision commit. It can publish an unattached
+Capture plus integrity Evidence without inventing an Item or Specimen. Cancellation
+retains scratch before commit and is stably too late after `RevisionCommitted`, where
+reconciliation completes exactly once. The legacy `/uploads` and admin inbox routes
+delegate to Imports and distinct Jobs; pre-v9 in-flight uploads remain readable through
+a bounded fallback, and both compatibility routes are marked for API-major removal.
+P03 passed its local root review with 138 tests. Independent review and target-Linux/
+filesystem termination behavior remain externally unqualified.
 
 ### P04 — Inbox, import-review and job UI
 

@@ -10,11 +10,11 @@ use axum::{
 };
 use collector_app::{
     AccountUpdate, AccountView, AuthenticatedPrincipal, CollectionService, CommandContext,
-    ComponentDetails, CreateAssetCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView,
-    GrantView, ImportSourceKind, ImportSourceSummary, ImportView, JobView, MediaResource,
-    NativeDeviceView, PasskeyView, PresentedAsset, PresentedCollection, PresentedEvidence,
-    PresentedItem, ReturnLoanCommand, ReviewImportCommand, SaveItemCommand, SessionView,
-    SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
+    ComponentDetails, CreateAssetCommand, CreateImportCommand, DisposeSpecimenCommand,
+    EnrollmentStart, EnrollmentView, GrantView, ImportSourceKind, ImportSourceSummary, ImportView,
+    JobView, MediaResource, NativeDeviceView, PasskeyView, PresentedAsset, PresentedCollection,
+    PresentedEvidence, PresentedItem, ReturnLoanCommand, ReviewImportCommand, SaveItemCommand,
+    SessionView, SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -491,6 +491,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(provisional_import))
         .routes(routes!(analyze_provisional_import))
         .routes(routes!(review_provisional_import))
+        .routes(routes!(publish_provisional_import))
         .routes(
             routes!(stage_provisional_import_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
@@ -1873,13 +1874,17 @@ async fn create_provisional_import(
         blocking(move || {
             state.service.create_provisional_import(
                 &actor,
-                input.collection_id,
-                ImportSourceSummary {
-                    kind: ImportSourceKind::Browser,
-                    label: None,
-                    package_name: input.package_name,
+                CreateImportCommand {
+                    collection_id: input.collection_id,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: input.package_name,
+                    },
+                    files: input.files,
+                    association: CaptureAssociation::default(),
+                    expected_item_revision: None,
                 },
-                input.files,
                 &context,
             )
         })
@@ -1944,6 +1949,27 @@ async fn review_provisional_import(
         })
         .await?,
     ))
+}
+
+#[utoipa::path(post, path = "/api/v1/imports/{id}/publish", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = serde_json::Value), (status = 404), (status = 409)))]
+async fn publish_provisional_import(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .enqueue_import_publication(&actor, id, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
 }
 
 #[utoipa::path(put, path = "/api/v1/imports/{id}/files/{index}", params(("id" = ImportId, Path), ("index" = usize, Path), ("offset" = u64, Query)), request_body(content = String, content_type = "application/octet-stream"), responses((status = 200, body = ImportView), (status = 404), (status = 409), (status = 413)))]
@@ -2066,13 +2092,17 @@ async fn stage_inbox_import(
     .await?;
     let import = state.service.create_provisional_import(
         &actor,
-        collection,
-        ImportSourceSummary {
-            kind: ImportSourceKind::Inbox,
-            label: Some(label),
-            package_name: package,
+        CreateImportCommand {
+            collection_id: collection,
+            source: ImportSourceSummary {
+                kind: ImportSourceKind::Inbox,
+                label: Some(label),
+                package_name: package,
+            },
+            files,
+            association: CaptureAssociation::default(),
+            expected_item_revision: None,
         },
-        files,
         &context,
     )?;
     let source_locator = source
@@ -2089,6 +2119,52 @@ async fn stage_inbox_import(
         .into_response())
 }
 
+fn compatibility_upload(user_id: UserId, import: ImportView) -> Result<Upload> {
+    let item_id = import
+        .association
+        .item_id
+        .ok_or_else(|| Error::Storage("legacy upload Import lost its Item association".into()))?;
+    let expected_revision = import
+        .expected_item_revision
+        .ok_or_else(|| Error::Storage("legacy upload Import lost its Item revision".into()))?;
+    let state = match import.phase {
+        collector_app::ImportPhase::Staging
+            if import.files.iter().all(|file| file.received_bytes.0 == 0) =>
+        {
+            JobState::Queued
+        }
+        collector_app::ImportPhase::Staging
+        | collector_app::ImportPhase::Analyzing
+        | collector_app::ImportPhase::AwaitingReview
+        | collector_app::ImportPhase::Publishing => JobState::Running,
+        collector_app::ImportPhase::Published => JobState::Completed,
+        collector_app::ImportPhase::Cancelled => JobState::Cancelled,
+    };
+    Ok(Upload {
+        id: JobId(import.id.0),
+        user_id,
+        item_id,
+        expected_revision,
+        representation_id: import.representation_id,
+        capture_id: import.capture_id,
+        offsets: import
+            .files
+            .iter()
+            .map(|file| file.received_bytes.0)
+            .collect(),
+        files: import
+            .files
+            .into_iter()
+            .map(|file| UploadFile {
+                name: file.name,
+                bytes: file.bytes,
+                sha256: file.digest.map(|digest| digest.hex),
+            })
+            .collect(),
+        state,
+    })
+}
+
 #[utoipa::path(post, path = "/api/v1/uploads", params(("Idempotency-Key" = String, Header)), request_body = NewUpload, responses((status = 200, body = Upload), (status = 409)))]
 async fn create_upload(
     State(state): State<AppState>,
@@ -2097,18 +2173,34 @@ async fn create_upload(
 ) -> ApiResult<Json<collector_store::Upload>> {
     let actor = principal(&state, &headers)?;
     let context = command_context(&headers)?;
-    Ok(Json(
+    let user_id = actor.user_id;
+    Ok(Json(compatibility_upload(
+        user_id,
         blocking(move || {
-            state.service.create_upload(
+            state.service.create_provisional_import(
                 &actor,
-                input.item_id,
-                input.expected_revision,
-                input.files,
+                CreateImportCommand {
+                    collection_id: state
+                        .service
+                        .item_presented(&actor, input.item_id)?
+                        .collection_id,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "legacy-browser-upload".into(),
+                    },
+                    files: input.files,
+                    association: CaptureAssociation {
+                        item_id: Some(input.item_id),
+                        ..Default::default()
+                    },
+                    expected_item_revision: Some(input.expected_revision),
+                },
                 &context,
             )
         })
         .await?,
-    ))
+    )?))
 }
 #[utoipa::path(get, path = "/api/v1/uploads/{id}", params(("id" = JobId, Path)), responses((status = 200, body = Upload), (status = 403), (status = 404)))]
 async fn upload(
@@ -2117,8 +2209,16 @@ async fn upload(
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_store::Upload>> {
     let actor = principal(&state, &headers)?;
+    let user_id = actor.user_id;
     Ok(Json(
-        blocking(move || state.service.upload(&actor, id)).await?,
+        blocking(
+            move || match state.service.provisional_import(&actor, ImportId(id.0)) {
+                Ok(import) => compatibility_upload(user_id, import),
+                Err(Error::NotFound) => state.service.upload(&actor, id),
+                Err(error) => Err(error),
+            },
+        )
+        .await?,
     ))
 }
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -2134,11 +2234,24 @@ async fn chunk(
     body: axum::body::Bytes,
 ) -> ApiResult<Json<collector_store::Upload>> {
     let actor = principal(&state, &headers)?;
+    let user_id = actor.user_id;
     Ok(Json(
         blocking(move || {
-            state
-                .service
-                .upload_chunk(&actor, id, index, query.offset, &body)
+            match state.service.stage_provisional_import_chunk(
+                &actor,
+                ImportId(id.0),
+                index,
+                query.offset,
+                &body,
+            ) {
+                Ok(import) => compatibility_upload(user_id, import),
+                Err(Error::NotFound) => {
+                    state
+                        .service
+                        .upload_chunk(&actor, id, index, query.offset, &body)
+                }
+                Err(error) => Err(error),
+            }
         })
         .await?,
     ))
@@ -2151,7 +2264,17 @@ async fn cancel_upload(
 ) -> ApiResult<StatusCode> {
     let actor = principal(&state, &headers)?;
     let context = command_context(&headers)?;
-    blocking(move || state.service.cancel_upload(&actor, id, &context)).await?;
+    blocking(move || {
+        match state
+            .service
+            .cancel_provisional_import(&actor, ImportId(id.0), &context)
+        {
+            Ok(_) => Ok(()),
+            Err(Error::NotFound) => state.service.cancel_upload(&actor, id, &context),
+            Err(error) => Err(error),
+        }
+    })
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(post, path = "/api/v1/uploads/{id}/commit", params(("id" = JobId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = serde_json::Value), (status = 409)))]
@@ -2162,9 +2285,45 @@ async fn commit_upload(
 ) -> ApiResult<Response> {
     let actor = principal(&state, &headers)?;
     let context = command_context(&headers)?;
-    state.service.upload(&actor, id)?;
-    blocking(move || state.service.enqueue_upload_commit(&actor, id, &context)).await?;
-    Ok((StatusCode::ACCEPTED, Json(serde_json::json!({"job_id":id}))).into_response())
+    let import_id = ImportId(id.0);
+    let mut import = match state.service.provisional_import(&actor, import_id) {
+        Ok(import) => import,
+        Err(Error::NotFound) => {
+            let job_id =
+                blocking(move || state.service.enqueue_upload_commit(&actor, id, &context)).await?;
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({"job_id":job_id})),
+            )
+                .into_response());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if import.phase == collector_app::ImportPhase::Analyzing {
+        import = state.service.review_provisional_import(
+            &actor,
+            import_id,
+            ReviewImportCommand {
+                expected_revision: import.revision,
+                identity: collector_app::ImportIdentityDecision::Unidentified,
+                association: import.association,
+                expected_item_revision: import.expected_item_revision,
+            },
+            &context,
+        )?;
+    }
+    let _ = import;
+    let job_id = blocking(move || {
+        state
+            .service
+            .enqueue_import_publication(&actor, import_id, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
 }
 #[utoipa::path(post, path = "/api/v1/items/{id}/verify", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = serde_json::Value), (status = 409)))]
 async fn verify(
@@ -2514,19 +2673,38 @@ async fn import_inbox(
         let source = source.clone();
         blocking(move || Store::inventory_directory(&source)).await?
     };
-    let upload = state.service.create_upload(
+    let collection_id = state
+        .service
+        .item_presented(&actor, input.item_id)?
+        .collection_id;
+    let import = state.service.create_provisional_import(
         &actor,
-        input.item_id,
-        input.expected_revision,
-        files,
+        CreateImportCommand {
+            collection_id,
+            source: ImportSourceSummary {
+                kind: ImportSourceKind::Inbox,
+                label: Some(name),
+                package_name: input.package,
+            },
+            files,
+            association: CaptureAssociation {
+                item_id: Some(input.item_id),
+                ..Default::default()
+            },
+            expected_item_revision: Some(input.expected_revision),
+        },
         &context,
     )?;
-    let id = upload.id;
     let source_locator = source
         .to_str()
         .ok_or_else(|| Error::Invalid("inbox source path must be UTF-8".into()))?;
-    state
-        .service
-        .enqueue_inbox_upload(&actor, id, source_locator, &context)?;
-    Ok((StatusCode::ACCEPTED, Json(serde_json::json!({"job_id":id}))).into_response())
+    let job_id =
+        state
+            .service
+            .enqueue_inbox_import_staging(&actor, import.id, source_locator, &context)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"import_id":import.id,"job_id":job_id})),
+    )
+        .into_response())
 }

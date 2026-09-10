@@ -565,4 +565,235 @@ impl ProvisionalImportPort for Store {
         }
         Ok(record)
     }
+
+    fn publish_import_for_job(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+    ) -> Result<ImportRecord> {
+        let journals = publication::PublicationJournalStore::new(&self.archive);
+        let result = self.publish_import_inner(id, job, claim_token);
+        let transaction = TransactionId(job.0);
+        if matches!(result, Err(Error::JobCancelled))
+            && journals
+                .phase(transaction)?
+                .is_none_or(|phase| phase < publication::PublicationPhase::RevisionCommitted)
+        {
+            if journals.phase(transaction)?.is_some() {
+                journals.abort(transaction)?;
+            }
+            let mut record = self.import_record(id)?;
+            record.view.phase = ImportPhase::Cancelled;
+            let revision = record.view.revision;
+            self.save_import(record, revision)?;
+        } else if result.is_err()
+            && journals
+                .phase(transaction)?
+                .is_some_and(|phase| phase >= publication::PublicationPhase::RevisionCommitted)
+        {
+            self.reindex()?;
+            finish_v3_publication(self, transaction)?;
+            return self.publish_import_inner(id, job, claim_token);
+        }
+        result
+    }
+
+    fn cancel_import(&self, id: ImportId) -> Result<ImportRecord> {
+        let mut record = self.import_record(id)?;
+        if matches!(
+            record.view.phase,
+            ImportPhase::Publishing | ImportPhase::Published
+        ) {
+            return Err(Error::CancellationTooLate);
+        }
+        if record.view.phase == ImportPhase::Cancelled {
+            return Ok(record);
+        }
+        record.view.phase = ImportPhase::Cancelled;
+        let revision = record.view.revision;
+        self.save_import(record, revision)
+    }
+}
+
+impl Store {
+    fn publish_import_inner(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+    ) -> Result<ImportRecord> {
+        self.ensure_job_continues(job, Some(claim_token))?;
+        let _writer = lock(&self.writer)?;
+        let mut record = self.import_record(id)?;
+        if record.view.phase == ImportPhase::Published {
+            return Ok(record);
+        }
+        if !matches!(
+            record.view.phase,
+            ImportPhase::AwaitingReview | ImportPhase::Publishing
+        ) || record.view.review.is_none()
+        {
+            return Err(Error::Conflict);
+        }
+        if let (Some(item_id), Some(expected)) = (
+            record.view.association.item_id,
+            record.view.expected_item_revision,
+        ) && self.item(item_id)?.revision != expected
+        {
+            if record.view.phase != ImportPhase::AwaitingReview {
+                record.view.phase = ImportPhase::AwaitingReview;
+                let revision = record.view.revision;
+                self.save_import(record, revision)?;
+            }
+            return Err(Error::Conflict);
+        }
+        if record.view.phase == ImportPhase::AwaitingReview {
+            record.view.phase = ImportPhase::Publishing;
+            let revision = record.view.revision;
+            record = self.save_import(record, revision)?;
+        }
+        let total = record
+            .view
+            .files
+            .iter()
+            .map(|file| file.bytes.0)
+            .sum::<u64>();
+        if fs2::available_space(&self.archive).map_err(storage)?
+            < total.saturating_add(64 * 1024 * 1024)
+        {
+            return Err(Error::Unavailable("insufficient archive space".into()));
+        }
+        let scratch = self.state.join("imports").join(id.to_string());
+        fs::create_dir_all(&scratch).map_err(storage)?;
+        let mut files = Vec::new();
+        let mut sources = Vec::new();
+        for (index, declared) in record.view.files.iter().enumerate() {
+            self.ensure_job_continues(job, Some(claim_token))?;
+            let source = scratch.join(format!("{index}.part"));
+            if declared.bytes.0 == 0 && !source.exists() {
+                let file = File::create(&source).map_err(storage)?;
+                file.sync_all().map_err(storage)?;
+            }
+            let (bytes, digest) = crate::files::hash_file(&source)?;
+            if bytes != declared.bytes || declared.digest.as_ref() != Some(&digest) {
+                return Err(Error::Invalid(
+                    "staged bytes do not match the durable Import inventory".into(),
+                ));
+            }
+            files.push(StoredFile {
+                name: declared.name.clone(),
+                bytes,
+                digest,
+            });
+            sources.push(source);
+        }
+        let capture = Capture {
+            id: record.view.capture_id,
+            collection_id: record.view.collection_id,
+            revision: Revision(1),
+            association: record.view.association,
+            created_at: record.view.created_at,
+            representations: vec![Representation {
+                id: record.view.representation_id,
+                role: RepresentationRole::PreservationMaster,
+                format: "original-package".into(),
+                files: files.clone(),
+                source: None,
+                profile: None,
+            }],
+        };
+        capture.validate()?;
+        {
+            let db = lock(&self.db)?;
+            let mut graph = graph_from_projection(&db, record.view.collection_id)?;
+            graph.captures.retain(|value| value.id != capture.id);
+            graph.captures.push(capture.clone());
+            validate_projected_graph(&db, &graph, record.view.collection_id)?;
+        }
+        let collection = {
+            let db = lock(&self.db)?;
+            collection_path(&db, &self.archive, record.view.collection_id)?
+        };
+        match self.capture(capture.id) {
+            Ok(existing)
+                if serde_json::to_value(&existing).map_err(storage)?
+                    == serde_json::to_value(&capture).map_err(storage)? =>
+            {
+                self.heartbeat_job_record(job, claim_token, "revision_committed", total, 30)?;
+            }
+            Ok(_) => {
+                return Err(Error::Storage(
+                    "preallocated Capture identity has different published content".into(),
+                ));
+            }
+            Err(Error::NotFound) => {
+                self.publish_capture_payloads(
+                    TransactionId(job.0),
+                    job,
+                    &collection,
+                    capture.clone(),
+                    &sources,
+                    Some(claim_token),
+                )?;
+            }
+            Err(error) => return Err(error),
+        }
+
+        let evidence = archive_v3::EvidenceRecordV3 {
+            id: EvidenceId(id.0),
+            collection_id: record.view.collection_id,
+            item_id: record.view.association.item_id,
+            representation_ids: vec![record.view.representation_id],
+            kind: EvidenceKind::Integrity,
+            outcome: EvidenceOutcome::Passed,
+            inputs: files.iter().map(|file| file.digest.clone()).collect(),
+            implementation: "collector-store staged copy and destination reread".into(),
+            implementation_version: env!("CARGO_PKG_VERSION").into(),
+            catalog: None,
+            details: serde_json::json!({
+                "claim":"destination bytes equal staged source bytes; no catalog verification asserted"
+            }),
+            created_at: record.view.created_at,
+        };
+        evidence.validate()?;
+        let evidence_exists: Option<String> = lock(&self.db)?
+            .query_row(
+                "SELECT record FROM evidence WHERE id=?",
+                [evidence.id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        if let Some(existing) = evidence_exists {
+            if existing != serde_json::to_string(&evidence).map_err(storage)? {
+                return Err(Error::Storage(
+                    "preallocated Evidence identity has different published content".into(),
+                ));
+            }
+        } else {
+            let publication = publish_v3_revision(
+                self,
+                V3RevisionTarget {
+                    collection: &collection,
+                    directory_kind: "evidence",
+                    entity_id: evidence.id.to_string(),
+                    collection_id: evidence.collection_id,
+                    expected: Revision(0),
+                    revision: Revision(1),
+                },
+                evidence.clone(),
+                vec![],
+            )?;
+            let mut db = lock(&self.db)?;
+            let tx = db.transaction().map_err(storage)?;
+            project_evidence_record(&tx, &evidence)?;
+            tx.commit().map_err(storage)?;
+            finish_v3_publication(self, publication)?;
+        }
+        record = self.import_record(id)?;
+        record.view.phase = ImportPhase::Published;
+        let revision = record.view.revision;
+        self.save_import(record, revision)
+    }
 }

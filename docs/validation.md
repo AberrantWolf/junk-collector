@@ -1,5 +1,44 @@
 # Validation recorded for the foundation
 
+## Wave 3 P03.4 publication, compatibility, and root review — 2026-09-10
+
+- `unattached_import_publication_commits_preallocated_capture_payload_and_evidence_once`
+  stages and reviews a real package, runs its claimed publication Job, and verifies
+  the exact preallocated Capture/Representation IDs, destination digest/bytes, and a
+  standalone schema-3 integrity Evidence record with no Item. Reopen observes one
+  durable Capture and a `published` Import.
+- `queued_import_publication_cancellation_retains_scratch_without_publishing` covers
+  the queued boundary. `import_cancellation_is_too_late_after_capture_revision_commit_and_finishes_once`
+  pauses the real journal at `RevisionCommitted`, proves cancellation returns the
+  stable too-late error, resumes, and observes one Capture and one Evidence record.
+  `published_import_reconciles_a_crash_before_job_completion` then leaves the Import
+  published with its Job still claimed, reopens, and proves startup takeover completes
+  that same Job without another Capture. Startup reconciliation recognizes this
+  deterministic publication transaction.
+- `import_publication_returns_to_review_when_the_associated_item_changes` mutates the
+  selected Item after review but before worker execution. The Job fails safely, no
+  Capture publishes, and the complete selection/association remains in
+  `awaiting_review`. Zero-byte declarations receive the canonical empty SHA-256 and
+  need no fake chunk; a conflicting declared digest is rejected.
+- `legacy_upload_routes_delegate_to_imports_and_use_a_distinct_publication_job`
+  exercises the old create/chunk/commit/read surface. Its compatibility handle maps
+  to an Import, no same-ID Job exists, commit returns a distinct publication Job, and
+  the canonical workflow publishes the attached Capture. The administrator inbox
+  route likewise creates an Import plus staging Job and now requires review rather
+  than bypassing the workflow. Pre-v9 in-flight Upload rows retain their old adapter.
+- The HTTP convergence test publishes the modern browser Import end to end. All new
+  routes remain curation-listener composed, submitter/collection scoped, and public
+  DTOs contain no scratch, inbox-root, archive path, worker, or claim-token data.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 138 locked
+  workspace tests, warning-free all-target clippy, generated API drift, TypeScript
+  check/build, and rebuilt embedded-assets server pass. P03 root acceptance review
+  passes locally.
+- **Not implemented:** P04 import/job UI, D04/D05 built-in byte analyzers, C06 event
+  streaming, and document attachments. Legacy `/uploads` and administrator inbox
+  endpoints remain compatibility adapters until an API-major removal. **Externally
+  unqualified:** independent P03 review and target-Linux/filesystem termination
+  behavior.
+
 ## Wave 3 P03.3 optional analysis and review — 2026-09-10
 
 - `optional_import_analysis_persists_candidates_or_honest_unavailability` registers

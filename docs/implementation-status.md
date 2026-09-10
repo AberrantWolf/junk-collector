@@ -124,17 +124,25 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   Item/Specimen/Component/Carrier chain or leave the Capture unattached, and retain
   the user's selection in `awaiting_review` when the expected Item revision is stale.
   Manual review records that no analyzer was selected.
+- P03.4 publishes through a distinct durable P02 Job and the P01 journal using the
+  Import's preallocated Capture and Representation identities. It re-reads staged
+  bytes, publishes integrity Evidence, supports a canonical physical association or
+  an unattached Capture without fabricated inventory, and completes committed work
+  exactly once after restart. Cancellation retains source scratch before the Capture
+  revision commit and returns a stable too-late conflict afterward; stale associated
+  Item revisions preserve review state. The legacy browser-upload and administrator
+  inbox endpoints delegate to the same Import workflow and distinct execution Jobs,
+  with a bounded fallback only for pre-v9 in-flight uploads. P03 is locally complete.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete P03.4 publication and compatibility delegation, then build
-   the P04 configured inbox/import-review and durable-job UI. P03.1 persistence,
-   U04 supporting images, and physical lifecycle behavior are locally complete;
-   staging and review routes exist but publication routes and UI do not. Document attachments and offline artwork
-   remain unimplemented.
+2. Build the P04 configured inbox/import-review and durable-job UI over the locally
+   complete P02/P03 APIs. The current legacy upload and administrator inbox routes
+   are compatibility adapters scheduled for API-major removal. Document attachments,
+   event streaming, and offline artwork remain unimplemented.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

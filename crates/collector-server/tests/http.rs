@@ -264,6 +264,30 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
         .clone()
         .oneshot(
             Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/imports/{import_id}/publish"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "publish-browser-import")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert!(service.run_next_job("http-publication-worker").unwrap());
+    assert_eq!(
+        service
+            .provisional_import(&actor, import_id.parse().unwrap())
+            .unwrap()
+            .phase,
+        collector_app::ImportPhase::Published
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
                 .uri(format!("/api/v1/imports/{import_id}"))
                 .header("authorization", format!("Bearer {stranger_token}"))
                 .body(Body::empty())
@@ -309,6 +333,159 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
 }
 
 #[tokio::test]
+async fn legacy_upload_routes_delegate_to_imports_and_use_a_distinct_publication_job() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let user = state
+        .store
+        .create_user("legacy-upload-owner", "a long owner password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(&test_authentication(&actor), "Legacy uploads", &command())
+        .unwrap();
+    let item = Item {
+        id: ItemId::new(),
+        collection_id: collection.id,
+        revision: Revision(0),
+        title: "Compatibility adapter".into(),
+        subtitle: String::new(),
+        identity_link: ItemIdentityLink::None,
+        domain: ModuleData {
+            module: ModuleId("org.junkcollector.generic".into()),
+            schema_version: 1,
+            payload: RawJson::from_value(serde_json::json!({})),
+        },
+        identity: IdentityState::Unidentified,
+        translations: vec![],
+        identifiers: vec![],
+        specimens: vec![],
+        wishlist: false,
+        captures: vec![],
+        assets: vec![],
+        metadata: MetadataState::default(),
+        deleted: false,
+        updated_at: chrono::Utc::now(),
+    };
+    let saved = state
+        .service
+        .save_item(&actor, item.id, item.into(), Revision(0), &command())
+        .unwrap();
+    let (token, _) = state.store.issue_session(user, "browser").unwrap();
+    let service = state.service.clone();
+    let app = router(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/uploads")
+                .header("authorization", format!("Bearer {token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "legacy-create")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "item_id": saved.id,
+                        "expected_revision": saved.revision,
+                        "files": [{"name":"disc.bin","bytes":4,"sha256":null}]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let upload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let handle: JobId = upload["id"].as_str().unwrap().parse().unwrap();
+    let import_id = ImportId(handle.0);
+    assert_eq!(
+        service.provisional_import(&actor, import_id).unwrap().phase,
+        collector_app::ImportPhase::Staging
+    );
+    assert!(service.jobs(&actor).unwrap().is_empty());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/uploads/{handle}/files/0?offset=0"))
+                .header("authorization", format!("Bearer {token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/octet-stream")
+                .body(Body::from("data"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/uploads/{handle}/commit"))
+                .header("authorization", format!("Bearer {token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "legacy-commit")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let accepted: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let job: JobId = accepted["job_id"].as_str().unwrap().parse().unwrap();
+    assert_ne!(job, handle);
+    assert!(service.run_next_job("legacy-http-worker").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    assert_eq!(
+        service.provisional_import(&actor, import_id).unwrap().phase,
+        collector_app::ImportPhase::Published
+    );
+    assert_eq!(
+        service
+            .item_presented(&actor, saved.id)
+            .unwrap()
+            .captures
+            .len(),
+        1
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/uploads/{handle}"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let upload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(upload["state"], "completed");
+}
+
+#[tokio::test]
 async fn provisional_import_routes_follow_curation_listener_composition() {
     let import = ImportId::new();
     let collection = CollectionId::new();
@@ -336,6 +513,11 @@ async fn provisional_import_routes_follow_curation_listener_composition() {
                 "PUT",
                 format!("/api/v1/imports/{import}/review"),
                 serde_json::json!({"expected_revision":1,"identity":{"identity":"unidentified"},"association":{"item_id":null,"specimen_id":null,"component_id":null,"carrier_id":null},"expected_item_revision":null}),
+            ),
+            (
+                "POST",
+                format!("/api/v1/imports/{import}/publish"),
+                serde_json::Value::Null,
             ),
             (
                 "PUT",
@@ -1015,7 +1197,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 71);
+    assert_eq!(paths.len(), 72);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -1028,6 +1210,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/imports/{id}",
         "/api/v1/imports/{id}/analysis",
         "/api/v1/imports/{id}/review",
+        "/api/v1/imports/{id}/publish",
         "/api/v1/imports/{id}/files/{index}",
         "/api/v1/collections/{id}/inboxes",
         "/api/v1/collections/{collection}/inboxes/{label}/stage",
