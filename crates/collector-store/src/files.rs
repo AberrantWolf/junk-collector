@@ -20,7 +20,7 @@ pub(crate) fn safe_name(name: &str) -> Result<()> {
     }
     Ok(())
 }
-fn hash_file(path: &Path) -> Result<(ByteLength, Digest)> {
+pub(crate) fn hash_file(path: &Path) -> Result<(ByteLength, Digest)> {
     let mut file = File::open(path).map_err(storage)?;
     let mut hash = Sha256::new();
     let mut bytes = 0u64;
@@ -849,7 +849,7 @@ impl Store {
         Ok(capture)
     }
 
-    fn ensure_job_continues(&self, id: JobId, claim_token: Option<&str>) -> Result<()> {
+    pub(crate) fn ensure_job_continues(&self, id: JobId, claim_token: Option<&str>) -> Result<()> {
         if let Some(token) = claim_token
             && self.cancellation_requested_record(id, token)?
         {

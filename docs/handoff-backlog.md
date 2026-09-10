@@ -356,7 +356,7 @@ Separate package inventory/staging, analyzer candidates, user review/physical as
 
 **Limit:** use existing upload/inbox mechanisms, not a second importer; actual analyzer implementations arrive in D04/D05.
 
-**Status (2026-09-10): P03.1 complete locally; P03.2 is next.** Private schema
+**Status (2026-09-10): P03.1-P03.2 complete locally; P03.3 is next.** Private schema
 v9 now persists a durable provisional Import separately from its execution Jobs:
 safe source summary, bounded declared-file inventory and resumable offsets/digests,
 preallocated Capture/Representation identities, optional physical association and
@@ -366,8 +366,14 @@ source and identities across restart. Validation rejects private path-shaped sou
 summaries, unsafe/case-colliding inventories, invalid offsets/digests, absent selected
 candidates, and premature publication. A completely staged, reviewed but unidentified
 and unattached Import is valid without fabricated catalog or physical identity.
-P03.2 staging/resume and browser/inbox convergence, P03.3 analysis/review, P03.4
-publication/compatibility, and all public Import routes remain not implemented.
+Browser chunks and curator-selected configured inbox packages now converge on one
+private scratch representation and the same digested `ImportView`. Inbox work runs
+as a cancellable/retryable P02 Job. It rechecks each entry and the final inventory
+for symlinks, special files, escape, case collisions, sizes, metadata, and content;
+browser offsets and exact replay survive restart. Collection-scoped endpoints expose
+only configured labels and direct package names, while submitter scope hides another
+user's Import and both Import/Job views omit source roots. P03.3 analysis/review and
+P03.4 publication plus legacy adapter delegation remain not implemented.
 
 ### P04 — Inbox, import-review and job UI
 

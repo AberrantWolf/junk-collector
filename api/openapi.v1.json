@@ -942,6 +942,66 @@
         }
       }
     },
+    "/api/v1/collections/{collection}/inboxes/{label}/stage": {
+      "post": {
+        "operationId": "stage_inbox_import",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "label",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StageInboxImport"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedInboxImport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/collections/{id}/grants": {
       "get": {
         "operationId": "collection_grants",
@@ -1087,6 +1147,39 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{id}/inboxes": {
+      "get": {
+        "operationId": "collection_inboxes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InboxSourceView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
             "description": ""
           }
         }
@@ -1298,6 +1391,146 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/imports": {
+      "post": {
+        "operationId": "create_provisional_import",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewProvisionalImport"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/imports/{id}": {
+      "get": {
+        "operationId": "provisional_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/imports/{id}/files/{index}": {
+      "put": {
+        "operationId": "stage_provisional_import_chunk",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 8388608
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
           }
         }
       }
@@ -4076,6 +4309,256 @@
           "confirmed"
         ]
       },
+      "ImportCandidate": {
+        "type": "object",
+        "required": [
+          "key",
+          "module",
+          "label",
+          "observation"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "module": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "observation": {}
+        },
+        "additionalProperties": false
+      },
+      "ImportDeclaredFile": {
+        "type": "object",
+        "required": [
+          "name",
+          "bytes",
+          "received_bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Digest"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "received_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "ImportIdentityDecision": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "key",
+              "identity"
+            ],
+            "properties": {
+              "identity": {
+                "type": "string",
+                "enum": [
+                  "candidate"
+                ]
+              },
+              "key": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "identity"
+            ],
+            "properties": {
+              "identity": {
+                "type": "string",
+                "enum": [
+                  "unidentified"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "ImportPhase": {
+        "type": "string",
+        "enum": [
+          "staging",
+          "analyzing",
+          "awaiting_review",
+          "publishing",
+          "published",
+          "cancelled"
+        ]
+      },
+      "ImportReviewDecision": {
+        "type": "object",
+        "required": [
+          "identity",
+          "association"
+        ],
+        "properties": {
+          "association": {
+            "$ref": "#/components/schemas/CaptureAssociation"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/ImportIdentityDecision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportSourceKind": {
+        "type": "string",
+        "enum": [
+          "browser",
+          "inbox"
+        ]
+      },
+      "ImportSourceSummary": {
+        "type": "object",
+        "required": [
+          "kind",
+          "package_name"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ImportSourceKind"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "package_name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportView": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "collection_id",
+          "source",
+          "files",
+          "capture_id",
+          "representation_id",
+          "association",
+          "candidates",
+          "limitations",
+          "phase",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "analysis_job_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          },
+          "association": {
+            "$ref": "#/components/schemas/CaptureAssociation"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportCandidate"
+            }
+          },
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expected_item_revision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Revision"
+              }
+            ]
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportDeclaredFile"
+            }
+          },
+          "id": {
+            "$ref": "#/components/schemas/ImportId"
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "phase": {
+            "$ref": "#/components/schemas/ImportPhase"
+          },
+          "representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "review": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImportReviewDecision"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/ImportSourceSummary"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "InboxImport": {
         "type": "object",
         "required": [
@@ -4092,6 +4575,24 @@
           },
           "package": {
             "type": "string"
+          }
+        }
+      },
+      "InboxSourceView": {
+        "type": "object",
+        "required": [
+          "label",
+          "packages"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -4690,6 +5191,29 @@
             "type": "string"
           }
         }
+      },
+      "NewProvisionalImport": {
+        "type": "object",
+        "required": [
+          "collection_id",
+          "package_name",
+          "files"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadFile"
+            }
+          },
+          "package_name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "NewUpload": {
         "type": "object",
@@ -5964,6 +6488,33 @@
       "SpecimenId": {
         "type": "string",
         "format": "uuid"
+      },
+      "StageInboxImport": {
+        "type": "object",
+        "required": [
+          "package"
+        ],
+        "properties": {
+          "package": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StagedInboxImport": {
+        "type": "object",
+        "required": [
+          "import",
+          "job_id"
+        ],
+        "properties": {
+          "import": {
+            "$ref": "#/components/schemas/ImportView"
+          },
+          "job_id": {
+            "$ref": "#/components/schemas/JobId"
+          }
+        }
       },
       "StartEnrollment": {
         "type": "object",

@@ -287,6 +287,20 @@ pub trait ProvisionalImportPort: Send + Sync {
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord>;
     fn import_record(&self, id: ImportId) -> Result<ImportRecord>;
     fn save_import(&self, record: ImportRecord, expected_revision: u64) -> Result<ImportRecord>;
+    fn stage_import_chunk(
+        &self,
+        id: ImportId,
+        index: usize,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<ImportRecord>;
+    fn stage_inbox_import(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+        source_locator: &str,
+    ) -> Result<ImportRecord>;
 }
 
 pub trait ImportPort: Send + Sync {
@@ -388,7 +402,7 @@ impl From<JobRecord> for JobView {
         let retryable = record.state == JobState::Failed
             && matches!(
                 record.kind.as_str(),
-                "integrity_verification" | "preservation_import"
+                "integrity_verification" | "preservation_import" | "import_staging"
             );
         Self {
             id: record.id,
@@ -680,6 +694,7 @@ pub trait CommandEffects:
     + EnrollmentPort
     + AccessPort
     + JobPort
+    + ProvisionalImportPort
 {
 }
 impl<T> CommandEffects for T where
@@ -691,6 +706,7 @@ impl<T> CommandEffects for T where
         + EnrollmentPort
         + AccessPort
         + JobPort
+        + ProvisionalImportPort
 {
 }
 
@@ -757,6 +773,7 @@ pub struct CollectionService {
     access: Arc<dyn AccessPort>,
     content: Arc<dyn ContentPort>,
     imports: Arc<dyn ImportPort>,
+    provisional_imports: Arc<dyn ProvisionalImportPort>,
     administration: Arc<dyn AdministrationPort>,
     authentication: Arc<dyn AuthenticationPort>,
     enrollments: Arc<dyn EnrollmentPort>,
@@ -1111,11 +1128,13 @@ impl CollectionService {
             + EnrollmentPort
             + IdempotencyPort
             + JobPort
+            + ProvisionalImportPort
             + 'static,
     {
         let reader: Arc<dyn CollectionReadPort> = catalog.clone();
         let content: Arc<dyn ContentPort> = catalog.clone();
         let imports: Arc<dyn ImportPort> = catalog.clone();
+        let provisional_imports: Arc<dyn ProvisionalImportPort> = catalog.clone();
         let administration: Arc<dyn AdministrationPort> = catalog.clone();
         let authentication: Arc<dyn AuthenticationPort> = catalog.clone();
         let enrollments: Arc<dyn EnrollmentPort> = catalog.clone();
@@ -1127,6 +1146,7 @@ impl CollectionService {
             access,
             content,
             imports,
+            provisional_imports,
             administration,
             authentication,
             enrollments,
@@ -2232,6 +2252,132 @@ impl CollectionService {
         )?;
         self.reader.item(item_id)
     }
+    fn authorized_provisional_import(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+    ) -> Result<ImportRecord> {
+        let record = self.provisional_imports.import_record(id)?;
+        if record.user_id != actor.user_id {
+            return Err(Error::NotFound);
+        }
+        self.authorize(actor, record.view.collection_id, Action::Curate)?;
+        Ok(record)
+    }
+    pub fn create_provisional_import(
+        &self,
+        actor: &Principal,
+        collection_id: CollectionId,
+        source: ImportSourceSummary,
+        files: Vec<UploadFile>,
+        context: &CommandContext,
+    ) -> Result<ImportView> {
+        self.authorize(actor, collection_id, Action::Curate)?;
+        let request = (collection_id, source.clone(), files.clone());
+        let now = self.authentication.now();
+        let record = ImportRecord {
+            user_id: actor.user_id,
+            view: ImportView {
+                id: ImportId(deterministic_inventory_uuid(
+                    actor.user_id,
+                    "import-create",
+                    context.key(),
+                )),
+                revision: 1,
+                collection_id,
+                source,
+                files: files
+                    .into_iter()
+                    .map(|file| {
+                        Ok(ImportDeclaredFile {
+                            name: file.name,
+                            bytes: file.bytes,
+                            received_bytes: ByteLength(0),
+                            digest: file
+                                .sha256
+                                .map(|value| Digest::new(HashAlgorithm::Sha256, value))
+                                .transpose()?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                capture_id: CaptureId(deterministic_inventory_uuid(
+                    actor.user_id,
+                    "import-capture",
+                    context.key(),
+                )),
+                representation_id: RepresentationId(deterministic_inventory_uuid(
+                    actor.user_id,
+                    "import-representation",
+                    context.key(),
+                )),
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+                candidates: vec![],
+                limitations: vec![],
+                review: None,
+                analysis_job_id: None,
+                phase: ImportPhase::Staging,
+                created_at: now,
+                updated_at: now,
+            },
+        };
+        self.execute_command(actor, context, "import.create", &request, |effects| {
+            effects.create_import(record).map(|record| record.view)
+        })
+    }
+    pub fn provisional_import(&self, actor: &Principal, id: ImportId) -> Result<ImportView> {
+        Ok(self.authorized_provisional_import(actor, id)?.view)
+    }
+    pub fn stage_provisional_import_chunk(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+        index: usize,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<ImportView> {
+        self.authorized_provisional_import(actor, id)?;
+        Ok(self
+            .provisional_imports
+            .stage_import_chunk(id, index, offset, bytes)?
+            .view)
+    }
+    pub fn enqueue_inbox_import_staging(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+        source_locator: &str,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        let record = self.authorized_provisional_import(actor, id)?;
+        if record.view.source.kind != ImportSourceKind::Inbox {
+            return Err(Error::Invalid(
+                "only configured inbox Imports can stage from an inbox source".into(),
+            ));
+        }
+        let job = JobId::new();
+        let total_units = record.view.files.iter().map(|file| file.bytes.0).sum();
+        let spec = JobSpec {
+            id: job,
+            user_id: actor.user_id,
+            collection_id: Some(record.view.collection_id),
+            item_id: None,
+            kind: "import_staging".into(),
+            phase: "queued".into(),
+            total_units,
+            request: serde_json::json!({
+                "import_id": id,
+                "source_locator": source_locator,
+            }),
+        };
+        self.execute_command(
+            actor,
+            context,
+            "import.inbox.stage.enqueue",
+            &(id, source_locator),
+            |effects| effects.enqueue_job(spec),
+        )
+    }
     fn authorized_upload(&self, actor: &Principal, id: JobId) -> Result<Upload> {
         let upload = self.imports.upload(id)?;
         if upload.user_id != actor.user_id {
@@ -2474,6 +2620,23 @@ impl CollectionService {
                 .imports
                 .commit_upload_for_job(claim.id, &claim.claim_token)
                 .map(|item| serde_json::json!({"item_id":item.id,"revision":item.revision})),
+            "import_staging" => {
+                let import_id = claim
+                    .request
+                    .get("import_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| Error::Storage("staging job has no Import identity".into()))?
+                    .parse()
+                    .map_err(|error| Error::Storage(format!("invalid Import identity: {error}")))?;
+                let source_locator = claim
+                    .request
+                    .get("source_locator")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| Error::Storage("staging job has no source locator".into()))?;
+                self.provisional_imports
+                    .stage_inbox_import(import_id, claim.id, &claim.claim_token, source_locator)
+                    .map(|record| serde_json::json!({"import_id":record.view.id}))
+            }
             _ => Err(Error::Unavailable(format!(
                 "job kind {} has no registered executor",
                 claim.kind
@@ -2548,7 +2711,9 @@ impl CollectionService {
         self.execute_command(actor, context, "job.retry", &id, |effects| {
             match job.kind.as_str() {
                 "preservation_import" => effects.retry_upload(id),
-                "integrity_verification" => effects.retry_failed_job(id, actor.user_id),
+                "integrity_verification" | "import_staging" => {
+                    effects.retry_failed_job(id, actor.user_id)
+                }
                 _ => Err(Error::Unavailable("this job kind cannot be retried".into())),
             }
         })

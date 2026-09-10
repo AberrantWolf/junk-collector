@@ -372,6 +372,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{collection}/inboxes/{label}/stage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["stage_inbox_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{id}/grants": {
         parameters: {
             query?: never;
@@ -399,6 +415,22 @@ export interface paths {
         put: operations["set_collection_grant"];
         post?: never;
         delete: operations["remove_collection_grant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{id}/inboxes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["collection_inboxes"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -509,6 +541,54 @@ export interface paths {
         };
         get: operations["identity"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_provisional_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["provisional_import"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{id}/files/{index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["stage_provisional_import_chunk"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1309,10 +1389,70 @@ export interface components {
         };
         /** @enum {string} */
         IdentityState: "unidentified" | "tentative" | "selected" | "confirmed";
+        ImportCandidate: {
+            key: string;
+            label: string;
+            module: components["schemas"]["ModuleId"];
+            observation: unknown;
+        };
+        ImportDeclaredFile: {
+            bytes: components["schemas"]["ByteLength"];
+            digest?: null | components["schemas"]["Digest"];
+            name: string;
+            received_bytes: components["schemas"]["ByteLength"];
+        };
+        /** Format: uuid */
+        ImportId: string;
+        ImportIdentityDecision: {
+            /** @enum {string} */
+            identity: "candidate";
+            key: string;
+        } | {
+            /** @enum {string} */
+            identity: "unidentified";
+        };
+        /** @enum {string} */
+        ImportPhase: "staging" | "analyzing" | "awaiting_review" | "publishing" | "published" | "cancelled";
+        ImportReviewDecision: {
+            association: components["schemas"]["CaptureAssociation"];
+            identity: components["schemas"]["ImportIdentityDecision"];
+        };
+        /** @enum {string} */
+        ImportSourceKind: "browser" | "inbox";
+        ImportSourceSummary: {
+            kind: components["schemas"]["ImportSourceKind"];
+            label?: string | null;
+            package_name: string;
+        };
+        ImportView: {
+            analysis_job_id?: null | components["schemas"]["JobId"];
+            association: components["schemas"]["CaptureAssociation"];
+            candidates: components["schemas"]["ImportCandidate"][];
+            capture_id: components["schemas"]["CaptureId"];
+            collection_id: components["schemas"]["CollectionId"];
+            /** Format: date-time */
+            created_at: string;
+            expected_item_revision?: null | components["schemas"]["Revision"];
+            files: components["schemas"]["ImportDeclaredFile"][];
+            id: components["schemas"]["ImportId"];
+            limitations: string[];
+            phase: components["schemas"]["ImportPhase"];
+            representation_id: components["schemas"]["RepresentationId"];
+            review?: null | components["schemas"]["ImportReviewDecision"];
+            /** Format: int64 */
+            revision: number;
+            source: components["schemas"]["ImportSourceSummary"];
+            /** Format: date-time */
+            updated_at: string;
+        };
         InboxImport: {
             expected_revision: components["schemas"]["Revision"];
             item_id: components["schemas"]["ItemId"];
             package: string;
+        };
+        InboxSourceView: {
+            label: string;
+            packages: string[];
         };
         Item: {
             assets: components["schemas"]["Asset"][];
@@ -1468,6 +1608,11 @@ export interface components {
         };
         NewCollection: {
             name: string;
+        };
+        NewProvisionalImport: {
+            collection_id: components["schemas"]["CollectionId"];
+            files: components["schemas"]["UploadFile"][];
+            package_name: string;
         };
         NewUpload: {
             expected_revision: components["schemas"]["Revision"];
@@ -1770,6 +1915,13 @@ export interface components {
         };
         /** Format: uuid */
         SpecimenId: string;
+        StageInboxImport: {
+            package: string;
+        };
+        StagedInboxImport: {
+            import: components["schemas"]["ImportView"];
+            job_id: components["schemas"]["JobId"];
+        };
         StartEnrollment: {
             device_name: string;
             username?: string | null;
@@ -2705,6 +2857,46 @@ export interface operations {
             };
         };
     };
+    stage_inbox_import: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageInboxImport"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagedInboxImport"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     collection_grants: {
         parameters: {
             query?: never;
@@ -2818,6 +3010,33 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    collection_inboxes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxSourceView"][];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3043,6 +3262,116 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["IdentityResponse"];
                 };
+            };
+        };
+    };
+    create_provisional_import: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewProvisionalImport"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    provisional_import: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stage_provisional_import_chunk: {
+        parameters: {
+            query: {
+                offset: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["ImportId"];
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

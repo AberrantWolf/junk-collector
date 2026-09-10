@@ -1,9 +1,15 @@
 use super::*;
+use crate::files::safe_name;
 use collector_app::{
     ImportIdentityDecision, ImportPhase, ImportRecord, ImportSourceKind, ProvisionalImportPort,
 };
 use rusqlite::TransactionBehavior;
 use std::collections::HashSet;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
+
+const IMPORT_CHUNK_LIMIT: usize = 8 * 1024 * 1024;
 
 fn source_kind(value: ImportSourceKind) -> &'static str {
     match value {
@@ -310,7 +316,7 @@ impl ProvisionalImportPort for Store {
                 "Import insert did not change one row".into(),
             ));
         }
-        self.record_command(&tx, &record)?;
+        self.record_command(&tx, &record.view)?;
         tx.commit().map_err(storage)?;
         Ok(record)
     }
@@ -380,8 +386,183 @@ impl ProvisionalImportPort for Store {
         if changed != 1 {
             return Err(Error::Conflict);
         }
-        self.record_command(&tx, &record)?;
+        self.record_command(&tx, &record.view)?;
         tx.commit().map_err(storage)?;
+        Ok(record)
+    }
+
+    fn stage_import_chunk(
+        &self,
+        id: ImportId,
+        index: usize,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<ImportRecord> {
+        if bytes.len() > IMPORT_CHUNK_LIMIT {
+            return Err(Error::Invalid("chunk exceeds 8 MiB".into()));
+        }
+        let _guard = lock(&self.uploads)?;
+        let mut record = self.import_record(id)?;
+        if record.view.phase != ImportPhase::Staging {
+            return Err(Error::Conflict);
+        }
+        let declared = record.view.files.get(index).ok_or(Error::NotFound)?;
+        let end = offset
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| Error::Invalid("offset overflow".into()))?;
+        if offset > declared.received_bytes.0 || end > declared.bytes.0 {
+            return Err(Error::Conflict);
+        }
+        let directory = self.state.join("imports").join(id.to_string());
+        fs::create_dir_all(&directory).map_err(storage)?;
+        let path = directory.join(format!("{index}.part"));
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(storage)?;
+        let mut current = file.metadata().map_err(storage)?.len();
+        if current < offset {
+            return Err(Error::Storage(
+                "Import scratch is shorter than its durable offset".into(),
+            ));
+        }
+        if current > declared.received_bytes.0 {
+            file.set_len(declared.received_bytes.0).map_err(storage)?;
+            file.sync_all().map_err(storage)?;
+            current = declared.received_bytes.0;
+        }
+        if current > offset {
+            if end > current || end > declared.received_bytes.0 {
+                return Err(Error::Conflict);
+            }
+            let mut previous = vec![0; bytes.len()];
+            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
+            file.read_exact(&mut previous).map_err(storage)?;
+            if previous != bytes {
+                return Err(Error::Conflict);
+            }
+            return Ok(record);
+        } else {
+            file.seek(SeekFrom::End(0)).map_err(storage)?;
+            file.write_all(bytes).map_err(storage)?;
+            file.sync_all().map_err(storage)?;
+        }
+        let length = file.metadata().map_err(storage)?.len();
+        let entry = &mut record.view.files[index];
+        entry.received_bytes = ByteLength(length);
+        if length == entry.bytes.0 {
+            let (_, observed) = crate::files::hash_file(&path)?;
+            if entry
+                .digest
+                .as_ref()
+                .is_some_and(|expected| *expected != observed)
+            {
+                return Err(Error::Invalid(
+                    "staged file does not match its declared digest".into(),
+                ));
+            }
+            entry.digest = Some(observed);
+        }
+        if record
+            .view
+            .files
+            .iter()
+            .all(|file| file.received_bytes == file.bytes && file.digest.is_some())
+        {
+            record.view.phase = ImportPhase::Analyzing;
+        }
+        let revision = record.view.revision;
+        self.save_import(record, revision)
+    }
+
+    fn stage_inbox_import(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+        source_locator: &str,
+    ) -> Result<ImportRecord> {
+        let source = Path::new(source_locator);
+        let source_metadata = fs::symlink_metadata(source).map_err(storage)?;
+        if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+            return Err(Error::Invalid("inbox package changed while staging".into()));
+        }
+        let root = fs::canonicalize(source).map_err(storage)?;
+        let initial_inventory = Self::inventory_directory(&root)?;
+        let mut record = self.import_record(id)?;
+        if record.view.phase == ImportPhase::Analyzing
+            && record
+                .view
+                .files
+                .iter()
+                .all(|file| file.received_bytes == file.bytes && file.digest.is_some())
+        {
+            return Ok(record);
+        }
+        if record.view.phase != ImportPhase::Staging
+            || initial_inventory.len() != record.view.files.len()
+            || initial_inventory
+                .iter()
+                .zip(&record.view.files)
+                .any(|(left, right)| left.name != right.name || left.bytes != right.bytes)
+        {
+            return Err(Error::Invalid("inbox package changed while staging".into()));
+        }
+        for index in 0..record.view.files.len() {
+            self.ensure_job_continues(job, Some(claim_token))?;
+            let declared = record.view.files[index].clone();
+            safe_name(&declared.name)?;
+            let path = root.join(&declared.name);
+            let metadata_before = fs::symlink_metadata(&path).map_err(storage)?;
+            let canonical = fs::canonicalize(&path).map_err(storage)?;
+            if metadata_before.file_type().is_symlink()
+                || !metadata_before.is_file()
+                || metadata_before.len() != declared.bytes.0
+                || !canonical.starts_with(&root)
+            {
+                return Err(Error::Invalid("inbox package changed while staging".into()));
+            }
+            let mut file = File::open(&canonical).map_err(storage)?;
+            let mut offset = declared.received_bytes.0;
+            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
+            let mut buffer = vec![0u8; 1024 * 1024];
+            while offset < declared.bytes.0 {
+                let read = file.read(&mut buffer).map_err(storage)?;
+                if read == 0 {
+                    return Err(Error::Invalid("inbox package changed while staging".into()));
+                }
+                record = self.stage_import_chunk(id, index, offset, &buffer[..read])?;
+                offset += read as u64;
+                let completed = record
+                    .view
+                    .files
+                    .iter()
+                    .map(|entry| entry.received_bytes.0)
+                    .sum();
+                self.heartbeat_job_record(job, claim_token, "staging_inbox", completed, 30)?;
+                self.ensure_job_continues(job, Some(claim_token))?;
+            }
+            let metadata_after = file.metadata().map_err(storage)?;
+            let (_, source_digest) = crate::files::hash_file(&canonical)?;
+            if metadata_after.len() != metadata_before.len()
+                || metadata_after.modified().ok() != metadata_before.modified().ok()
+                || record.view.files[index].digest.as_ref() != Some(&source_digest)
+            {
+                return Err(Error::Invalid("inbox package changed while staging".into()));
+            }
+        }
+        let final_inventory = Self::inventory_directory(&root)?;
+        if final_inventory.len() != initial_inventory.len()
+            || final_inventory
+                .iter()
+                .zip(&initial_inventory)
+                .any(|(left, right)| left.name != right.name || left.bytes != right.bytes)
+        {
+            return Err(Error::Invalid("inbox package changed while staging".into()));
+        }
         Ok(record)
     }
 }

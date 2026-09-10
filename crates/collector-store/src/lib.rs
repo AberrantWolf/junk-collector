@@ -194,6 +194,7 @@ impl Store {
             journal_store.abort(*transaction_id)?;
         }
         fs::create_dir_all(state.join("uploads")).map_err(storage)?;
+        fs::create_dir_all(state.join("imports")).map_err(storage)?;
         let mut db = Connection::open(state.join("catalog.sqlite")).map_err(storage)?;
         db.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(storage)?;

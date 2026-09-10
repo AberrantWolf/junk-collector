@@ -1,5 +1,32 @@
 # Validation recorded for the foundation
 
+## Wave 3 P03.2 source convergence — 2026-09-10
+
+- `browser_and_inbox_sources_converge_on_the_same_durable_staging_state` stages
+  identical nested package bytes through browser chunks and a real claimed inbox
+  Job. Both finish as the same file inventory, offsets, SHA-256 digests, and
+  `analyzing` phase; only the private Job request contains the resolved source path.
+- `browser_import_resumes_from_durable_offsets_after_restart` proves create-command
+  replay returns the same preallocated identities, partial offsets survive Store
+  restart, gap writes conflict without mutation, and the resumed final chunk checks
+  its declared digest. Exact already-accepted chunks are harmless replays.
+- `changed_inbox_input_fails_the_staging_job_and_retains_resumable_import` changes
+  a declared file before claim and observes a failed Job with the Import retained in
+  `staging`. Per-entry canonical/symlink/type/size checks, source rehash, metadata
+  comparison, and final reinventory cover mutation during copy; existing permanent
+  inbox tests continue to cover symlinks and malicious paths.
+- `provisional_import_routes_converge_sources_and_hide_inbox_paths_and_other_users`
+  exercises the browser create/chunk/read routes and collection inbox listing/stage
+  route. It confirms direct directories only, no configured root in either response,
+  another user's Import ID is not found, and the queued inbox Job reaches the same
+  digested state. Routes follow curation listener composition.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 129 locked
+  workspace tests, warning-free all-target clippy, generated API drift, TypeScript
+  check/build, and rebuilt embedded-assets server pass.
+- **Not implemented:** P03.3 optional analyzer dispatch, candidate/review commands,
+  and stale-review preservation; P03.4 publication and upload/inbox compatibility
+  delegation; P04 UI. **Externally unqualified:** independent source-security review.
+
 ## Wave 3 P03.1 durable provisional Import model — 2026-09-10
 
 - Private schema v9 creates typed `imports` columns for ownership, collection,

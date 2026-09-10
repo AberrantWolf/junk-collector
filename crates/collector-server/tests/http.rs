@@ -101,6 +101,221 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
 }
 
 #[tokio::test]
+async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_other_users() {
+    let (root, mut state) = state();
+    state.exposure.public_curation = true;
+    let owner = state
+        .store
+        .create_user("import-owner", "a long owner password", true)
+        .unwrap();
+    let stranger = state
+        .store
+        .create_user("import-stranger", "a long stranger password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(&test_authentication(&actor), "Imports", &command())
+        .unwrap();
+    let (owner_token, _) = state.store.issue_session(owner, "browser").unwrap();
+    let (stranger_token, _) = state.store.issue_session(stranger, "browser").unwrap();
+    let inbox_root = root.path().join("private-drop-root");
+    std::fs::create_dir_all(inbox_root.join("package-one")).unwrap();
+    std::fs::write(inbox_root.join("package-one/disc.bin"), b"data").unwrap();
+    std::fs::write(inbox_root.join("not-a-package"), b"ignored").unwrap();
+    Arc::make_mut(&mut state.inboxes).insert("Optical shelf".into(), inbox_root.clone());
+    let service = state.service.clone();
+    let app = router(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/collections/{}/inboxes", collection.id))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.contains("Optical shelf"));
+    assert!(text.contains("package-one"));
+    assert!(!text.contains("not-a-package"));
+    assert!(!text.contains(inbox_root.to_str().unwrap()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/imports")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "create-browser-import")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "collection_id": collection.id,
+                        "package_name": "browser-package",
+                        "files": [{"name":"disc.bin","bytes":4,"sha256":null}]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let browser: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let import_id = browser["id"].as_str().unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/imports/{import_id}/files/0?offset=0"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/octet-stream")
+                .body(Body::from("data"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let staged: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(staged["phase"], "analyzing");
+    assert_eq!(staged["files"][0]["received_bytes"], 4);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/imports/{import_id}"))
+                .header("authorization", format!("Bearer {stranger_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/collections/{}/inboxes/Optical%20shelf/stage",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "stage-inbox-import")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"package":"package-one"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let inbox: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !String::from_utf8(body.to_vec())
+            .unwrap()
+            .contains(inbox_root.to_str().unwrap())
+    );
+    assert!(service.run_next_job("http-import-worker").unwrap());
+    let inbox_id: ImportId = inbox["import"]["id"].as_str().unwrap().parse().unwrap();
+    let completed = service.provisional_import(&actor, inbox_id).unwrap();
+    assert_eq!(completed.phase, collector_app::ImportPhase::Analyzing);
+    assert_eq!(completed.files[0].digest, Some(Digest::sha256(b"data")));
+}
+
+#[tokio::test]
+async fn provisional_import_routes_follow_curation_listener_composition() {
+    let import = ImportId::new();
+    let collection = CollectionId::new();
+    for enabled in [false, true] {
+        let (_root, mut state) = state();
+        state.exposure.public_curation = enabled;
+        let app = router(state);
+        for (method, path, body) in [
+            (
+                "POST",
+                "/api/v1/imports".into(),
+                serde_json::json!({"collection_id":collection,"package_name":"package","files":[{"name":"disc.bin","bytes":4,"sha256":null}]}),
+            ),
+            (
+                "GET",
+                format!("/api/v1/imports/{import}"),
+                serde_json::Value::Null,
+            ),
+            (
+                "PUT",
+                format!("/api/v1/imports/{import}/files/0?offset=0"),
+                serde_json::Value::Null,
+            ),
+            (
+                "GET",
+                format!("/api/v1/collections/{collection}/inboxes"),
+                serde_json::Value::Null,
+            ),
+            (
+                "POST",
+                format!("/api/v1/collections/{collection}/inboxes/label/stage"),
+                serde_json::json!({"package":"package"}),
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header("origin", "https://collector.example")
+                        .header("idempotency-key", "import-listener-probe")
+                        .header("content-type", "application/json")
+                        .body(Body::from(if body.is_null() {
+                            Vec::new()
+                        } else {
+                            serde_json::to_vec(&body).unwrap()
+                        }))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if enabled {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::NOT_FOUND
+                }
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn physical_lifecycle_routes_follow_curation_listener_composition() {
     let id = ItemId::new();
     let specimen = SpecimenId::new();
@@ -732,7 +947,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 64);
+    assert_eq!(paths.len(), 69);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -741,6 +956,11 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/items/{id}/specimens/{specimen_id}/loans",
         "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return",
         "/api/v1/items/{id}/specimens/{specimen_id}/dispose",
+        "/api/v1/imports",
+        "/api/v1/imports/{id}",
+        "/api/v1/imports/{id}/files/{index}",
+        "/api/v1/collections/{id}/inboxes",
+        "/api/v1/collections/{collection}/inboxes/{label}/stage",
     ] {
         assert!(
             paths.contains_key(path),

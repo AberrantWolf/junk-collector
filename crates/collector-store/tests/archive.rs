@@ -4828,3 +4828,158 @@ fn durable_import_allows_published_unidentified_unattached_capture_identity() {
         ImportIdentityDecision::Unidentified
     ));
 }
+
+#[test]
+fn browser_and_inbox_sources_converge_on_the_same_durable_staging_state() {
+    let (root, store, actor, service, collection) = setup();
+    let declared = vec![UploadFile {
+        name: "disc/track01.bin".into(),
+        bytes: ByteLength(4),
+        sha256: None,
+    }];
+    let browser = service
+        .create_provisional_import(
+            &actor,
+            collection.id,
+            ImportSourceSummary {
+                kind: ImportSourceKind::Browser,
+                label: None,
+                package_name: "browser-disc".into(),
+            },
+            declared.clone(),
+            &command(),
+        )
+        .unwrap();
+    let browser = service
+        .stage_provisional_import_chunk(&actor, browser.id, 0, 0, b"data")
+        .unwrap();
+
+    let inbox_root = root.path().join("configured-inbox");
+    let package = inbox_root.join("inbox-disc");
+    std::fs::create_dir_all(package.join("disc")).unwrap();
+    std::fs::write(package.join("disc/track01.bin"), b"data").unwrap();
+    let inbox = service
+        .create_provisional_import(
+            &actor,
+            collection.id,
+            ImportSourceSummary {
+                kind: ImportSourceKind::Inbox,
+                label: Some("Optical shelf".into()),
+                package_name: "inbox-disc".into(),
+            },
+            Store::inventory_directory(&package).unwrap(),
+            &command(),
+        )
+        .unwrap();
+    let job = service
+        .enqueue_inbox_import_staging(&actor, inbox.id, package.to_str().unwrap(), &command())
+        .unwrap();
+    assert!(service.run_next_job("test-worker").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let inbox = service.provisional_import(&actor, inbox.id).unwrap();
+
+    assert_eq!(browser.phase, ImportPhase::Analyzing);
+    assert_eq!(inbox.phase, ImportPhase::Analyzing);
+    assert_eq!(
+        serde_json::to_value(&browser.files).unwrap(),
+        serde_json::to_value(&inbox.files).unwrap()
+    );
+    let job_request: String = rusqlite::Connection::open(root.path().join("state/private.sqlite"))
+        .unwrap()
+        .query_row(
+            "SELECT request FROM jobs WHERE id=?",
+            [job.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(job_request.contains(package.to_str().unwrap()));
+    assert!(
+        !serde_json::to_string(&inbox)
+            .unwrap()
+            .contains(package.to_str().unwrap())
+    );
+    drop(store);
+}
+
+#[test]
+fn browser_import_resumes_from_durable_offsets_after_restart() {
+    let (root, store, actor, service, collection) = setup();
+    let create_key = command();
+    let source = ImportSourceSummary {
+        kind: ImportSourceKind::Browser,
+        label: None,
+        package_name: "restart-disc".into(),
+    };
+    let files = vec![UploadFile {
+        name: "track.bin".into(),
+        bytes: ByteLength(4),
+        sha256: Some(Digest::sha256(b"data").hex),
+    }];
+    let created = service
+        .create_provisional_import(
+            &actor,
+            collection.id,
+            source.clone(),
+            files.clone(),
+            &create_key,
+        )
+        .unwrap();
+    let replay = service
+        .create_provisional_import(&actor, collection.id, source, files, &create_key)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&replay).unwrap(),
+        serde_json::to_value(&created).unwrap()
+    );
+    let partial = service
+        .stage_provisional_import_chunk(&actor, created.id, 0, 0, b"da")
+        .unwrap();
+    assert_eq!(partial.files[0].received_bytes, ByteLength(2));
+    drop(service);
+    drop(store);
+
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    let restored = service.provisional_import(&actor, created.id).unwrap();
+    assert_eq!(restored.files[0].received_bytes, ByteLength(2));
+    assert!(matches!(
+        service.stage_provisional_import_chunk(&actor, created.id, 0, 3, b"a"),
+        Err(Error::Conflict)
+    ));
+    let completed = service
+        .stage_provisional_import_chunk(&actor, created.id, 0, 2, b"ta")
+        .unwrap();
+    assert_eq!(completed.phase, ImportPhase::Analyzing);
+    assert_eq!(completed.files[0].digest, Some(Digest::sha256(b"data")));
+}
+
+#[test]
+fn changed_inbox_input_fails_the_staging_job_and_retains_resumable_import() {
+    let (root, _store, actor, service, collection) = setup();
+    let package = root.path().join("configured-inbox/package");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("disc.bin"), b"old").unwrap();
+    let created = service
+        .create_provisional_import(
+            &actor,
+            collection.id,
+            ImportSourceSummary {
+                kind: ImportSourceKind::Inbox,
+                label: Some("Drop zone".into()),
+                package_name: "package".into(),
+            },
+            Store::inventory_directory(&package).unwrap(),
+            &command(),
+        )
+        .unwrap();
+    std::fs::write(package.join("disc.bin"), b"changed").unwrap();
+    let job = service
+        .enqueue_inbox_import_staging(&actor, created.id, package.to_str().unwrap(), &command())
+        .unwrap();
+    assert!(service.run_next_job("test-worker").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Failed);
+    let retained = service.provisional_import(&actor, created.id).unwrap();
+    assert_eq!(retained.phase, ImportPhase::Staging);
+    assert_eq!(retained.files[0].received_bytes, ByteLength(0));
+}

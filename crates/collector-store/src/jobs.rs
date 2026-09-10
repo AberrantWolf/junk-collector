@@ -642,7 +642,9 @@ impl Store {
             .optional()
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
-        if state != "failed" || kind != "integrity_verification" {
+        if state != "failed"
+            || !matches!(kind.as_str(), "integrity_verification" | "import_staging")
+        {
             return Err(Error::Conflict);
         }
         let mut result = prior_result

@@ -11,9 +11,10 @@ use axum::{
 use collector_app::{
     AccountUpdate, AccountView, AuthenticatedPrincipal, CollectionService, CommandContext,
     ComponentDetails, CreateAssetCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView,
-    GrantView, JobView, MediaResource, NativeDeviceView, PasskeyView, PresentedAsset,
-    PresentedCollection, PresentedEvidence, PresentedItem, ReturnLoanCommand, SaveItemCommand,
-    SessionView, SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
+    GrantView, ImportSourceKind, ImportSourceSummary, ImportView, JobView, MediaResource,
+    NativeDeviceView, PasskeyView, PresentedAsset, PresentedCollection, PresentedEvidence,
+    PresentedItem, ReturnLoanCommand, SaveItemCommand, SessionView, SpecimenDetails,
+    StartLoanCommand, UpdateAssetCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -486,6 +487,13 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(dispose_specimen))
         .routes(routes!(verify))
         .routes(routes!(create_upload))
+        .routes(routes!(create_provisional_import))
+        .routes(routes!(provisional_import))
+        .routes(
+            routes!(stage_provisional_import_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
+        .routes(routes!(collection_inboxes))
+        .routes(routes!(stage_inbox_import))
         .routes(routes!(upload, cancel_upload))
         .routes(routes!(commit_upload))
         .routes(routes!(jobs))
@@ -1842,6 +1850,196 @@ struct NewUpload {
     expected_revision: Revision,
     files: Vec<UploadFile>,
 }
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct NewProvisionalImport {
+    collection_id: CollectionId,
+    package_name: String,
+    files: Vec<UploadFile>,
+}
+
+#[utoipa::path(post, path = "/api/v1/imports", params(("Idempotency-Key" = String, Header)), request_body = NewProvisionalImport, responses((status = 200, body = ImportView), (status = 403), (status = 409)))]
+async fn create_provisional_import(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<NewProvisionalImport>,
+) -> ApiResult<Json<ImportView>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state.service.create_provisional_import(
+                &actor,
+                input.collection_id,
+                ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: input.package_name,
+                },
+                input.files,
+                &context,
+            )
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/imports/{id}", params(("id" = ImportId, Path)), responses((status = 200, body = ImportView), (status = 404)))]
+async fn provisional_import(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+) -> ApiResult<Json<ImportView>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.provisional_import(&actor, id)).await?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/imports/{id}/files/{index}", params(("id" = ImportId, Path), ("index" = usize, Path), ("offset" = u64, Query)), request_body(content = String, content_type = "application/octet-stream"), responses((status = 200, body = ImportView), (status = 404), (status = 409), (status = 413)))]
+async fn stage_provisional_import_chunk(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, index)): Path<(ImportId, usize)>,
+    Query(query): Query<Offset>,
+    body: axum::body::Bytes,
+) -> ApiResult<Json<ImportView>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .stage_provisional_import_chunk(&actor, id, index, query.offset, &body)
+        })
+        .await?,
+    ))
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+struct InboxSourceView {
+    label: String,
+    packages: Vec<String>,
+}
+
+fn direct_inbox_packages(root: &std::path::Path) -> Result<Vec<String>> {
+    let root = std::fs::canonicalize(root).map_err(|error| Error::Storage(error.to_string()))?;
+    let mut packages = Vec::new();
+    for entry in std::fs::read_dir(root).map_err(|error| Error::Storage(error.to_string()))? {
+        let entry = entry.map_err(|error| Error::Storage(error.to_string()))?;
+        let metadata = std::fs::symlink_metadata(entry.path())
+            .map_err(|error| Error::Storage(error.to_string()))?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if metadata.is_dir()
+            && !metadata.file_type().is_symlink()
+            && !name.is_empty()
+            && !name.contains(['/', '\\'])
+            && !matches!(name.as_str(), "." | "..")
+        {
+            packages.push(name);
+        }
+    }
+    packages.sort();
+    Ok(packages)
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{id}/inboxes", params(("id" = CollectionId, Path)), responses((status = 200, body = Vec<InboxSourceView>), (status = 403)))]
+async fn collection_inboxes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+) -> ApiResult<Json<Vec<InboxSourceView>>> {
+    let actor = principal(&state, &headers)?;
+    state.service.authorize(&actor, id, Action::Curate)?;
+    let inboxes = state.inboxes.clone();
+    Ok(Json(
+        blocking(move || {
+            inboxes
+                .iter()
+                .map(|(label, root)| {
+                    Ok(InboxSourceView {
+                        label: label.clone(),
+                        packages: direct_inbox_packages(root)?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct StageInboxImport {
+    package: String,
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+struct StagedInboxImport {
+    import: ImportView,
+    job_id: JobId,
+}
+
+#[utoipa::path(post, path = "/api/v1/collections/{collection}/inboxes/{label}/stage", params(("collection" = CollectionId, Path), ("label" = String, Path), ("Idempotency-Key" = String, Header)), request_body = StageInboxImport, responses((status = 202, body = StagedInboxImport), (status = 403), (status = 409)))]
+async fn stage_inbox_import(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, label)): Path<(CollectionId, String)>,
+    Json(input): Json<StageInboxImport>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    state
+        .service
+        .authorize(&actor, collection, Action::Curate)?;
+    if input.package.is_empty()
+        || input.package.contains(['/', '\\'])
+        || matches!(input.package.as_str(), "." | "..")
+    {
+        return Err(Error::Invalid("select a direct inbox package directory".into()).into());
+    }
+    let root = state.inboxes.get(&label).ok_or(Error::NotFound)?.clone();
+    let source = root.join(&input.package);
+    let package = input.package;
+    let (source, files) = blocking(move || {
+        let root = std::fs::canonicalize(root).map_err(|e| Error::Storage(e.to_string()))?;
+        let metadata =
+            std::fs::symlink_metadata(&source).map_err(|e| Error::Storage(e.to_string()))?;
+        let path = std::fs::canonicalize(&source).map_err(|e| Error::Storage(e.to_string()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() || !path.starts_with(root) {
+            return Err(Error::Forbidden);
+        }
+        let files = Store::inventory_directory(&path)?;
+        Ok((path, files))
+    })
+    .await?;
+    let import = state.service.create_provisional_import(
+        &actor,
+        collection,
+        ImportSourceSummary {
+            kind: ImportSourceKind::Inbox,
+            label: Some(label),
+            package_name: package,
+        },
+        files,
+        &context,
+    )?;
+    let source_locator = source
+        .to_str()
+        .ok_or_else(|| Error::Invalid("inbox source path must be UTF-8".into()))?;
+    let job_id =
+        state
+            .service
+            .enqueue_inbox_import_staging(&actor, import.id, source_locator, &context)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(StagedInboxImport { import, job_id }),
+    )
+        .into_response())
+}
+
 #[utoipa::path(post, path = "/api/v1/uploads", params(("Idempotency-Key" = String, Header)), request_body = NewUpload, responses((status = 200, body = Upload), (status = 409)))]
 async fn create_upload(
     State(state): State<AppState>,
