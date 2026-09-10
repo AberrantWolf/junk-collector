@@ -4,8 +4,8 @@ use collector_app::{
     CredentialKind, DisposeSpecimenCommand, IdempotencyPort, ImportCandidate, ImportDeclaredFile,
     ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord, ImportReviewDecision,
     ImportSourceKind, ImportSourceSummary, ImportView, JobPort, JobSpec, MediaResource,
-    ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand, ReturnedPossession, SaveItemCommand,
-    SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
+    ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand, ReturnedPossession,
+    ReviewImportCommand, SaveItemCommand, SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_core::*;
 use collector_modules::*;
@@ -22,6 +22,53 @@ struct TestClock {
 
 struct ArtworkSelectingModule {
     selected: AssetId,
+}
+
+struct ImportAnalyzingModule;
+
+impl CollectionModule for ImportAnalyzingModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        ModuleDescriptor {
+            id: ModuleId("org.example.imports".into()),
+            schema_version: 1,
+            display_name: "Import analysis fixture".into(),
+            capabilities: vec![Capability {
+                id: CapabilityId::new("org.example.imports.import-analysis").unwrap(),
+                display_name: "Import analysis".into(),
+                availability: Availability::Available,
+            }],
+        }
+    }
+
+    fn validate_current(&self, _data: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+
+    fn present(&self, _data: &ModuleData) -> ModuleResult<ModulePresentation> {
+        Ok(ModulePresentation::default())
+    }
+
+    fn operate(
+        &self,
+        request: OperationRequest,
+        _host: &dyn ModuleHost,
+    ) -> ModuleResult<OperationOutput> {
+        let input: serde_json::Value = request
+            .input
+            .parse()
+            .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+        if input["files"][0]["digest"].is_null() {
+            return Err(ModuleError::Invalid(
+                "analysis received an unstaged file".into(),
+            ));
+        }
+        Ok(OperationOutput {
+            value: RawJson::from_json(
+                r#"{"candidates":[{"key":"observed-disc","label":"Observed disc","observation":{"unknown":null,"ordered":[2,1],"number":1e+02}}],"limitations":["Fixture candidate is an observation, not verification"]}"#,
+            )
+            .unwrap(),
+        })
+    }
 }
 
 impl CollectionModule for ArtworkSelectingModule {
@@ -4982,4 +5029,136 @@ fn changed_inbox_input_fails_the_staging_job_and_retains_resumable_import() {
     let retained = service.provisional_import(&actor, created.id).unwrap();
     assert_eq!(retained.phase, ImportPhase::Staging);
     assert_eq!(retained.files[0].received_bytes, ByteLength(0));
+}
+
+fn staged_import(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    package: &str,
+) -> ImportView {
+    let created = service
+        .create_provisional_import(
+            actor,
+            collection,
+            ImportSourceSummary {
+                kind: ImportSourceKind::Browser,
+                label: None,
+                package_name: package.into(),
+            },
+            vec![UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(actor, created.id, 0, 0, b"data")
+        .unwrap()
+}
+
+#[test]
+fn optional_import_analysis_persists_candidates_or_honest_unavailability() {
+    let (_root, store, actor, base_service, collection) = setup();
+    let mut registry = Registry::default();
+    registry.register(Box::new(ImportAnalyzingModule)).unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(registry));
+    let import = staged_import(&service, &actor, collection.id, "analyzed");
+    let job = service
+        .enqueue_import_analysis(
+            &actor,
+            import.id,
+            ModuleId("org.example.imports".into()),
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("analysis-worker").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let analyzed = service.provisional_import(&actor, import.id).unwrap();
+    assert_eq!(analyzed.phase, ImportPhase::AwaitingReview);
+    assert_eq!(analyzed.analysis_job_id, Some(job));
+    assert_eq!(analyzed.candidates[0].key, "observed-disc");
+    assert_eq!(
+        analyzed.candidates[0].observation.get(),
+        r#"{"unknown":null,"ordered":[2,1],"number":1e+02}"#
+    );
+    assert!(analyzed.limitations[0].contains("not verification"));
+
+    let unavailable = staged_import(&base_service, &actor, collection.id, "unavailable");
+    let job = base_service
+        .enqueue_import_analysis(
+            &actor,
+            unavailable.id,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    assert!(base_service.run_next_job("analysis-worker").unwrap());
+    assert_eq!(
+        base_service.job(&actor, job).unwrap().state,
+        JobState::Completed
+    );
+    let unavailable = base_service
+        .provisional_import(&actor, unavailable.id)
+        .unwrap();
+    assert_eq!(unavailable.phase, ImportPhase::AwaitingReview);
+    assert!(unavailable.candidates.is_empty());
+    assert!(unavailable.limitations[0].contains("D04/D05"));
+}
+
+#[test]
+fn import_review_preserves_selection_on_stale_item_and_supports_unattached_review() {
+    let (_root, _store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let import = staged_import(&service, &actor, collection.id, "stale-review");
+    let mut changed = saved.clone();
+    changed.title = "Concurrent title".into();
+    let changed = save_inventory(&service, &actor, changed, saved.revision).unwrap();
+    let command_input = ReviewImportCommand {
+        expected_revision: import.revision,
+        identity: ImportIdentityDecision::Unidentified,
+        association: CaptureAssociation {
+            item_id: Some(saved.id),
+            ..Default::default()
+        },
+        expected_item_revision: Some(saved.revision),
+    };
+    assert!(matches!(
+        service.review_provisional_import(&actor, import.id, command_input, &command()),
+        Err(Error::Conflict)
+    ));
+    let preserved = service.provisional_import(&actor, import.id).unwrap();
+    assert_eq!(preserved.phase, ImportPhase::AwaitingReview);
+    assert_eq!(preserved.expected_item_revision, Some(saved.revision));
+    assert_eq!(
+        preserved.association,
+        CaptureAssociation {
+            item_id: Some(saved.id),
+            ..Default::default()
+        }
+    );
+    assert_eq!(changed.revision, Revision(saved.revision.0 + 1));
+    assert!(matches!(
+        preserved.review.unwrap().identity,
+        ImportIdentityDecision::Unidentified
+    ));
+
+    let unattached = staged_import(&service, &actor, collection.id, "unattached-review");
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            unattached.id,
+            ReviewImportCommand {
+                expected_revision: unattached.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(reviewed.association, CaptureAssociation::default());
+    assert!(reviewed.limitations[0].contains("No analyzer was selected"));
 }

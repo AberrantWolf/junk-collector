@@ -1469,6 +1469,56 @@
         }
       }
     },
+    "/api/v1/imports/{id}/analysis": {
+      "post": {
+        "operationId": "analyze_provisional_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeProvisionalImport"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/imports/{id}/files/{index}": {
       "put": {
         "operationId": "stage_provisional_import_chunk",
@@ -1530,6 +1580,58 @@
             "description": ""
           },
           "413": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/imports/{id}/review": {
+      "put": {
+        "operationId": "review_provisional_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewImportCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
             "description": ""
           }
         }
@@ -3286,6 +3388,18 @@
           "borrowed",
           "unknown"
         ]
+      },
+      "AnalyzeProvisionalImport": {
+        "type": "object",
+        "required": [
+          "module"
+        ],
+        "properties": {
+          "module": {
+            "$ref": "#/components/schemas/ModuleId"
+          }
+        },
+        "additionalProperties": false
       },
       "ApproveEnrollment": {
         "type": "object",
@@ -6236,6 +6350,38 @@
           "elsewhere",
           "unknown"
         ]
+      },
+      "ReviewImportCommand": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "identity",
+          "association"
+        ],
+        "properties": {
+          "association": {
+            "$ref": "#/components/schemas/CaptureAssociation"
+          },
+          "expected_item_revision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Revision"
+              }
+            ]
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "identity": {
+            "$ref": "#/components/schemas/ImportIdentityDecision"
+          }
+        },
+        "additionalProperties": false
       },
       "Revision": {
         "type": "integer",

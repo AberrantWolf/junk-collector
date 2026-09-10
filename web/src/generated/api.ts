@@ -580,6 +580,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{id}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["analyze_provisional_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports/{id}/files/{index}": {
         parameters: {
             query?: never;
@@ -589,6 +605,22 @@ export interface paths {
         };
         get?: never;
         put: operations["stage_provisional_import_chunk"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["review_provisional_import"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1135,6 +1167,9 @@ export interface components {
         };
         /** @enum {string} */
         ActiveOwnership: "owned" | "borrowed" | "unknown";
+        AnalyzeProvisionalImport: {
+            module: components["schemas"]["ModuleId"];
+        };
         ApproveEnrollment: {
             user_code: string;
         };
@@ -1851,6 +1886,13 @@ export interface components {
         };
         /** @enum {string} */
         ReturnedPossession: "present" | "elsewhere" | "unknown";
+        ReviewImportCommand: {
+            association: components["schemas"]["CaptureAssociation"];
+            expected_item_revision?: null | components["schemas"]["Revision"];
+            /** Format: int64 */
+            expected_revision: number;
+            identity: components["schemas"]["ImportIdentityDecision"];
+        };
         /** Format: int64 */
         Revision: number;
         /** @enum {string} */
@@ -3329,6 +3371,45 @@ export interface operations {
             };
         };
     };
+    analyze_provisional_import: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeProvisionalImport"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     stage_provisional_import_chunk: {
         parameters: {
             query: {
@@ -3368,6 +3449,45 @@ export interface operations {
                 content?: never;
             };
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    review_provisional_import: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewImportCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

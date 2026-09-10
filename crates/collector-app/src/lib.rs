@@ -2,8 +2,10 @@
 pub mod security;
 use chrono::{DateTime, Utc};
 use collector_core::*;
-use collector_modules::ModulePresentation;
-use collector_modules::Registry;
+use collector_modules::{
+    CapabilityId, JobSubmission, ModuleError, ModuleHost, ModulePresentation, ModuleResult,
+    OperationEntity, OperationRequest, Registry, RepresentationReader,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek};
@@ -258,6 +260,15 @@ pub struct ImportReviewDecision {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewImportCommand {
+    pub expected_revision: u64,
+    pub identity: ImportIdentityDecision,
+    pub association: CaptureAssociation,
+    pub expected_item_revision: Option<Revision>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ImportView {
     pub id: ImportId,
     pub revision: u64,
@@ -402,7 +413,10 @@ impl From<JobRecord> for JobView {
         let retryable = record.state == JobState::Failed
             && matches!(
                 record.kind.as_str(),
-                "integrity_verification" | "preservation_import" | "import_staging"
+                "integrity_verification"
+                    | "preservation_import"
+                    | "import_staging"
+                    | "import_analysis"
             );
         Self {
             id: record.id,
@@ -780,6 +794,39 @@ pub struct CollectionService {
     idempotency: Arc<dyn IdempotencyPort>,
     jobs: Arc<dyn JobPort>,
     modules: Arc<Registry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportAnalysisCandidateOutput {
+    key: String,
+    label: String,
+    observation: RawJson,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportAnalysisOutput {
+    #[serde(default)]
+    candidates: Vec<ImportAnalysisCandidateOutput>,
+    #[serde(default)]
+    limitations: Vec<String>,
+}
+
+struct ImportAnalysisHost;
+
+impl ModuleHost for ImportAnalysisHost {
+    fn representation(&self, _id: RepresentationId) -> ModuleResult<Box<dyn RepresentationReader>> {
+        Err(ModuleError::UnavailableCapability(
+            "staged package readers are supplied by format analyzers in D04/D05".into(),
+        ))
+    }
+
+    fn submit_job(&self, _request: JobSubmission) -> ModuleResult<JobId> {
+        Err(ModuleError::Invalid(
+            "import analysis cannot recursively submit jobs".into(),
+        ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, utoipa::ToSchema)]
@@ -2378,6 +2425,247 @@ impl CollectionService {
             |effects| effects.enqueue_job(spec),
         )
     }
+    pub fn enqueue_import_analysis(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+        module: ModuleId,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        module.validate()?;
+        let record = self.authorized_provisional_import(actor, id)?;
+        if record.view.phase != ImportPhase::Analyzing {
+            return Err(Error::Conflict);
+        }
+        let job = deterministic_job_id(actor.user_id, "import.analyze", context.key());
+        let spec = JobSpec {
+            id: job,
+            user_id: actor.user_id,
+            collection_id: Some(record.view.collection_id),
+            item_id: record.view.association.item_id,
+            kind: "import_analysis".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({"import_id":id,"module":module}),
+        };
+        self.execute_command(
+            actor,
+            context,
+            "import.analyze.enqueue",
+            &(id, module),
+            |effects| effects.enqueue_job(spec),
+        )
+    }
+    fn analyze_import_for_job(&self, claim: &JobClaim) -> Result<ImportView> {
+        let id: ImportId = claim
+            .request
+            .get("import_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| Error::Storage("analysis job has no Import identity".into()))?
+            .parse()
+            .map_err(|error| Error::Storage(format!("invalid Import identity: {error}")))?;
+        let module = ModuleId(
+            claim
+                .request
+                .get("module")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| Error::Storage("analysis job has no module identity".into()))?
+                .to_owned(),
+        );
+        module.validate()?;
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        let mut record = self.provisional_imports.import_record(id)?;
+        if record.user_id != claim.user_id || record.view.phase != ImportPhase::Analyzing {
+            return Err(Error::Conflict);
+        }
+        let capability = CapabilityId::new(format!("{}.import-analysis", module.0))?;
+        let input = RawJson::from_value(serde_json::json!({
+            "import_id": id,
+            "representation_id": record.view.representation_id,
+            "files": record.view.files,
+        }));
+        let analyzed = self.modules.operate(
+            OperationRequest {
+                capability,
+                input,
+                collection_id: record.view.collection_id,
+                entity: OperationEntity::Representation(record.view.representation_id),
+                idempotency_key: format!("{}:{}", claim.id, claim.attempt),
+            },
+            &ImportAnalysisHost,
+        );
+        match analyzed {
+            Ok(output) => {
+                let output: ImportAnalysisOutput = output.value.parse()?;
+                record.view.candidates = output
+                    .candidates
+                    .into_iter()
+                    .map(|candidate| ImportCandidate {
+                        key: candidate.key,
+                        module: module.clone(),
+                        label: candidate.label,
+                        observation: candidate.observation,
+                    })
+                    .collect();
+                record.view.limitations = output.limitations;
+            }
+            Err(ModuleError::UnavailableCapability(limitation)) => {
+                record.view.candidates.clear();
+                record.view.limitations = vec![limitation];
+            }
+            Err(ModuleError::UnknownCapability(_)) => {
+                record.view.candidates.clear();
+                record.view.limitations = vec![format!(
+                    "No import analyzer is registered for {}; review may continue unidentified.",
+                    module.0
+                )];
+            }
+            Err(error) => return Err(error.into()),
+        }
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        record.view.analysis_job_id = Some(claim.id);
+        record.view.phase = ImportPhase::AwaitingReview;
+        let revision = record.view.revision;
+        Ok(self.provisional_imports.save_import(record, revision)?.view)
+    }
+    fn validate_import_association(
+        &self,
+        collection: CollectionId,
+        association: CaptureAssociation,
+    ) -> Result<Option<Item>> {
+        let Some(item_id) = association.item_id else {
+            if association.specimen_id.is_some()
+                || association.component_id.is_some()
+                || association.carrier_id.is_some()
+            {
+                return Err(Error::Invalid(
+                    "physical Import association requires its enclosing Item".into(),
+                ));
+            }
+            return Ok(None);
+        };
+        let item = self.reader.item(item_id)?;
+        if item.collection_id != collection {
+            return Err(Error::NotFound);
+        }
+        let specimen = association
+            .specimen_id
+            .map(|id| {
+                item.specimens
+                    .iter()
+                    .find(|specimen| specimen.id == id)
+                    .ok_or(Error::NotFound)
+            })
+            .transpose()?;
+        if association.component_id.is_some() && specimen.is_none() {
+            return Err(Error::Invalid(
+                "component association requires its enclosing specimen".into(),
+            ));
+        }
+        let component = association
+            .component_id
+            .map(|id| {
+                specimen
+                    .and_then(|specimen| {
+                        specimen
+                            .components
+                            .iter()
+                            .find(|component| component.id == id)
+                    })
+                    .ok_or(Error::NotFound)
+            })
+            .transpose()?;
+        if association.carrier_id.is_some() && component.is_none() {
+            return Err(Error::Invalid(
+                "carrier association requires its enclosing component".into(),
+            ));
+        }
+        if let Some(carrier_id) = association.carrier_id
+            && component
+                .and_then(|value| value.carrier.as_ref())
+                .map(|value| value.id)
+                != Some(carrier_id)
+        {
+            return Err(Error::NotFound);
+        }
+        Ok(Some(item))
+    }
+    pub fn review_provisional_import(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+        command: ReviewImportCommand,
+        context: &CommandContext,
+    ) -> Result<ImportView> {
+        let current = self.authorized_provisional_import(actor, id)?;
+        if !matches!(
+            current.view.phase,
+            ImportPhase::Analyzing | ImportPhase::AwaitingReview
+        ) {
+            return Err(Error::Conflict);
+        }
+        let item =
+            self.validate_import_association(current.view.collection_id, command.association)?;
+        if item.is_some() != command.expected_item_revision.is_some() {
+            return Err(Error::Invalid(
+                "an Item association requires its expected revision".into(),
+            ));
+        }
+        if let (Some(item), Some(expected)) = (&item, command.expected_item_revision)
+            && item.revision != expected
+        {
+            if current.view.revision == command.expected_revision {
+                let mut preserved = current;
+                preserved.view.association = command.association;
+                preserved.view.expected_item_revision = Some(expected);
+                preserved.view.review = Some(ImportReviewDecision {
+                    identity: command.identity.clone(),
+                    association: command.association,
+                });
+                preserved.view.phase = ImportPhase::AwaitingReview;
+                let revision = preserved.view.revision;
+                self.provisional_imports.save_import(preserved, revision)?;
+            }
+            return Err(Error::Conflict);
+        }
+        self.execute_command(actor, context, "import.review", &(id, &command), |effects| {
+            let mut record = effects.import_record(id)?;
+            if record.view.revision != command.expected_revision
+                || !matches!(
+                    record.view.phase,
+                    ImportPhase::Analyzing | ImportPhase::AwaitingReview
+                )
+            {
+                return Err(Error::Conflict);
+            }
+            if record.view.phase == ImportPhase::Analyzing && record.view.limitations.is_empty() {
+                record.view.limitations.push(
+                    "No analyzer was selected; review continued unidentified or by manual association."
+                        .into(),
+                );
+            }
+            record.view.association = command.association;
+            record.view.expected_item_revision = command.expected_item_revision;
+            record.view.review = Some(ImportReviewDecision {
+                identity: command.identity.clone(),
+                association: command.association,
+            });
+            record.view.phase = ImportPhase::AwaitingReview;
+            effects
+                .save_import(record, command.expected_revision)
+                .map(|record| record.view)
+        })
+    }
     fn authorized_upload(&self, actor: &Principal, id: JobId) -> Result<Upload> {
         let upload = self.imports.upload(id)?;
         if upload.user_id != actor.user_id {
@@ -2637,6 +2925,9 @@ impl CollectionService {
                     .stage_inbox_import(import_id, claim.id, &claim.claim_token, source_locator)
                     .map(|record| serde_json::json!({"import_id":record.view.id}))
             }
+            "import_analysis" => self
+                .analyze_import_for_job(&claim)
+                .map(|view| serde_json::json!({"import_id":view.id,"revision":view.revision})),
             _ => Err(Error::Unavailable(format!(
                 "job kind {} has no registered executor",
                 claim.kind
@@ -2711,7 +3002,7 @@ impl CollectionService {
         self.execute_command(actor, context, "job.retry", &id, |effects| {
             match job.kind.as_str() {
                 "preservation_import" => effects.retry_upload(id),
-                "integrity_verification" | "import_staging" => {
+                "integrity_verification" | "import_staging" | "import_analysis" => {
                     effects.retry_failed_job(id, actor.user_id)
                 }
                 _ => Err(Error::Unavailable("this job kind cannot be retried".into())),

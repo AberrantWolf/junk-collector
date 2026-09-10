@@ -531,6 +531,14 @@ fn descriptor(id: &str, name: &str) -> ModuleDescriptor {
             capability("inventory", "Inventory", Availability::Available),
             capability("preservation", "Preservation", Availability::Available),
             capability(
+                "import-analysis",
+                "Import analysis",
+                Availability::Unavailable {
+                    limitation: "Built-in import analyzer migration is pending D04/D05; review may continue unidentified."
+                        .into(),
+                },
+            ),
+            capability(
                 "catalog-verification",
                 "Catalog verification",
                 Availability::Unavailable {

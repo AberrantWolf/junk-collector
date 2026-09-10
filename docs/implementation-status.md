@@ -116,16 +116,24 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   and direct package names only; private roots remain solely in the bounded worker
   request and are absent from `ImportView` and `JobView`. Both sources converge on
   the same digested `analyzing` state after staging.
+- P03.3 submits optional Import analysis as a retryable/cancellable durable Job
+  through the A03 module capability registry. Valid outputs persist lossless bounded
+  candidates and limitations; unavailable built-in game/music analyzers proceed to
+  review with an explicit D04/D05 limitation and no fabricated candidate. Focused
+  review commands select a candidate or remain unidentified, validate an existing
+  Item/Specimen/Component/Carrier chain or leave the Capture unattached, and retain
+  the user's selection in `awaiting_review` when the expected Item revision is stale.
+  Manual review records that no analyzer was selected.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete P03.3-P03.4 review and publication, then build
+2. Complete P03.4 publication and compatibility delegation, then build
    the P04 configured inbox/import-review and durable-job UI. P03.1 persistence,
    U04 supporting images, and physical lifecycle behavior are locally complete;
-   staging Import routes exist but review/publication routes and UI do not. Document attachments and offline artwork
+   staging and review routes exist but publication routes and UI do not. Document attachments and offline artwork
    remain unimplemented.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.

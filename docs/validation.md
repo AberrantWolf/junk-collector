@@ -1,5 +1,29 @@
 # Validation recorded for the foundation
 
+## Wave 3 P03.3 optional analysis and review — 2026-09-10
+
+- `optional_import_analysis_persists_candidates_or_honest_unavailability` registers
+  an available test module and runs its namespaced `import-analysis` operation through
+  a claimed durable Job. The operation receives only preallocated identities and the
+  digested inventory, and its raw candidate observation retains unknown fields/order/
+  number spelling. The same scenario runs the built-in music capability and reaches
+  `awaiting_review` with no candidate and the explicit D04/D05 limitation.
+- `import_review_preserves_selection_on_stale_item_and_supports_unattached_review`
+  updates an Item concurrently, observes a conflict, then reads back the user's
+  unidentified choice, association, and old expected revision at a new Import revision.
+  It also completes an unattached manual review and records the no-analyzer limitation.
+  Store validation rejects absent candidate keys; application validation rejects
+  cross-collection or broken physical chains.
+- The HTTP convergence test now submits the built-in analysis Job, observes its honest
+  limitation, and reviews the Import unidentified without any “verified” response.
+  Analysis/review routes are also in the curation listener-composition matrix.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 131 locked
+  workspace tests, warning-free all-target clippy, generated API drift, TypeScript
+  check/build, and rebuilt embedded-assets server pass.
+- **Not implemented:** P03.4 publication, commit-boundary reconciliation, and legacy
+  upload/inbox delegation; P04 UI; D04/D05 byte-reading built-in analyzers.
+  **Externally unqualified:** independent review of module output fixtures.
+
 ## Wave 3 P03.2 source convergence — 2026-09-10
 
 - `browser_and_inbox_sources_converge_on_the_same_durable_staging_state` stages

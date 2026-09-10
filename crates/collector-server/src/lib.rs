@@ -13,8 +13,8 @@ use collector_app::{
     ComponentDetails, CreateAssetCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView,
     GrantView, ImportSourceKind, ImportSourceSummary, ImportView, JobView, MediaResource,
     NativeDeviceView, PasskeyView, PresentedAsset, PresentedCollection, PresentedEvidence,
-    PresentedItem, ReturnLoanCommand, SaveItemCommand, SessionView, SpecimenDetails,
-    StartLoanCommand, UpdateAssetCommand,
+    PresentedItem, ReturnLoanCommand, ReviewImportCommand, SaveItemCommand, SessionView,
+    SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -489,6 +489,8 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_upload))
         .routes(routes!(create_provisional_import))
         .routes(routes!(provisional_import))
+        .routes(routes!(analyze_provisional_import))
+        .routes(routes!(review_provisional_import))
         .routes(
             routes!(stage_provisional_import_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
@@ -1894,6 +1896,53 @@ async fn provisional_import(
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.provisional_import(&actor, id)).await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct AnalyzeProvisionalImport {
+    module: ModuleId,
+}
+
+#[utoipa::path(post, path = "/api/v1/imports/{id}/analysis", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = AnalyzeProvisionalImport, responses((status = 202, body = serde_json::Value), (status = 404), (status = 409)))]
+async fn analyze_provisional_import(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(input): Json<AnalyzeProvisionalImport>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .enqueue_import_analysis(&actor, id, input.module, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
+}
+
+#[utoipa::path(put, path = "/api/v1/imports/{id}/review", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = ReviewImportCommand, responses((status = 200, body = ImportView), (status = 404), (status = 409)))]
+async fn review_provisional_import(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(command): Json<ReviewImportCommand>,
+) -> ApiResult<Json<ImportView>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .review_provisional_import(&actor, id, command, &context)
+        })
+        .await?,
     ))
 }
 

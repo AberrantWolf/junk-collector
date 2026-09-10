@@ -206,6 +206,64 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
         .clone()
         .oneshot(
             Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/imports/{import_id}/analysis"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "analyze-browser-import")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"module":"org.junk.music"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert!(service.run_next_job("http-analysis-worker").unwrap());
+    let analyzed = service
+        .provisional_import(&actor, import_id.parse().unwrap())
+        .unwrap();
+    assert_eq!(analyzed.phase, collector_app::ImportPhase::AwaitingReview);
+    assert!(analyzed.candidates.is_empty());
+    assert!(analyzed.limitations[0].contains("D04/D05"));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/imports/{import_id}/review"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "review-browser-import")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "expected_revision": analyzed.revision,
+                        "identity": {"identity":"unidentified"},
+                        "association": {"item_id":null,"specimen_id":null,"component_id":null,"carrier_id":null},
+                        "expected_item_revision": null
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    let reviewed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(reviewed["review"]["identity"]["identity"], "unidentified");
+    assert!(
+        !String::from_utf8(body.to_vec())
+            .unwrap()
+            .contains("verified")
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
                 .uri(format!("/api/v1/imports/{import_id}"))
                 .header("authorization", format!("Bearer {stranger_token}"))
                 .body(Body::empty())
@@ -268,6 +326,16 @@ async fn provisional_import_routes_follow_curation_listener_composition() {
                 "GET",
                 format!("/api/v1/imports/{import}"),
                 serde_json::Value::Null,
+            ),
+            (
+                "POST",
+                format!("/api/v1/imports/{import}/analysis"),
+                serde_json::json!({"module":"org.junk.music"}),
+            ),
+            (
+                "PUT",
+                format!("/api/v1/imports/{import}/review"),
+                serde_json::json!({"expected_revision":1,"identity":{"identity":"unidentified"},"association":{"item_id":null,"specimen_id":null,"component_id":null,"carrier_id":null},"expected_item_revision":null}),
             ),
             (
                 "PUT",
@@ -947,7 +1015,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 69);
+    assert_eq!(paths.len(), 71);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -958,6 +1026,8 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/items/{id}/specimens/{specimen_id}/dispose",
         "/api/v1/imports",
         "/api/v1/imports/{id}",
+        "/api/v1/imports/{id}/analysis",
+        "/api/v1/imports/{id}/review",
         "/api/v1/imports/{id}/files/{index}",
         "/api/v1/collections/{id}/inboxes",
         "/api/v1/collections/{collection}/inboxes/{label}/stage",

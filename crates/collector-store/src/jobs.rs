@@ -643,7 +643,10 @@ impl Store {
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
         if state != "failed"
-            || !matches!(kind.as_str(), "integrity_verification" | "import_staging")
+            || !matches!(
+                kind.as_str(),
+                "integrity_verification" | "import_staging" | "import_analysis"
+            )
         {
             return Err(Error::Conflict);
         }

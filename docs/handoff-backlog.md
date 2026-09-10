@@ -356,7 +356,7 @@ Separate package inventory/staging, analyzer candidates, user review/physical as
 
 **Limit:** use existing upload/inbox mechanisms, not a second importer; actual analyzer implementations arrive in D04/D05.
 
-**Status (2026-09-10): P03.1-P03.2 complete locally; P03.3 is next.** Private schema
+**Status (2026-09-10): P03.1-P03.3 complete locally; P03.4 is next.** Private schema
 v9 now persists a durable provisional Import separately from its execution Jobs:
 safe source summary, bounded declared-file inventory and resumable offsets/digests,
 preallocated Capture/Representation identities, optional physical association and
@@ -372,8 +372,13 @@ as a cancellable/retryable P02 Job. It rechecks each entry and the final invento
 for symlinks, special files, escape, case collisions, sizes, metadata, and content;
 browser offsets and exact replay survive restart. Collection-scoped endpoints expose
 only configured labels and direct package names, while submitter scope hides another
-user's Import and both Import/Job views omit source roots. P03.3 analysis/review and
-P03.4 publication plus legacy adapter delegation remain not implemented.
+user's Import and both Import/Job views omit source roots. Optional module analysis
+now runs as a P02 Job through the A03 owner capability and stores bounded raw
+alternatives/limitations. Built-in game/music analysis honestly yields no candidate
+until D04/D05. Review supports candidate or unidentified identity plus a canonical
+existing physical chain or no association; stale Item revision conflict preserves
+the submitted selection in `awaiting_review`. P03.4 publication, commit-boundary
+cancellation reconciliation, and legacy adapter delegation remain not implemented.
 
 ### P04 — Inbox, import-review and job UI
 
