@@ -1,5 +1,36 @@
 # Validation recorded for the foundation
 
+## Wave 3 U03.1 focused physical lifecycle commands — 2026-09-10
+
+- TDD coverage in `focused_inventory_commands_preserve_history_and_are_idempotent`
+  proves command-bound specimen/loan identity, idempotent replay, two independent
+  copies on a wishlist item, explicit loan return, retained loan history,
+  disposal, broad-save history preservation, Wave 1 tamper rejection, reindex,
+  and restart. It also publishes a Capture and real artwork payload before
+  disposal, then proves both relationships and the original bytes remain readable.
+- `component_order_and_references_are_protected_by_focused_commands` exercises
+  out-of-order multi-disc creation, deterministic ordering, component update,
+  successful unreferenced removal, and refusal to remove a component referenced
+  by either a Capture or an Asset. Existing projection-removal tests now use the
+  focused command rather than the retired broad-save bypass.
+- `focused_inventory_routes_require_curator_role_and_revisioned_idempotent_commands`
+  proves direct viewer denial, required idempotency keys, stable replay, and the
+  role-filtered `PresentedItem` response. Contract coverage asserts all seven
+  lifecycle paths are annotated. Generated OpenAPI and TypeScript omit specimens
+  from `SaveItemCommand` and include only working focused routes.
+- Full local gate: `python3 scripts/check_architecture.py`,
+  `cargo fmt --all -- --check`, `cargo test --workspace --locked` (115 tests),
+  `cargo clippy --workspace --all-targets -- -D warnings`,
+  `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, and the rebuilt `collector-server` pass.
+  The isolated Chromium smoke suite also passes after removal of the obsolete
+  broad-save add-copy control.
+- **Not implemented:** U03.2 copy-level lifecycle UI and its draft/conflict
+  behavior; U03.3's complete privacy/browser/restart matrix. The obsolete
+  broad-save add-copy shortcut is removed, so no final-looking control advertises
+  missing editor behavior. Physical specimen deletion remains intentionally
+  absent.
+
 ## Wave 3 P02.1 durable job repository — 2026-09-10
 
 - A test-first schema assertion failed against the Wave 2 two-column JSON job

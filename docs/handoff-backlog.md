@@ -151,6 +151,23 @@ Provide focused editors for copies, components/carriers, condition, acquisition,
 
 **Limit:** no trading marketplace or deletion of payloads as a lifecycle side effect.
 
+Planned children (complete in order): U03.1 focused lifecycle commands, U03.2
+lifecycle editor, and U03.3 privacy/reindex review. See
+[the Wave 3 execution plan](wave-3-plan.md).
+
+**Status (2026-09-10): U03.1 implemented; U03.2 is next.** The broad Item-save
+command can no longer submit specimen state, and the Wave 1 adapter delegates
+only when its specimen snapshot exactly matches canonical storage. Focused,
+revisioned, idempotent commands and curator-only routes create/update specimens
+and ordered components, remove only unreferenced components, start/return loans,
+and dispose specimens without deleting their history or archive relationships.
+Specimen, Component, Carrier, and Loan identities derive deterministically from
+command identity. Permanent tests cover two copies, wishlist-only creation,
+multi-disc ordering, Capture/Asset removal guards, returned-loan history,
+disposal, replay, authorization, reindex, and restart. The obsolete broad-save
+add-copy UI shortcut was removed; the complete lifecycle editor and final
+privacy/reindex review are explicitly not implemented yet.
+
 ### U04 — Sensitive supporting assets and role-aware artwork
 
 **Routine · Dependencies:** A04, U02. **Owner:** app asset services, store images, web presentation. **Start:** store asset methods, server asset routes, `Artwork` component.

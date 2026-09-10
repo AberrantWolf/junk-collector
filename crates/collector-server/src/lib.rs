@@ -10,9 +10,10 @@ use axum::{
 };
 use collector_app::{
     AccountUpdate, AccountView, AuthenticatedPrincipal, CollectionService, CommandContext,
-    EnrollmentStart, EnrollmentView, GrantView, JobView, MediaResource, NativeDeviceView,
-    PasskeyView, PresentedCollection, PresentedEvidence, PresentedItem, SaveItemCommand,
-    SessionView,
+    ComponentDetails, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView, JobView,
+    MediaResource, NativeDeviceView, PasskeyView, PresentedCollection, PresentedEvidence,
+    PresentedItem, ReturnLoanCommand, SaveItemCommand, SessionView, SpecimenDetails,
+    StartLoanCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -473,6 +474,13 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(collection_grants))
         .routes(routes!(set_collection_grant, remove_collection_grant))
         .routes(routes!(save_item))
+        .routes(routes!(create_specimen))
+        .routes(routes!(update_specimen))
+        .routes(routes!(create_component))
+        .routes(routes!(update_component, remove_component))
+        .routes(routes!(start_loan))
+        .routes(routes!(return_loan))
+        .routes(routes!(dispose_specimen))
         .routes(routes!(verify))
         .routes(routes!(create_upload))
         .routes(routes!(upload, cancel_upload))
@@ -1165,6 +1173,238 @@ async fn save_item(
                 state
                     .service
                     .save_item(&actor, id, command, expected_revision, &context)?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct SpecimenChange {
+    expected_revision: Revision,
+    details: SpecimenDetails,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ComponentChange {
+    expected_revision: Revision,
+    details: ComponentDetails,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct StartLoan {
+    expected_revision: Revision,
+    command: StartLoanCommand,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ReturnLoan {
+    expected_revision: Revision,
+    command: ReturnLoanCommand,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct DisposeSpecimen {
+    expected_revision: Revision,
+    command: DisposeSpecimenCommand,
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/specimens", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = SpecimenChange, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn create_specimen(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(input): Json<SpecimenChange>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.create_specimen(
+                &actor,
+                id,
+                input.expected_revision,
+                input.details,
+                &context,
+            )?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/items/{id}/specimens/{specimen_id}", params(("id" = ItemId, Path), ("specimen_id" = SpecimenId, Path), ("Idempotency-Key" = String, Header)), request_body = SpecimenChange, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn update_specimen(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
+    Json(input): Json<SpecimenChange>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.update_specimen(
+                &actor,
+                id,
+                specimen_id,
+                input.expected_revision,
+                input.details,
+                &context,
+            )?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/specimens/{specimen_id}/components", params(("id" = ItemId, Path), ("specimen_id" = SpecimenId, Path), ("Idempotency-Key" = String, Header)), request_body = ComponentChange, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn create_component(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
+    Json(input): Json<ComponentChange>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.create_component(
+                &actor,
+                id,
+                specimen_id,
+                input.expected_revision,
+                input.details,
+                &context,
+            )?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/items/{id}/specimens/{specimen_id}/components/{component_id}", params(("id" = ItemId, Path), ("specimen_id" = SpecimenId, Path), ("component_id" = ComponentId, Path), ("Idempotency-Key" = String, Header)), request_body = ComponentChange, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn update_component(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, specimen_id, component_id)): Path<(ItemId, SpecimenId, ComponentId)>,
+    Json(input): Json<ComponentChange>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.update_component(
+                &actor,
+                (id, specimen_id, component_id),
+                input.expected_revision,
+                input.details,
+                &context,
+            )?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(delete, path = "/api/v1/items/{id}/specimens/{specimen_id}/components/{component_id}", params(("id" = ItemId, Path), ("specimen_id" = SpecimenId, Path), ("component_id" = ComponentId, Path), ExpectedRevision, ("Idempotency-Key" = String, Header)), responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409)))]
+async fn remove_component(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, specimen_id, component_id)): Path<(ItemId, SpecimenId, ComponentId)>,
+    Query(query): Query<ExpectedRevision>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.remove_component(
+                &actor,
+                id,
+                specimen_id,
+                component_id,
+                query.expected_revision,
+                &context,
+            )?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/specimens/{specimen_id}/loans", params(("id" = ItemId, Path), ("specimen_id" = SpecimenId, Path), ("Idempotency-Key" = String, Header)), request_body = StartLoan, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn start_loan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
+    Json(input): Json<StartLoan>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.start_loan(
+                &actor,
+                id,
+                specimen_id,
+                input.expected_revision,
+                input.command,
+                &context,
+            )?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return", params(("id" = ItemId, Path), ("specimen_id" = SpecimenId, Path), ("loan_id" = LoanId, Path), ("Idempotency-Key" = String, Header)), request_body = ReturnLoan, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn return_loan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, specimen_id, loan_id)): Path<(ItemId, SpecimenId, LoanId)>,
+    Json(input): Json<ReturnLoan>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.return_loan(
+                &actor,
+                (id, specimen_id, loan_id),
+                input.expected_revision,
+                input.command,
+                &context,
+            )?;
+            state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/specimens/{specimen_id}/dispose", params(("id" = ItemId, Path), ("specimen_id" = SpecimenId, Path), ("Idempotency-Key" = String, Header)), request_body = DisposeSpecimen, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn dispose_specimen(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
+    Json(input): Json<DisposeSpecimen>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let saved = state.service.dispose_specimen(
+                &actor,
+                id,
+                specimen_id,
+                input.expected_revision,
+                input.command,
+                &context,
+            )?;
             state.service.item_presented(&actor, saved.id)
         })
         .await?,

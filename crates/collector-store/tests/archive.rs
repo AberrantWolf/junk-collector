@@ -1,7 +1,9 @@
 use collector_app::{
-    AccessPort, AuthenticatedPrincipal, Catalog, CollectionService, CommandContext, ContentPort,
-    CredentialKind, IdempotencyPort, ImportPort, JobPort, JobSpec, MediaResource, ReceiptDecision,
-    SaveItemCommand,
+    AccessPort, ActiveOwnership, AuthenticatedPrincipal, CarrierDetails, Catalog,
+    CollectionService, CommandContext, ComponentDetails, ContentPort, CredentialKind,
+    DisposeSpecimenCommand, IdempotencyPort, ImportPort, JobPort, JobSpec, MediaResource,
+    ReceiptDecision, ReturnLoanCommand, ReturnedPossession, SaveItemCommand, SpecimenDetails,
+    StartLoanCommand,
 };
 use collector_core::*;
 use collector_modules::Registry;
@@ -1945,7 +1947,7 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
 }
 #[test]
 fn viewer_redaction_and_cross_collection_access() {
-    let (_root, store, owner, service, collection) = setup();
+    let (_root, store, _owner, service, collection) = setup();
     let viewer_id = store
         .create_user("viewer", "another long password", false)
         .unwrap();
@@ -1989,7 +1991,7 @@ fn viewer_redaction_and_cross_collection_access() {
             returned_at: None,
         }],
     });
-    let saved = save_inventory(&service, &owner, value, Revision(0)).unwrap();
+    let saved = Catalog::save(&*store, value, Revision(0)).unwrap();
     let public = service.item_presented(&viewer, saved.id).unwrap();
     assert!(public.specimens[0].acquisition.is_none());
     assert!(public.specimens[0].loans.is_none());
@@ -3157,7 +3159,7 @@ fn review_incomplete_migration_record_is_recoverable() {
 
 #[test]
 fn review_same_specimen_cannot_belong_to_two_items() {
-    let (_root, _store, actor, service, collection) = setup();
+    let (_root, store, _actor, _service, collection) = setup();
     let mut first = item(collection.id);
     first.specimens.push(Specimen {
         id: SpecimenId::new(),
@@ -3172,9 +3174,9 @@ fn review_same_specimen_cannot_belong_to_two_items() {
     });
     let mut second = first.clone();
     second.id = ItemId::new();
-    save_inventory(&service, &actor, first, Revision(0)).unwrap();
+    Catalog::save(&*store, first, Revision(0)).unwrap();
     assert!(
-        save_inventory(&service, &actor, second, Revision(0)).is_err(),
+        Catalog::save(&*store, second, Revision(0)).is_err(),
         "duplicate physical identity was accepted"
     );
 }
@@ -3325,7 +3327,7 @@ fn incomplete_typed_migration_output_recovers_but_committed_sidecars_do_not_chan
 
 #[test]
 fn nested_identity_cannot_be_reused_across_collections() {
-    let (_root, _store, actor, service, collection) = setup();
+    let (_root, store, actor, service, collection) = setup();
     let mut first = item(collection.id);
     first.specimens.push(Specimen {
         id: SpecimenId::new(),
@@ -3344,37 +3346,473 @@ fn nested_identity_cannot_be_reused_across_collections() {
         .create_collection(&test_authentication(&actor), "Other", &command())
         .unwrap()
         .id;
-    save_inventory(&service, &actor, first, Revision(0)).unwrap();
+    Catalog::save(&*store, first, Revision(0)).unwrap();
     assert!(
-        matches!(save_inventory(&service, &actor, second, Revision(0)), Err(Error::Invalid(message)) if message.contains("across collections"))
+        matches!(Catalog::save(&*store, second, Revision(0)), Err(Error::Invalid(message)) if message.contains("across collections"))
     );
+}
+
+#[test]
+fn focused_inventory_commands_preserve_history_and_are_idempotent() {
+    let (root, store, actor, service, collection) = setup();
+    let base = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    assert!(base.wishlist);
+
+    let specimen_context = CommandContext::new("specimen-one").unwrap();
+    let first = service
+        .create_specimen(
+            &actor,
+            base.id,
+            base.revision,
+            SpecimenDetails {
+                label: "Shop copy".into(),
+                condition: Condition::Good,
+                ownership: ActiveOwnership::Owned,
+                possession: Possession::Present,
+                acquisition: Some(Acquisition {
+                    date: Some(chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap()),
+                    cost: None,
+                    source: Some("Koenji".into()),
+                    coordinates: None,
+                }),
+                private_notes: Some("Obi retained".into()),
+            },
+            &specimen_context,
+        )
+        .unwrap();
+    let replay = service
+        .create_specimen(
+            &actor,
+            base.id,
+            base.revision,
+            SpecimenDetails {
+                label: "Shop copy".into(),
+                condition: Condition::Good,
+                ownership: ActiveOwnership::Owned,
+                possession: Possession::Present,
+                acquisition: Some(Acquisition {
+                    date: Some(chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap()),
+                    cost: None,
+                    source: Some("Koenji".into()),
+                    coordinates: None,
+                }),
+                private_notes: Some("Obi retained".into()),
+            },
+            &specimen_context,
+        )
+        .unwrap();
+    assert_eq!(replay.revision, first.revision);
+    assert_eq!(replay.specimens.len(), 1);
+    let first_specimen = first.specimens[0].id;
+
+    let second = service
+        .create_specimen(
+            &actor,
+            base.id,
+            first.revision,
+            SpecimenDetails {
+                label: "Listening copy".into(),
+                condition: Condition::Fair,
+                ownership: ActiveOwnership::Borrowed,
+                possession: Possession::Elsewhere,
+                acquisition: None,
+                private_notes: None,
+            },
+            &CommandContext::new("specimen-two").unwrap(),
+        )
+        .unwrap();
+    assert_ne!(second.specimens[0].id, second.specimens[1].id);
+    let second_specimen = second.specimens[1].id;
+    let second = service
+        .update_specimen(
+            &actor,
+            base.id,
+            second_specimen,
+            second.revision,
+            SpecimenDetails {
+                label: "Listening copy".into(),
+                condition: Condition::Poor,
+                ownership: ActiveOwnership::Borrowed,
+                possession: Possession::Present,
+                acquisition: None,
+                private_notes: Some("Jewel case cracked".into()),
+            },
+            &CommandContext::new("update-specimen-two").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(second.specimens[1].possession, Possession::Present);
+
+    let loaned = service
+        .start_loan(
+            &actor,
+            base.id,
+            first_specimen,
+            second.revision,
+            StartLoanCommand {
+                contact: "A trusted friend".into(),
+                lent_at: chrono::NaiveDate::from_ymd_opt(2026, 9, 2).unwrap(),
+                due_at: None,
+            },
+            &CommandContext::new("loan-one").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(loaned.specimens[0].possession, Possession::Lent);
+    let loan_id = loaned.specimens[0].loans[0].id;
+    assert!(matches!(
+        service.dispose_specimen(
+            &actor,
+            base.id,
+            first_specimen,
+            loaned.revision,
+            DisposeSpecimenCommand {
+                date: chrono::NaiveDate::from_ymd_opt(2026, 9, 3).unwrap(),
+                reason: "Cannot dispose while lent".into(),
+                possession: ReturnedPossession::Elsewhere,
+            },
+            &CommandContext::new("reject-active-loan-disposal").unwrap(),
+        ),
+        Err(Error::Conflict)
+    ));
+    let returned = service
+        .return_loan(
+            &actor,
+            (base.id, first_specimen, loan_id),
+            loaned.revision,
+            ReturnLoanCommand {
+                returned_at: chrono::NaiveDate::from_ymd_opt(2026, 9, 4).unwrap(),
+                possession: ReturnedPossession::Present,
+            },
+            &CommandContext::new("return-one").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(returned.specimens[0].possession, Possession::Present);
+    assert_eq!(returned.specimens[0].loans.len(), 1);
+    assert!(returned.specimens[0].loans[0].returned_at.is_some());
+
+    let mut broad = SaveItemCommand::from(returned.clone());
+    broad.title = "Edited without inventory payload".into();
+    let edited = service
+        .save_item(
+            &actor,
+            base.id,
+            broad,
+            returned.revision,
+            &CommandContext::new("broad-edit").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(edited.specimens.len(), 2);
+    assert_eq!(edited.specimens[0].loans.len(), 1);
+
+    service
+        .adapt_wave1_item_save(&actor, edited.id, edited.clone(), edited.revision)
+        .unwrap();
+
+    let mut legacy = edited.clone();
+    legacy.specimens[0].loans.clear();
+    assert!(
+        service
+            .adapt_wave1_item_save(&actor, edited.id, legacy, edited.revision)
+            .is_err(),
+        "the Wave 1 envelope erased server-owned loan history"
+    );
+
+    save_capture_record(
+        &service,
+        &actor,
+        Capture {
+            id: CaptureId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            association: CaptureAssociation {
+                item_id: Some(base.id),
+                specimen_id: Some(first_specimen),
+                ..Default::default()
+            },
+            created_at: chrono::Utc::now(),
+            representations: vec![],
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let current = store.item(base.id).unwrap();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::new(2, 2)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let with_artwork = service
+        .publish_cover(
+            &actor,
+            base.id,
+            current.revision,
+            png.get_ref(),
+            "Preserved cover".into(),
+            &CommandContext::new("lifecycle-cover").unwrap(),
+        )
+        .unwrap();
+    let asset_id = with_artwork.assets[0].id;
+
+    let disposed = service
+        .dispose_specimen(
+            &actor,
+            base.id,
+            first_specimen,
+            with_artwork.revision,
+            DisposeSpecimenCommand {
+                date: chrono::NaiveDate::from_ymd_opt(2026, 9, 5).unwrap(),
+                reason: "Damaged beyond use".into(),
+                possession: ReturnedPossession::Elsewhere,
+            },
+            &CommandContext::new("dispose-one").unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(
+        disposed.specimens[0].ownership,
+        Ownership::Disposed { .. }
+    ));
+    assert_eq!(disposed.specimens[0].loans.len(), 1);
+    assert_eq!(disposed.captures.len(), 1);
+    assert_eq!(disposed.assets.len(), 1);
+    assert_eq!(
+        resource_bytes(service.asset(&actor, base.id, asset_id, false).unwrap()),
+        *png.get_ref()
+    );
+
+    store.reindex().unwrap();
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let durable = reopened.item(base.id).unwrap();
+    assert_eq!(durable.specimens.len(), 2);
+    assert_eq!(durable.specimens[0].loans.len(), 1);
+    assert!(matches!(
+        durable.specimens[0].ownership,
+        Ownership::Disposed { .. }
+    ));
+}
+
+#[test]
+fn component_order_and_references_are_protected_by_focused_commands() {
+    let (_root, store, actor, service, collection) = setup();
+    let base = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let with_specimen = service
+        .create_specimen(
+            &actor,
+            base.id,
+            base.revision,
+            SpecimenDetails {
+                label: "Two-disc set".into(),
+                condition: Condition::Excellent,
+                ownership: ActiveOwnership::Owned,
+                possession: Possession::Present,
+                acquisition: None,
+                private_notes: None,
+            },
+            &CommandContext::new("component-specimen").unwrap(),
+        )
+        .unwrap();
+    let specimen_id = with_specimen.specimens[0].id;
+    let disc_two = service
+        .create_component(
+            &actor,
+            base.id,
+            specimen_id,
+            with_specimen.revision,
+            ComponentDetails {
+                label: "Disc 2".into(),
+                kind: ComponentKind::OpticalDisc,
+                position: 2,
+                carrier: Some(CarrierDetails {
+                    label: "Disc 2".into(),
+                    kind: CarrierKind::OpticalDisc,
+                }),
+            },
+            &CommandContext::new("disc-two").unwrap(),
+        )
+        .unwrap();
+    let disc_one = service
+        .create_component(
+            &actor,
+            base.id,
+            specimen_id,
+            disc_two.revision,
+            ComponentDetails {
+                label: "Disc 1".into(),
+                kind: ComponentKind::OpticalDisc,
+                position: 1,
+                carrier: Some(CarrierDetails {
+                    label: "Disc 1".into(),
+                    kind: CarrierKind::OpticalDisc,
+                }),
+            },
+            &CommandContext::new("disc-one").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        disc_one.specimens[0]
+            .components
+            .iter()
+            .map(|component| component.position)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    let second_component_id = disc_one.specimens[0].components[1].id;
+    let updated = service
+        .update_component(
+            &actor,
+            (base.id, specimen_id, second_component_id),
+            disc_one.revision,
+            ComponentDetails {
+                label: "Bonus disc".into(),
+                kind: ComponentKind::OpticalDisc,
+                position: 2,
+                carrier: Some(CarrierDetails {
+                    label: "Bonus disc".into(),
+                    kind: CarrierKind::OpticalDisc,
+                }),
+            },
+            &CommandContext::new("rename-disc-two").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(updated.specimens[0].components[1].label, "Bonus disc");
+    let disc_one = service
+        .remove_component(
+            &actor,
+            base.id,
+            specimen_id,
+            second_component_id,
+            updated.revision,
+            &CommandContext::new("remove-unreferenced-disc").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(disc_one.specimens[0].components.len(), 1);
+    let component_id = disc_one.specimens[0].components[0].id;
+    let carrier_id = disc_one.specimens[0].components[0]
+        .carrier
+        .as_ref()
+        .unwrap()
+        .id;
+    let capture = Capture {
+        id: CaptureId::new(),
+        collection_id: collection.id,
+        revision: Revision(0),
+        association: CaptureAssociation {
+            item_id: Some(base.id),
+            specimen_id: Some(specimen_id),
+            component_id: Some(component_id),
+            carrier_id: Some(carrier_id),
+        },
+        created_at: chrono::Utc::now(),
+        representations: vec![],
+    };
+    save_capture_record(&service, &actor, capture, Revision(0)).unwrap();
+    let current = store.item(base.id).unwrap();
+    assert!(matches!(
+        service.remove_component(
+            &actor,
+            base.id,
+            specimen_id,
+            component_id,
+            current.revision,
+            &CommandContext::new("remove-referenced-disc").unwrap(),
+        ),
+        Err(Error::Conflict)
+    ));
+
+    let current = store.item(base.id).unwrap();
+    let with_insert = service
+        .create_component(
+            &actor,
+            base.id,
+            specimen_id,
+            current.revision,
+            ComponentDetails {
+                label: "Booklet".into(),
+                kind: ComponentKind::Booklet,
+                position: 2,
+                carrier: None,
+            },
+            &CommandContext::new("booklet-component").unwrap(),
+        )
+        .unwrap();
+    let booklet_id = with_insert.specimens[0].components[1].id;
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::new(2, 2)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let mut with_asset = service
+        .publish_cover(
+            &actor,
+            base.id,
+            with_insert.revision,
+            png.get_ref(),
+            "Booklet scan".into(),
+            &CommandContext::new("booklet-cover").unwrap(),
+        )
+        .unwrap();
+    with_asset.assets[0].subject = AssetSubject::Component {
+        component_id: booklet_id,
+    };
+    let with_asset = Catalog::save(&*store, with_asset.clone(), with_asset.revision).unwrap();
+    assert!(matches!(
+        service.remove_component(
+            &actor,
+            base.id,
+            specimen_id,
+            booklet_id,
+            with_asset.revision,
+            &CommandContext::new("remove-asset-subject").unwrap(),
+        ),
+        Err(Error::Conflict)
+    ));
 }
 
 #[test]
 fn removed_components_are_removed_from_projection() {
     let (root, store, actor, service, collection) = setup();
-    let mut value = item(collection.id);
-    value.specimens.push(Specimen {
-        id: SpecimenId::new(),
-        label: "copy".into(),
-        components: vec![Component {
-            id: ComponentId::new(),
-            label: "case".into(),
-            kind: ComponentKind::Case,
-            position: 1,
-            carrier: None,
-            migration_provenance: None,
-        }],
-        condition: Condition::Unknown,
-        ownership: Ownership::Owned,
-        possession: Possession::Present,
-        acquisition: None,
-        private_notes: None,
-        loans: vec![],
-    });
-    let mut saved = save_inventory(&service, &actor, value, Revision(0)).unwrap();
-    saved.specimens[0].components.clear();
-    save_inventory(&service, &actor, saved.clone(), saved.revision).unwrap();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let saved = service
+        .create_specimen(
+            &actor,
+            saved.id,
+            saved.revision,
+            SpecimenDetails {
+                label: "copy".into(),
+                condition: Condition::Unknown,
+                ownership: ActiveOwnership::Owned,
+                possession: Possession::Present,
+                acquisition: None,
+                private_notes: None,
+            },
+            &CommandContext::new("projection-specimen").unwrap(),
+        )
+        .unwrap();
+    let specimen_id = saved.specimens[0].id;
+    let saved = service
+        .create_component(
+            &actor,
+            saved.id,
+            specimen_id,
+            saved.revision,
+            ComponentDetails {
+                label: "case".into(),
+                kind: ComponentKind::Case,
+                position: 1,
+                carrier: None,
+            },
+            &CommandContext::new("projection-component").unwrap(),
+        )
+        .unwrap();
+    let component_id = saved.specimens[0].components[0].id;
+    service
+        .remove_component(
+            &actor,
+            saved.id,
+            specimen_id,
+            component_id,
+            saved.revision,
+            &CommandContext::new("projection-remove").unwrap(),
+        )
+        .unwrap();
     let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
     let count: u64 = db
         .query_row("SELECT COUNT(*) FROM components", [], |row| row.get(0))

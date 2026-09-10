@@ -532,6 +532,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/specimens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_specimen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/specimens/{specimen_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_specimen"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/specimens/{specimen_id}/components": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_component"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/specimens/{specimen_id}/components/{component_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_component"];
+        post?: never;
+        delete: operations["remove_component"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/specimens/{specimen_id}/dispose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["dispose_specimen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/specimens/{specimen_id}/loans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["start_loan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["return_loan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/verify": {
         parameters: {
             query?: never;
@@ -845,6 +957,8 @@ export interface components {
             date?: string | null;
             source?: string | null;
         };
+        /** @enum {string} */
+        ActiveOwnership: "owned" | "borrowed" | "unknown";
         ApproveEnrollment: {
             user_code: string;
         };
@@ -934,6 +1048,10 @@ export interface components {
             kind: components["schemas"]["CarrierKind"];
             label: string;
         };
+        CarrierDetails: {
+            kind: components["schemas"]["CarrierKind"];
+            label: string;
+        };
         /** Format: uuid */
         CarrierId: string;
         /** @enum {string} */
@@ -965,6 +1083,17 @@ export interface components {
             /** Format: int32 */
             position: number;
         };
+        ComponentChange: {
+            details: components["schemas"]["ComponentDetails"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        ComponentDetails: {
+            carrier?: null | components["schemas"]["CarrierDetails"];
+            kind: components["schemas"]["ComponentKind"];
+            label: string;
+            /** Format: int32 */
+            position: number;
+        };
         /** Format: uuid */
         ComponentId: string;
         /** @enum {string} */
@@ -986,6 +1115,16 @@ export interface components {
         Digest: {
             algorithm: components["schemas"]["HashAlgorithm"];
             hex: string;
+        };
+        DisposeSpecimen: {
+            command: components["schemas"]["DisposeSpecimenCommand"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        DisposeSpecimenCommand: {
+            /** Format: date */
+            date: string;
+            possession: components["schemas"]["ReturnedPossession"];
+            reason: string;
         };
         /** Format: uuid */
         EditionId: string;
@@ -1444,6 +1583,17 @@ export interface components {
         RepresentationId: string;
         /** @enum {string} */
         RepresentationRole: "preservation_master" | "lossless_derivative" | "lossy_derivative";
+        ReturnLoan: {
+            command: components["schemas"]["ReturnLoanCommand"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        ReturnLoanCommand: {
+            possession: components["schemas"]["ReturnedPossession"];
+            /** Format: date */
+            returned_at: string;
+        };
+        /** @enum {string} */
+        ReturnedPossession: "present" | "elsewhere" | "unknown";
         /** Format: int64 */
         Revision: number;
         /** @enum {string} */
@@ -1460,7 +1610,6 @@ export interface components {
             identifiers: components["schemas"]["ProviderIdentity"][];
             identity: components["schemas"]["IdentityState"];
             identity_link: components["schemas"]["ItemIdentityLink"];
-            specimens: components["schemas"]["Specimen"][];
             subtitle: string;
             title: string;
             translations: components["schemas"]["LocalizedText"][];
@@ -1495,11 +1644,34 @@ export interface components {
             possession: components["schemas"]["Possession"];
             private_notes?: string | null;
         };
+        SpecimenChange: {
+            details: components["schemas"]["SpecimenDetails"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        SpecimenDetails: {
+            acquisition?: null | components["schemas"]["Acquisition"];
+            condition: components["schemas"]["Condition"];
+            label: string;
+            ownership: components["schemas"]["ActiveOwnership"];
+            possession: components["schemas"]["Possession"];
+            private_notes?: string | null;
+        };
         /** Format: uuid */
         SpecimenId: string;
         StartEnrollment: {
             device_name: string;
             username?: string | null;
+        };
+        StartLoan: {
+            command: components["schemas"]["StartLoanCommand"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        StartLoanCommand: {
+            contact: string;
+            /** Format: date */
+            due_at?: string | null;
+            /** Format: date */
+            lent_at: string;
         };
         StoredFile: {
             bytes: components["schemas"]["ByteLength"];
@@ -2779,6 +2951,415 @@ export interface operations {
                 content?: never;
             };
             416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_specimen: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecimenChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_specimen: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+                specimen_id: components["schemas"]["SpecimenId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecimenChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_component: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+                specimen_id: components["schemas"]["SpecimenId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_component: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+                specimen_id: components["schemas"]["SpecimenId"];
+                component_id: components["schemas"]["ComponentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_component: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+                specimen_id: components["schemas"]["SpecimenId"];
+                component_id: components["schemas"]["ComponentId"];
+                expected_revision: components["schemas"]["Revision"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    dispose_specimen: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+                specimen_id: components["schemas"]["SpecimenId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisposeSpecimen"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_loan: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+                specimen_id: components["schemas"]["SpecimenId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartLoan"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    return_loan: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+                specimen_id: components["schemas"]["SpecimenId"];
+                loan_id: components["schemas"]["LoanId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnLoan"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -643,7 +643,7 @@ pub enum Ownership {
     Unknown,
     Disposed { date: NaiveDate, reason: String },
 }
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Possession {
     Present,

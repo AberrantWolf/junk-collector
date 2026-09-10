@@ -54,14 +54,24 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   excluding stored requests, prior-failure bodies, worker/lease/claim data, and
   other users' jobs. Mutations require idempotency keys. P02 is locally complete;
   target-Linux filesystem/process behavior and independent review remain external.
+- U03.1 makes specimen lifecycle state server-owned. The bounded Item-save
+  command omits specimens, while its Wave 1 adapter accepts only an exact
+  canonical snapshot. Focused application commands and curator-only HTTP routes
+  create/update specimens and ordered components, remove unreferenced components,
+  start and explicitly return loans, and record disposal without deletion.
+  Nested identities are deterministic per command; returned loans, captures,
+  assets, evidence references, and payloads survive ordinary Item revisions.
+  The previous broad-save “Add an owned physical copy” shortcut is removed.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete physical component/condition/acquisition/loan editing,
-   sensitive attachments, and the configured inbox/import-review UI.
+2. Complete the U03.2 copy-level lifecycle editor and U03.3 privacy/reindex
+   review, then implement sensitive attachments and the configured
+   inbox/import-review UI. Focused lifecycle APIs are implemented; their final
+   editor is not.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

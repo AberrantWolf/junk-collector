@@ -63,7 +63,6 @@ try{
  await page.getByRole('combobox',{name:/Kind/}).selectOption('org.junk.music');
  await page.getByLabel('Title',{exact:true}).fill('A test pressing');
  await page.getByLabel('Artist / platform / edition',{exact:true}).fill('Test ensemble · Japan · CD');
- await page.getByLabel('Add an owned physical copy').check();
  await page.getByRole('button',{name:'Add',exact:true}).click();
  await page.getByText('Inventory saved.',{exact:false}).waitFor();
  // Synthetic one-pixel fixture; image decoding and real thumbnail bounds have separate Rust coverage.
@@ -72,6 +71,14 @@ try{
  await page.getByRole('button',{name:'Attach cover',exact:true}).click();
  await page.getByText('Original artwork and thumbnail saved.').waitFor();
  await page.getByRole('button',{name:'Close curator'}).click();
+ await page.evaluate(async()=>{
+  const collection=(await(await fetch('/api/v1/collections')).json())[0];
+  const item=(await(await fetch(`/api/v1/items?collection_id=${collection.id}`)).json()).items[0];
+  const response=await fetch(`/api/v1/items/${item.id}/specimens`,{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:item.revision,details:{label:'Owned copy',condition:'excellent',ownership:'owned',possession:'present',acquisition:null,private_notes:'Synthetic browser fixture'}})});
+  if(!response.ok)throw new Error(`focused specimen create: ${response.status} ${await response.text()}`);
+ });
+ await page.reload();
+ await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
  await page.getByRole('button',{name:/A test pressing/}).waitFor();
  await page.locator('.collection-row img').waitFor({state:'visible'});
  assert.equal(await page.locator('.collection-row img').count(),1);
@@ -90,7 +97,7 @@ try{
  await page.evaluate(async()=>{
   const collection=(await(await fetch('/api/v1/collections')).json())[0];
   const id=crypto.randomUUID();
-  const command={collection_id:collection.id,title:'Opaque module fixture',subtitle:'Unavailable schema',identity_link:{kind:'none'},domain:{module:'org.example.absent',schema_version:8,payload:{z:100,a:null}},identity:'unidentified',translations:[],identifiers:[],specimens:[],wishlist:true};
+  const command={collection_id:collection.id,title:'Opaque module fixture',subtitle:'Unavailable schema',identity_link:{kind:'none'},domain:{module:'org.example.absent',schema_version:8,payload:{z:100,a:null}},identity:'unidentified',translations:[],identifiers:[],wishlist:true};
   const response=await fetch(`/api/v1/items/${id}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command,expected_revision:0})});
   if(!response.ok)throw new Error(`opaque module fixture: ${response.status} ${await response.text()}`);
  });
@@ -142,7 +149,7 @@ try{
  await page.getByRole('button',{name:'Account & security',exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Curate collection',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Add item',exact:true}).count(),0);
- assert.equal(await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],specimens:[],wishlist:false},expected_revision:0})});return response.status;}),403);
+ assert.equal(await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false},expected_revision:0})});return response.status;}),403);
  await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});
  await page.getByRole('searchbox').fill('session expired');
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();

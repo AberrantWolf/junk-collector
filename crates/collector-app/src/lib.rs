@@ -769,7 +769,6 @@ pub struct SaveItemCommand {
     pub identity: IdentityState,
     pub translations: Vec<LocalizedText>,
     pub identifiers: Vec<ProviderIdentity>,
-    pub specimens: Vec<Specimen>,
     pub wishlist: bool,
 }
 
@@ -784,10 +783,95 @@ impl From<Item> for SaveItemCommand {
             identity: item.identity,
             translations: item.translations,
             identifiers: item.identifiers,
-            specimens: item.specimens,
             wishlist: item.wishlist,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ActiveOwnership {
+    Owned,
+    Borrowed,
+    Unknown,
+}
+
+impl From<ActiveOwnership> for Ownership {
+    fn from(value: ActiveOwnership) -> Self {
+        match value {
+            ActiveOwnership::Owned => Self::Owned,
+            ActiveOwnership::Borrowed => Self::Borrowed,
+            ActiveOwnership::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReturnedPossession {
+    Present,
+    Elsewhere,
+    Unknown,
+}
+
+impl From<ReturnedPossession> for Possession {
+    fn from(value: ReturnedPossession) -> Self {
+        match value {
+            ReturnedPossession::Present => Self::Present,
+            ReturnedPossession::Elsewhere => Self::Elsewhere,
+            ReturnedPossession::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SpecimenDetails {
+    pub label: String,
+    pub condition: Condition,
+    pub ownership: ActiveOwnership,
+    pub possession: Possession,
+    pub acquisition: Option<Acquisition>,
+    pub private_notes: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CarrierDetails {
+    pub label: String,
+    pub kind: CarrierKind,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentDetails {
+    pub label: String,
+    pub kind: ComponentKind,
+    pub position: u16,
+    pub carrier: Option<CarrierDetails>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartLoanCommand {
+    pub contact: String,
+    pub lent_at: chrono::NaiveDate,
+    pub due_at: Option<chrono::NaiveDate>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReturnLoanCommand {
+    pub returned_at: chrono::NaiveDate,
+    pub possession: ReturnedPossession,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DisposeSpecimenCommand {
+    pub date: chrono::NaiveDate,
+    pub reason: String,
+    pub possession: ReturnedPossession,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1079,33 +1163,35 @@ impl CollectionService {
     ) -> Result<Item> {
         let request = (id, expected, command.clone());
         self.authorize(actor, command.collection_id, Action::Curate)?;
-        let (captures, assets, metadata, deleted, revision, updated_at) = match self.reader.item(id)
-        {
-            Ok(previous) => {
-                if previous.collection_id != command.collection_id {
-                    return Err(Error::Invalid(
-                        "moving items across collections is not supported".into(),
-                    ));
+        let (specimens, captures, assets, metadata, deleted, revision, updated_at) =
+            match self.reader.item(id) {
+                Ok(previous) => {
+                    if previous.collection_id != command.collection_id {
+                        return Err(Error::Invalid(
+                            "moving items across collections is not supported".into(),
+                        ));
+                    }
+                    (
+                        previous.specimens,
+                        previous.captures,
+                        previous.assets,
+                        previous.metadata,
+                        previous.deleted,
+                        previous.revision,
+                        previous.updated_at,
+                    )
                 }
-                (
-                    previous.captures,
-                    previous.assets,
-                    previous.metadata,
-                    previous.deleted,
-                    previous.revision,
-                    previous.updated_at,
-                )
-            }
-            Err(Error::NotFound) => (
-                vec![],
-                vec![],
-                MetadataState::default(),
-                false,
-                Revision(0),
-                Utc::now(),
-            ),
-            Err(error) => return Err(error),
-        };
+                Err(Error::NotFound) => (
+                    vec![],
+                    vec![],
+                    vec![],
+                    MetadataState::default(),
+                    false,
+                    Revision(0),
+                    Utc::now(),
+                ),
+                Err(error) => return Err(error),
+            };
         let item = Item {
             id,
             collection_id: command.collection_id,
@@ -1117,7 +1203,7 @@ impl CollectionService {
             identity: command.identity,
             translations: command.translations,
             identifiers: command.identifiers,
-            specimens: command.specimens,
+            specimens,
             wishlist: command.wishlist,
             captures,
             assets,
@@ -1130,6 +1216,393 @@ impl CollectionService {
         self.execute_command(actor, context, "item.save", &request, |effects| {
             effects.save(item, expected)
         })
+    }
+
+    fn update_inventory<Request: Serialize>(
+        &self,
+        actor: &Principal,
+        target: (ItemId, Revision),
+        context: &CommandContext,
+        operation: &str,
+        request: &Request,
+        change: impl FnOnce(&mut Item) -> Result<()>,
+    ) -> Result<Item> {
+        let (id, expected) = target;
+        let mut item = self.reader.item(id)?;
+        self.authorize(actor, item.collection_id, Action::Curate)?;
+        self.execute_command(actor, context, operation, request, move |effects| {
+            change(&mut item)?;
+            item.validate()?;
+            effects.save(item, expected)
+        })
+    }
+
+    pub fn create_specimen(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        expected: Revision,
+        details: SpecimenDetails,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        validate_specimen_details(&details)?;
+        if details.possession == Possession::Lent {
+            return Err(Error::Invalid(
+                "a new specimen cannot be lent without starting a loan".into(),
+            ));
+        }
+        let specimen_id = deterministic_specimen_id(actor.user_id, context.key());
+        let request = (id, expected, specimen_id, details.clone());
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "specimen.create",
+            &request,
+            move |item| {
+                item.specimens.push(Specimen {
+                    id: specimen_id,
+                    label: details.label,
+                    condition: details.condition,
+                    ownership: details.ownership.into(),
+                    possession: details.possession,
+                    components: vec![],
+                    acquisition: details.acquisition,
+                    private_notes: details.private_notes,
+                    loans: vec![],
+                });
+                Ok(())
+            },
+        )
+    }
+
+    pub fn update_specimen(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        specimen_id: SpecimenId,
+        expected: Revision,
+        details: SpecimenDetails,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        validate_specimen_details(&details)?;
+        let request = (id, specimen_id, expected, details.clone());
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "specimen.update",
+            &request,
+            move |item| {
+                let specimen = specimen_mut(item, specimen_id)?;
+                if matches!(specimen.ownership, Ownership::Disposed { .. }) {
+                    return Err(Error::Invalid(
+                        "disposed specimens are corrected through the disposal command".into(),
+                    ));
+                }
+                if specimen.loans.iter().any(|loan| loan.returned_at.is_none())
+                    && details.possession != Possession::Lent
+                {
+                    return Err(Error::Invalid(
+                        "an active loan keeps possession lent until it is returned".into(),
+                    ));
+                }
+                if !specimen.loans.iter().any(|loan| loan.returned_at.is_none())
+                    && details.possession == Possession::Lent
+                {
+                    return Err(Error::Invalid(
+                        "start a loan before setting possession to lent".into(),
+                    ));
+                }
+                specimen.label = details.label;
+                specimen.condition = details.condition;
+                specimen.ownership = details.ownership.into();
+                specimen.possession = details.possession;
+                specimen.acquisition = details.acquisition;
+                specimen.private_notes = details.private_notes;
+                Ok(())
+            },
+        )
+    }
+
+    pub fn create_component(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        specimen_id: SpecimenId,
+        expected: Revision,
+        details: ComponentDetails,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        validate_component_details(&details)?;
+        let component_id = deterministic_component_id(actor.user_id, context.key());
+        let carrier_id = details
+            .carrier
+            .as_ref()
+            .map(|_| deterministic_carrier_id(actor.user_id, context.key()));
+        let request = (
+            id,
+            specimen_id,
+            component_id,
+            carrier_id,
+            expected,
+            details.clone(),
+        );
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "component.create",
+            &request,
+            move |item| {
+                let specimen = specimen_mut(item, specimen_id)?;
+                specimen.components.push(Component {
+                    id: component_id,
+                    label: details.label,
+                    kind: details.kind,
+                    position: details.position,
+                    carrier: details.carrier.map(|carrier| Carrier {
+                        id: carrier_id.expect("carrier identity was derived"),
+                        label: carrier.label,
+                        kind: carrier.kind,
+                    }),
+                    migration_provenance: None,
+                });
+                specimen
+                    .components
+                    .sort_by_key(|component| component.position);
+                Ok(())
+            },
+        )
+    }
+
+    pub fn update_component(
+        &self,
+        actor: &Principal,
+        target: (ItemId, SpecimenId, ComponentId),
+        expected: Revision,
+        details: ComponentDetails,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        let (id, specimen_id, component_id) = target;
+        validate_component_details(&details)?;
+        let new_carrier_id = deterministic_carrier_id(actor.user_id, context.key());
+        let request = (id, specimen_id, component_id, expected, details.clone());
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "component.update",
+            &request,
+            move |item| {
+                let current = item
+                    .specimens
+                    .iter()
+                    .find(|specimen| specimen.id == specimen_id)
+                    .and_then(|specimen| {
+                        specimen
+                            .components
+                            .iter()
+                            .find(|component| component.id == component_id)
+                    })
+                    .cloned()
+                    .ok_or(Error::NotFound)?;
+                if current.carrier.is_some()
+                    && details.carrier.is_none()
+                    && item.captures.iter().any(|capture| {
+                        capture.association.carrier_id
+                            == current.carrier.as_ref().map(|carrier| carrier.id)
+                    })
+                {
+                    return Err(Error::Conflict);
+                }
+                let specimen = specimen_mut(item, specimen_id)?;
+                let component = specimen
+                    .components
+                    .iter_mut()
+                    .find(|component| component.id == component_id)
+                    .ok_or(Error::NotFound)?;
+                let carrier_id = component
+                    .carrier
+                    .as_ref()
+                    .map(|carrier| carrier.id)
+                    .unwrap_or(new_carrier_id);
+                component.label = details.label;
+                component.kind = details.kind;
+                component.position = details.position;
+                component.carrier = details.carrier.map(|carrier| Carrier {
+                    id: carrier_id,
+                    label: carrier.label,
+                    kind: carrier.kind,
+                });
+                specimen
+                    .components
+                    .sort_by_key(|component| component.position);
+                Ok(())
+            },
+        )
+    }
+
+    pub fn remove_component(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        specimen_id: SpecimenId,
+        component_id: ComponentId,
+        expected: Revision,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        let request = (id, specimen_id, component_id, expected);
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "component.remove",
+            &request,
+            move |item| {
+                let component = item
+                    .specimens
+                    .iter()
+                    .find(|specimen| specimen.id == specimen_id)
+                    .and_then(|specimen| {
+                        specimen
+                            .components
+                            .iter()
+                            .find(|component| component.id == component_id)
+                    })
+                    .ok_or(Error::NotFound)?;
+                let carrier_id = component.carrier.as_ref().map(|carrier| carrier.id);
+                if item.captures.iter().any(|capture| {
+                    capture.association.component_id == Some(component_id)
+                        || carrier_id.is_some_and(|carrier_id| {
+                            capture.association.carrier_id == Some(carrier_id)
+                        })
+                }) || item
+                    .assets
+                    .iter()
+                    .any(|asset| asset.subject == AssetSubject::Component { component_id })
+                {
+                    return Err(Error::Conflict);
+                }
+                let specimen = specimen_mut(item, specimen_id)?;
+                specimen
+                    .components
+                    .retain(|component| component.id != component_id);
+                Ok(())
+            },
+        )
+    }
+
+    pub fn start_loan(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        specimen_id: SpecimenId,
+        expected: Revision,
+        command: StartLoanCommand,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        if command.contact.trim().is_empty()
+            || command.contact.len() > 4096
+            || command.due_at.is_some_and(|due| due < command.lent_at)
+        {
+            return Err(Error::Invalid("loan details are invalid".into()));
+        }
+        let loan_id = deterministic_loan_id(actor.user_id, context.key());
+        let request = (id, specimen_id, loan_id, expected, command.clone());
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "loan.start",
+            &request,
+            move |item| {
+                let specimen = specimen_mut(item, specimen_id)?;
+                if matches!(specimen.ownership, Ownership::Disposed { .. })
+                    || specimen.loans.iter().any(|loan| loan.returned_at.is_none())
+                {
+                    return Err(Error::Conflict);
+                }
+                specimen.loans.push(Loan {
+                    id: loan_id,
+                    contact: command.contact,
+                    lent_at: command.lent_at,
+                    due_at: command.due_at,
+                    returned_at: None,
+                });
+                specimen.possession = Possession::Lent;
+                Ok(())
+            },
+        )
+    }
+
+    pub fn return_loan(
+        &self,
+        actor: &Principal,
+        target: (ItemId, SpecimenId, LoanId),
+        expected: Revision,
+        command: ReturnLoanCommand,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        let (id, specimen_id, loan_id) = target;
+        let request = (id, specimen_id, loan_id, expected, command.clone());
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "loan.return",
+            &request,
+            move |item| {
+                let specimen = specimen_mut(item, specimen_id)?;
+                let loan = specimen
+                    .loans
+                    .iter_mut()
+                    .find(|loan| loan.id == loan_id)
+                    .ok_or(Error::NotFound)?;
+                if loan.returned_at.is_some() || command.returned_at < loan.lent_at {
+                    return Err(Error::Conflict);
+                }
+                loan.returned_at = Some(command.returned_at);
+                specimen.possession = command.possession.into();
+                Ok(())
+            },
+        )
+    }
+
+    pub fn dispose_specimen(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        specimen_id: SpecimenId,
+        expected: Revision,
+        command: DisposeSpecimenCommand,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        if command.reason.trim().is_empty() || command.reason.len() > 4096 {
+            return Err(Error::Invalid(
+                "disposal reason is required and bounded".into(),
+            ));
+        }
+        let request = (id, specimen_id, expected, command.clone());
+        self.update_inventory(
+            actor,
+            (id, expected),
+            context,
+            "specimen.dispose",
+            &request,
+            move |item| {
+                let specimen = specimen_mut(item, specimen_id)?;
+                if specimen.loans.iter().any(|loan| loan.returned_at.is_none()) {
+                    return Err(Error::Conflict);
+                }
+                specimen.ownership = Ownership::Disposed {
+                    date: command.date,
+                    reason: command.reason,
+                };
+                specimen.possession = command.possession.into();
+                Ok(())
+            },
+        )
     }
     pub fn adapt_wave1_item_save(
         &self,
@@ -1147,6 +1620,7 @@ impl CollectionService {
                 self.authorize(actor, current.collection_id, Action::Curate)?;
                 let submitted_owned = serde_json::to_value((
                     item.revision,
+                    &item.specimens,
                     &item.captures,
                     &item.assets,
                     &item.metadata,
@@ -1156,6 +1630,7 @@ impl CollectionService {
                 .map_err(|error| Error::Invalid(error.to_string()))?;
                 let canonical_owned = serde_json::to_value((
                     current.revision,
+                    &current.specimens,
                     &current.captures,
                     &current.assets,
                     &current.metadata,
@@ -1176,6 +1651,7 @@ impl CollectionService {
             Err(Error::NotFound)
                 if expected == Revision(0)
                     && item.revision == Revision(0)
+                    && item.specimens.is_empty()
                     && item.captures.is_empty()
                     && item.assets.is_empty()
                     && !item.deleted
@@ -2099,6 +2575,87 @@ fn deterministic_collection_id(user: UserId, key: &str) -> CollectionId {
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     CollectionId(uuid::Uuid::from_bytes(bytes))
+}
+
+fn deterministic_inventory_uuid(user: UserId, kind: &str, key: &str) -> uuid::Uuid {
+    use sha2::{Digest as _, Sha256};
+    let mut bytes: [u8; 16] = Sha256::digest(format!("junk-collector:{kind}:{user}:{key}"))[..16]
+        .try_into()
+        .expect("SHA-256 prefix has fixed length");
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes)
+}
+
+fn deterministic_specimen_id(user: UserId, key: &str) -> SpecimenId {
+    SpecimenId(deterministic_inventory_uuid(user, "specimen-create", key))
+}
+
+fn deterministic_component_id(user: UserId, key: &str) -> ComponentId {
+    ComponentId(deterministic_inventory_uuid(user, "component-create", key))
+}
+
+fn deterministic_carrier_id(user: UserId, key: &str) -> CarrierId {
+    CarrierId(deterministic_inventory_uuid(user, "carrier-create", key))
+}
+
+fn deterministic_loan_id(user: UserId, key: &str) -> LoanId {
+    LoanId(deterministic_inventory_uuid(user, "loan-start", key))
+}
+
+fn validate_bounded_text(value: &str, label: &str, required: bool) -> Result<()> {
+    if (required && value.trim().is_empty()) || value.len() > 4096 {
+        return Err(Error::Invalid(format!(
+            "{label} {} and must be at most 4096 bytes",
+            if required {
+                "is required"
+            } else {
+                "is optional"
+            }
+        )));
+    }
+    Ok(())
+}
+
+fn validate_specimen_details(details: &SpecimenDetails) -> Result<()> {
+    validate_bounded_text(&details.label, "specimen label", true)?;
+    if let Some(notes) = &details.private_notes {
+        validate_bounded_text(notes, "private notes", false)?;
+    }
+    if let Some(acquisition) = &details.acquisition {
+        if let Some(source) = &acquisition.source {
+            validate_bounded_text(source, "acquisition source", false)?;
+        }
+        if let Some(cost) = &acquisition.cost {
+            cost.validate()?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_component_details(details: &ComponentDetails) -> Result<()> {
+    validate_bounded_text(&details.label, "component label", true)?;
+    if let Some(carrier) = &details.carrier {
+        validate_bounded_text(&carrier.label, "carrier label", true)?;
+        if !details.kind.data_bearing() {
+            return Err(Error::Invalid(
+                "a non-data-bearing component cannot have a carrier".into(),
+            ));
+        }
+        if matches!(carrier.kind, CarrierKind::Case | CarrierKind::Booklet) {
+            return Err(Error::Invalid(
+                "cases and booklets cannot have carrier identity".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn specimen_mut(item: &mut Item, specimen_id: SpecimenId) -> Result<&mut Specimen> {
+    item.specimens
+        .iter_mut()
+        .find(|specimen| specimen.id == specimen_id)
+        .ok_or(Error::NotFound)
 }
 
 fn deterministic_asset_id(user: UserId, key: &str) -> AssetId {

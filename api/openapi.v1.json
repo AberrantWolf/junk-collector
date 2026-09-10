@@ -1334,6 +1334,542 @@
         }
       }
     },
+    "/api/v1/items/{id}/specimens": {
+      "post": {
+        "operationId": "create_specimen",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpecimenChange"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/specimens/{specimen_id}": {
+      "put": {
+        "operationId": "update_specimen",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "specimen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpecimenChange"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/specimens/{specimen_id}/components": {
+      "post": {
+        "operationId": "create_component",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "specimen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComponentChange"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/specimens/{specimen_id}/components/{component_id}": {
+      "put": {
+        "operationId": "update_component",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "specimen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          },
+          {
+            "name": "component_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ComponentId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComponentChange"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "operationId": "remove_component",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "specimen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          },
+          {
+            "name": "component_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ComponentId"
+            }
+          },
+          {
+            "name": "expected_revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Revision"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/specimens/{specimen_id}/dispose": {
+      "post": {
+        "operationId": "dispose_specimen",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "specimen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisposeSpecimen"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/specimens/{specimen_id}/loans": {
+      "post": {
+        "operationId": "start_loan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "specimen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLoan"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return": {
+      "post": {
+        "operationId": "return_loan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "specimen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          },
+          {
+            "name": "loan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/LoanId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnLoan"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/verify": {
       "post": {
         "operationId": "verify",
@@ -2128,6 +2664,14 @@
           }
         }
       },
+      "ActiveOwnership": {
+        "type": "string",
+        "enum": [
+          "owned",
+          "borrowed",
+          "unknown"
+        ]
+      },
       "ApproveEnrollment": {
         "type": "object",
         "required": [
@@ -2511,6 +3055,22 @@
           }
         }
       },
+      "CarrierDetails": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/CarrierKind"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "CarrierId": {
         "type": "string",
         "format": "uuid"
@@ -2631,6 +3191,54 @@
           }
         }
       },
+      "ComponentChange": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "details"
+        ],
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ComponentDetails"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ComponentDetails": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "position"
+        ],
+        "properties": {
+          "carrier": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CarrierDetails"
+              }
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ComponentKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "ComponentId": {
         "type": "string",
         "format": "uuid"
@@ -2720,6 +3328,43 @@
             "type": "string"
           }
         }
+      },
+      "DisposeSpecimen": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "$ref": "#/components/schemas/DisposeSpecimenCommand"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DisposeSpecimenCommand": {
+        "type": "object",
+        "required": [
+          "date",
+          "reason",
+          "possession"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "possession": {
+            "$ref": "#/components/schemas/ReturnedPossession"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "EditionId": {
         "type": "string",
@@ -4555,6 +5200,47 @@
           "lossy_derivative"
         ]
       },
+      "ReturnLoan": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "$ref": "#/components/schemas/ReturnLoanCommand"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReturnLoanCommand": {
+        "type": "object",
+        "required": [
+          "returned_at",
+          "possession"
+        ],
+        "properties": {
+          "possession": {
+            "$ref": "#/components/schemas/ReturnedPossession"
+          },
+          "returned_at": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReturnedPossession": {
+        "type": "string",
+        "enum": [
+          "present",
+          "elsewhere",
+          "unknown"
+        ]
+      },
       "Revision": {
         "type": "integer",
         "format": "int64",
@@ -4588,7 +5274,6 @@
           "identity",
           "translations",
           "identifiers",
-          "specimens",
           "wishlist"
         ],
         "properties": {
@@ -4609,12 +5294,6 @@
           },
           "identity_link": {
             "$ref": "#/components/schemas/ItemIdentityLink"
-          },
-          "specimens": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Specimen"
-            }
           },
           "subtitle": {
             "type": "string"
@@ -4754,6 +5433,62 @@
           }
         }
       },
+      "SpecimenChange": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "details"
+        ],
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/SpecimenDetails"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SpecimenDetails": {
+        "type": "object",
+        "required": [
+          "label",
+          "condition",
+          "ownership",
+          "possession"
+        ],
+        "properties": {
+          "acquisition": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Acquisition"
+              }
+            ]
+          },
+          "condition": {
+            "$ref": "#/components/schemas/Condition"
+          },
+          "label": {
+            "type": "string"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/ActiveOwnership"
+          },
+          "possession": {
+            "$ref": "#/components/schemas/Possession"
+          },
+          "private_notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "SpecimenId": {
         "type": "string",
         "format": "uuid"
@@ -4774,6 +5509,46 @@
             ]
           }
         }
+      },
+      "StartLoan": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "$ref": "#/components/schemas/StartLoanCommand"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartLoanCommand": {
+        "type": "object",
+        "required": [
+          "contact",
+          "lent_at"
+        ],
+        "properties": {
+          "contact": {
+            "type": "string"
+          },
+          "due_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "lent_at": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "additionalProperties": false
       },
       "StoredFile": {
         "type": "object",

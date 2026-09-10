@@ -586,7 +586,21 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 51);
+    assert_eq!(paths.len(), 58);
+    for path in [
+        "/api/v1/items/{id}/specimens",
+        "/api/v1/items/{id}/specimens/{specimen_id}",
+        "/api/v1/items/{id}/specimens/{specimen_id}/components",
+        "/api/v1/items/{id}/specimens/{specimen_id}/components/{component_id}",
+        "/api/v1/items/{id}/specimens/{specimen_id}/loans",
+        "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return",
+        "/api/v1/items/{id}/specimens/{specimen_id}/dispose",
+    ] {
+        assert!(
+            paths.contains_key(path),
+            "missing focused lifecycle path {path}"
+        );
+    }
     assert!(paths.values().all(|path| {
         path.as_object().is_some_and(|operations| {
             operations.values().all(|operation| {
@@ -1215,7 +1229,6 @@ async fn bounded_item_command_accepts_editable_fields_and_rejects_owned_state() 
         "identity": "unidentified",
         "translations": [],
         "identifiers": [],
-        "specimens": [],
         "wishlist": false
     });
     let app = router(state);
@@ -1252,6 +1265,7 @@ async fn bounded_item_command_accepts_editable_fields_and_rejects_owned_state() 
     );
 
     for forbidden_field in [
+        "specimens",
         "captures",
         "assets",
         "evidence",
@@ -1299,6 +1313,139 @@ async fn bounded_item_command_accepts_editable_fields_and_rejects_owned_state() 
 }
 
 #[tokio::test]
+async fn focused_inventory_routes_require_curator_role_and_revisioned_idempotent_commands() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let owner = state
+        .store
+        .create_user("inventory-owner", "a long owner password", true)
+        .unwrap();
+    let viewer = state
+        .store
+        .create_user("inventory-viewer", "a long viewer password", false)
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(&test_authentication(&actor), "Inventory", &command())
+        .unwrap();
+    state
+        .store
+        .grant(collection.id, viewer, Role::Viewer)
+        .unwrap();
+    let stored = Item {
+        id: ItemId::new(),
+        collection_id: collection.id,
+        revision: Revision(0),
+        title: "Lifecycle".into(),
+        subtitle: String::new(),
+        identity_link: ItemIdentityLink::None,
+        domain: ModuleData {
+            module: ModuleId("org.example.lifecycle".into()),
+            schema_version: 1,
+            payload: RawJson::from_value(serde_json::json!({})),
+        },
+        identity: IdentityState::Unidentified,
+        translations: vec![],
+        identifiers: vec![],
+        specimens: vec![],
+        wishlist: true,
+        captures: vec![],
+        assets: vec![],
+        metadata: MetadataState::default(),
+        deleted: false,
+        updated_at: chrono::Utc::now(),
+    };
+    let saved = state
+        .service
+        .save_item(&actor, stored.id, stored.into(), Revision(0), &command())
+        .unwrap();
+    let (owner_token, _) = state.store.issue_session(owner, "owner browser").unwrap();
+    let (viewer_token, _) = state.store.issue_session(viewer, "viewer browser").unwrap();
+    let app = router(state);
+    let body = serde_json::to_vec(&serde_json::json!({
+        "expected_revision": saved.revision,
+        "details": {
+            "label": "Owned copy",
+            "condition": "good",
+            "ownership": "owned",
+            "possession": "present",
+            "acquisition": null,
+            "private_notes": "private"
+        }
+    }))
+    .unwrap();
+
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/items/{}/specimens", saved.id))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .header("idempotency-key", "viewer-cannot-create-specimen")
+                .header("content-type", "application/json")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    let missing_key = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/items/{}/specimens", saved.id))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing_key.status(), StatusCode::BAD_REQUEST);
+
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/items/{}/specimens", saved.id))
+                    .header("origin", "https://collector.example")
+                    .header("authorization", format!("Bearer {owner_token}"))
+                    .header("idempotency-key", "create-owned-specimen")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 32 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+        let item: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(item["specimens"].as_array().unwrap().len(), 1);
+        assert_eq!(item["specimens"][0]["private_notes"], "private");
+    }
+}
+
+#[tokio::test]
 async fn mutation_requires_key_and_http_replay_has_stable_conflict_code() {
     let (_root, mut state) = state();
     state.ingress = Ingress::Private;
@@ -1326,7 +1473,6 @@ async fn mutation_requires_key_and_http_replay_has_stable_conflict_code() {
         "identity": "unidentified",
         "translations": [],
         "identifiers": [],
-        "specimens": [],
         "wishlist": false
     });
     let body = serde_json::to_vec(&serde_json::json!({
