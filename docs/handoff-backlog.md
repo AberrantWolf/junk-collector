@@ -452,7 +452,7 @@ Inspect sibling manifests/source/instructions and record exact algorithms, crate
 
 ### D02 — Extract format/hash/disc verification primitives
 
-**Status (2026-09-10): D02.1-D02.4 implemented/reviewed; D02.5 is next.** The
+**Status (2026-09-10): complete locally; D03.1 is next.** The
 documentation-only drift gate reconfirmed exact sibling state. D02.2 then moved
 generic hashing types and executable ordered CUE/CHD reader contracts into Junk
 Libs and migrated Retro's complete-disc consumer in separate commits. Retro keeps
@@ -469,6 +469,11 @@ checksum matching, frame-450 evidence, and bounded offset search into
 `junk-libs-accuraterip`. Phono uses compatibility re-exports while retaining all
 reader, network, provider, and persistence policy. Its complete local workspace
 passes; owned-dump/live-provider and physical-drive results remain external.
+D02.5 adds neutral `BufRead`-based Logiqx/ClrMamePro parsing to Junk Libs and
+replaces Retro's parser with a filesystem/error adapter. Retro retains downloading,
+caching, matching, platform normalization, and naming policy. D02's local review
+passes; unpublished dependency pins, private/live-disc fixtures, and independent
+review remain external rather than claimed.
 
 **Review · Dependencies:** D01. **Owner:** independently consumable junk-libs crates and affected sibling consumers.
 

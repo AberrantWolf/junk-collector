@@ -1,5 +1,32 @@
 # Validation recorded for the foundation
 
+# Wave 3 D02.5 neutral DAT parser and root review — 2026-09-10
+
+- TDD first failed on the absent `junk_libs_dat::parse_dat` API. The shared
+  parser now auto-detects Logiqx XML versus ClrMamePro and accepts only a
+  `BufRead`; it contains no path, download, cache, database, matcher, platform,
+  or application orchestration.
+- Permanent shared probes compare equivalent XML/text records, XML entity
+  decoding, lowercase checksum normalization, game-level serial propagation,
+  and malformed sizes. Retro's 59 DAT tests add complete Redump/LibRetro record,
+  multi-ROM, quoted-name, optional field, matcher, naming, and raw-loader-boundary
+  regression coverage through the shared parser.
+- Commits: Junk Libs `3643b9a`; Retro Junk `d36bc9a`. Retro's pre-existing
+  untracked sync documentation/scripts were not staged.
+- Passed: Junk Libs `cargo test --workspace --all-features` and
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`; Retro
+  `cargo test --workspace`, `cargo test -p retro-junk-dat`, focused package fmt,
+  `cargo clippy -p retro-junk-dat --all-targets -- -D warnings`; Collector
+  `python3 scripts/check_architecture.py`.
+- The full Retro clippy probe still reports pre-existing warnings in untouched
+  `retro-junk-backend` and `retro-junk-import`; none originate in the migrated DAT
+  package. Cross-path all-workspace fmt still sees unrelated Junk Libs document
+  formatting drift recorded under D02.2.
+- **Implemented:** neutral DAT parser, real Retro consumer migration, and D02 root
+  review. **Not implemented:** Collector DAT/catalog use (D04), music integration
+  (D05), or any provider/downloader in Junk Libs. **Externally unqualified:**
+  published Git pins, independent corpus review, and private/live-disc fixtures.
+
 # Wave 3 D02.4 shared AccurateRip extraction — 2026-09-10
 
 - TDD first failed because `junk-libs-accuraterip` exposed none of the required
