@@ -172,6 +172,13 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   vectors remain byte-identical. AccurateRip CRC/dBAR/offset behavior, neutral DAT
   parsing, Collector integration, live-drive qualification, and a published Git
   dependency pin remain required under D02.4-D02.5.
+- D02.4 adds `junk-libs-accuraterip` as the single headless implementation of
+  CRC v1/v2 over packed integer CD PCM, boundary skips, dBAR parsing/request
+  validation, primary-checksum comparison, frame-450 evidence, and bounded
+  sample-offset search across track boundaries. Phono's compatibility modules
+  consume it while CUE/CHD construction, HTTP/rate limiting, evidence storage,
+  and product errors remain local. DAT extraction and Collector music integration
+  remain required under D02.5/D05; private/live/hardware checks remain external.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
@@ -182,7 +189,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
    P04 workspace and Job controls. The legacy upload and administrator inbox routes
    remain compatibility adapters scheduled for API-major removal. Document
    attachments, event streaming, and offline artwork remain unimplemented.
-3. Complete D02.4-D05 shared algorithms and analyzer/provider adapters, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. D02.1-D02.3 complete the provenance, generic reader/hash, and neutral disc-ID children only; no catalog verification is currently claimed.
+3. Complete D02.5-D05 shared algorithms and analyzer/provider adapters, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. D02.1-D02.4 complete the provenance, generic reader/hash, neutral disc-ID, and AccurateRip primitive children only; no catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
 6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.

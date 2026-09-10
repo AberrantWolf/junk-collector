@@ -1,5 +1,28 @@
 # Validation recorded for the foundation
 
+# Wave 3 D02.4 shared AccurateRip extraction — 2026-09-10
+
+- TDD first failed because `junk-libs-accuraterip` exposed none of the required
+  CRC, dBAR, or offset-search APIs. The green crate operates only on packed integer
+  CD PCM and in-memory dBAR bytes and has no filesystem, HTTP, catalog, GUI, or
+  audio-device dependency.
+- The shared 42-test suite covers CRC v1/v2 overflow behavior, inclusive 2940-sample
+  skip boundaries, single-track double skips, exact sample counts, stacked/truncated
+  dBAR records, request-header mismatch, primary-v1/v2/both matching, zero-primary
+  checksums, frame-450 non-verification, no-data/mismatch/ambiguous outcomes, and
+  cross-track offset search at -2939, -6, 0, +6, and +2939 samples.
+- Commits: Junk Libs `da85b92`; Phono Junk `f459c51`. Phono's pre-existing
+  untracked `AGENTS.md` was not staged.
+- Passed: Junk Libs `cargo test --workspace --all-features` and
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`; Phono
+  `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  focused formatting, and `git diff --check`.
+- **Implemented:** shared CRC/dBAR/matching/offset algorithms and the real Phono
+  migration; HTTP/rate limiting remains correctly product-owned. **Not implemented:**
+  D02.5 neutral DAT parsing and Collector/D05 integration. **Externally unqualified:**
+  the environment-supplied Redumper fixture plus live AccurateRip, physical-drive
+  behavior, publishing/pinning the shared commits, and independent review.
+
 # Wave 3 D02.3 shared disc identity extraction — 2026-09-10
 
 - TDD first failed on the absent `junk_libs_disc_id::calculate_disc_ids` API.
