@@ -144,17 +144,22 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   active work polls at two seconds, idle state at 30 seconds, and reconnect/action/
   visibility changes refresh immediately. Retry keeps the same Job identity and
   updates its attempt; Import review inputs remain owned outside the polling ledger.
+- P04.3 persists the current Item-scoped Import handle across page refresh, refreshes
+  durable Import/Job state after reconnect, and rebases stale review submissions while
+  retaining the user's identity and physical-chain choices for explicit reapply. The
+  real browser matrix covers retry/cancel, cross-user and collection authorization,
+  unavailable analyzer disclosure, keyboard/focus/live status, reduced motion, mobile
+  layout, and normal/private listener composition. P04 is locally complete.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete P04.3 browser/security and accessibility review. The P04.1 package/
-   import workspace and P04.2 durable Job controls are locally implemented. The
-   current legacy upload and administrator inbox routes are compatibility adapters
-   scheduled for API-major removal. Document attachments, event streaming, and
-   offline artwork remain unimplemented.
+2. Complete independent accessibility/security review for the locally implemented
+   P04 workspace and Job controls. The legacy upload and administrator inbox routes
+   remain compatibility adapters scheduled for API-major removal. Document
+   attachments, event streaming, and offline artwork remain unimplemented.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

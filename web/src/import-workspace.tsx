@@ -1,4 +1,4 @@
-import React,{useEffect,useState,api} from '@collector/runtime';
+import React,{useEffect,useState,api,isApiRequestError} from '@collector/runtime';
 import type {components} from './generated/api';
 
 type Item=components['schemas']['PresentedItem'];
@@ -33,6 +33,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
  const [files,setFiles]=useState<File[]>([]);const [inboxes,setInboxes]=useState<InboxSource[]>([]);
  const [label,setLabel]=useState('');const [inboxPackage,setInboxPackage]=useState('');
  const [record,setRecord]=useState<ImportView>();const [job,setJob]=useState<JobView>();
+ const [conflict,setConflict]=useState('');const [itemRevision,setItemRevision]=useState(item.revision);
  const [identity,setIdentity]=useState('unidentified');const [attach,setAttach]=useState(true);
  const [specimen,setSpecimen]=useState('');const [component,setComponent]=useState('');const [carrier,setCarrier]=useState('');
  const selectedSpecimen=item.specimens.find(value=>value.id===specimen);
@@ -41,14 +42,18 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
  const done=record?.files.reduce((sum,file)=>sum+file.received_bytes,0)||0;
  const candidates=record?.candidates||[];
  const selectedInbox=inboxes.find(value=>value.label===label);
+ const storageKey=`collector.import.${item.id}`;
 
  useEffect(()=>{let active=true;api<InboxSource[]>(`/collections/${item.collection_id}/inboxes`).then(value=>{if(!active)return;setInboxes(value);setLabel(current=>current||value[0]?.label||'');}).catch(onError);return()=>{active=false;};},[item.collection_id]);
+ useEffect(()=>{const id=localStorage.getItem(storageKey);if(id)api<ImportView>(`/imports/${id}`).then(setRecord).catch(error=>{localStorage.removeItem(storageKey);onError(error);});},[storageKey]);
+ useEffect(()=>{if(record)localStorage.setItem(storageKey,record.id);},[record?.id,storageKey]);
+ useEffect(()=>{setItemRevision(item.revision);},[item.revision]);
  useEffect(()=>{setInboxPackage(selectedInbox?.packages[0]||'');},[selectedInbox?.label]);
  useEffect(()=>{setComponent('');setCarrier('');},[specimen]);
  useEffect(()=>{setCarrier('');},[component]);
  useEffect(()=>{const refresh=()=>{if(record)api<ImportView>(`/imports/${record.id}`).then(setRecord).catch(onError);};window.addEventListener('online',refresh);window.addEventListener('collector-jobs-updated',refresh);return()=>{window.removeEventListener('online',refresh);window.removeEventListener('collector-jobs-updated',refresh);};},[record?.id]);
 
- function reset(){setRecord(undefined);setJob(undefined);setFiles([]);setIdentity('unidentified');setAttach(true);setSpecimen('');setComponent('');setCarrier('');}
+ function reset(){localStorage.removeItem(storageKey);setRecord(undefined);setJob(undefined);setConflict('');setFiles([]);setIdentity('unidentified');setAttach(true);setSpecimen('');setComponent('');setCarrier('');}
  async function stage(){
   setBusy(true);setJob(undefined);
   try{
@@ -82,8 +87,12 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
   if(!record)return;setBusy(true);
   try{
    const choice=identity==='unidentified'?{identity:'unidentified'}:{identity:'candidate',key:identity};
-   const reviewed=await api<ImportView>(`/imports/${record.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:record.revision,identity:choice,association:association(),expected_item_revision:attach?item.revision:null})});setRecord(reviewed);
-  }catch(error){onError(error);}finally{setBusy(false);}
+   const reviewed=await api<ImportView>(`/imports/${record.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:record.revision,identity:choice,association:association(),expected_item_revision:attach?itemRevision:null})});setRecord(reviewed);setConflict('');
+  }catch(error){
+   if(isApiRequestError(error)&&error.status===409){
+    const [current,currentItem]=await Promise.all([api<ImportView>(`/imports/${record.id}`),api<Item>(`/items/${item.id}`)]);setRecord(current);setItemRevision(currentItem.revision);setConflict(`The server is now at Import revision ${current.revision} and Item revision ${currentItem.revision}. Your review choices are still in this form; review them and apply again.`);
+   }else onError(error);
+  }finally{setBusy(false);}
  }
  async function publish(){
   if(!record)return;setBusy(true);setJob(undefined);
@@ -108,13 +117,14 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
    <h4>Package inventory</h4><div className="package-files" role="list">{record.files.map(file=><div role="listitem" key={file.name}><span>{file.name}</span><small>{file.received_bytes.toLocaleString()} / {file.bytes.toLocaleString()} bytes · {file.digest?'SHA-256 recorded':'digest pending'}</small></div>)}</div>
    {record.limitations.length>0&&<div className="import-limitations"><h4>Analysis limitations</h4><ul>{record.limitations.map(value=><li key={value}>{value}</li>)}</ul></div>}
    {record.phase==='analyzing'&&<button className="primary" disabled={busy} onClick={()=>void beginReview()}>Review import</button>}
-   {record.phase==='awaiting_review'&&!record.review&&<form aria-label="Review import" onSubmit={event=>{event.preventDefault();void saveReview();}}>
+   {conflict&&<p className="notice conflict" role="alert"><strong>Revision conflict.</strong> {conflict}</p>}
+   {record.phase==='awaiting_review'&&(!record.review||!!conflict)&&<form aria-label="Review import" onSubmit={event=>{event.preventDefault();void saveReview();}}>
     <fieldset><legend>Identity</legend><label><input type="radio" name="identity" value="unidentified" checked={identity==='unidentified'} onChange={event=>setIdentity(event.target.value)}/> Keep unidentified</label>{candidates.map(candidate=><label key={candidate.key}><input type="radio" name="identity" value={candidate.key} checked={identity===candidate.key} onChange={event=>setIdentity(event.target.value)}/> {candidate.label}</label>)}</fieldset>
     <fieldset><legend>Physical association</legend><label><input type="radio" name="attachment" checked={attach} onChange={()=>setAttach(true)}/> Attach to {item.title}</label><label><input type="radio" name="attachment" checked={!attach} onChange={()=>setAttach(false)}/> Leave capture unattached</label></fieldset>
     {attach&&item.specimens.length>0&&<div className="form-grid"><label>Physical copy<select value={specimen} onChange={event=>setSpecimen(event.target.value)}><option value="">Item only</option>{item.specimens.map(value=><option key={value.id} value={value.id}>{value.label}</option>)}</select></label>{selectedSpecimen&&<label>Part<select value={component} onChange={event=>setComponent(event.target.value)}><option value="">Copy only</option>{selectedSpecimen.components.map(value=><option key={value.id} value={value.id}>{value.position}. {value.label}</option>)}</select></label>}{selectedComponent?.carrier&&<label>Carrier<select value={carrier} onChange={event=>setCarrier(event.target.value)}><option value="">Part only</option><option value={selectedComponent.carrier.id}>{selectedComponent.carrier.label}</option></select></label>}</div>}
     <button className="primary" disabled={busy}>Review import</button>
    </form>}
-   {record.phase==='awaiting_review'&&record.review&&<div className="review-decision"><p><strong>Review saved.</strong> {record.review.identity.identity==='unidentified'?'No catalog identity was asserted.':'A candidate was selected for this capture.'}</p><button className="primary" disabled={busy} onClick={()=>void publish()}>Publish capture</button></div>}
+   {record.phase==='awaiting_review'&&record.review&&!conflict&&<div className="review-decision"><p><strong>Review saved.</strong> {record.review.identity.identity==='unidentified'?'No catalog identity was asserted.':'A candidate was selected for this capture.'}</p><button className="primary" disabled={busy} onClick={()=>void publish()}>Publish capture</button></div>}
    {record.phase==='published'&&<p className="notice" role="status">Capture published. The original package and integrity evidence are now in the archive.</p>}
   </div>}
  </section>;

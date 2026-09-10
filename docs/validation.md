@@ -1,5 +1,36 @@
 # Validation recorded for the foundation
 
+## Wave 3 P04.3 browser/security and root review — 2026-09-10
+
+- The expanded Chromium flow retries a real stale-publication Job, observes the same
+  identity at attempt 2 while queued, cancels it through “Cancel job,” reaches durable
+  `cancelled`, and verifies focus returns to “Refresh jobs.” P02.4 Rust tests retain
+  the complete cancellation/retry boundary and idempotency matrix.
+- A second Import selects the exact Reference copy / Disc 1 / carrier chain. A real
+  concurrent Item edit makes review stale; the server preserves the submitted review,
+  the UI fetches current Import/Item revisions, keeps all three selectors, and requires
+  an explicit second “Review import” to apply against the current revision.
+- The reviewed Import handle survives full page reload in browser storage and is
+  re-authorized/refetched when curation reopens. Simulated offline refresh produces a
+  visible alert; restoring the network fires immediate Import/Job refresh and clears
+  it. Polling does not own or replace local review choices.
+- After switching to a separately authenticated viewer, direct reads of the owner's
+  saved Import and Job return 404 and direct Import creation in the viewer-only
+  collection returns 403. The built-in analyzer remains visibly limited by D04/D05;
+  no analyzer success or verification badge is rendered.
+- Radio-group keyboard navigation, named forms/regions, one live progress status,
+  post-action focus restoration, `prefers-reduced-motion`, and 390px no-overflow
+  assertions pass. `import-mobile.png` and `jobs-mobile.png` are captured for visual
+  critique; the accession docket remains a single archival ledger rather than a card
+  dashboard.
+- Checks: architecture/documentation links, generated API drift, TypeScript check/
+  build, rebuilt embedded-assets server, and both normal HTTPS and `LOCAL_SETUP=1`
+  Chromium suites pass. The 138 Rust tests remain unchanged from P03.4. P04 root
+  acceptance review passes locally.
+- **Not implemented:** C06 event streaming, D04/D05 analyzers, document attachments,
+  and offline artwork. **Externally unqualified:** independent accessibility/security
+  review and non-Chromium browser behavior.
+
 ## Wave 3 P04.2 durable Job controls — 2026-09-10
 
 - The curation dialog's “Background work” region consumes the submitter-scoped

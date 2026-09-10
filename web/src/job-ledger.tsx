@@ -11,7 +11,7 @@ function readable(value:string){return value.replaceAll('_',' ');}
 
 export default function JobLedger(){
  const [jobs,setJobs]=useState<Job[]>([]);const [cursor,setCursor]=useState<string|null>();const [error,setError]=useState('');const [changing,setChanging]=useState('');
- const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);const live=useRef(true);
+ const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);const live=useRef(true);const refreshButton=useRef<HTMLButtonElement>(null);
 
  async function fetchJobs(append=false){
   try{
@@ -35,11 +35,11 @@ export default function JobLedger(){
  async function mutate(job:Job,action:'cancel'|'retry'){
   setChanging(job.id);setError('');
   try{await api(`/jobs/${job.id}/${action}`,{method:'POST'});const next=await fetchJobs();if(timer.current)clearTimeout(timer.current);schedule(next);window.dispatchEvent(new Event('collector-jobs-updated'));}
-  catch(value){setError(requestErrorMessage(value));}finally{setChanging('');}
+  catch(value){setError(requestErrorMessage(value));}finally{setChanging('');requestAnimationFrame(()=>refreshButton.current?.focus());}
  }
  const active=jobs.filter(job=>activeStates.has(job.state));const history=jobs.filter(job=>!activeStates.has(job.state));
  return <section className="job-ledger" aria-labelledby="job-ledger-heading">
-  <div className="section-heading"><div><h3 id="job-ledger-heading">Background work</h3><p className="muted">Your package, publication, and integrity jobs stay here across refreshes.</p></div><button disabled={!!changing} onClick={()=>void fetchJobs()}>Refresh jobs</button></div>
+  <div className="section-heading"><div><h3 id="job-ledger-heading">Background work</h3><p className="muted">Your package, publication, and integrity jobs stay here across refreshes.</p></div><button ref={refreshButton} disabled={!!changing} onClick={()=>void fetchJobs()}>Refresh jobs</button></div>
   {error&&<p className="notice error" role="alert">{error}</p>}
   <JobGroup heading="Active" jobs={active} changing={changing} onAction={mutate}/>
   <JobGroup heading="History" jobs={history} changing={changing} onAction={mutate}/>

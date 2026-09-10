@@ -392,7 +392,7 @@ filesystem termination behavior remain externally unqualified.
 
 **Routine · Dependencies:** P02, P03, U02. **Owner:** web curation/administration through application APIs.
 
-**Status (2026-09-10): P04.1-P04.2 complete locally; P04.3 is next.** The curation
+**Status (2026-09-10): complete locally; D02.1 is next.** The curation
 workbench now stages browser files or a configured-inbox package through the one
 P03 workflow, displays the complete inventory and durable progress, shows honest
 analysis limitations/candidate choices, records Item/copy/part/carrier or unattached
@@ -402,9 +402,13 @@ selectors and a full unidentified/unattached browser publication at desktop and
 attempts, diagnostics, and real cancel/retry controls. It polls visible active work
 every two seconds, backs off to 30 seconds when idle, and refreshes on reconnect or
 action without owning or resetting Import review drafts. Chromium retries a real
-stale-publication failure and observes attempt 2. The P04.3 browser/security,
-cancellation-race, focus/live-region, reduced-motion, and local-listener matrix
-remain not implemented.
+stale-publication failure and observes attempt 2. The P04.3 matrix now proves
+refresh restoration, offline/reconnect recovery, retry and queued cancellation,
+stale physical review with choices retained/reapplied, unavailable-tool disclosure,
+viewer denial for another user's Job/Import and unauthorized staging, keyboard/focus
+order, live progress, reduced motion, and mobile layout in both normal HTTPS and
+private local-setup modes. P04 passed its local root review; C06 event streaming and
+independent accessibility/security review remain outstanding.
 
 Add configured inbox selection, package inventory/review, provisional association controls, durable job progress/error/cancel/retry views and reconnect behavior. Configuration administration remains private by default; collection imports use the curation surface.
 
