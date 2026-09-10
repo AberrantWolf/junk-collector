@@ -155,7 +155,7 @@ Planned children (complete in order): U03.1 focused lifecycle commands, U03.2
 lifecycle editor, and U03.3 privacy/reindex review. See
 [the Wave 3 execution plan](wave-3-plan.md).
 
-**Status (2026-09-10): U03.1 implemented; U03.2 is next.** The broad Item-save
+**Status (2026-09-10): U03.1 and U03.2 implemented; U03.3 is next.** The broad Item-save
 command can no longer submit specimen state, and the Wave 1 adapter delegates
 only when its specimen snapshot exactly matches canonical storage. Focused,
 revisioned, idempotent commands and curator-only routes create/update specimens
@@ -165,8 +165,14 @@ Specimen, Component, Carrier, and Loan identities derive deterministically from
 command identity. Permanent tests cover two copies, wishlist-only creation,
 multi-disc ordering, Capture/Asset removal guards, returned-loan history,
 disposal, replay, authorization, reindex, and restart. The obsolete broad-save
-add-copy UI shortcut was removed; the complete lifecycle editor and final
-privacy/reindex review are explicitly not implemented yet.
+add-copy UI shortcut was replaced only after the focused APIs worked. The
+archival-workbench editor now manages copies, condition, acquisition/private
+notes, ordered parts/carriers, lending, explicit return, retained loan history,
+and disposal. A real revision race keeps the user's draft and offers either
+server reload/discard or manual reapply against the displayed current revision.
+Chromium exercises the full lifecycle, keyboard order, and a 390px responsive
+layout. The U03.3 structural privacy/reindex/browser review is explicitly not
+implemented yet.
 
 ### U04 — Sensitive supporting assets and role-aware artwork
 

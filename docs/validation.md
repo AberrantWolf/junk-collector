@@ -1,5 +1,27 @@
 # Validation recorded for the foundation
 
+## Wave 3 U03.2 physical lifecycle editor — 2026-09-10
+
+- The Chromium smoke scenario creates a copy with condition, acquisition, cost,
+  source, and private notes through the focused API; creates Disc 2 before Disc 1
+  and observes canonical ordering; starts and returns a loan; and confirms the
+  returned loan remains visible after disposal.
+- The scenario opens an edit draft, publishes a concurrent broad Item revision,
+  receives a real 409, and proves the typed draft remains unchanged. The conflict
+  panel displays the form's revision and current server revision; “Keep draft”
+  rebases without discarding input and the subsequent focused command persists it.
+- Forms and copy/part/loan rows have named landmarks and controls. The browser
+  checks tab order from “Add physical copy” to “Edit copy,” captures
+  `web/test-results/inventory-mobile.png` at 390px, and finds no horizontal
+  overflow. Visual inspection found the copy ledger dense but legible, with
+  ordered parts, private notes, and lifecycle actions clearly separated in the
+  existing archival-workbench style; no decorative dashboard treatment was added.
+- `npm --prefix web run check`, `npm --prefix web run build`, the rebuilt embedded
+  `collector-server`, and `npm --prefix web run test:smoke` pass.
+- **Not implemented:** U03.3's complete viewer structural-absence matrix,
+  independent-copy restart/reindex review, and browser security review. Specimen
+  deletion remains intentionally absent.
+
 ## Wave 3 U03.1 focused physical lifecycle commands — 2026-09-10
 
 - TDD coverage in `focused_inventory_commands_preserve_history_and_are_idempotent`
