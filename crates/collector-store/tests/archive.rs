@@ -1,9 +1,9 @@
 use collector_app::{
     AccessPort, ActiveOwnership, AuthenticatedPrincipal, CarrierDetails, Catalog,
-    CollectionService, CommandContext, ComponentDetails, ContentPort, CredentialKind,
-    DisposeSpecimenCommand, IdempotencyPort, ImportPort, JobPort, JobSpec, MediaResource,
-    ReceiptDecision, ReturnLoanCommand, ReturnedPossession, SaveItemCommand, SpecimenDetails,
-    StartLoanCommand,
+    CollectionService, CommandContext, ComponentDetails, ContentPort, CreateAssetCommand,
+    CredentialKind, DisposeSpecimenCommand, IdempotencyPort, ImportPort, JobPort, JobSpec,
+    MediaResource, ReceiptDecision, ReturnLoanCommand, ReturnedPossession, SaveItemCommand,
+    SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
 };
 use collector_core::*;
 use collector_modules::Registry;
@@ -2053,6 +2053,313 @@ fn cover_upload_retains_original_and_has_bounded_thumbnail() {
 }
 
 #[test]
+fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
+    let (root, store, actor, service, collection) = setup();
+    let work = save_work_record(
+        &service,
+        &actor,
+        Work {
+            id: WorkId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            provisional: false,
+            title: "Asset work".into(),
+            translations: vec![],
+            identifiers: vec![],
+            migration_provenance: vec![],
+            deleted: false,
+            updated_at: chrono::Utc::now(),
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let edition = save_edition_record(
+        &service,
+        &actor,
+        Edition {
+            id: EditionId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            work_id: Some(work.id),
+            provisional: false,
+            title: "Asset edition".into(),
+            expected_components: vec![],
+            identifiers: vec![],
+            migration_provenance: vec![],
+            deleted: false,
+            updated_at: chrono::Utc::now(),
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let mut inventory = item(collection.id);
+    inventory.identity_link = ItemIdentityLink::Edition {
+        edition_id: edition.id,
+    };
+    let inventory = save_inventory(&service, &actor, inventory, Revision(0)).unwrap();
+    let inventory = service
+        .create_specimen(
+            &actor,
+            inventory.id,
+            inventory.revision,
+            SpecimenDetails {
+                label: "Asset copy".into(),
+                condition: Condition::Good,
+                ownership: ActiveOwnership::Owned,
+                possession: Possession::Present,
+                acquisition: None,
+                private_notes: None,
+            },
+            &CommandContext::new("asset-specimen").unwrap(),
+        )
+        .unwrap();
+    let specimen_id = inventory.specimens[0].id;
+    let inventory = service
+        .create_component(
+            &actor,
+            inventory.id,
+            specimen_id,
+            inventory.revision,
+            ComponentDetails {
+                label: "Disc one".into(),
+                kind: ComponentKind::OpticalDisc,
+                position: 1,
+                carrier: Some(CarrierDetails {
+                    label: "CD".into(),
+                    kind: CarrierKind::OpticalDisc,
+                }),
+            },
+            &CommandContext::new("asset-component").unwrap(),
+        )
+        .unwrap();
+    let component_id = inventory.specimens[0].components[0].id;
+    let carrier_id = inventory.specimens[0].components[0]
+        .carrier
+        .as_ref()
+        .unwrap()
+        .id;
+    let capture = save_capture_record(
+        &service,
+        &actor,
+        Capture {
+            id: CaptureId::new(),
+            collection_id: collection.id,
+            revision: Revision(0),
+            association: CaptureAssociation {
+                item_id: Some(inventory.id),
+                specimen_id: Some(specimen_id),
+                component_id: Some(component_id),
+                carrier_id: Some(carrier_id),
+            },
+            created_at: chrono::Utc::now(),
+            representations: vec![],
+        },
+        Revision(0),
+    )
+    .unwrap();
+    let item_revision = store.item(inventory.id).unwrap().revision;
+
+    let subjects = [
+        AssetSubject::Item {
+            item_id: inventory.id,
+        },
+        AssetSubject::Specimen { specimen_id },
+        AssetSubject::Component { component_id },
+        AssetSubject::Capture {
+            capture_id: capture.id,
+        },
+        AssetSubject::Work { work_id: work.id },
+        AssetSubject::Edition {
+            edition_id: edition.id,
+        },
+    ];
+    let formats = [
+        (image::ImageFormat::Png, "image/png"),
+        (image::ImageFormat::Jpeg, "image/jpeg"),
+        (image::ImageFormat::WebP, "image/webp"),
+    ];
+    let kinds = [AssetKind::Cover, AssetKind::Photo, AssetKind::Scan];
+    let mut states = Vec::new();
+    let mut originals = Vec::new();
+    for (index, subject) in subjects.into_iter().enumerate() {
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(480 + index as u32, 240, image::Rgb([index as u8, 40, 80]))
+            .write_to(&mut encoded, formats[index % formats.len()].0)
+            .unwrap();
+        let bytes = encoded.into_inner();
+        let context = CommandContext::new(format!("asset-create-{index}")).unwrap();
+        let command = CreateAssetCommand {
+            collection_id: collection.id,
+            subject,
+            kind: kinds[index % kinds.len()].clone(),
+            visibility: Visibility::Shared,
+            alt_text: format!("Asset {index}"),
+        };
+        let state = service
+            .create_asset(&actor, command.clone(), &bytes, &context)
+            .unwrap();
+        assert_eq!(state.revision, Revision(1));
+        assert_eq!(state.asset.subject, subject);
+        assert_eq!(state.asset.media_type, formats[index % formats.len()].1);
+        assert_eq!(state.asset.file.bytes, ByteLength(bytes.len() as u64));
+        let thumbnail = state.asset.thumbnail.as_ref().unwrap();
+        assert_eq!(thumbnail.name, "thumbnail.png");
+        let thumbnail_path = files_named(&root.path().join("archive"), "thumbnail.png")
+            .into_iter()
+            .find(|path| path.to_string_lossy().contains(&state.asset.id.to_string()))
+            .unwrap();
+        let thumbnail_image = image::open(thumbnail_path).unwrap();
+        assert!(thumbnail_image.width() <= 192 && thumbnail_image.height() <= 192);
+        let replay = service
+            .create_asset(&actor, command, &bytes, &context)
+            .unwrap();
+        assert_eq!(replay.revision, Revision(1));
+        assert_eq!(replay.asset.id, state.asset.id);
+        originals.push(bytes);
+        states.push(state);
+    }
+    assert_eq!(store.item(inventory.id).unwrap().revision, item_revision);
+    for bytes in &originals {
+        assert!(find_file_with_bytes(&root.path().join("archive"), bytes).is_some());
+    }
+
+    let original_id = states[0].asset.id;
+    let updated = service
+        .update_asset(
+            &actor,
+            original_id,
+            Revision(1),
+            UpdateAssetCommand {
+                visibility: Visibility::Curators,
+                alt_text: "Private archival cover".into(),
+            },
+            &CommandContext::new("asset-update").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(updated.revision, Revision(2));
+    assert_eq!(updated.asset.subject, states[0].asset.subject);
+    assert_eq!(updated.asset.file.digest, states[0].asset.file.digest);
+    assert_eq!(store.item(inventory.id).unwrap().revision, item_revision);
+    let tombstone = service
+        .tombstone_asset(
+            &actor,
+            original_id,
+            Revision(2),
+            &CommandContext::new("asset-tombstone").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(tombstone.revision, Revision(3));
+    assert!(tombstone.deleted);
+    assert!(
+        service
+            .asset(&actor, inventory.id, original_id, false)
+            .is_err()
+    );
+    assert!(find_file_with_bytes(&root.path().join("archive"), &originals[0]).is_some());
+    let revision_records = files_named(&root.path().join("archive"), "record.v3.json")
+        .into_iter()
+        .filter(|path| path.to_string_lossy().contains(&original_id.to_string()))
+        .count();
+    assert_eq!(revision_records, 3);
+    assert_eq!(
+        ContentPort::asset_state(&*store, original_id)
+            .unwrap()
+            .revision,
+        Revision(3)
+    );
+    assert_eq!(store.item(inventory.id).unwrap().revision, item_revision);
+
+    store.reindex().unwrap();
+    for state in states.iter().skip(1) {
+        assert_eq!(
+            ContentPort::asset_state(&*store, state.asset.id)
+                .unwrap()
+                .revision,
+            Revision(1)
+        );
+    }
+    assert!(
+        ContentPort::asset_state(&*store, original_id)
+            .unwrap()
+            .deleted
+    );
+}
+
+#[test]
+fn unsupported_or_invalid_asset_inputs_publish_nothing() {
+    let (root, _store, actor, service, collection) = setup();
+    let inventory = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let staging = root.path().join("state/asset-publication");
+    let staging_count = || {
+        std::fs::read_dir(&staging)
+            .map(|entries| entries.count())
+            .unwrap_or(0)
+    };
+    let before = staging_count();
+    let command_for = |kind| CreateAssetCommand {
+        collection_id: collection.id,
+        subject: AssetSubject::Item {
+            item_id: inventory.id,
+        },
+        kind,
+        visibility: Visibility::Shared,
+        alt_text: "Evidence".into(),
+    };
+    assert!(matches!(
+        service.create_asset(
+            &actor,
+            command_for(AssetKind::Document),
+            b"document",
+            &CommandContext::new("asset-document").unwrap()
+        ),
+        Err(Error::Unavailable(message)) if message.contains("not implemented")
+    ));
+    assert!(matches!(
+        service.create_asset(
+            &actor,
+            command_for(AssetKind::Cover),
+            b"not an image",
+            &CommandContext::new("asset-corrupt").unwrap()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        service.create_asset(
+            &actor,
+            command_for(AssetKind::Photo),
+            &vec![0; 20 * 1024 * 1024 + 1],
+            &CommandContext::new("asset-oversized").unwrap()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    let other = service
+        .create_collection(&test_authentication(&actor), "Other", &command())
+        .unwrap();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::new(1, 1)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    assert!(matches!(
+        service.create_asset(
+            &actor,
+            CreateAssetCommand {
+                collection_id: other.id,
+                ..command_for(AssetKind::Scan)
+            },
+            png.get_ref(),
+            &CommandContext::new("asset-cross-collection").unwrap()
+        ),
+        Err(Error::Invalid(message)) if message.contains("outside")
+    ));
+    assert_eq!(staging_count(), before);
+    assert!(
+        files_named(&root.path().join("archive"), "record.v3.json")
+            .into_iter()
+            .all(|path| !path.to_string_lossy().contains("/assets/"))
+    );
+}
+
+#[test]
 fn cover_payload_faults_recover_with_one_collection_asset() {
     for point in publication_points() {
         let root = tempfile::tempdir().unwrap();
@@ -4039,19 +4346,23 @@ fn subprocess_command_receipt_worker() {
             store.commit_upload(upload_id).unwrap();
             serde_json::to_value(effects.verify_integrity(item_id).unwrap()).unwrap()
         }
-        "cover.publish" => {
+        "asset.create.compat-cover" => {
             let mut png = std::io::Cursor::new(Vec::new());
             image::RgbaImage::new(2, 2)
                 .write_to(&mut png, image::ImageFormat::Png)
                 .unwrap();
             serde_json::to_value(
                 effects
-                    .publish_cover(
-                        item_id,
+                    .create_asset(
                         AssetId::new(),
-                        Revision(1),
+                        collector_app::CreateAssetCommand {
+                            collection_id: collection,
+                            subject: AssetSubject::Item { item_id },
+                            kind: AssetKind::Cover,
+                            visibility: Visibility::Shared,
+                            alt_text: "Cover".into(),
+                        },
                         png.get_ref(),
-                        "Cover".into(),
                     )
                     .unwrap(),
             )
@@ -4089,7 +4400,7 @@ fn sigkill_receipt_effect_gap_replays_every_mutation_family() {
         "upload.cancel",
         "upload.commit",
         "integrity.verify",
-        "cover.publish",
+        "asset.create.compat-cover",
     ];
     for operation in operations {
         for early in [false, true] {

@@ -74,15 +74,25 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   independent copies, returned history, disposal, Capture/Asset relationships,
   and stored artwork bytes survive reindex/restart. U03 is locally complete;
   independent review remains external.
+- U04.1 adds standalone, collection-scoped Asset creation for PNG/JPEG/WebP
+  Covers, Photos, and Scans attached to Work, Edition, Item, Specimen, Component,
+  or Capture subjects. One bounded image pipeline preserves originals and emits
+  PNG thumbnails. Visibility/alt-text updates and tombstones create independent
+  schema-3 Asset revisions without changing Item revisions; subjects remain
+  immutable, payloads/history survive tombstoning, and reindex retains standalone
+  records. Documents are rejected as explicitly unavailable rather than accepted
+  as a placeholder.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Implement sensitive attachments and the configured inbox/import-review UI.
-   Physical lifecycle APIs, editor, privacy filtering, and recovery review are
-   locally complete.
+2. Complete U04.2/U04.3 role-filtered Asset DTO/routes, `primary_artwork`, and
+   attachment controls, then implement the configured inbox/import-review UI.
+   Standalone image persistence is locally complete; document attachments remain
+   unimplemented. Physical lifecycle APIs, editor, privacy filtering, and recovery
+   review are locally complete.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

@@ -100,6 +100,15 @@ pub struct MediaResource {
     pub download_name: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct AssetState {
+    pub collection_id: CollectionId,
+    pub revision: Revision,
+    pub asset: Asset,
+    pub deleted: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Persistence and file mechanisms after application policy has authorized an
 /// effect. No method receives a Principal or Role.
 pub trait ContentPort: Send + Sync {
@@ -112,14 +121,22 @@ pub trait ContentPort: Send + Sync {
         index: usize,
     ) -> Result<MediaResource>;
     fn asset(&self, item: ItemId, asset: AssetId, thumbnail: bool) -> Result<MediaResource>;
-    fn publish_cover(
+    fn asset_state(&self, asset: AssetId) -> Result<AssetState>;
+    fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId>;
+    fn create_asset(
         &self,
-        item: ItemId,
+        asset: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+    ) -> Result<AssetState>;
+    fn update_asset(
+        &self,
         asset: AssetId,
         expected: Revision,
-        bytes: &[u8],
+        visibility: Visibility,
         alt_text: String,
-    ) -> Result<Item>;
+    ) -> Result<AssetState>;
+    fn tombstone_asset(&self, asset: AssetId, expected: Revision) -> Result<AssetState>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -872,6 +889,23 @@ pub struct DisposeSpecimenCommand {
     pub date: chrono::NaiveDate,
     pub reason: String,
     pub possession: ReturnedPossession,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAssetCommand {
+    pub collection_id: CollectionId,
+    pub subject: AssetSubject,
+    pub kind: AssetKind,
+    pub visibility: Visibility,
+    pub alt_text: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateAssetCommand {
+    pub visibility: Visibility,
+    pub alt_text: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1897,6 +1931,65 @@ impl CollectionService {
         }
         self.content.asset(item_id, asset_id, thumbnail)
     }
+    pub fn create_asset(
+        &self,
+        actor: &Principal,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+        context: &CommandContext,
+    ) -> Result<AssetState> {
+        validate_asset_upload(&command.kind, &command.alt_text, bytes)?;
+        self.authorize(actor, command.collection_id, Action::Curate)?;
+        let subject_collection = self.content.asset_subject_collection(command.subject)?;
+        if subject_collection != command.collection_id {
+            return Err(Error::Invalid(
+                "asset subject is outside the selected collection".into(),
+            ));
+        }
+        let asset_id = deterministic_new_asset_id(actor.user_id, context.key());
+        let request = (asset_id, command.clone(), Digest::sha256(bytes));
+        self.execute_command(actor, context, "asset.create", &request, |effects| {
+            effects.create_asset(asset_id, command, bytes)
+        })
+    }
+    pub fn update_asset(
+        &self,
+        actor: &Principal,
+        asset_id: AssetId,
+        expected: Revision,
+        command: UpdateAssetCommand,
+        context: &CommandContext,
+    ) -> Result<AssetState> {
+        if command.alt_text.len() > 4096 {
+            return Err(Error::Invalid("alt text exceeds upload limit".into()));
+        }
+        let current = self.content.asset_state(asset_id)?;
+        self.authorize(actor, current.collection_id, Action::Curate)?;
+        if current.deleted {
+            return Err(Error::NotFound);
+        }
+        let request = (asset_id, expected, command.clone());
+        self.execute_command(actor, context, "asset.update", &request, |effects| {
+            effects.update_asset(asset_id, expected, command.visibility, command.alt_text)
+        })
+    }
+    pub fn tombstone_asset(
+        &self,
+        actor: &Principal,
+        asset_id: AssetId,
+        expected: Revision,
+        context: &CommandContext,
+    ) -> Result<AssetState> {
+        let current = self.content.asset_state(asset_id)?;
+        self.authorize(actor, current.collection_id, Action::Curate)?;
+        if current.deleted {
+            return Err(Error::NotFound);
+        }
+        let request = (asset_id, expected);
+        self.execute_command(actor, context, "asset.tombstone", &request, |effects| {
+            effects.tombstone_asset(asset_id, expected)
+        })
+    }
     pub fn publish_cover(
         &self,
         actor: &Principal,
@@ -1908,14 +2001,32 @@ impl CollectionService {
     ) -> Result<Item> {
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, Action::Curate)?;
-        let asset_id = deterministic_asset_id(actor.user_id, context.key());
-        if bytes.len() > 20 * 1024 * 1024 || alt_text.len() > 4096 {
-            return Err(Error::Invalid("image exceeds upload limit".into()));
+        if item.revision != expected {
+            return Err(Error::Conflict);
         }
+        let asset_id = deterministic_asset_id(actor.user_id, context.key());
+        validate_asset_upload(&AssetKind::Cover, &alt_text, bytes)?;
         let request = (item_id, expected, Digest::sha256(bytes), alt_text.clone());
-        self.execute_command(actor, context, "cover.publish", &request, |effects| {
-            effects.publish_cover(item_id, asset_id, expected, bytes, alt_text)
-        })
+        self.execute_command(
+            actor,
+            context,
+            "asset.create.compat-cover",
+            &request,
+            |effects| {
+                effects.create_asset(
+                    asset_id,
+                    CreateAssetCommand {
+                        collection_id: item.collection_id,
+                        subject: AssetSubject::Item { item_id },
+                        kind: AssetKind::Cover,
+                        visibility: Visibility::Shared,
+                        alt_text,
+                    },
+                    bytes,
+                )
+            },
+        )?;
+        self.reader.item(item_id)
     }
     fn authorized_upload(&self, actor: &Principal, id: JobId) -> Result<Upload> {
         let upload = self.imports.upload(id)?;
@@ -2667,6 +2778,30 @@ fn deterministic_asset_id(user: UserId, key: &str) -> AssetId {
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     AssetId(uuid::Uuid::from_bytes(bytes))
+}
+
+fn deterministic_new_asset_id(user: UserId, key: &str) -> AssetId {
+    AssetId(deterministic_inventory_uuid(user, "asset-create", key))
+}
+
+fn validate_asset_upload(kind: &AssetKind, alt_text: &str, bytes: &[u8]) -> Result<()> {
+    match kind {
+        AssetKind::Cover | AssetKind::Photo | AssetKind::Scan => {}
+        AssetKind::Document => {
+            return Err(Error::Unavailable(
+                "document uploads are not implemented in Wave 3".into(),
+            ));
+        }
+        AssetKind::Other => {
+            return Err(Error::Invalid(
+                "asset kind must be cover, photo, or scan".into(),
+            ));
+        }
+    }
+    if bytes.len() > 20 * 1024 * 1024 || alt_text.len() > 4096 {
+        return Err(Error::Invalid("image exceeds upload limit".into()));
+    }
+    Ok(())
 }
 
 fn deterministic_job_id(user: UserId, operation: &str, key: &str) -> JobId {

@@ -9,10 +9,11 @@ mod migration_v3;
 mod publication;
 use chrono::Utc;
 use collector_app::{
-    AccessPort, AccountView, AdministrationPort, AuthenticatedPrincipal, AuthenticationPort,
-    Catalog, ContentPort, CredentialKind, EnrollmentPort, EnrollmentStart, EnrollmentView,
-    GrantView, IdempotencyPort, ImportPort, JobClaim, JobPort, JobRecord, JobSpec, MediaResource,
-    NativeCredentialIssue, NativeDeviceView, ReceiptDecision, SessionView, StoredPasskey,
+    AccessPort, AccountView, AdministrationPort, AssetState, AuthenticatedPrincipal,
+    AuthenticationPort, Catalog, ContentPort, CreateAssetCommand, CredentialKind, EnrollmentPort,
+    EnrollmentStart, EnrollmentView, GrantView, IdempotencyPort, ImportPort, JobClaim, JobPort,
+    JobRecord, JobSpec, MediaResource, NativeCredentialIssue, NativeDeviceView, ReceiptDecision,
+    SessionView, StoredPasskey,
 };
 pub use collector_app::{Upload, UploadFile};
 use collector_core::*;
@@ -948,15 +949,35 @@ impl ContentPort for Store {
         })
     }
 
-    fn publish_cover(
+    fn asset_state(&self, asset: AssetId) -> Result<AssetState> {
+        self.asset_state_record(asset)
+    }
+
+    fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId> {
+        self.asset_subject_collection_record(subject)
+    }
+
+    fn create_asset(
         &self,
-        item: ItemId,
+        asset: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+    ) -> Result<AssetState> {
+        self.create_asset_record(asset, command, bytes)
+    }
+
+    fn update_asset(
+        &self,
         asset: AssetId,
         expected: Revision,
-        bytes: &[u8],
+        visibility: Visibility,
         alt_text: String,
-    ) -> Result<Item> {
-        self.publish_cover_record(item, asset, expected, bytes, alt_text)
+    ) -> Result<AssetState> {
+        self.update_asset_record(asset, expected, visibility, alt_text)
+    }
+
+    fn tombstone_asset(&self, asset: AssetId, expected: Revision) -> Result<AssetState> {
+        self.tombstone_asset_record(asset, expected)
     }
 }
 
@@ -2661,6 +2682,31 @@ fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
     item.captures = rows
         .map(|row| serde_json::from_str(&row.map_err(storage)?).map_err(storage))
         .collect::<Result<Vec<_>>>()?;
+    let mut assets = item
+        .assets
+        .drain(..)
+        .map(|asset| (asset.id, asset))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut statement = db
+        .prepare("SELECT record FROM assets WHERE collection_id=?")
+        .map_err(storage)?;
+    let rows = statement
+        .query_map([item.collection_id.to_string()], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(storage)?;
+    for row in rows {
+        let record: archive_v3::AssetRecordV3 =
+            serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
+        if asset_belongs_to_item(&record.asset, item) {
+            if record.deleted {
+                assets.remove(&record.asset.id);
+            } else {
+                assets.insert(record.asset.id, record.asset);
+            }
+        }
+    }
+    item.assets = assets.into_values().collect();
     Ok(())
 }
 
@@ -2685,6 +2731,11 @@ fn graph_from_projection(db: &Connection, collection: CollectionId) -> Result<Co
     for item in &mut items {
         hydrate_captures(db, item)?;
     }
+    let asset_records: Vec<archive_v3::AssetRecordV3> = records(
+        db,
+        "SELECT record FROM assets WHERE collection_id=?",
+        collection,
+    )?;
     Ok(CollectionGraph {
         works: records(
             db,
@@ -2701,7 +2752,11 @@ fn graph_from_projection(db: &Connection, collection: CollectionId) -> Result<Co
             "SELECT record FROM captures WHERE collection_id=?",
             collection,
         )?,
-        assets: items.iter().flat_map(|item| item.assets.clone()).collect(),
+        assets: asset_records
+            .into_iter()
+            .filter(|record| !record.deleted)
+            .map(|record| record.asset)
+            .collect(),
         items,
     })
 }

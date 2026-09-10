@@ -960,38 +960,87 @@ impl Store {
         }
         Ok((path, file))
     }
-    pub(crate) fn publish_cover_record(
+    pub(crate) fn asset_state_record(&self, asset_id: AssetId) -> Result<AssetState> {
+        let record: String = lock(&self.db)?
+            .query_row(
+                "SELECT record FROM assets WHERE id=?",
+                [asset_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        let record: archive_v3::AssetRecordV3 = serde_json::from_str(&record).map_err(storage)?;
+        Ok(AssetState {
+            collection_id: record.collection_id,
+            revision: record.revision,
+            asset: record.asset,
+            deleted: record.deleted,
+            updated_at: record.updated_at,
+        })
+    }
+
+    pub(crate) fn asset_subject_collection_record(
         &self,
-        item_id: ItemId,
-        asset_id: AssetId,
-        expected: Revision,
-        bytes: &[u8],
-        alt_text: String,
-    ) -> Result<Item> {
-        let mut item = self.item(item_id)?;
-        if let Some(existing) = item.assets.iter().find(|asset| asset.id == asset_id) {
-            if existing.file.digest == Digest::sha256(bytes) && existing.alt_text == alt_text {
-                let staging = self
-                    .state
-                    .join("asset-publication")
-                    .join(asset_id.to_string());
-                if staging.exists() {
-                    fs::remove_dir_all(&staging).map_err(storage)?;
-                    sync_directory(
-                        staging
-                            .parent()
-                            .ok_or_else(|| Error::Storage("Asset staging has no parent".into()))?,
-                    )?;
-                }
-                return Ok(item);
+        subject: AssetSubject,
+    ) -> Result<CollectionId> {
+        match subject {
+            AssetSubject::Item { item_id } => Ok(self.item(item_id)?.collection_id),
+            AssetSubject::Work { work_id } => Ok(self.work(work_id)?.collection_id),
+            AssetSubject::Edition { edition_id } => Ok(self.edition(edition_id)?.collection_id),
+            AssetSubject::Capture { capture_id } => Ok(self.capture(capture_id)?.collection_id),
+            AssetSubject::Specimen { specimen_id } => self.subject_owner(|item| {
+                item.specimens
+                    .iter()
+                    .any(|specimen| specimen.id == specimen_id)
+            }),
+            AssetSubject::Component { component_id } => self.subject_owner(|item| {
+                item.specimens.iter().any(|specimen| {
+                    specimen
+                        .components
+                        .iter()
+                        .any(|component| component.id == component_id)
+                })
+            }),
+        }
+    }
+
+    fn subject_owner(&self, matches: impl Fn(&Item) -> bool) -> Result<CollectionId> {
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("SELECT record FROM items").map_err(storage)?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(storage)?;
+        let mut owner = None;
+        for row in rows {
+            let item: Item = serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
+            if matches(&item) && owner.replace(item.collection_id).is_some() {
+                return Err(Error::Storage(
+                    "asset subject identity has more than one owner".into(),
+                ));
             }
-            return Err(Error::IdempotencyConflict);
         }
-        if item.revision != expected {
-            return Err(Error::Conflict);
-        }
+        owner.ok_or(Error::NotFound)
+    }
+
+    pub(crate) fn create_asset_record(
+        &self,
+        asset_id: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+    ) -> Result<AssetState> {
+        let CreateAssetCommand {
+            collection_id,
+            subject,
+            kind,
+            visibility,
+            alt_text,
+        } = command;
         if bytes.len() > 20 * 1024 * 1024 || alt_text.len() > 4096 {
             return Err(Error::Invalid("image exceeds upload limit".into()));
+        }
+        if !matches!(kind, AssetKind::Cover | AssetKind::Photo | AssetKind::Scan) {
+            return Err(Error::Invalid("unsupported image asset kind".into()));
         }
         let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
             .with_guessed_format()
@@ -1010,31 +1059,57 @@ impl Store {
         limits.max_image_height = Some(12000);
         limits.max_alloc = Some(256 * 1024 * 1024);
         reader.limits(limits);
-        let image = reader.decode().map_err(|e| Error::Invalid(e.to_string()))?;
+        let image = reader
+            .decode()
+            .map_err(|error| Error::Invalid(error.to_string()))?;
         let mut thumbnail = std::io::Cursor::new(Vec::new());
         image
             .thumbnail(192, 192)
             .write_to(&mut thumbnail, image::ImageFormat::Png)
             .map_err(storage)?;
         let thumbnail = thumbnail.into_inner();
-        let root = self
+
+        let _writer = lock(&self.writer)?;
+        if self.asset_subject_collection_record(subject)? != collection_id {
+            return Err(Error::Invalid(
+                "asset subject is outside the selected collection".into(),
+            ));
+        }
+        if lock(&self.db)?
+            .query_row(
+                "SELECT 1 FROM assets WHERE id=?",
+                [asset_id.to_string()],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(storage)?
+            .is_some()
+        {
+            return Err(Error::IdempotencyConflict);
+        }
+        let collection = collection_path(&*lock(&self.db)?, &self.archive, collection_id)?;
+        let staging = self
             .state
             .join("asset-publication")
             .join(asset_id.to_string());
-        fs::create_dir_all(&root).map_err(storage)?;
-        let name = format!("original.{extension}");
-        write_new_or_verify(&root.join(&name), bytes)?;
-        write_new_or_verify(&root.join("thumbnail.png"), &thumbnail)?;
-        sync_directory(&root)?;
-        sync_directory(root.parent().unwrap())?;
-        item.assets.push(Asset {
+        fs::create_dir_all(&staging).map_err(storage)?;
+        let original_name = format!("original.{extension}");
+        write_new_or_verify(&staging.join(&original_name), bytes)?;
+        write_new_or_verify(&staging.join("thumbnail.png"), &thumbnail)?;
+        sync_directory(&staging)?;
+        sync_directory(
+            staging
+                .parent()
+                .ok_or_else(|| Error::Storage("Asset staging has no parent".into()))?,
+        )?;
+        let asset = Asset {
             id: asset_id,
-            subject: AssetSubject::Item { item_id },
-            kind: AssetKind::Cover,
-            visibility: Visibility::Shared,
+            subject,
+            kind,
+            visibility,
             media_type: media_type.into(),
             file: StoredFile {
-                name,
+                name: original_name,
                 bytes: ByteLength(bytes.len() as u64),
                 digest: Digest::sha256(bytes),
             },
@@ -1044,9 +1119,166 @@ impl Store {
                 digest: Digest::sha256(&thumbnail),
             }),
             alt_text,
-        });
-        self.publish(item, expected, vec![])
+        };
+        let payload_root = collection
+            .join("assets")
+            .join(asset_id.to_string())
+            .join("payload");
+        let record = archive_v3::AssetRecordV3 {
+            collection_id,
+            revision: Revision(1),
+            legacy_payloads: vec![
+                archive_v3::LegacyPayloadV3 {
+                    role: "original".into(),
+                    relative_path: relative(&self.archive, &payload_root.join(&asset.file.name))?,
+                    sha256: asset.file.digest.hex.clone(),
+                },
+                archive_v3::LegacyPayloadV3 {
+                    role: "thumbnail".into(),
+                    relative_path: relative(&self.archive, &payload_root.join("thumbnail.png"))?,
+                    sha256: asset
+                        .thumbnail
+                        .as_ref()
+                        .expect("thumbnail was created")
+                        .digest
+                        .hex
+                        .clone(),
+                },
+            ],
+            asset,
+            deleted: false,
+            updated_at: self.clock.now(),
+        };
+        self.publish_asset_state(record, &collection, true)
     }
+
+    pub(crate) fn update_asset_record(
+        &self,
+        asset_id: AssetId,
+        expected: Revision,
+        visibility: Visibility,
+        alt_text: String,
+    ) -> Result<AssetState> {
+        if alt_text.len() > 4096 {
+            return Err(Error::Invalid("alt text exceeds upload limit".into()));
+        }
+        let _writer = lock(&self.writer)?;
+        let current = self.asset_record_v3(asset_id)?;
+        if current.deleted {
+            return Err(Error::NotFound);
+        }
+        if current.revision != expected {
+            return Err(Error::Conflict);
+        }
+        let collection = collection_path(&*lock(&self.db)?, &self.archive, current.collection_id)?;
+        let mut record = current;
+        record.revision = Revision(
+            expected
+                .0
+                .checked_add(1)
+                .ok_or_else(|| Error::Invalid("Asset revision overflow".into()))?,
+        );
+        record.asset.visibility = visibility;
+        record.asset.alt_text = alt_text;
+        record.updated_at = self.clock.now();
+        self.publish_asset_state(record, &collection, false)
+    }
+
+    pub(crate) fn tombstone_asset_record(
+        &self,
+        asset_id: AssetId,
+        expected: Revision,
+    ) -> Result<AssetState> {
+        let _writer = lock(&self.writer)?;
+        let current = self.asset_record_v3(asset_id)?;
+        if current.deleted {
+            return Err(Error::NotFound);
+        }
+        if current.revision != expected {
+            return Err(Error::Conflict);
+        }
+        let collection = collection_path(&*lock(&self.db)?, &self.archive, current.collection_id)?;
+        let mut record = current;
+        record.revision = Revision(
+            expected
+                .0
+                .checked_add(1)
+                .ok_or_else(|| Error::Invalid("Asset revision overflow".into()))?,
+        );
+        record.deleted = true;
+        record.updated_at = self.clock.now();
+        self.publish_asset_state(record, &collection, false)
+    }
+
+    fn asset_record_v3(&self, asset_id: AssetId) -> Result<archive_v3::AssetRecordV3> {
+        let record: String = lock(&self.db)?
+            .query_row(
+                "SELECT record FROM assets WHERE id=?",
+                [asset_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        serde_json::from_str(&record).map_err(storage)
+    }
+
+    fn publish_asset_state(
+        &self,
+        record: archive_v3::AssetRecordV3,
+        collection: &Path,
+        publish_payloads: bool,
+    ) -> Result<AssetState> {
+        let state = AssetState {
+            collection_id: record.collection_id,
+            revision: record.revision,
+            asset: record.asset.clone(),
+            deleted: record.deleted,
+            updated_at: record.updated_at,
+        };
+        let payloads = if publish_payloads {
+            staged_asset_payloads(&self.archive, &self.state, collection, &record.asset)?
+        } else {
+            vec![]
+        };
+        let transaction = publish_v3_revision_with_payloads(
+            &self.with_command_result(&state)?,
+            V3RevisionTarget {
+                collection,
+                directory_kind: "assets",
+                entity_id: record.asset.id.to_string(),
+                collection_id: record.collection_id,
+                expected: Revision(record.revision.0 - 1),
+                revision: record.revision,
+            },
+            record.clone(),
+            vec![],
+            payloads,
+        )?;
+        lock(&self.db)?
+            .execute(
+                "INSERT INTO assets(id,collection_id,revision,record,deleted) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET collection_id=excluded.collection_id,revision=excluded.revision,record=excluded.record,deleted=excluded.deleted",
+                params![record.asset.id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?,record.deleted],
+            )
+            .map_err(storage)?;
+        finish_v3_publication(self, transaction)?;
+        if publish_payloads {
+            let staging = self
+                .state
+                .join("asset-publication")
+                .join(record.asset.id.to_string());
+            if staging.exists() {
+                fs::remove_dir_all(&staging).map_err(storage)?;
+                sync_directory(
+                    staging
+                        .parent()
+                        .ok_or_else(|| Error::Storage("Asset staging has no parent".into()))?,
+                )?;
+            }
+        }
+        Ok(state)
+    }
+
     pub(crate) fn asset_path(
         &self,
         item_id: ItemId,

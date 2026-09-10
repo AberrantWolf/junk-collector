@@ -1,5 +1,28 @@
 # Validation recorded for the foundation
 
+## Wave 3 U04.1 standalone asset commands — 2026-09-10
+
+- `standalone_assets_cover_all_subjects_and_keep_independent_history` creates
+  real PNG, JPEG, and WebP Covers/Photos/Scans across Work, Edition, Item,
+  Specimen, Component, and Capture subjects. It verifies original digests/bytes,
+  decodable PNG thumbnails bounded to 192×192, deterministic replay, immutable
+  subjects, independent visibility/alt-text revision, three retained metadata
+  revisions after tombstoning, unchanged Item revision, retained payload bytes,
+  and standalone-row survival through reindex.
+- `unsupported_or_invalid_asset_inputs_publish_nothing` probes explicit document
+  unavailability, corrupt image bytes, a byte over the 20 MiB limit, and a subject
+  outside the selected collection. No Asset revision or image scratch is created.
+  Existing phase-fault coverage continues to exercise real Asset payload recovery
+  through the compatibility cover consumer.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 118
+  locked workspace tests, warning-free all-target clippy, generated API drift,
+  TypeScript checking, web build, and rebuilt embedded-assets server pass.
+- **Not implemented:** U04.2 collection-scoped `PresentedAsset` metadata/original/
+  thumbnail routes, visibility authorization on those new routes, and server-side
+  `primary_artwork`; U04.3 attachment controls and artwork-row review. Document
+  uploads remain explicitly unavailable. **Externally unqualified:** independent
+  review.
+
 ## Wave 3 U03.3 physical lifecycle privacy/reindex review — 2026-09-10
 
 - The read-model firewall fixture now includes a returned loan with a unique
