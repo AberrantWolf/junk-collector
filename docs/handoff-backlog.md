@@ -392,6 +392,15 @@ filesystem termination behavior remain externally unqualified.
 
 **Routine · Dependencies:** P02, P03, U02. **Owner:** web curation/administration through application APIs.
 
+**Status (2026-09-10): P04.1 complete locally; P04.2 is next.** The curation
+workbench now stages browser files or a configured-inbox package through the one
+P03 workflow, displays the complete inventory and durable progress, shows honest
+analysis limitations/candidate choices, records Item/copy/part/carrier or unattached
+association, and publishes the Capture. The Chromium interaction covers both source
+selectors and a full unidentified/unattached browser publication at desktop and
+390px. Active/history Job controls, idle/reconnect polling, cancellation/retry UI,
+and the P04.3 browser/security matrix remain not implemented.
+
 Add configured inbox selection, package inventory/review, provisional association controls, durable job progress/error/cancel/retry views and reconnect behavior. Configuration administration remains private by default; collection imports use the curation surface.
 
 **Acceptance:** browser upload and inbox package reach the same review workflow; retry/cancel remain usable after refresh; missing tools are explained without a false verification badge; users cannot enumerate unauthorized server paths or other users' jobs.

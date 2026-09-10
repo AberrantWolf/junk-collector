@@ -1,5 +1,27 @@
 # Validation recorded for the foundation
 
+## Wave 3 P04.1 provisional Import workspace — 2026-09-10
+
+- The Chromium workflow opens the real curation dialog, selects the configured
+  `Optical shelf`/`reference-disc` inbox without exposing its temporary root, then
+  switches to browser files and stages `browser-disc.bin` through the modern Import
+  endpoint. The file inventory reaches its exact byte count and SHA-256 state.
+- “Review import” runs the owning music capability as a durable Job. The workbench
+  presents its persisted D04/D05 limitation and no successful-looking candidate or
+  verified badge. The user explicitly leaves the Capture unattached, saves an
+  unidentified review, and “Publish capture” reaches the real published state.
+- Forms/regions have accessible names, progress is a native progress element, and
+  background phase text is an `aria-live` status. `web/test-results/import-mobile.png`
+  records the published docket at 390px; visual review corrected an initially
+  unloaded chunk stylesheet and then found a legible single-column inventory with
+  no horizontal overflow, consistent with the archival workbench.
+- Checks: TypeScript check/build, rebuilt embedded-assets server, and normal HTTPS
+  Chromium smoke pass. The existing 138 Rust tests are unchanged from P03.4.
+- **Not implemented:** P04.2 active/history Job controls, cancel/retry controls and
+  idle/reconnect polling; P04.3 offline/conflict/authorization/accessibility matrix;
+  C06 event streaming. **Externally unqualified:** independent visual/accessibility
+  review.
+
 ## Wave 3 P03.4 publication, compatibility, and root review — 2026-09-10
 
 - `unattached_import_publication_commits_preallocated_capture_payload_and_evidence_once`

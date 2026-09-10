@@ -133,16 +133,23 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   Item revisions preserve review state. The legacy browser-upload and administrator
   inbox endpoints delegate to the same Import workflow and distinct execution Jobs,
   with a bounded fallback only for pre-v9 in-flight uploads. P03 is locally complete.
+- P04.1 adds a curation accession workspace over the executable Import API. It can
+  select browser files or safe configured-inbox package names, stage and inspect the
+  complete inventory with live progress, display persisted analyzer limitations and
+  candidate alternatives without a verification claim, record an existing physical
+  chain or no association, and publish the reviewed Capture. The responsive keyboard-
+  named workflow is browser-tested at desktop and 390px.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Build the P04 configured inbox/import-review and durable-job UI over the locally
-   complete P02/P03 APIs. The current legacy upload and administrator inbox routes
-   are compatibility adapters scheduled for API-major removal. Document attachments,
-   event streaming, and offline artwork remain unimplemented.
+2. Complete P04.2 durable active/history Job controls and P04.3 browser/security
+   review. The P04.1 package/import review workspace is locally implemented. The
+   current legacy upload and administrator inbox routes are compatibility adapters
+   scheduled for API-major removal. Document attachments, event streaming, and
+   offline artwork remain unimplemented.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
