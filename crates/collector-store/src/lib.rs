@@ -3,6 +3,7 @@ mod archive_v3;
 mod auth;
 mod commands;
 mod files;
+mod jobs;
 mod migration;
 mod migration_v3;
 mod publication;
@@ -10,8 +11,8 @@ use chrono::Utc;
 use collector_app::{
     AccessPort, AccountView, AdministrationPort, AuthenticatedPrincipal, AuthenticationPort,
     Catalog, ContentPort, CredentialKind, EnrollmentPort, EnrollmentStart, EnrollmentView,
-    GrantView, IdempotencyPort, ImportPort, MediaResource, NativeCredentialIssue, NativeDeviceView,
-    ReceiptDecision, SessionView, StoredPasskey,
+    GrantView, IdempotencyPort, ImportPort, JobClaim, JobPort, JobSpec, MediaResource,
+    NativeCredentialIssue, NativeDeviceView, ReceiptDecision, SessionView, StoredPasskey,
 };
 pub use collector_app::{Upload, UploadFile};
 use collector_core::*;
@@ -991,8 +992,50 @@ impl ImportPort for Store {
         self.verify_integrity_record(item)
     }
 
+    fn verify_integrity_for_job(
+        &self,
+        item: ItemId,
+        job: JobId,
+        created_at: chrono::DateTime<Utc>,
+    ) -> Result<Item> {
+        self.verify_integrity_job_record(item, job, created_at)
+    }
+
     fn jobs(&self, user: UserId) -> Result<Vec<Job>> {
         self.jobs_for_user(user)
+    }
+}
+
+impl JobPort for Store {
+    fn enqueue_job(&self, spec: JobSpec) -> Result<JobId> {
+        self.enqueue_job_record(spec)
+    }
+
+    fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>> {
+        self.claim_job_record(worker_instance, lease_seconds)
+    }
+
+    fn renew_job_lease(&self, id: JobId, claim_token: &str, lease_seconds: i64) -> Result<()> {
+        self.renew_job_lease_record(id, claim_token, lease_seconds)
+    }
+
+    fn heartbeat_job(
+        &self,
+        id: JobId,
+        claim_token: &str,
+        phase: &str,
+        completed_units: u64,
+        lease_seconds: i64,
+    ) -> Result<()> {
+        self.heartbeat_job_record(id, claim_token, phase, completed_units, lease_seconds)
+    }
+
+    fn complete_job(&self, id: JobId, claim_token: &str, result: serde_json::Value) -> Result<()> {
+        self.complete_job_record(id, claim_token, result)
+    }
+
+    fn fail_job(&self, id: JobId, claim_token: &str, message: &str) -> Result<()> {
+        self.fail_job_record(id, claim_token, message)
     }
 }
 

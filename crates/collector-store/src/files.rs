@@ -839,6 +839,22 @@ impl Store {
         ))
     }
     pub(crate) fn verify_integrity_record(&self, item_id: ItemId) -> Result<Item> {
+        self.verify_integrity_inner(item_id, None, Utc::now())
+    }
+    pub(crate) fn verify_integrity_job_record(
+        &self,
+        item_id: ItemId,
+        job_id: JobId,
+        created_at: chrono::DateTime<Utc>,
+    ) -> Result<Item> {
+        self.verify_integrity_inner(item_id, Some(job_id), created_at)
+    }
+    fn verify_integrity_inner(
+        &self,
+        item_id: ItemId,
+        job_id: Option<JobId>,
+        created_at: chrono::DateTime<Utc>,
+    ) -> Result<Item> {
         let item = self.item(item_id)?;
         let mut evidence = Vec::new();
         for representation in item.captures.iter().flat_map(|c| &c.representations) {
@@ -854,7 +870,9 @@ impl Store {
                 details.push(serde_json::json!({"file":file.name,"matches":matches}));
             }
             evidence.push(Evidence {
-                id: EvidenceId::new(),
+                id: job_id.map_or_else(EvidenceId::new, |job_id| {
+                    deterministic_integrity_evidence_id(job_id, representation.id)
+                }),
                 item_id: item.id,
                 representation_id: representation.id,
                 kind: EvidenceKind::Integrity,
@@ -872,12 +890,50 @@ impl Store {
                 implementation_version: env!("CARGO_PKG_VERSION").into(),
                 catalog: None,
                 details: serde_json::json!({"files":details}),
-                created_at: Utc::now(),
+                created_at,
             });
+        }
+        if job_id.is_some() {
+            let existing = self.evidence(item.id)?;
+            let mut present = 0usize;
+            for intended in &evidence {
+                if let Some(recorded) = existing.iter().find(|value| value.id == intended.id) {
+                    if serde_json::to_value(recorded).map_err(storage)?
+                        != serde_json::to_value(intended).map_err(storage)?
+                    {
+                        return Err(Error::Storage(
+                            "durable integrity retry conflicts with published evidence".into(),
+                        ));
+                    }
+                    present += 1;
+                }
+            }
+            if present == evidence.len() {
+                return Ok(item);
+            }
+            if present != 0 {
+                return Err(Error::Storage(
+                    "durable integrity evidence is only partially published".into(),
+                ));
+            }
         }
         let expected = item.revision;
         self.publish(item, expected, evidence)
     }
+}
+
+fn deterministic_integrity_evidence_id(
+    job_id: JobId,
+    representation_id: RepresentationId,
+) -> EvidenceId {
+    let mut bytes: [u8; 16] = Sha256::digest(format!(
+        "junk-collector:integrity:{job_id}:{representation_id}"
+    ))[..16]
+        .try_into()
+        .expect("SHA-256 prefix has fixed length");
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    EvidenceId(uuid::Uuid::from_bytes(bytes))
 }
 
 impl Store {

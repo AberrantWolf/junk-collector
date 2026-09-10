@@ -66,6 +66,51 @@ impl AppState {
     }
 }
 
+pub struct JobRuntime(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for JobRuntime {
+    fn drop(&mut self) {
+        for worker in &self.0 {
+            worker.abort();
+        }
+    }
+}
+
+pub fn start_job_workers(service: CollectionService) -> JobRuntime {
+    let worker_instance = ServerId::new().to_string();
+    let workers = (0..2)
+        .map(|worker_index| {
+            let service = service.clone();
+            let worker_instance = worker_instance.clone();
+            tokio::spawn(async move {
+                loop {
+                    let service = service.clone();
+                    let worker_instance = worker_instance.clone();
+                    match tokio::task::spawn_blocking(move || {
+                        service.run_next_job(&worker_instance)
+                    })
+                    .await
+                    {
+                        Ok(Ok(true)) => continue,
+                        Ok(Ok(false)) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(250)).await
+                        }
+                        Ok(Err(error)) => {
+                            tracing::error!(worker_index, %error, "durable job worker failed");
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                        Err(error) => {
+                            tracing::error!(worker_index, %error, "durable job worker panicked");
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+            })
+        })
+        .collect();
+    JobRuntime(workers)
+}
+
 pub trait RateLimitClock: Send + Sync {
     fn monotonic_millis(&self) -> u64;
 }
@@ -1441,22 +1486,25 @@ async fn commit_upload(
     blocking(move || state.service.commit_upload(&actor, id, &context)).await?;
     Ok((StatusCode::ACCEPTED, Json(serde_json::json!({"job_id":id}))).into_response())
 }
-#[utoipa::path(post, path = "/api/v1/items/{id}/verify", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), responses((status = 200, body = Item), (status = 409)))]
+#[utoipa::path(post, path = "/api/v1/items/{id}/verify", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = serde_json::Value), (status = 409)))]
 async fn verify(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<ItemId>,
-) -> ApiResult<Json<Item>> {
+) -> ApiResult<Response> {
     let actor = principal(&state, &headers)?;
     let context = command_context(&headers)?;
-    let _permit = state
-        .jobs
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| Error::Unavailable("workers busy".into()))?;
-    Ok(Json(
-        blocking(move || state.service.verify_integrity(&actor, id, &context)).await?,
-    ))
+    let job_id = blocking(move || {
+        state
+            .service
+            .enqueue_integrity_verification(&actor, id, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
 }
 #[utoipa::path(get, path = "/api/v1/jobs", responses((status = 200, body = Vec<Job>), (status = 401)))]
 async fn jobs(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Vec<Job>>> {

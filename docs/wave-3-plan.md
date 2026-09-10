@@ -14,10 +14,10 @@ checkpoint are complete; compiling scaffolding is not a completed capability.
 
 ## Live ledger
 
-| Child | State | Result and evidence | Explicitly not yet implemented |
-|---|---|---|---|
-| P02.1 durable job repository | implemented | Private schema v8 stores typed job ownership, targets, state/phase, progress, attempts, timestamps, safe diagnostics, bounded request/result bodies, and future claim fields. The private-v2 fixture and current uploads migrate without lost Job IDs or history. Architecture, fmt, 96 Rust tests, and clippy pass. | Claims, leases, scheduler execution, cancellation/retry controls, and new job routes remain P02.2-P02.4. |
-| P02.2 claim/worker state machine | in progress | P02.1 is the reviewed storage prerequisite. | Durable claiming and executable scheduling are not implemented yet. |
+| Child | State | Repositories/commits | Result and evidence | Explicitly not yet implemented |
+|---|---|---|---|---|
+| P02.1 durable job repository | implemented | Junk Collector `29ee3ca` | Private schema v8 stores typed job ownership, targets, state/phase, progress, attempts, timestamps, safe diagnostics, bounded request/result bodies, and future claim fields. The private-v2 fixture and current uploads migrate without lost Job IDs or history. Architecture, fmt, 96 Rust tests, and clippy pass. | Claims, leases, scheduler execution, cancellation/retry controls, and new job routes remain P02.2-P02.4. |
+| P02.2 claim/worker state machine | implemented | Junk Collector child commit titled `Implement P02.2 durable job execution` (the SHA cannot be embedded in the commit that it identifies; the next ledger update records it) | FIFO claims are transactionally capped at two active jobs and one per user. Thirty-second leases, five-second worker heartbeats, claim-token fencing, immediate prior-instance takeover, monotonic/throttled progress, and two startup worker loops are executable. Integrity verification is the first durable consumer; HTTP returns a real queued Job, and deterministic Evidence makes post-publication reclaim idempotent. Architecture, API drift, fmt, 102 Rust tests, clippy, TypeScript check/build, and rebuilt server pass. Review corrected a storage-global cap gap and nondeterministic retry Evidence before completion. | Cancellation, retry, publication-boundary controls, upload/inbox migration off request workers, cursor `JobView`, and job mutation/detail routes remain P02.3-P02.4. |
 | P02.3 cancellation/retry/publication reconciliation | not implemented | — | Entire child. |
 | P02.4 job API and review | not implemented | — | Entire child. |
 | U03.1-U03.3 physical lifecycle | not implemented | — | Entire ticket. |

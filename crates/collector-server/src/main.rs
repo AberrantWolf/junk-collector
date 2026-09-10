@@ -330,6 +330,7 @@ async fn main() -> Result<()> {
             if let Some(origin) = &config.authentication_origin {
                 state.passkeys = Some(Arc::new(collector_server::passkeys::Passkeys::new(origin)?));
             }
+            let _job_runtime = collector_server::start_job_workers(state.service.clone());
             let public = router(state.clone());
             let lan = router(state.clone());
             state.ingress = Ingress::Private;

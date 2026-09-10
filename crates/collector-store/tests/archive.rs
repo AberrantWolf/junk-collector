@@ -1,6 +1,7 @@
 use collector_app::{
     AccessPort, AuthenticatedPrincipal, Catalog, CollectionService, CommandContext, ContentPort,
-    CredentialKind, IdempotencyPort, ImportPort, MediaResource, ReceiptDecision, SaveItemCommand,
+    CredentialKind, IdempotencyPort, ImportPort, JobPort, JobSpec, MediaResource, ReceiptDecision,
+    SaveItemCommand,
 };
 use collector_core::*;
 use collector_modules::Registry;
@@ -2367,6 +2368,256 @@ fn durable_job_rows_store_typed_state_without_losing_upload_identity() {
     assert_eq!(state, "queued");
     assert_eq!(completed, 0);
     assert_eq!(total, 4);
+}
+
+#[test]
+fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Store::open_with_clock(
+        root.path().join("archive"),
+        root.path().join("state"),
+        clock.clone(),
+    )
+    .unwrap();
+    let user = UserId::new();
+    let first = JobSpec {
+        id: JobId::new(),
+        user_id: user,
+        collection_id: None,
+        item_id: None,
+        kind: "test.first".into(),
+        phase: "queued".into(),
+        total_units: 1,
+        request: serde_json::json!({"fixture":1}),
+    };
+    let second = JobSpec {
+        id: JobId::new(),
+        kind: "test.second".into(),
+        request: serde_json::json!({"fixture":2}),
+        ..first.clone()
+    };
+    store.enqueue_job(first.clone()).unwrap();
+    store.enqueue_job(second.clone()).unwrap();
+
+    let original = store.claim_job("server-a", 30).unwrap().unwrap();
+    assert_eq!(original.id, first.id);
+    assert!(store.claim_job("server-a", 30).unwrap().is_none());
+    assert!(matches!(
+        store.complete_job(original.id, "wrong-token", serde_json::json!({})),
+        Err(Error::CommandInProgress)
+    ));
+
+    clock.advance(31);
+    let recovered = store.claim_job("server-b", 30).unwrap().unwrap();
+    assert_eq!(recovered.id, original.id);
+    assert_ne!(recovered.claim_token, original.claim_token);
+    assert!(matches!(
+        store.complete_job(original.id, &original.claim_token, serde_json::json!({})),
+        Err(Error::CommandInProgress)
+    ));
+    assert!(matches!(
+        store.renew_job_lease(original.id, &original.claim_token, 30),
+        Err(Error::CommandInProgress)
+    ));
+    store
+        .complete_job(
+            recovered.id,
+            &recovered.claim_token,
+            serde_json::json!({"completed":true}),
+        )
+        .unwrap();
+    assert_eq!(
+        store.claim_job("server-b", 30).unwrap().unwrap().id,
+        second.id
+    );
+}
+
+#[test]
+fn durable_claims_enforce_the_global_limit_in_storage() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let jobs = (0..3)
+        .map(|fixture| JobSpec {
+            id: JobId::new(),
+            user_id: UserId::new(),
+            collection_id: None,
+            item_id: None,
+            kind: format!("test.{fixture}"),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({"fixture":fixture}),
+        })
+        .collect::<Vec<_>>();
+    for job in &jobs {
+        store.enqueue_job(job.clone()).unwrap();
+    }
+
+    let first = store.claim_job("server-a", 30).unwrap().unwrap();
+    let second = store.claim_job("server-a", 30).unwrap().unwrap();
+    assert_ne!(first.user_id, second.user_id);
+    assert!(store.claim_job("server-a", 30).unwrap().is_none());
+}
+
+#[test]
+fn durable_progress_is_monotonic_and_throttled_with_immediate_phase_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let state = root.path().join("state");
+    let store = Store::open_with_clock(root.path().join("archive"), &state, clock.clone()).unwrap();
+    let job = JobSpec {
+        id: JobId::new(),
+        user_id: UserId::new(),
+        collection_id: None,
+        item_id: None,
+        kind: "test.progress".into(),
+        phase: "queued".into(),
+        total_units: 3,
+        request: serde_json::json!({}),
+    };
+    store.enqueue_job(job).unwrap();
+    let claim = store.claim_job("server-a", 30).unwrap().unwrap();
+
+    store
+        .heartbeat_job(claim.id, &claim.claim_token, "reading", 1, 30)
+        .unwrap();
+    store
+        .heartbeat_job(claim.id, &claim.claim_token, "reading", 2, 30)
+        .unwrap();
+    let db = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    let first: (String, u64) = db
+        .query_row(
+            "SELECT phase,completed_units FROM jobs WHERE id=?",
+            [claim.id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(first, ("reading".into(), 1));
+
+    store
+        .heartbeat_job(claim.id, &claim.claim_token, "hashing", 2, 30)
+        .unwrap();
+    let phase_change: (String, u64) = db
+        .query_row(
+            "SELECT phase,completed_units FROM jobs WHERE id=?",
+            [claim.id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(phase_change, ("hashing".into(), 2));
+
+    assert!(matches!(
+        store.heartbeat_job(claim.id, &claim.claim_token, "hashing", 1, 30),
+        Err(Error::CommandInProgress)
+    ));
+    clock.advance(1);
+    store
+        .heartbeat_job(claim.id, &claim.claim_token, "hashing", 3, 30)
+        .unwrap();
+}
+
+#[test]
+fn integrity_verification_runs_as_a_real_durable_job() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 0, 0, b"data")
+        .unwrap();
+    service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
+    let before = store.evidence(saved.id).unwrap().len();
+
+    let key = command();
+    let job = service
+        .enqueue_integrity_verification(&actor, saved.id, &key)
+        .unwrap();
+    assert_eq!(
+        service
+            .enqueue_integrity_verification(&actor, saved.id, &key)
+            .unwrap(),
+        job
+    );
+    assert!(service.run_next_job("test-server").unwrap());
+    assert_eq!(store.evidence(saved.id).unwrap().len(), before + 1);
+    assert_eq!(
+        service
+            .jobs(&actor)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == job)
+            .unwrap()
+            .state,
+        JobState::Completed
+    );
+}
+
+#[test]
+fn reclaimed_integrity_job_does_not_publish_twice() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 0, 0, b"data")
+        .unwrap();
+    service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
+    let job = service
+        .enqueue_integrity_verification(&actor, saved.id, &command())
+        .unwrap();
+    let claim = store.claim_job("server-before-crash", 30).unwrap().unwrap();
+    assert_eq!(claim.id, job);
+    store
+        .verify_integrity_for_job(saved.id, job, claim.created_at)
+        .unwrap();
+    let evidence_after_publication = store.evidence(saved.id).unwrap().len();
+    let revision_after_publication = store.item(saved.id).unwrap().revision;
+
+    assert!(service.run_next_job("server-after-restart").unwrap());
+    assert_eq!(
+        store.evidence(saved.id).unwrap().len(),
+        evidence_after_publication
+    );
+    assert_eq!(
+        store.item(saved.id).unwrap().revision,
+        revision_after_publication
+    );
+    assert_eq!(
+        service
+            .jobs(&actor)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == job)
+            .unwrap()
+            .state,
+        JobState::Completed
+    );
 }
 
 #[test]

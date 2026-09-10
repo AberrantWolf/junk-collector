@@ -703,6 +703,84 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
 }
 
 #[tokio::test]
+async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let user = state
+        .store
+        .create_user("owner", "a long owner password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(&test_authentication(&actor), "Durable work", &command())
+        .unwrap();
+    let item = Item {
+        id: ItemId::new(),
+        collection_id: collection.id,
+        revision: Revision(0),
+        title: "Queued verification".into(),
+        subtitle: String::new(),
+        identity_link: ItemIdentityLink::None,
+        domain: ModuleData {
+            module: ModuleId("org.junkcollector.generic".into()),
+            schema_version: 1,
+            payload: RawJson::from_value(serde_json::json!({})),
+        },
+        identity: IdentityState::Unidentified,
+        translations: vec![],
+        identifiers: vec![],
+        specimens: vec![],
+        wishlist: false,
+        captures: vec![],
+        assets: vec![],
+        metadata: MetadataState::default(),
+        deleted: false,
+        updated_at: chrono::Utc::now(),
+    };
+    let saved = state
+        .service
+        .save_item(&actor, item.id, item.into(), Revision(0), &command())
+        .unwrap();
+    let (token, _) = state.store.issue_session(user, "browser").unwrap();
+    let service = state.service.clone();
+    let response = router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/items/{}/verify", saved.id))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {token}"))
+                .header("idempotency-key", "durable-integrity-http")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let bytes = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let job: JobId = body["job_id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(
+        service
+            .jobs(&actor)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id == job)
+            .unwrap()
+            .state,
+        JobState::Queued
+    );
+    assert!(service.run_next_job("http-test-worker").unwrap());
+}
+
+#[tokio::test]
 async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied() {
     let (_root, mut state) = state();
     state.ingress = Ingress::Private;

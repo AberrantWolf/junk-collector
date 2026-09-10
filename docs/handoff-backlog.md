@@ -276,13 +276,15 @@ migration; P02.2 claim/worker state machine; P02.3 cancellation, retry, and
 publication reconciliation; P02.4 job API and review. See
 [the Wave 3 execution plan](wave-3-plan.md).
 
-**Status (2026-09-10): P02.1 complete; P02.2 is next.** Private schema v8 replaces
-opaque job-only rows with typed owner/target/state/phase/progress/attempt/time,
-diagnostic, request/result, lease, claim, and cancellation columns. The committed
-private-v2 fixture and current upload jobs migrate without changing Job IDs or
-losing progress/failure history. Existing upload and job reads remain operational.
-Durable claiming, leases, executable restart scheduling, cancellation/retry
-controls, and the reviewed job API remain explicitly unimplemented.
+**Status (2026-09-10): P02.1 and P02.2 complete; P02.3 is next.** Private schema
+v8 stores typed jobs and migrates legacy uploads without identity/history loss.
+Transactional FIFO claims enforce two active jobs globally and one per user, with
+30-second leases, five-second heartbeats, prior-instance restart takeover, claim
+fencing, and bounded progress persistence. Two server worker loops execute the
+first real consumer: integrity verification now queues through HTTP, and recovery
+cannot duplicate its deterministic Evidence publication. Cancellation/retry,
+publication-boundary policy, moving upload/inbox publication off request workers,
+and the reviewed P02.4 job API remain explicitly unimplemented.
 
 ### P03 — Provisional package review and resumable ingest
 

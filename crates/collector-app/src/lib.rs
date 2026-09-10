@@ -157,7 +157,53 @@ pub trait ImportPort: Send + Sync {
     fn commit_upload(&self, id: JobId) -> Result<Item>;
     fn fail_upload(&self, id: JobId, message: &str) -> Result<()>;
     fn verify_integrity(&self, item: ItemId) -> Result<Item>;
+    fn verify_integrity_for_job(
+        &self,
+        item: ItemId,
+        job: JobId,
+        created_at: DateTime<Utc>,
+    ) -> Result<Item>;
     fn jobs(&self, user: UserId) -> Result<Vec<Job>>;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JobSpec {
+    pub id: JobId,
+    pub user_id: UserId,
+    pub collection_id: Option<CollectionId>,
+    pub item_id: Option<ItemId>,
+    pub kind: String,
+    pub phase: String,
+    pub total_units: u64,
+    pub request: serde_json::Value,
+}
+
+#[derive(Clone, Debug)]
+pub struct JobClaim {
+    pub id: JobId,
+    pub user_id: UserId,
+    pub item_id: Option<ItemId>,
+    pub kind: String,
+    pub request: serde_json::Value,
+    pub claim_token: String,
+    pub attempt: u32,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
+pub trait JobPort: Send + Sync {
+    fn enqueue_job(&self, spec: JobSpec) -> Result<JobId>;
+    fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>>;
+    fn renew_job_lease(&self, id: JobId, claim_token: &str, lease_seconds: i64) -> Result<()>;
+    fn heartbeat_job(
+        &self,
+        id: JobId,
+        claim_token: &str,
+        phase: &str,
+        completed_units: u64,
+        lease_seconds: i64,
+    ) -> Result<()>;
+    fn complete_job(&self, id: JobId, claim_token: &str, result: serde_json::Value) -> Result<()>;
+    fn fail_job(&self, id: JobId, claim_token: &str, message: &str) -> Result<()>;
 }
 
 pub trait AdministrationPort: Send + Sync {
@@ -400,6 +446,7 @@ pub trait CommandEffects:
     + AuthenticationPort
     + EnrollmentPort
     + AccessPort
+    + JobPort
 {
 }
 impl<T> CommandEffects for T where
@@ -410,6 +457,7 @@ impl<T> CommandEffects for T where
         + AuthenticationPort
         + EnrollmentPort
         + AccessPort
+        + JobPort
 {
 }
 
@@ -480,6 +528,7 @@ pub struct CollectionService {
     authentication: Arc<dyn AuthenticationPort>,
     enrollments: Arc<dyn EnrollmentPort>,
     idempotency: Arc<dyn IdempotencyPort>,
+    jobs: Arc<dyn JobPort>,
     modules: Arc<Registry>,
 }
 
@@ -725,6 +774,7 @@ impl CollectionService {
             + AuthenticationPort
             + EnrollmentPort
             + IdempotencyPort
+            + JobPort
             + 'static,
     {
         let reader: Arc<dyn CollectionReadPort> = catalog.clone();
@@ -734,6 +784,7 @@ impl CollectionService {
         let authentication: Arc<dyn AuthenticationPort> = catalog.clone();
         let enrollments: Arc<dyn EnrollmentPort> = catalog.clone();
         let idempotency: Arc<dyn IdempotencyPort> = catalog.clone();
+        let jobs: Arc<dyn JobPort> = catalog.clone();
         let access: Arc<dyn AccessPort> = catalog.clone();
         Self {
             reader,
@@ -744,6 +795,7 @@ impl CollectionService {
             authentication,
             enrollments,
             idempotency,
+            jobs,
             modules,
         }
     }
@@ -1401,6 +1453,98 @@ impl CollectionService {
             effects.verify_integrity(item_id)
         })
     }
+
+    pub fn enqueue_integrity_verification(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let id = deterministic_job_id(actor.user_id, "integrity.verify", context.key());
+        let spec = JobSpec {
+            id,
+            user_id: actor.user_id,
+            collection_id: Some(item.collection_id),
+            item_id: Some(item_id),
+            kind: "integrity_verification".into(),
+            phase: "queued".into(),
+            total_units: item
+                .captures
+                .iter()
+                .flat_map(|capture| &capture.representations)
+                .flat_map(|representation| &representation.files)
+                .count() as u64,
+            request: serde_json::json!({"item_id":item_id}),
+        };
+        self.execute_command(
+            actor,
+            context,
+            "job.integrity.enqueue",
+            &item_id,
+            |effects| effects.enqueue_job(spec),
+        )
+    }
+
+    pub fn run_next_job(&self, worker_instance: &str) -> Result<bool> {
+        let Some(claim) = self.jobs.claim_job(worker_instance, 30)? else {
+            return Ok(false);
+        };
+        self.jobs
+            .heartbeat_job(claim.id, &claim.claim_token, "starting", 0, 30)?;
+        let (stop_heartbeat, heartbeat_stop) = std::sync::mpsc::channel();
+        let heartbeat_jobs = self.jobs.clone();
+        let heartbeat_id = claim.id;
+        let heartbeat_token = claim.claim_token.clone();
+        let heartbeat = std::thread::Builder::new()
+            .name(format!("collector-job-heartbeat-{heartbeat_id}"))
+            .spawn(move || {
+                while heartbeat_stop
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .is_err()
+                {
+                    if heartbeat_jobs
+                        .renew_job_lease(heartbeat_id, &heartbeat_token, 30)
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .map_err(|error| Error::Unavailable(error.to_string()))?;
+        let result = match claim.kind.as_str() {
+            "integrity_verification" => {
+                let item_id = claim
+                    .item_id
+                    .ok_or_else(|| Error::Storage("integrity job has no Item identity".into()))?;
+                self.imports
+                    .verify_integrity_for_job(item_id, claim.id, claim.created_at)
+                    .map(|item| serde_json::json!({"item_id":item.id,"revision":item.revision}))
+            }
+            _ => Err(Error::Unavailable(format!(
+                "job kind {} has no registered executor",
+                claim.kind
+            ))),
+        };
+        let _ = stop_heartbeat.send(());
+        heartbeat
+            .join()
+            .map_err(|_| Error::Unavailable("job heartbeat worker panicked".into()))?;
+        match result {
+            Ok(result) => self
+                .jobs
+                .complete_job(claim.id, &claim.claim_token, result)?,
+            Err(error) => {
+                self.jobs.fail_job(
+                    claim.id,
+                    &claim.claim_token,
+                    &error.to_string().chars().take(512).collect::<String>(),
+                )?;
+            }
+        }
+        Ok(true)
+    }
     pub fn jobs(&self, actor: &Principal) -> Result<Vec<Job>> {
         let jobs = self.imports.jobs(actor.user_id)?;
         if jobs.iter().any(|job| job.user_id != actor.user_id) {
@@ -1758,4 +1902,14 @@ fn deterministic_asset_id(user: UserId, key: &str) -> AssetId {
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     AssetId(uuid::Uuid::from_bytes(bytes))
+}
+
+fn deterministic_job_id(user: UserId, operation: &str, key: &str) -> JobId {
+    use sha2::{Digest as _, Sha256};
+    let mut bytes: [u8; 16] = Sha256::digest(format!("{user}:{operation}:{key}").as_bytes())[..16]
+        .try_into()
+        .expect("SHA-256 prefix");
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    JobId(uuid::Uuid::from_bytes(bytes))
 }

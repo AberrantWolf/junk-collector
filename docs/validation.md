@@ -17,6 +17,36 @@
   reconciliation, cancellation/retry commands, and the new job API remain
   P02.2-P02.4. No UI or capability advertises them.
 
+## Wave 3 P02.2 durable claim and worker state machine — 2026-09-10
+
+- TDD coverage uses real schema-v8 SQLite rows to prove FIFO claiming, the
+  storage-enforced global limit of two, one active job per user, 30-second lease
+  expiry, immediate takeover from a prior server instance, and claim-token
+  fencing. A stale worker cannot heartbeat or complete a reclaimed Job.
+- Phase changes persist immediately. Same-phase progress is monotonic, bounded by
+  total units, and persisted no more than once per second. The server starts two
+  blocking-safe worker loops, each with a five-second heartbeat; async HTTP
+  workers do not execute integrity reads or hashing.
+- Integrity verification is the first executable scheduler consumer. Its HTTP
+  action returns `202` with the durable Job identity. A recovery test publishes
+  the Evidence, simulates loss before Job completion, reclaims from a new server
+  instance, and proves the deterministic Evidence and Item revision are not
+  published twice.
+- Review found and corrected two issues before the child was marked implemented:
+  concurrency was initially bounded only by worker composition rather than in
+  the claim transaction, and recovered integrity work initially generated fresh
+  Evidence IDs. Both have permanent regressions.
+- Generated OpenAPI and TypeScript reflect the real asynchronous verification
+  response. `python3 scripts/check_architecture.py`, API drift checking,
+  `cargo fmt --all -- --check`, `cargo test --workspace --locked` (102 tests),
+  `cargo clippy --workspace --all-targets -- -D warnings`,
+  `npm --prefix web run check`, `npm --prefix web run build`, and the subsequent
+  embedded-assets server rebuild pass.
+- **Not implemented:** P02.3 cancellation/retry and publication commit-boundary
+  policy; upload/inbox publication still uses the legacy request-triggered path
+  and process-local semaphore. P02.4 cursor `JobView`, detail, cancellation, and
+  retry routes are absent. Event streaming remains C06.
+
 Validated locally on macOS, Rust 1.95.0 and Node 24.3.0.
 
 - `cargo test --workspace`: 20 integration tests pass, covering module registration, archive recovery and tamper detection, upload/inbox source preservation and retries, authorization/redaction, image bounds, search/pagination, credential revocation, exposure routing, HTTP ranges, cache keys, and direct enrolled TLS.

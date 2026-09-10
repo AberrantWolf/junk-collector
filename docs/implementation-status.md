@@ -32,19 +32,23 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 - Resumable package upload, destination verification, stable retry identity, original downloads with byte ranges, integrity rechecks and persisted job records.
 - Client trust construction, route selection/hysteresis and cache eviction policy. A TLS integration test enrolls through same-user browser approval, persists a native credential through the storage port, proves authenticated ranged downloads over loopback LAN without any public route, and rejects an unrelated certificate or credential-bearing cross-origin route.
 - Configured server inbox inventory/import API using the same source-retaining staging and evidence path; background upload errors persist as failed jobs.
-- P02.1 advances private state to schema v8 and stores jobs in typed durable
-  owner, target, state/phase, progress, attempt, timestamp, diagnostic,
-  request/result, and claim-related columns. Existing upload Job IDs and the
-  legacy private-v2 job survive migration. This is a job repository, not yet a
-  durable scheduler.
+- P02.1/P02.2 advance private state to schema v8 and implement typed durable jobs
+  plus a local executable scheduler. Transactional FIFO claiming enforces a
+  two-job global bound and one active job per user; 30-second leases,
+  five-second heartbeats, claim-token fencing, restart takeover, and bounded
+  progress persistence are permanent-test covered. Two server worker loops run
+  integrity verification as the first consumer. Its deterministic Evidence
+  identity makes recovery after archive publication idempotent, and the existing
+  verification HTTP action now returns the actual queued Job identity.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete P02.2-P02.4 durable claims, restart execution, cancellation/retry,
-   and job APIs; complete physical component/condition/acquisition/loan editing,
+2. Complete P02.3-P02.4 cancellation/retry, publication reconciliation, migration
+   of upload/inbox work off request workers, and reviewed job APIs; complete
+   physical component/condition/acquisition/loan editing,
    sensitive attachments, and the configured inbox/import-review UI.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
