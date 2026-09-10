@@ -1,5 +1,30 @@
 # Validation recorded for the foundation
 
+# Wave 3 D02.3 shared disc identity extraction — 2026-09-10
+
+- TDD first failed on the absent `junk_libs_disc_id::calculate_disc_ids` API.
+  The green implementation validates track ranges, offset count/order, and lead-out
+  before calculating MusicBrainz, FreeDB/CDDB, and AccurateRip disc IDs.
+- Independent permanent vectors cover ARver's three-track TOC, MusicBrainz's
+  published example, and libdiscid's 22-track case. Phono's existing one-, three-,
+  four-, six-, and 22-track vectors and CUE-to-TOC integration remain byte-identical.
+- Commits: Junk Libs `92d3bf2`; Phono Junk `1a6e19c`. Phono's pre-existing
+  untracked `AGENTS.md` was not staged.
+- Passed: Junk Libs `cargo test --workspace --all-features` and
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`; Phono
+  `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  focused changed-package fmt, and `git diff --check`.
+- Existing qualification: all-workspace Phono fmt traverses unrelated, pre-existing
+  Junk Libs document-crate formatting drift through sibling path dependencies.
+  The locally committed Junk Libs SHA is not published, so Phono intentionally uses
+  sibling paths and documents the required release-time Git pin rather than naming
+  an unresolvable revision.
+- **Implemented:** checked neutral TOC and disc-ID algorithms plus the real Phono
+  consumer migration. **Not implemented:** D02.4 AccurateRip CRC/dBAR/offset
+  extraction, D02.5 neutral DAT parsing, and Collector integration.
+  **Externally unqualified:** live optical-drive/private-disc results, publishing
+  and pinning the shared commit, and independent review.
+
 # Wave 3 D02.2 generic format/hash consolidation — 2026-09-10
 
 - TDD red probes first failed for the absent shared CUE-span and CHD-track visitor

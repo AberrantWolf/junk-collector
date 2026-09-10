@@ -81,9 +81,9 @@ but never fabricated into hashed source bytes.
 | Redumper sidecar validation | junk-libs disc redumper APIs; sidecar schema and referenced raw PCM ranges | none for parsing | D02/D05 | provenance-redacted Retro mixed-mode manifest; external owned payload root | unqualified without owned payload |
 | Raw redumper PCM reader | junk-libs seekable audio; signed integer PCM frame coordinates | audio feature | D02 reader / D03 audio consumer / D05 | generated PCM plus Phono/Retro external owned dump | supported for generated PCM; real dump unqualified |
 | Mixed-mode redumper layout | source parsers expose partial layout support | external real fixture | D05 | Retro provenance-redacted manifest plus environment-supplied owned dump | unavailable for advertised complete verification |
-| MusicBrainz disc ID | `phono-junk-toc`; normalized CD TOC frames | hashing/base64 | D02 narrow disc-identity API / D05 | published MusicBrainz/libdiscid vectors | supported |
-| FreeDB disc ID | `phono-junk-toc`; normalized CD TOC frames | none | D02/D05 | published/libdiscid-compatible vectors | supported |
-| AccurateRip disc IDs | `phono-junk-toc`; normalized TOC frames | none | D02/D05 | ARver and Phono published vectors | supported |
+| MusicBrainz disc ID | `junk-libs-disc-id` via Phono compatibility wrapper; validated normalized CD TOC frames | hashing/base64 | D02 shared disc-identity API / D05 | published MusicBrainz/libdiscid vectors | implemented locally; live drive external |
+| FreeDB disc ID | `junk-libs-disc-id` via Phono compatibility wrapper; validated normalized CD TOC frames | none | D02/D05 | published/libdiscid-compatible vectors | implemented locally; live drive external |
+| AccurateRip disc IDs | `junk-libs-disc-id` via Phono compatibility wrapper; validated normalized TOC frames | none | D02/D05 | ARver and Phono published vectors | implemented locally; CRC/provider work remains D02.4 |
 | AccurateRip v1/v2 checksum | `phono-junk-accuraterip`; ordered decoded CD PCM frames | none | D02 verification crate / D05 | ARver vectors and independently produced expected checksums | supported |
 | Frame-450 evidence | Phono AccurateRip APIs; CD PCM frame 450 treatment | none | D02/D05 | ARver vector | supported |
 | Offset search | Phono `verify_with_offsets`; signed sample-frame offsets with explicit window | none | D02/D05 | ARver plus locally supplied real harness | supported by code/vector; real-dump qualification outstanding |

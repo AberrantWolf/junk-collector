@@ -452,14 +452,18 @@ Inspect sibling manifests/source/instructions and record exact algorithms, crate
 
 ### D02 — Extract format/hash/disc verification primitives
 
-**Status (2026-09-10): D02.1-D02.2 implemented/reviewed; D02.3 is next.** The
+**Status (2026-09-10): D02.1-D02.3 implemented/reviewed; D02.4 is next.** The
 documentation-only drift gate reconfirmed exact sibling state. D02.2 then moved
 generic hashing types and executable ordered CUE/CHD reader contracts into Junk
 Libs and migrated Retro's complete-disc consumer in separate commits. Retro keeps
 platform normalization and catalog policy; its user-owned untracked sync scripts
 remain untouched. Published/synthetic/chdman vectors and affected test gates pass.
-Private real dumps remain external, and pre-existing unrelated whole-workspace
-format/clippy findings are recorded rather than swept into this child.
+D02.3 adds a validated neutral TOC and MusicBrainz, FreeDB/CDDB, and AccurateRip
+disc-ID calculations to `junk-libs-disc-id`; Phono now consumes them through thin
+compatibility wrappers with published vectors unchanged. Private/live-disc results
+remain external, the new shared SHA still needs a published Git pin, and pre-existing
+unrelated whole-workspace format/clippy findings remain recorded rather than swept
+into these children.
 
 **Review · Dependencies:** D01. **Owner:** independently consumable junk-libs crates and affected sibling consumers.
 
