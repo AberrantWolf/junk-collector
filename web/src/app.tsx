@@ -8,7 +8,7 @@ type Item=components['schemas']['PresentedItem'];
 type Page=components['schemas']['Page_PresentedItem'];
 type Principal=components['schemas']['Principal'];
 
-export {React as default,useState,useEffect};
+export {React as default,useState,useEffect,useRef};
 
 export class ApiRequestError extends Error{
  readonly status:number;
@@ -60,9 +60,9 @@ async function registerPasskey(){
 }
 
 function Artwork({item,large=false}:{item:Item;large?:boolean}){
- const cover=item.assets.findLast(a=>a.kind==='cover'&&a.thumbnail);const [failed,setFailed]=useState(false);
- useEffect(()=>setFailed(false),[cover?.id]);
- return <div className={`artwork ${large?'large':''}`}>{cover&&!failed?<img src={`/api/v1/items/${item.id}/assets/${cover.id}?thumbnail=true`} loading="lazy" alt={cover.alt_text||`${item.title} cover`} onError={()=>setFailed(true)}/>:<span role="img" aria-label="No cover artwork" className="art-placeholder">{item.domain.module==='org.junk.music'?'◉':'▣'}</span>}</div>;
+ const artwork=item.assets.find(asset=>asset.id===item.primary_artwork);const [failed,setFailed]=useState(false);
+ useEffect(()=>setFailed(false),[artwork?.id]);
+ return <div className={`artwork ${large?'large':''}`}>{artwork&&!failed?<img src={`/api/v1/collections/${item.collection_id}/assets/${artwork.id}/thumbnail`} loading="lazy" alt={artwork.alt_text||`${item.title} artwork`} onError={()=>setFailed(true)}/>:<span role="img" aria-label="No artwork attached" className="art-placeholder"><b aria-hidden="true">{item.domain.module==='org.junk.music'?'◉':'▣'}</b><small>No art</small></span>}</div>;
 }
 
 function App(){

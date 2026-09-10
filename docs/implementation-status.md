@@ -90,17 +90,24 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   inherit Work artwork, and a role-aware server `primary_artwork` prefers visible
   module selection before deterministic newest-Cover fallback. Asset mutations
   remain curation-listener composed.
+- U04.3 replaces the one-purpose cover shortcut with a backed supporting-image
+  workbench. Curators choose the attachment subject, Cover/Photo/Scan role,
+  visibility, alternative text, and image; receive a local preview; inspect
+  lazy-loaded stored thumbnails; revise metadata; and archive with explicit
+  retained-history guidance. Browse/detail consume server-selected artwork and
+  visibly separate missing artwork from identity uncertainty. Keyboard flow,
+  focus restoration, reduced motion, viewer filtering, and responsive layout are
+  browser tested. U04 is locally complete; document uploads, offline artwork, and
+  independent review remain outstanding.
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete U04.3 attachment controls and artwork accessibility/browser review,
-   then implement the configured inbox/import-review UI. Standalone image
-   persistence, role-filtered routes, and server artwork selection are locally
-   complete; document attachments remain unimplemented. Physical lifecycle APIs,
-   editor, privacy filtering, and recovery review are locally complete.
+2. Implement the configured inbox/import-review UI. U04 supporting images and
+   physical lifecycle behavior are locally complete; document attachments and
+   offline artwork remain unimplemented.
 3. Implement analyzer/provider adapters using extracted Retro Junk/Phono Junk logic, DAT/catalog ingestion, MusicBrainz/CAA enrichment and independent real-dump verification oracles. No catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

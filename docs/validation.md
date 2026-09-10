@@ -1,5 +1,31 @@
 # Validation recorded for the foundation
 
+## Wave 3 U04.3 supporting image UI and root review — 2026-09-10
+
+- The curation workbench exposes only implemented PNG/JPEG/WebP Cover, Photo,
+  and Scan choices. Its labeled attachment selector covers the Item, linked
+  Work/Edition when identified, copies, ordered parts, and Captures. A selected
+  file receives a local preview before the U04.2 command executes; persisted rows
+  use lazy canonical thumbnails and show attachment, visibility, alt text, and
+  Asset revision.
+- Chromium creates a shared Cover, observes the real stored thumbnail, edits its
+  alt text and visibility to curator-only at revision 2, creates then archives a
+  Photo after confirmation, and verifies focus returns to the file selector. The
+  later viewer session loads neither the private thumbnail nor its metadata and
+  sees the explicit “No artwork attached” state independently of “Unidentified.”
+- `web/test-results/assets-mobile.png` captures the retained curator-only Cover
+  row at 390px. Visual review found the image ledger legible, compact, and
+  consistent with the existing archival workbench; controls remain in keyboard
+  order and the page reports no horizontal overflow. All imagery is lazy-loaded,
+  and the existing reduced-motion media rule covers the new surface.
+- Full local gate: architecture/link/fixture checks, Rust formatting, all 120
+  locked workspace tests, warning-free all-target clippy, generated API drift,
+  TypeScript checking, web build, rebuilt embedded-assets server, and both normal
+  HTTPS and `LOCAL_SETUP=1` private-listener Chromium suites pass. U04 root
+  acceptance review passes locally.
+- **Not implemented:** document attachments and C05 offline artwork. **Externally
+  unqualified:** independent U04 authorization/accessibility review.
+
 ## Wave 3 U04.2 Asset DTO and authorization — 2026-09-10
 
 - `asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_selection`

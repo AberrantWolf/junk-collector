@@ -187,7 +187,7 @@ Add photos/scans and visibility controls using existing original/thumbnail stora
 
 **Limit:** do not duplicate image-processing algorithms in React; offline propagation is C05.
 
-**Status (2026-09-10): U04.1-U04.2 implemented; U04.3 is next.** Standalone,
+**Status (2026-09-10): complete locally; P03.1 is next.** Standalone,
 collection-scoped Asset commands now create PNG/JPEG/WebP Covers, Photos, and
 Scans for Work, Edition, Item, Specimen, Component, and Capture subjects. The
 single store image pipeline preserves original bytes, emits bounded PNG
@@ -204,8 +204,15 @@ opening either byte representation. The legacy Item URL delegates through the sa
 policy. Edition-linked Items inherit Work Assets, and server-selected
 `primary_artwork` prefers the first visible module choice before the newest visible
 Item/Edition/Work Cover with deterministic ID tie-breaking. Mutation routes remain
-absent when curation exposure is disabled. U04.3 controls are not displayed.
-Document uploads remain explicitly unavailable.
+absent when curation exposure is disabled. The archival-workbench UI now creates
+labeled attachments at Item/copy/part/Capture/linked-identity scope, previews the
+selected local image, displays lazy stored thumbnails, edits visibility/alt text,
+and archives with retained-history guidance and focus restoration. Browse/detail
+use server-selected artwork, while visible “No art” remains distinct from
+tentative/unidentified identity. Normal and private-local Chromium suites cover
+the real workflow, keyboard controls, viewer filtering, reduced-motion CSS, and a
+390px no-overflow visual review. Document uploads and offline propagation remain
+explicitly unavailable. Independent review is externally unqualified.
 
 ## Security and enrollment
 
