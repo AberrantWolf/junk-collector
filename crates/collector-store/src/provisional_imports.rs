@@ -403,7 +403,7 @@ impl ProvisionalImportPort for Store {
         }
         let _guard = lock(&self.uploads)?;
         let mut record = self.import_record(id)?;
-        if record.view.phase != ImportPhase::Staging {
+        if record.view.phase == ImportPhase::Cancelled {
             return Err(Error::Conflict);
         }
         let declared = record.view.files.get(index).ok_or(Error::NotFound)?;
@@ -414,6 +414,22 @@ impl ProvisionalImportPort for Store {
             return Err(Error::Conflict);
         }
         let directory = self.state.join("imports").join(id.to_string());
+        // A lost response may be retried after staging has completed. Verify
+        // durable bytes read-only; later phases must never mutate the source.
+        if record.view.phase != ImportPhase::Staging {
+            if end > declared.received_bytes.0 {
+                return Err(Error::Conflict);
+            }
+            let mut file = File::open(directory.join(format!("{index}.part"))).map_err(storage)?;
+            let mut previous = vec![0; bytes.len()];
+            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
+            file.read_exact(&mut previous).map_err(storage)?;
+            return if previous == bytes {
+                Ok(record)
+            } else {
+                Err(Error::Conflict)
+            };
+        }
         fs::create_dir_all(&directory).map_err(storage)?;
         let path = directory.join(format!("{index}.part"));
         let mut file = OpenOptions::new()
@@ -636,10 +652,18 @@ impl Store {
         {
             return Err(Error::Conflict);
         }
+        // Revision checks guard a new publication, not completion of an
+        // irreversible archive commit recovered after process interruption.
+        let committed_capture = match self.capture(record.view.capture_id) {
+            Ok(capture) => Some(capture),
+            Err(Error::NotFound) => None,
+            Err(error) => return Err(error),
+        };
         if let (Some(item_id), Some(expected)) = (
             record.view.association.item_id,
             record.view.expected_item_revision,
-        ) && self.item(item_id)?.revision != expected
+        ) && committed_capture.is_none()
+            && self.item(item_id)?.revision != expected
         {
             if record.view.phase != ImportPhase::AwaitingReview {
                 record.view.phase = ImportPhase::AwaitingReview;
@@ -659,8 +683,9 @@ impl Store {
             .iter()
             .map(|file| file.bytes.0)
             .sum::<u64>();
-        if fs2::available_space(&self.archive).map_err(storage)?
-            < total.saturating_add(64 * 1024 * 1024)
+        if committed_capture.is_none()
+            && fs2::available_space(&self.archive).map_err(storage)?
+                < total.saturating_add(64 * 1024 * 1024)
         {
             return Err(Error::Unavailable("insufficient archive space".into()));
         }

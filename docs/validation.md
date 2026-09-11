@@ -1230,3 +1230,26 @@ superseded by this section. Linux termination/filesystem execution, power-loss/N
 qualification, real password managers/hardware authenticators, trusted remote HTTPS,
 and native platform credential storage remain external or later release gates.
 Local process termination and virtual authenticators do not certify those surfaces.
+
+## Wave 3 review fixes — 2026-09-11
+
+- Added permanent archive regressions for cancellation interrupted before worker
+  acknowledgment, final-chunk replay after staging and publication, conflicting
+  replay rejection, and recovery after Capture commit plus a later Item edit.
+  Assertions cover retained scratch, terminal Import/Job state, exactly one
+  Evidence record, and preservation of the later inventory change.
+- Expanded real Chromium smoke: interrupt both attempts of an upload chunk,
+  reload the browser, reject a different same-name/same-size source without
+  appending bytes, resume the original Import, and lose the final response after
+  the server accepts the bytes. Saved physical review choices also survive
+  reopening the review form after refresh.
+- Passed: architecture/document/fixture checks, formatting, workspace Rust tests,
+  strict all-target Clippy, TypeScript checks, generated API drift checks, web
+  build, rebuilt server, and normal HTTPS/WebAuthn plus LOCAL_SETUP=1 smoke.
+- Browser runs used temporary server state and isolated Chrome profiles with
+  approved sandbox escalation. The first new interruption test let the client's
+  automatic retry succeed; the test now interrupts both attempts. No user archive
+  or running installation was opened or migrated.
+- Resume compares retained prefixes using bounded read-only chunk replay. This
+  avoids mixing changed source files but retransfers the retained bytes for
+  comparison. Target-Linux/NAS/power-loss and other external gates remain open.

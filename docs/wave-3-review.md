@@ -1,7 +1,8 @@
 # Wave 3 integration review
 
-Review date: 2026-09-10. This document closes the local Wave 3 integration
-checkpoint. The child-by-child implementation record and commit inventory remain
+Initial review date: 2026-09-10; corrective review: 2026-09-11. The original
+commit/check inventory below records the first local integration checkpoint.
+The follow-up at the end records validated corrections included in the subsequent review-fix commit. The child-by-child implementation record and commit inventory remain
 in [the live ledger](wave-3-plan.md).
 
 ## Acceptance trace
@@ -48,3 +49,16 @@ scheduling, and all Wave 4 work remain **not implemented**. Hardware, private
 fixture, target-Linux/NAS, published-pin, abrupt-power, and independent-review
 gates remain **externally unqualified** and must not be inferred from the local
 passes above.
+
+## Independent review follow-up (2026-09-11)
+
+Review reproduced three missing state-transition cases: cancellation followed by
+restart before acknowledgment, final-chunk replay after staging completion, and
+committed-Capture recovery after an Item edit. Permanent archive tests now cover
+these cases, including retained sources, mismatched replay rejection, completed
+Evidence and preserved Item edits. The browser review also found missing upload
+resumption and no way to reopen a saved review; the smoke scenario now interrupts
+an upload, reloads, rejects a different same-size source, resumes the original
+Import, and reopens a saved physical association. See [implementation status](implementation-status.md)
+for the prefix-comparison bandwidth tradeoff. External qualification gates above
+remain unchanged.

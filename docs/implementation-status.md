@@ -1,5 +1,15 @@
 # Implementation status
 
+Wave 3 review follow-up (2026-09-11; validated review-fix commit): interrupted pre-commit cancellations now
+resolve the Job and Import together at startup. Recovery of a committed Capture
+finishes publication despite later Item edits, and does not reserve payload space
+again. Exact final upload-chunk retries remain read-only after staging completes.
+The browser can reselect and resume an interrupted package using its existing
+Import identity; it checks retained prefixes before appending, which retransfers
+those prefixes for comparison but never rewrites them. Saved reviews can be edited
+again after a failed publication, and transient restore failures retain the saved
+Import identity. These changes add permanent recovery and browser regression tests.
+
 This repository is an executable architecture/server foundation, not the complete first release described in the accepted plan. Capability reporting must stay honest as remaining modules land.
 
 Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation tickets and the [release requirements](release-requirements.md) for the repository-local target specification. The gap list below is a summary, not a substitute for ticket acceptance criteria.

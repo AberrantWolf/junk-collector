@@ -33,6 +33,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
  const [files,setFiles]=useState<File[]>([]);const [inboxes,setInboxes]=useState<InboxSource[]>([]);
  const [label,setLabel]=useState('');const [inboxPackage,setInboxPackage]=useState('');
  const [record,setRecord]=useState<ImportView>();const [job,setJob]=useState<JobView>();
+ const [editingReview,setEditingReview]=useState(false);const [checkingFiles,setCheckingFiles]=useState(false);
  const [conflict,setConflict]=useState('');const [itemRevision,setItemRevision]=useState(item.revision);
  const [identity,setIdentity]=useState('unidentified');const [attach,setAttach]=useState(true);
  const [specimen,setSpecimen]=useState('');const [component,setComponent]=useState('');const [carrier,setCarrier]=useState('');
@@ -45,15 +46,13 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
  const storageKey=`collector.import.${item.id}`;
 
  useEffect(()=>{let active=true;api<InboxSource[]>(`/collections/${item.collection_id}/inboxes`).then(value=>{if(!active)return;setInboxes(value);setLabel(current=>current||value[0]?.label||'');}).catch(onError);return()=>{active=false;};},[item.collection_id]);
- useEffect(()=>{const id=localStorage.getItem(storageKey);if(id)api<ImportView>(`/imports/${id}`).then(setRecord).catch(error=>{localStorage.removeItem(storageKey);onError(error);});},[storageKey]);
+ useEffect(()=>{const id=localStorage.getItem(storageKey);if(id)api<ImportView>(`/imports/${id}`).then(setRecord).catch(error=>{if(isApiRequestError(error)&&(error.status===404||error.status===403))localStorage.removeItem(storageKey);onError(error);});},[storageKey]);
  useEffect(()=>{if(record)localStorage.setItem(storageKey,record.id);},[record?.id,storageKey]);
  useEffect(()=>{setItemRevision(item.revision);},[item.revision]);
  useEffect(()=>{setInboxPackage(selectedInbox?.packages[0]||'');},[selectedInbox?.label]);
- useEffect(()=>{setComponent('');setCarrier('');},[specimen]);
- useEffect(()=>{setCarrier('');},[component]);
  useEffect(()=>{const refresh=()=>{if(record)api<ImportView>(`/imports/${record.id}`).then(setRecord).catch(onError);};window.addEventListener('online',refresh);window.addEventListener('collector-jobs-updated',refresh);return()=>{window.removeEventListener('online',refresh);window.removeEventListener('collector-jobs-updated',refresh);};},[record?.id]);
 
- function reset(){localStorage.removeItem(storageKey);setRecord(undefined);setJob(undefined);setConflict('');setFiles([]);setIdentity('unidentified');setAttach(true);setSpecimen('');setComponent('');setCarrier('');}
+ function reset(){setEditingReview(false);localStorage.removeItem(storageKey);setRecord(undefined);setJob(undefined);setConflict('');setFiles([]);setIdentity('unidentified');setAttach(true);setSpecimen('');setComponent('');setCarrier('');}
  async function stage(){
   setBusy(true);setJob(undefined);
   try{
@@ -72,6 +71,42 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
    }
   }catch(error){onError(error);}finally{setBusy(false);}
  }
+ async function resume(){
+  if(!record)return;setBusy(true);setCheckingFiles(true);
+  try{
+   let current=await api<ImportView>(`/imports/${record.id}`);setRecord(current);
+   if(current.phase!=='staging')return;
+   const selected=new Map(files.map(file=>[fileName(file),file]));
+   if(selected.size!==files.length||selected.size!==current.files.length||current.files.some(entry=>selected.get(entry.name)?.size!==entry.bytes)){
+    throw new Error('Select the same complete package, with the original file names and sizes.');
+   }
+   // Check retained prefixes before appending anything, so a different source
+   // cannot silently produce a mixed master. Chunk replay is read-only on disk.
+   for(let index=0;index<current.files.length;index++){
+    const entry=current.files[index];const file=selected.get(entry.name)!;
+    for(let offset=0;offset<entry.received_bytes;offset+=4*1024*1024){
+     current=await api<ImportView>(`/imports/${current.id}/files/${index}?offset=${offset}`,{method:'PUT',body:file.slice(offset,Math.min(offset+4*1024*1024,entry.received_bytes))});
+    }
+   }
+   setCheckingFiles(false);
+   for(let index=0;index<current.files.length;index++){
+    const file=selected.get(current.files[index].name)!;
+    for(let offset=current.files[index].received_bytes;offset<file.size;offset+=4*1024*1024){
+     current=await api<ImportView>(`/imports/${current.id}/files/${index}?offset=${offset}`,{method:'PUT',body:file.slice(offset,offset+4*1024*1024)});setRecord(current);
+    }
+   }
+  }catch(error){onError(error);}finally{setCheckingFiles(false);setBusy(false);}
+ }
+ async function editReview(){
+  if(!record)return;setBusy(true);
+  try{
+   const currentItem=await api<Item>(`/items/${item.id}`);setItemRevision(currentItem.revision);
+   const decision=record.review;
+   setIdentity(decision?.identity.identity==='candidate'?decision.identity.key:'unidentified');
+   setAttach(!!record.association.item_id);setSpecimen(record.association.specimen_id||'');setComponent(record.association.component_id||'');setCarrier(record.association.carrier_id||'');
+   setEditingReview(true);
+  }catch(error){onError(error);}finally{setBusy(false);}
+ }
  async function beginReview(){
   if(!record)return;setBusy(true);setJob(undefined);
   try{
@@ -87,7 +122,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
   if(!record)return;setBusy(true);
   try{
    const choice=identity==='unidentified'?{identity:'unidentified'}:{identity:'candidate',key:identity};
-   const reviewed=await api<ImportView>(`/imports/${record.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:record.revision,identity:choice,association:association(),expected_item_revision:attach?itemRevision:null})});setRecord(reviewed);setConflict('');
+   const reviewed=await api<ImportView>(`/imports/${record.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:record.revision,identity:choice,association:association(),expected_item_revision:attach?itemRevision:null})});setRecord(reviewed);setConflict('');setEditingReview(false);
   }catch(error){
    if(isApiRequestError(error)&&error.status===409){
     const [current,currentItem]=await Promise.all([api<ImportView>(`/imports/${record.id}`),api<Item>(`/items/${item.id}`)]);setRecord(current);setItemRevision(currentItem.revision);setConflict(`The server is now at Import revision ${current.revision} and Item revision ${currentItem.revision}. Your review choices are still in this form; review them and apply again.`);
@@ -99,7 +134,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
   try{
    const accepted=await api<{job_id:string}>(`/imports/${record.id}/publish`,{method:'POST'});
    jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));
-  }catch(error){onError(error);}finally{setBusy(false);}
+  }catch(error){onError(error);try{setRecord(await api<ImportView>(`/imports/${record.id}`));}catch(refreshError){onError(refreshError);}}finally{setBusy(false);}
  }
 
  const canStage=source==='browser'?files.length>0:!!label&&!!inboxPackage;
@@ -113,18 +148,23 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
   </form>}
   {record&&<div className="import-docket">
    <header><div><span className="docket-phase">{phaseLabel[record.phase]}</span><strong className="docket-title">{record.source.package_name}</strong></div><span>{percent(done,total)}%</span></header>
-   <progress max={Math.max(total,1)} value={total?done:1} aria-label="Package staging progress"/><p className="muted" role="status" aria-live="polite">{job?`${job.phase}: ${percent(job.completed_units,job.total_units)}%`:`${done.toLocaleString()} of ${total.toLocaleString()} bytes staged`}</p>
+   <progress max={Math.max(total,1)} value={total?done:1} aria-label="Package staging progress"/><p className="muted" role="status" aria-live="polite">{checkingFiles?'Checking selected files against retained bytes':job?`${job.phase}: ${percent(job.completed_units,job.total_units)}%`:`${done.toLocaleString()} of ${total.toLocaleString()} bytes staged`}</p>
    <h4>Package inventory</h4><div className="package-files" role="list">{record.files.map(file=><div role="listitem" key={file.name}><span>{file.name}</span><small>{file.received_bytes.toLocaleString()} / {file.bytes.toLocaleString()} bytes · {file.digest?'SHA-256 recorded':'digest pending'}</small></div>)}</div>
    {record.limitations.length>0&&<div className="import-limitations"><h4>Analysis limitations</h4><ul>{record.limitations.map(value=><li key={value}>{value}</li>)}</ul></div>}
-   {record.phase==='analyzing'&&<button className="primary" disabled={busy} onClick={()=>void beginReview()}>Review import</button>}
+   {record.phase==='staging'&&record.source.kind==='browser'&&<form aria-label="Resume package" onSubmit={event=>{event.preventDefault();void resume();}}>
+    <p className="notice">Upload interrupted? Select the same original package files to continue. Retained bytes are checked before uploading the remainder.</p>
+    <label>Original package files<input aria-label="Original package files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>
+    <button className="primary" disabled={busy||!files.length}>Resume upload</button>
+   </form>}
+   {record.phase==='analyzing' &&<button className="primary" disabled={busy} onClick={()=>void beginReview()}>Review import</button>}
    {conflict&&<p className="notice conflict" role="alert"><strong>Revision conflict.</strong> {conflict}</p>}
-   {record.phase==='awaiting_review'&&(!record.review||!!conflict)&&<form aria-label="Review import" onSubmit={event=>{event.preventDefault();void saveReview();}}>
+   {record.phase==='awaiting_review'&&(!record.review||!!conflict||editingReview)&&<form aria-label="Review import" onSubmit={event=>{event.preventDefault();void saveReview();}}>
     <fieldset><legend>Identity</legend><label><input type="radio" name="identity" value="unidentified" checked={identity==='unidentified'} onChange={event=>setIdentity(event.target.value)}/> Keep unidentified</label>{candidates.map(candidate=><label key={candidate.key}><input type="radio" name="identity" value={candidate.key} checked={identity===candidate.key} onChange={event=>setIdentity(event.target.value)}/> {candidate.label}</label>)}</fieldset>
     <fieldset><legend>Physical association</legend><label><input type="radio" name="attachment" checked={attach} onChange={()=>setAttach(true)}/> Attach to {item.title}</label><label><input type="radio" name="attachment" checked={!attach} onChange={()=>setAttach(false)}/> Leave capture unattached</label></fieldset>
-    {attach&&item.specimens.length>0&&<div className="form-grid"><label>Physical copy<select value={specimen} onChange={event=>setSpecimen(event.target.value)}><option value="">Item only</option>{item.specimens.map(value=><option key={value.id} value={value.id}>{value.label}</option>)}</select></label>{selectedSpecimen&&<label>Part<select value={component} onChange={event=>setComponent(event.target.value)}><option value="">Copy only</option>{selectedSpecimen.components.map(value=><option key={value.id} value={value.id}>{value.position}. {value.label}</option>)}</select></label>}{selectedComponent?.carrier&&<label>Carrier<select value={carrier} onChange={event=>setCarrier(event.target.value)}><option value="">Part only</option><option value={selectedComponent.carrier.id}>{selectedComponent.carrier.label}</option></select></label>}</div>}
+    {attach&&item.specimens.length>0&&<div className="form-grid"><label>Physical copy<select value={specimen} onChange={event=>{setSpecimen(event.target.value);setComponent('');setCarrier('');}}><option value="">Item only</option>{item.specimens.map(value=><option key={value.id} value={value.id}>{value.label}</option>)}</select></label>{selectedSpecimen&&<label>Part<select value={component} onChange={event=>{setComponent(event.target.value);setCarrier('');}}><option value="">Copy only</option>{selectedSpecimen.components.map(value=><option key={value.id} value={value.id}>{value.position}. {value.label}</option>)}</select></label>}{selectedComponent?.carrier&&<label>Carrier<select value={carrier} onChange={event=>setCarrier(event.target.value)}><option value="">Part only</option><option value={selectedComponent.carrier.id}>{selectedComponent.carrier.label}</option></select></label>}</div>}
     <button className="primary" disabled={busy}>Review import</button>
    </form>}
-   {record.phase==='awaiting_review'&&record.review&&!conflict&&<div className="review-decision"><p><strong>Review saved.</strong> {record.review.identity.identity==='unidentified'?'No catalog identity was asserted.':'A candidate was selected for this capture.'}</p><button className="primary" disabled={busy} onClick={()=>void publish()}>Publish capture</button></div>}
+   {record.phase==='awaiting_review'&&record.review&&!conflict&&!editingReview&&<div className="review-decision"><p><strong>Review saved.</strong> {record.review.identity.identity==='unidentified'?'No catalog identity was asserted.':'A candidate was selected for this capture.'}</p><button disabled={busy} onClick={()=>void editReview()}>Edit review</button><button className="primary" disabled={busy} onClick={()=>void publish()}>Publish capture</button></div>}
    {record.phase==='published'&&<p className="notice" role="status">Capture published. The original package and integrity evidence are now in the archive.</p>}
   </div>}
  </section>;

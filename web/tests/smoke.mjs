@@ -169,9 +169,43 @@ try{
  assert.equal(await importWorkspace.getByLabel('Configured inbox').evaluate(node=>node===document.activeElement),true,'import source keyboard order changed');
  await importWorkspace.getByLabel('This browser').check();
  const stageForm=importWorkspace.getByRole('form',{name:'Stage package'});
- await stageForm.getByLabel('Original package files').setInputFiles({name:'browser-disc.bin',mimeType:'application/octet-stream',buffer:Buffer.from('browser package bytes')});
+ const uploadBytes=Buffer.alloc(4*1024*1024+17,37);
+ let interrupted=false;
+ await page.route('**/api/v1/imports/*/files/*',async route=>{
+  if(new URL(route.request().url()).searchParams.get('offset')==='4194304'){interrupted=true;await route.abort('failed');}else await route.continue();
+ });
+ await stageForm.getByLabel('Original package files').setInputFiles({name:'browser-disc.bin',mimeType:'application/octet-stream',buffer:uploadBytes});
  await stageForm.getByRole('button',{name:'Stage package',exact:true}).click();
+ const resumeForm=importWorkspace.getByRole('form',{name:'Resume package'});
+ await resumeForm.getByRole('button',{name:'Resume upload',exact:true}).waitFor({state:'visible'});
+ await page.waitForFunction(()=>!document.querySelector('form[aria-label="Resume package"] button')?.disabled);
+ assert.equal(interrupted,true);
+ await page.unroute('**/api/v1/imports/*/files/*');
+ const interruptedId=await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(key=>key.startsWith('collector.import.'))));
+ await page.getByRole('button',{name:'Close curator'}).click();
+ await page.reload();
+ await page.getByRole('button',{name:/A test pressing/}).click();
+ await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await resumeForm.waitFor();
+ // A same-name/same-size different source must not append a mixed master.
+ await resumeForm.getByLabel('Original package files').setInputFiles({name:'browser-disc.bin',mimeType:'application/octet-stream',buffer:Buffer.alloc(uploadBytes.length,38)});
+ await resumeForm.getByRole('button',{name:'Resume upload',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('form[aria-label="Resume package"] button')?.disabled);
+ const retained=await page.evaluate(async id=>(await fetch(`/api/v1/imports/${id}`)).json(),interruptedId);
+ assert.equal(retained.files[0].received_bytes,4194304,'mismatched source appended bytes');
+ let lostFinalResponse=false;
+ await page.route('**/api/v1/imports/*/files/*',async route=>{
+  if(!lostFinalResponse&&new URL(route.request().url()).searchParams.get('offset')==='4194304'){
+   lostFinalResponse=true;const received=await route.fetch();assert.equal(received.status(),200);await route.abort('failed');
+  }else await route.continue();
+ });
+ await resumeForm.getByLabel('Original package files').setInputFiles({name:'browser-disc.bin',mimeType:'application/octet-stream',buffer:uploadBytes});
+ await resumeForm.getByRole('button',{name:'Resume upload',exact:true}).click();
  await importWorkspace.getByText('Ready for review',{exact:true}).waitFor();
+ const resumed=await page.evaluate(async id=>(await fetch(`/api/v1/imports/${id}`)).json(),interruptedId);
+ assert.equal(resumed.files[0].received_bytes,uploadBytes.length);
+ assert.equal(lostFinalResponse,true);await page.unroute('**/api/v1/imports/*/files/*');
+ assert.equal(await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(key=>key.startsWith('collector.import.')))),interruptedId,'resume created another Import');
  assert.equal(await importWorkspace.getByRole('status').count(),1,'import progress is not announced');
  assert.match(await importWorkspace.textContent(),/browser-disc\.bin/);
  await importWorkspace.getByRole('button',{name:'Review import',exact:true}).click();
@@ -253,6 +287,12 @@ try{
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  const restoredCurator=page.getByRole('dialog',{name:/Edit entry/});
  await restoredCurator.getByRole('region',{name:'Capture accession'}).getByText('Review saved.',{exact:false}).waitFor();
+ const restoredImport=restoredCurator.getByRole('region',{name:'Capture accession'});
+ await restoredImport.getByRole('button',{name:'Edit review',exact:true}).click();
+ const savedReview=restoredImport.getByRole('form',{name:'Review import'});
+ assert.equal(await savedReview.getByRole('combobox',{name:'Carrier',exact:true}).locator('option:checked').textContent(),'Disc 1 carrier','saved association was lost when editing review');
+ await savedReview.getByRole('button',{name:'Review import',exact:true}).click();
+ await restoredImport.getByText('Review saved.',{exact:false}).waitFor();
  const restoredJobs=restoredCurator.getByRole('region',{name:'Background work'});
  await page.context().setOffline(true);
  await restoredJobs.getByRole('button',{name:'Refresh jobs',exact:true}).click();

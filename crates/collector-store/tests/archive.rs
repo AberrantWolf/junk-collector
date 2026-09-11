@@ -5527,3 +5527,153 @@ fn published_import_reconciles_a_crash_before_job_completion() {
         Revision(1)
     );
 }
+
+#[test]
+fn final_chunk_replay() {
+    let (_root, _store, actor, service, collection) = setup();
+    let import = staged_import(&service, &actor, collection.id, "final-retry");
+    assert!(
+        service
+            .stage_provisional_import_chunk(&actor, import.id, 0, 0, b"data")
+            .is_ok(),
+        "exact final chunk replay should succeed"
+    );
+    assert!(matches!(
+        service.stage_provisional_import_chunk(&actor, import.id, 0, 0, b"evil"),
+        Err(Error::Conflict)
+    ));
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: import.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    service.run_next_job("worker").unwrap();
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let published = service.provisional_import(&actor, import.id).unwrap();
+    assert_eq!(
+        service
+            .stage_provisional_import_chunk(&actor, import.id, 0, 0, b"data")
+            .unwrap()
+            .revision,
+        published.revision
+    );
+}
+
+#[test]
+fn cancel_requested_restart() {
+    let (root, store, actor, service, collection) = setup();
+    let import = reviewed_unattached_import(&service, &actor, collection.id, "cancel-restart");
+    let job = service
+        .enqueue_import_publication(&actor, import.id, &command())
+        .unwrap();
+    store.claim_job("old-process", 30).unwrap().unwrap();
+    store.request_job_cancellation(job, actor.user_id).unwrap();
+    drop(service);
+    drop(store);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened.clone(), Arc::new(Registry::builtins()));
+    service.run_next_job("new-process").unwrap();
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Cancelled);
+    assert_eq!(
+        service.provisional_import(&actor, import.id).unwrap().phase,
+        ImportPhase::Cancelled
+    );
+    assert_eq!(
+        std::fs::read(
+            root.path()
+                .join("state/imports")
+                .join(import.id.to_string())
+                .join("0.part")
+        )
+        .unwrap(),
+        b"data"
+    );
+    assert!(matches!(
+        service.stage_provisional_import_chunk(&actor, import.id, 0, 0, b"data"),
+        Err(Error::Conflict)
+    ));
+}
+
+struct PanicAtImportCommit;
+impl collector_store::PublicationFaultInjector for PanicAtImportCommit {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == collector_store::PublicationFaultPoint::RevisionCommitted {
+            panic!("simulate process interruption after durable commit");
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn committed_import_after_item_edit() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let import = staged_import(&service, &actor, collection.id, "commit-restart");
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: import.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation {
+                    item_id: Some(saved.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(saved.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    drop(service);
+    drop(store);
+    let crashing = Store::open_with_publication_fault(
+        root.path().join("archive"),
+        root.path().join("state"),
+        Arc::new(PanicAtImportCommit),
+    )
+    .unwrap();
+    let claim = crashing.claim_job("old-process", 30).unwrap().unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || crashing.publish_import_for_job(import.id, job, &claim.claim_token)
+        ))
+        .is_err()
+    );
+    drop(crashing);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    assert!(Catalog::capture(&*reopened, import.capture_id).is_ok());
+    let service = CollectionService::new(reopened.clone(), Arc::new(Registry::builtins()));
+    let mut edited = Catalog::item(&*reopened, saved.id).unwrap();
+    let revision = edited.revision;
+    edited.title = "Updated title after restart".into();
+    save_inventory(&service, &actor, edited, revision).unwrap();
+    service.run_next_job("new-process").unwrap();
+    assert_eq!(
+        service.provisional_import(&actor, import.id).unwrap().phase,
+        ImportPhase::Published
+    );
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    assert_eq!(Catalog::evidence(&*reopened, saved.id).unwrap().len(), 1);
+    assert!(!service.run_next_job("new-process").unwrap());
+    assert_eq!(
+        Catalog::item(&*reopened, saved.id).unwrap().title,
+        "Updated title after restart"
+    );
+}

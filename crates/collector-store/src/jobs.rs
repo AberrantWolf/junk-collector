@@ -72,7 +72,7 @@ impl Store {
             let db = lock(&self.db)?;
             let mut statement = db
                 .prepare(
-                    "SELECT id,kind,item_id,request FROM private.jobs
+                    "SELECT id,kind,item_id,request,state FROM private.jobs
                      WHERE state IN ('running','cancel_requested')",
                 )
                 .map_err(storage)?;
@@ -83,13 +83,14 @@ impl Store {
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 })
                 .map_err(storage)?
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(storage)?
         };
-        for (id, kind, item_id, request) in candidates {
+        for (id, kind, item_id, request, state) in candidates {
             let job_id: JobId = id.parse().map_err(storage)?;
             let committed = if kind == "preservation_import" {
                 publication::PublicationJournalStore::new(&self.archive)
@@ -148,6 +149,21 @@ impl Store {
                         [id],
                     )
                     .map_err(storage)?;
+            } else if state == "cancel_requested" {
+                // Startup owns both process locks; no old worker can acknowledge
+                // this cancellation. Resolve the job and its Import atomically.
+                let mut db = lock(&self.db)?;
+                let tx = db
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(storage)?;
+                let now = self.clock.now().timestamp();
+                tx.execute(
+                    "UPDATE private.jobs SET state='cancelled',phase='cancelled',error=NULL,
+                     worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=? WHERE id=?",
+                    params![now, id],
+                ).map_err(storage)?;
+                cancel_job_import(&tx, &kind, &request, now)?;
+                tx.commit().map_err(storage)?;
             }
         }
         Ok(())
@@ -557,19 +573,7 @@ impl Store {
                 params![self.clock.now().timestamp(), id.to_string()],
             )
             .map_err(storage)?;
-            if kind.starts_with("import_") {
-                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
-                if let Some(import_id) =
-                    request.get("import_id").and_then(serde_json::Value::as_str)
-                {
-                    tx.execute(
-                        "UPDATE private.imports SET phase='cancelled',revision=revision+1,updated_at=?
-                         WHERE id=? AND phase<>'published' AND phase<>'cancelled'",
-                        params![self.clock.now().timestamp(), import_id],
-                    )
-                    .map_err(storage)?;
-                }
-            }
+            cancel_job_import(&tx, &kind, &request, self.clock.now().timestamp())?;
         }
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
@@ -726,4 +730,25 @@ impl Store {
         tx.commit().map_err(storage)?;
         Ok(id)
     }
+}
+
+// Called inside the same transaction that makes cancellation terminal.
+fn cancel_job_import(
+    tx: &rusqlite::Transaction<'_>,
+    kind: &str,
+    request: &str,
+    now: i64,
+) -> Result<()> {
+    if kind.starts_with("import_") {
+        let request: serde_json::Value = serde_json::from_str(request).map_err(storage)?;
+        if let Some(import_id) = request.get("import_id").and_then(serde_json::Value::as_str) {
+            tx.execute(
+                "UPDATE private.imports SET phase='cancelled',revision=revision+1,updated_at=?
+                 WHERE id=? AND phase<>'published' AND phase<>'cancelled'",
+                params![now, import_id],
+            )
+            .map_err(storage)?;
+        }
+    }
+    Ok(())
 }

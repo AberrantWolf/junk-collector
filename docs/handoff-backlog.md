@@ -1,6 +1,6 @@
 # Handoff backlog
 
-Baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Wave 2 is complete, including review corrections and receipt/publication coordination; external qualification gates remain open.** Ticket status is recorded individually below; existing mechanisms alone are not evidence that a ticket is complete. The approved child sequence and TDD/review contract are in [the Wave 2 execution plan](wave-2-plan.md).
+Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
 ## How to use this backlog
 
@@ -21,7 +21,7 @@ Each ticket lists its owning layers, entry files, scope, acceptance and limits. 
 | 5 | C03, C04, C05, C06, C07, P06 | Client integration, offline use, Trash Amp and scale |
 | 6 | R01, R02, R03 | Deployment, performance and release evidence |
 
-Within a wave follow the explicit dependencies below, not table position. Independent tracks may proceed separately if deliberately assigned. After Wave 1 review fixes are validated, the next implementation contracts are **A04** and **P01**; use their explicit dependencies. Do not give a small model the entire table as one coding task.
+Within a wave follow the explicit dependencies below, not table position. Independent tracks may proceed separately if deliberately assigned. The next implementation wave is **Wave 4**; select one of its tickets only after checking its explicit dependencies and splitting it into bounded children where needed. Wave 3 completion does not qualify unavailable private fixtures, providers, hardware, or target platforms. Do not give a small model the entire table as one coding task.
 
 ### Completion rules and checks
 
@@ -329,7 +329,9 @@ migration; P02.2 claim/worker state machine; P02.3 cancellation, retry, and
 publication reconciliation; P02.4 job API and review. See
 [the Wave 3 execution plan](wave-3-plan.md).
 
-**Status (2026-09-10): complete locally; U03.1 is next.** Private schema
+**Status (2026-09-11): complete locally, including validated review fixes.** Startup now resolves abandoned pre-commit cancellation acknowledgments and their Import state atomically, retaining source bytes. Permanent restart coverage is recorded in [validation](validation.md#wave-3-review-fixes--2026-09-11).
+
+Original implementation: Private schema
 v8 stores typed jobs and migrates legacy uploads without identity/history loss.
 Transactional FIFO claims enforce two active jobs globally and one per user, with
 30-second leases, five-second heartbeats, prior-instance restart takeover, claim
@@ -356,7 +358,9 @@ Separate package inventory/staging, analyzer candidates, user review/physical as
 
 **Limit:** use existing upload/inbox mechanisms, not a second importer; actual analyzer implementations arrive in D04/D05.
 
-**Status (2026-09-10): complete locally; P04.1 is next.** Private schema
+**Status (2026-09-11): complete locally, including validated review fixes.** Exact final-chunk retries are accepted read-only after staging or publication; mismatched bytes fail. A committed Capture completes recovery despite later Item edits, without repeating pre-commit revision or payload-space checks. Regression tests preserve later edits, source bytes, identities, and exactly one Evidence record.
+
+Original implementation: Private schema
 v9 now persists a durable provisional Import separately from its execution Jobs:
 safe source summary, bounded declared-file inventory and resumable offsets/digests,
 preallocated Capture/Representation identities, optional physical association and
@@ -392,7 +396,9 @@ filesystem termination behavior remain externally unqualified.
 
 **Routine · Dependencies:** P02, P03, U02. **Owner:** web curation/administration through application APIs.
 
-**Status (2026-09-10): complete locally; D02.1 is next.** The curation
+**Status (2026-09-11): complete locally, including validated review fixes.** Interrupted browser packages can be reselected after refresh and resumed under the same Import identity. Retained prefixes are compared before appending; this currently retransfers those bytes for comparison and is not a bandwidth-optimized resume protocol. Saved reviews can be reopened after publication failures, and temporary restore failures retain the saved Import ID. Both normal and private-local browser suites cover the changes, including lost final responses and same-name/same-size source mismatches.
+
+Original implementation: The curation
 workbench now stages browser files or a configured-inbox package through the one
 P03 workflow, displays the complete inventory and durable progress, shows honest
 analysis limitations/candidate choices, records Item/copy/part/carrier or unattached
