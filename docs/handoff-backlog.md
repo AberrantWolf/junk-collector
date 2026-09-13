@@ -42,8 +42,8 @@ contract for D04–D07, P05, C01, S04 and C02. **W4.0 is reviewed and corrected;
 W4.1 contracts are reviewed and corrected; W4.2 durable processing integration is
 reviewed and corrected.**
 The [collection-type refactor](collection-types-plan.md) (CT.1–CT.4) is the inserted
-prerequisite. CT.1–CT.4 are reviewed and corrected; resume D04.1 and stop after
-its extraction/qualification checkpoint for review. Authenticated descriptors, availability-aware
+prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1 is reviewed and corrected locally; proceed through D04.2 then D04.3,
+and stop for review afterward. Authenticated descriptors, availability-aware
 content permissions, generic owner-driven forms and valid unavailable-owner browser
 fallback coverage are present.
 The plan supplies child steps, fixed ownership,
@@ -560,7 +560,7 @@ Define capability-based authorized media readers and extract decoding, integer-s
 
 ### D04 — Game analyzer and DAT verification integration
 
-**Status: planned; not implemented.** Ordered children: D04.1 reader-based primitives; D04.2 DAT snapshots/matching; D04.3 workflow/review. Follow the [Wave 4 child instructions](wave-4-plan.md#d041--qualified-reader-based-game-primitives) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-13): D04.1 reviewed and corrected locally.** Reader-only shared primitives, Collector result mapping, affected Retro consumer migration, independent vectors, and the pinned synthetic CHD oracle pass. No DAT snapshot/match, registered production operation, persistence workflow, or catalog verification was added. Ordered remaining children: D04.2 DAT snapshots/matching; D04.3 workflow/review. Follow the [Wave 4 child instructions](wave-4-plan.md#d041--qualified-reader-based-game-primitives) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D02, A03, P02, P03. **Owner:** game module handlers; infrastructure catalog/provider adapters.
 

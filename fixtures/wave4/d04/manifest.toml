@@ -83,7 +83,14 @@ oracle = "Generated one-sector raw-2352 track; mutation proves track-one identif
 [external_chd]
 tool = "/opt/homebrew/bin/chdman"
 version = "0.285"
-status = "unqualified until D04.1 generates and compares the CHD"
+status = "D04.1 pinned synthetic two-track oracle passed; real dumps and other versions remain external"
+test = "CHDMAN=/opt/homebrew/bin/chdman cargo test -p junk-libs-game-formats --features chd --test chd_oracle -- --ignored"
+track_1_frames = 3
+track_1_byte = 17
+track_1_sha256 = "e75a34b718be8826bd01312d55980c3c6d898e346ab4bf2fda123791737fa12f"
+track_2_frames = 5
+track_2_byte = 34
+track_2_sha256 = "e8d9b3b43740b26ce576e9b8922fa5264c3ccc2a73585a97c985b1b05ca687fb"
 
 [composites.ines]
 header_hex = "4e45531a010000000000000000000000"

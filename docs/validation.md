@@ -1,5 +1,94 @@
 # Validation recorded for the foundation
 
+## D04.1 repository checkpoint
+
+The reviewed shared extraction is committed in Junk Libs at `cd385d8`; the
+associated Retro Junk consumer migration is committed at `f4af7b0`. This Collector
+checkpoint contains the matching integration, fixtures and handoff. These hashes
+identify the tested sibling state; Cargo still uses local path dependencies, not
+distributable immutable pins. Unrelated Retro sync scripts were excluded.
+
+## D04.1 review corrections — 2026-09-13
+
+- N64 reads are bounded to the initial stream length and reject aligned early EOF.
+  The range hasher has one shared implementation rather than duplicate loops.
+- Qualified CUE hashing preflights BINARY container type, unique logical FILE names,
+  exactly one INDEX 01, valid track numbers, ordered indexes and membership in each
+  track's source-byte span. Non-binary containers, alias/repeated FILE sources and
+  invalid layouts fail before opening payload readers. Generic CUE parser behavior
+  is unchanged; these are the qualified hash adapter's fail-closed rules.
+- Collector rejects overlapping or overflowing track spans while permitting the
+  valid exact raw hash of an empty file. Permanent tests cover these cases.
+- The CHD oracle is explicitly ignored in ordinary test runs. Run
+  `CHDMAN=/opt/homebrew/bin/chdman cargo test -p junk-libs-game-formats --features chd --test chd_oracle -- --ignored`
+  in Junk Libs to qualify it. An explicit missing-tool or wrong-version invocation
+  now fails instead of passing silently. The pinned 0.285 synthetic oracle passes.
+- Passed: 204 Collector workspace tests, 10 shared game-format vectors, the explicit
+  CHD oracle, and 431 affected Retro package tests. Default/all-feature shared vectors,
+  all-feature shared-workspace Clippy, affected Retro Clippy and Collector gates pass. No browser rerun was
+  needed because D04.1 changes no HTTP routes or frontend behavior; TypeScript,
+  generated API drift, web build and embedded-server rebuild were checked.
+- Shared-library and Collector changes remain uncommitted in their own repositories.
+  Unrelated Retro sync-script edits were preserved. The new `chd` feature gates the
+  hash API, but the existing shared disc dependency still includes its decoder;
+  no decoder-free build or real mixed-mode-dump qualification is claimed.
+- D04.2 then D04.3 may proceed under the updated handoff. Do not map CHD internal
+  frame positions into CUE source-byte offsets or infer complete DAT verification
+  from normalized hashes alone. Real dumps, platform gates and immutable dependency
+  pins remain outstanding.
+
+# D04.1 qualified reader-based game primitives — 2026-09-13
+
+- Added the reader-only `junk-libs-game-formats` crate. It owns versioned
+  normalization domains plus exact raw, trainer-free iNES/NES2 payload, canonical
+  big-endian N64, explicit SNES/PCE payload, ordered raw-2352 CUE-track, and
+  feature-gated CHD-track hashing. It has no filesystem paths, provider policy,
+  database, GUI, or Retro orchestration dependency.
+- Collector's game module maps shared hashes and CUE source spans into typed
+  observations, validates exact domain/version/digest sets, resolves CUE members
+  only through the frozen `PackageInventory`, and keeps header structure separate
+  from any future catalog match. No production capability was registered, no Job
+  executor or persistence path changed, and D04.2 DAT work did not start.
+- Retro Junk's actual NES, SNES, N64, PCE, CUE, and CHD hash consumers now call
+  the shared primitives. N64 hashing uses the whole-stream hook so arbitrary
+  three-byte reader chunks cannot split a normalization word. Existing cooked-CUE
+  behavior remains an explicitly unqualified Retro fallback rather than being
+  mislabeled as the qualified raw-2352 contract.
+- iNES/NES2 length and trainer rules were checked against the
+  [NESdev NES 2.0 format reference](https://www.nesdev.org/wiki/NES_2.0); SNES
+  explicit whole-bank/copier-header handling was checked against the
+  [SNESdev ROM file-format reference](https://snes.nesdev.org/wiki/ROM_file_formats).
+  PCE's explicit bank layout is cross-checked with the migrated Retro consumer;
+  real PCE/SNES dumps remain external qualification.
+- The pinned `/opt/homebrew/bin/chdman` 0.285 oracle creates a two-track CHD from
+  three raw-2352 frames of `0x11` followed by five frames of `0x22`. Shared decode
+  returns every unpadded track and matches independent SHA-256 values
+  `e75a34b718be8826bd01312d55980c3c6d898e346ab4bf2fda123791737fa12f` and
+  `e8d9b3b43740b26ce576e9b8922fa5264c3ccc2a73585a97c985b1b05ca687fb`.
+- Explicit unavailable/unqualified cases are trainer-bearing NES, NES2 misc ROMs,
+  malformed/trailing/truncated iNES lengths, unaligned or unknown N64 input,
+  ambiguous SNES/PCE layouts, cooked/missing/truncated CUE members, unsupported
+  CHD units, other consoles/containers, real mixed-mode dumps, and other chdman
+  versions. Inputs are never rewritten; failures do not become catalog
+  verification, and preservation remains available.
+- Independent and cross-consumer tests cover the published raw digest vector,
+  exact iNES and NES2 exponent sizes, hostile N64 chunk boundaries, explicit
+  SNES/PCE headers, combined and split CUE sources, stored versus synthetic
+  pregap, changed later tracks, malformed/incomplete layouts, and the pinned CHD
+  round trip. `cargo test -p junk-libs-game-formats` and the feature-enabled CHD
+  oracle pass; affected Retro suites pass 147 + 237 + 5 tests. Full repository
+  gates pass: architecture/link and all Wave 4 fixture checks; formatting; locked
+  workspace tests; warning-free full Collector Clippy; TypeScript and OpenAPI
+  drift checks; web build; and a fresh `collector-server` build. Junk Libs passes
+  strict all-feature workspace Clippy and the complete all-feature game-format
+  suite. The four affected Retro packages pass strict all-target Clippy; the
+  broader Retro workspace still has unrelated pre-existing strict-lint failures
+  in backend/import code and was not rewritten as part of this extraction.
+- The shared and Retro repositories remain separate working-tree changes and the
+  path dependency is not a distributable immutable pin. Real private dumps,
+  target-platform qualification, published dependency pins, and independent
+  review were external at the implementation checkpoint. Local review is recorded above.
+
 # CT.2 persistence and legacy assignment checkpoint — 2026-09-11
 
 - Added durable collection binding to runtime collections, presented DTOs, typed
@@ -129,7 +218,8 @@
   Clippy, TypeScript, generated API drift, web build and subsequent server build.
   Browser smoke was not repeated: no browser UI behavior changed. Existing HTTP
   tests include the curation operation route exposure check.
-- W4.2 is reviewed and corrected; D04.1 is next. Changes remain uncommitted.
+- At the W4.2 checkpoint, D04.1 was next. D04.1 has since implemented its bounded
+  primitives and remains uncommitted pending review.
 
 # Wave 4 W4.2 implementation evidence — 2026-09-11
 
@@ -158,7 +248,7 @@
 - Added the authenticated curation operation-enqueue API; generated OpenAPI and
   TypeScript artifacts were regenerated. There is no production provider network
   adapter, game/CD analyzer, metadata search workflow, derivative encoder, or new
-  browser UI in W4.2. D04.1 has not started.
+  browser UI in W4.2. D04.1 had not started at this W4.2 checkpoint.
 - Final checks passed: `python3 scripts/check_architecture.py`; `cargo fmt --all
   -- --check`; `git diff --check`; `cargo test --workspace --locked` (170 tests);
   `cargo clippy --workspace --all-targets --locked -- -D warnings`; `npm --prefix

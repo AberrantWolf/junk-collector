@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 reviewed and corrected; D04.1 is next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 reviewed and corrected; D04.1 reviewed and corrected; D04.2–D04.3 are next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -20,7 +20,7 @@ Implement [CT.1–CT.4](collection-types-plan.md) with its review checkpoints be
 D04.1. It supersedes domain-type placement and universal metadata-field decisions
 below where explicitly stated. W4.2 remains reviewed. CT.1–CT.3 are reviewed and
 corrected. CT.4's authenticated descriptors, availability-aware permissions,
-owner-driven forms and unavailable-owner fallback are reviewed and corrected locally. D04.1 may now resume.
+owner-driven forms and unavailable-owner fallback are reviewed and corrected locally. D04.1’s bounded extraction/qualification checkpoint is now reviewed and corrected.
 
 Downstream contracts now consume collection ownership rather than reintroducing a
 kind switch: D04/D05 publish results through their registered module owner and
@@ -70,7 +70,7 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 1 | W4.0 | none | Baseline, fixture and dependency lock-in | Reviewed/corrected 2026-09-11; proceed to W4.1 |
 | 2 | W4.1 | W4.0 | Package readers, typed results and source binding | Reviewed/corrected 2026-09-11; proceed to W4.2 |
 | 3 | W4.2 | W4.1 | Durable observations, snapshots and job integration | Reviewed/corrected 2026-09-11; proceed to D04.1 |
-| 4 | D04.1 | W4.2 | Qualified game primitive extraction | Review; sibling gates |
+| 4 | D04.1 | W4.2 | Qualified game primitive extraction | Reviewed/corrected 2026-09-13; sibling gates passed |
 | 5 | D04.2 | D04.1 | DAT snapshots and complete-match policy | Routine plus vectors |
 | 6 | D04.3 | D04.2 | Game jobs, curation and supported-operation matrix | D04 root review |
 | 7 | D05.1 | W4.2 | Exact CD PCM/layout and bounded checksum readers | Review; sibling gates |
@@ -149,7 +149,8 @@ distinguish current from historical results without deleting history. Recovery,
 cancellation/restart, retry/idempotence, revocation timing, streamed snapshot
 integrity, archive-only rebuild, unknown-record preservation, and changed-input
 currency are covered by tests. No game/CD analyzer or production network provider
-was added; D04.1 has not started. Final gates and limitations are recorded in
+was added by W4.2. D04.1 subsequently added only its bounded reader/result
+primitives and no registered runtime operation. Final gates and limitations are recorded in
 [`validation.md`](validation.md). Compatibility-only work is limited to reading and
 reindexing existing archive schema 3 and exposing its provenance limitation; no
 permanent adapter was added merely for a prior Wave checkpoint.
@@ -173,7 +174,8 @@ W4.2 review corrected host scope enforcement, cursor pagination, source currency
 pre-commit evidence rebinding, archive envelope identity checks, atomic reindex,
 provider spooling/grant rechecks, recipe replay and command path binding. It also
 fixed final-owner lock release exposed by parallel recovery tests. Final validation
-is recorded in [validation](validation.md); D04.1 is the next implementation child.
+is recorded in [validation](validation.md). D04.1 is now implemented locally and
+awaiting review; D04.2 has not started.
 
 ## Fixed architecture and scope decisions
 
@@ -406,6 +408,8 @@ extensibility. Domain work starts only after this checkpoint passes.
 
 ### D04.1 — Qualified reader-based game primitives
 
+**Status (2026-09-13): reviewed and corrected locally; proceed to D04.2–D04.3.**
+
 **Read:** Retro Nintendo NES/SNES/N64, NEC PCE, core analyzer contracts and DAT
 normalization; Junk Libs core/disc/DAT. Retro core currently contains path-bearing
 options, so do not make it a dependency of `collector-modules`.
@@ -432,6 +436,20 @@ versus synthetic pregap. Cross-check old and new consumers plus independent vect
 not only old/new equality. Run affected Junk Libs/Retro gates and record limitations.
 **Stop:** no wholesale Retro orchestration dependency, no copied parallel algorithm
 in Collector, no qualification inferred from filename or one selected track.
+
+D04.1 review handoff: preserve strict BINARY CUE source and index/span checks,
+N64 length bounds, and ordered non-overlapping source-byte ranges. Invoke the
+external CHD oracle explicitly with `CHDMAN=/path/to/chdman ... -- --ignored`;
+ordinary all-feature tests report it ignored. Its required version is 0.285, and
+an explicit missing/wrong-version run must fail. The `chd` feature gates the shared
+hash entry point; `junk-libs-disc` still brings its existing decoder dependency
+transitively, so this is not a decoder-free build claim.
+
+CUE `source_byte_offset` is a byte coordinate in an uncompressed source file. Do
+not reuse that field for CHD padded frames or compressed file offsets; a future
+Collector CHD adapter needs an explicit source/coordinate mapping. Do not label
+raw bytes, header structure, or a normalized hash as catalog verification. Real
+dumps, target platforms and immutable dependency pins remain external gates.
 
 ### D04.2 — DAT snapshots and matching
 
@@ -935,11 +953,13 @@ Wave 3 final-chunk replay, interrupted cancellation and post-commit recovery cas
 ## Ready-to-send implementing-agent prompt
 
 ```text
-Implement D04.1 next. CT.1–CT.4 are reviewed and corrected.
-Follow D04.1’s extraction and independent-vector gates and stop for review afterward.
+Implement D04.2 and D04.3 next, in that order. D04.1 and CT.1–CT.4 are reviewed
+and corrected. Complete D04.2 matching/vector gates before integrating D04.3.
+Stop for architectural conflicts or missing required qualification; stop for review
+after D04.3. Do not proceed into D05.
 Preserve the existing working-tree changes. Read decisions/pre-release-evolution.md
-alongside the required architecture/status/release documents. Settle the immediate
-reader/result contract, then implement the qualified primitives and migrate actual
+alongside the required architecture/status/release documents. Inspect the immediate
+reader/result contract, qualified primitives, independent vectors, and migrated
 callers together. Do not add compatibility wrappers solely for a wave checkpoint
 or scaffold unimplemented production APIs. Preserve real data and sibling consumers.
 Read AGENTS.md and the required architecture/status/release documents first.

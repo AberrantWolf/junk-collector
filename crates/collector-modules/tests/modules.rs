@@ -933,6 +933,161 @@ fn moved_game_and_music_result_wire_shapes_and_signed_units_are_unchanged() {
 }
 
 #[test]
+fn game_primitives_map_shared_hash_domains_without_claiming_catalog_verification() {
+    let file_id = PackageFileId::new();
+    let mut raw = Cursor::new(b"123456789".to_vec());
+    let result = hash_game_file(file_id, &mut raw, GameHashProfile::Raw).unwrap();
+    let GameProcessingResult::Hashes { files } = &result else {
+        panic!("expected hashes")
+    };
+    assert_eq!(files[0].file_id, file_id);
+    assert_eq!(files[0].domain.name, "org.junk.game.raw-bytes");
+    assert_eq!(files[0].domain.version, 1);
+    assert!(files[0].digests.iter().any(|digest| {
+        digest.algorithm == HashAlgorithm::Sha256
+            && digest.hex == "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225"
+    }));
+    Games
+        .validate_operation_result(
+            &CapabilityId::new("org.junk.games.hash").unwrap(),
+            &RawJson::from_value(serde_json::to_value(result).unwrap()),
+        )
+        .unwrap();
+
+    let payload: Vec<u8> = (0..16 * 1024)
+        .map(|index| ((index * 17 + 3) % 256) as u8)
+        .collect();
+    let mut rom = vec![0; 16];
+    rom[..4].copy_from_slice(b"NES\x1a");
+    rom[4] = 1;
+    rom.extend_from_slice(&payload);
+    let hashes = hash_game_file(
+        file_id,
+        &mut Cursor::new(rom.clone()),
+        GameHashProfile::InesPayload,
+    )
+    .unwrap();
+    let structure = inspect_ines_structure(&mut Cursor::new(rom)).unwrap();
+    assert!(matches!(hashes, GameProcessingResult::Hashes { .. }));
+    assert!(matches!(
+        structure,
+        GameProcessingResult::Structure { ref format, .. } if format == "ines"
+    ));
+    assert!(!matches!(hashes, GameProcessingResult::CatalogMatch { .. }));
+}
+
+#[test]
+fn game_cue_uses_frozen_inventory_and_hashes_every_ordered_raw_track() {
+    let collection_id = CollectionId::new();
+    let representation_id = RepresentationId::new();
+    let cue_id = PackageFileId::new();
+    let bin_id = PackageFileId::new();
+    let bin = [vec![0x11; 2352], vec![0x22; 2352]].concat();
+    let inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: cue_id,
+                display_name: PackageFileName::new("disc/game.cue").unwrap(),
+                bytes: ByteLength(106),
+            },
+            PackageInventoryFile {
+                id: bin_id,
+                display_name: PackageFileName::new("disc/game.bin").unwrap(),
+                bytes: ByteLength(bin.len() as u64),
+            },
+        ],
+    )
+    .unwrap();
+    let cue = "FILE \"game.bin\" BINARY\n\
+               TRACK 01 MODE1/2352\nINDEX 01 00:00:00\n\
+               TRACK 02 AUDIO\nINDEX 01 00:00:01\n";
+    let result = hash_cue_package(cue, cue_id, &inventory, |id| {
+        if id == bin_id {
+            Ok(Box::new(Cursor::new(bin.clone())))
+        } else {
+            Err(ModuleError::MissingPackageFile(id))
+        }
+    })
+    .unwrap();
+    let GameProcessingResult::TrackHashes { tracks } = &result else {
+        panic!("expected ordered track hashes")
+    };
+    assert_eq!(tracks.len(), 2);
+    assert_eq!(tracks[0].source_file_id, bin_id);
+    assert_eq!(tracks[1].source_file_id, bin_id);
+    assert_ne!(tracks[0].digests[0], tracks[1].digests[0]);
+    Games
+        .validate_operation_result(
+            &CapabilityId::new("org.junk.games.hash-tracks").unwrap(),
+            &RawJson::from_value(serde_json::to_value(&result).unwrap()),
+        )
+        .unwrap();
+    for offset in [0, (u64::MAX / 2352) * 2352] {
+        let mut malformed = result.clone();
+        if let GameProcessingResult::TrackHashes { tracks } = &mut malformed {
+            tracks[1].source_byte_offset = offset;
+        }
+        assert!(
+            Games
+                .validate_operation_result(
+                    &CapabilityId::new("org.junk.games.hash-tracks").unwrap(),
+                    &RawJson::from_value(serde_json::to_value(malformed).unwrap()),
+                )
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn unqualified_game_shapes_fail_closed() {
+    let file_id = PackageFileId::new();
+    let mut trainer = vec![0; 16];
+    trainer[..4].copy_from_slice(b"NES\x1a");
+    trainer[4] = 1;
+    trainer[6] = 0x04;
+    trainer.extend(vec![0; 512 + 16 * 1024]);
+    assert!(matches!(
+        hash_game_file(
+            file_id,
+            &mut Cursor::new(trainer),
+            GameHashProfile::InesPayload
+        ),
+        Err(ModuleError::UnavailableCapability(_))
+    ));
+
+    let collection_id = CollectionId::new();
+    let representation_id = RepresentationId::new();
+    let cue_id = PackageFileId::new();
+    let bin_id = PackageFileId::new();
+    let inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: cue_id,
+                display_name: PackageFileName::new("disc.cue").unwrap(),
+                bytes: ByteLength(1),
+            },
+            PackageInventoryFile {
+                id: bin_id,
+                display_name: PackageFileName::new("disc.iso").unwrap(),
+                bytes: ByteLength(2048),
+            },
+        ],
+    )
+    .unwrap();
+    let cooked = "FILE \"disc.iso\" BINARY\nTRACK 01 MODE1/2048\nINDEX 01 00:00:00\n";
+    assert!(matches!(
+        hash_cue_package(cooked, cue_id, &inventory, |_| {
+            Ok(Box::new(Cursor::new(vec![0; 2048])))
+        }),
+        Err(ModuleError::UnavailableCapability(_))
+    ));
+}
+
+#[test]
 fn catalog_results_require_distinct_candidates_and_file_identities() {
     let capability = "org.junk.games.catalog-verification".parse().unwrap();
     let candidate = CatalogCandidate {
@@ -1049,4 +1204,20 @@ fn descriptor_registration_bounds_all_client_visible_contracts() {
             .register(Box::new(DescriptorFixture(valid.clone())))
             .unwrap();
     }
+}
+
+#[test]
+fn empty_raw_hash_remains_a_valid_integrity_observation() {
+    let result = hash_game_file(
+        PackageFileId::new(),
+        &mut Cursor::new(Vec::<u8>::new()),
+        GameHashProfile::Raw,
+    )
+    .unwrap();
+    Games
+        .validate_operation_result(
+            &CapabilityId::new("org.junk.games.hash").unwrap(),
+            &RawJson::from_value(serde_json::to_value(result).unwrap()),
+        )
+        .unwrap();
 }

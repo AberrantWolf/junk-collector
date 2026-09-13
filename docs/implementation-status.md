@@ -36,7 +36,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 - S03 advances private state to v6 with expiring targeted enrollment and separately hashed/revocable native credentials. Same-user recent browser approval, cancellation/expiry/replay protection, one-time issuance, header-independent native authentication, and native-device inventory/revocation are implemented. `collector-client` owns an injectable secure-storage port, refuses redirects/cross-origin credential delivery, validates enrolled server identity/certificate material, and completes the LAN TLS integration through real enrollment.
 - U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted.
 - Private SQLite advances through explicit migrations and stores a durable default UserId selected once from legacy first-row behavior. First-account creation sets it transactionally; later accounts do not change it.
-- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 are implemented locally, while D04/D05 runtime integration remains outstanding.
+- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally, while D04.2–D04.3 and D05 runtime integration remain outstanding.
 - Separate private operational database; collection roles, private field filtering, revisioned accounts/grants, password/passkey recovery, browser-session inventory, and revocable paired native credentials.
 - Separate public/private HTTP routers and direct LAN TLS. Public curation/admin independently configured; disabled APIs and management bundles are absent.
 - WebAuthn passkey registration/login backend and browser integration when an HTTPS authentication origin is configured. Registration and passwordless login pass a Chromium virtual-authenticator end-to-end test; real password-manager/hardware acceptance remains a release gate.
@@ -248,15 +248,20 @@ matrix, exact dependency/tool selections, migration reservations, generated fixt
 recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
-D04.1 is next. Archive schema 4 and catalog schema 4 cover processing observations,
+D04.1 is reviewed and corrected locally; D04.2–D04.3 are next.
+Archive schema 4 and catalog schema 4 cover processing observations,
 streamed snapshots, metadata authority, and conversion recipes; private schema 10
 persists frozen Job input and provisional Import observations. Import publication
 rebinds evidence to its committed Representation with checked file mapping and
 retained provenance. Registered dispatch, authorization, restart/cancellation,
 idempotent retry, archive-only recovery, and current-versus-historical summaries
-have executable coverage. No production analyzer, provider network adapter, or
-domain support qualification is claimed. The validation evidence and remaining
-limits are recorded in [validation](validation.md).
+have executable coverage. No provider network adapter, DAT match, or production
+operation capability is claimed. D04.1 adds a
+reader-only shared game-format crate for exact raw, trainer-free iNES/NES2, N64,
+explicit SNES/PCE, ordered raw-2352 CUE, and pinned-oracle CHD hashing. Collector
+maps those outputs into validated module results without registering a runtime
+operation; actual Retro Junk consumers use the same algorithms. The validation
+evidence and remaining limits are recorded in [validation](validation.md).
 The native user-testable surface in this wave is a diagnostic CLI; Slint,
 offline-library management and the Trash Amp provider remain later tickets.
 
@@ -269,7 +274,7 @@ offline-library management and the Trash Amp provider remain later tickets.
    attachments, event streaming, and offline artwork remain unimplemented.
 3. Complete D04-D05 analyzer/provider adapters, DAT/catalog ingestion,
    MusicBrainz/CAA enrichment and independent real-dump verification oracles.
-   D02/D03 complete the reusable disc and headless audio primitives locally; no
+   D02/D03 and D04.1 complete the reusable disc/audio/game primitives locally; no
    Collector catalog verification is currently claimed.
 4. Add source-bound FLAC and configurable Opus derivative services and validated PCM transforms. Browser preview currently only plays already-playable original formats.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
@@ -361,4 +366,5 @@ CT.4 review also fixes stable patch-command receipts, unsupported-schema form
 controls and descriptor-independent access administration. Integer edits cannot
 silently round beyond the browser's safe range. The generic third-module browser
 fixture checks submission types; its production persistence remains covered by
-real HTTP/service/reindex tests. D04.1 is the next implementation child.
+real HTTP/service/reindex tests. D04.1 subsequently implemented the bounded shared
+reader/result primitives and is awaiting review before D04.2.

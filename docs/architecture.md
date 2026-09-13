@@ -7,14 +7,14 @@ Junk Collector preserves evidence and owned collection history independently of 
 ## Dependency rules
 
 Wave 4 reserves the `collector-api-types` and `collector-providers` boundaries
-below; neither crate exists at W4.2. The architecture checker reserves their
+below; neither crate exists at D04.1. The architecture checker reserves their
 dependency edges so later children cannot introduce a shortcut while creating
 them. DTO moves remain planned. Archive v4 processing records and projections are
 implemented through existing core, application, and store boundaries.
 
 - `collector-core`: portable typed identities, records and errors. No filesystem, database, networking, or presentation.
 - `collector-api-types`: shared serializable client-facing read DTOs. It depends only on `collector-core` plus serialization/schema libraries and owns no services, authorization, storage, or transport. Callers migrate to the shared DTO owner together.
-- `collector-modules`: module-owned schemas, source-preserving migrations, presentation values, and host-mediated operation contracts. No provider requests or application scheduling.
+- `collector-modules`: module-owned schemas, source-preserving migrations, presentation values, and host-mediated operation contracts. Reader-only game normalization delegates to narrow `junk-libs-game-formats` primitives; the module owns operation policy and result validation. No provider requests or application scheduling.
 - `collector-app`: use cases, authorization, effective permissions, and explicit response DTOs over mechanism-only storage ports. Frontends do not bypass these rules.
 - `collector-providers`: bounded HTTP, provider/catalog parsing adapters, recorded-response fixtures, and optional encoder-process mechanisms. It may depend on `collector-core`, `collector-api-types`, application port contracts, and narrow `junk-libs` crates; it never depends on Store, server, or a GUI.
 - `collector-store`: archive publication, local catalog projection, private state, package/asset storage. It implements mechanism ports using validated identities/effects; application services own authorization policy.

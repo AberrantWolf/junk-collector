@@ -492,7 +492,8 @@ Review validation: 200 locked workspace tests, strict Clippy, architecture/fixtu
 document checks, formatting, API drift, TypeScript/build and server rebuild pass.
 Both final HTTPS/WebAuthn and private local-setup browser suites pass.
 
-CT.1–CT.4 are complete locally. D04.1 is the next implementation child; follow its
+CT.1–CT.4 are complete locally. D04.1 subsequently implemented its bounded
+reader/result primitives and is awaiting review; follow its
 reader-only extraction and independent-vector gates. Preserve module ownership,
 patch receipts, safe fallback DTOs, artwork rows and the late publication-policy
 callbacks. Do not introduce a checkpoint-specific schema version or compatibility
@@ -501,12 +502,11 @@ layer without an actual persisted-data requirement.
 ## Prompt to send to the implementing agent
 
 ```text
-Implement D04.1 in docs/wave-4-plan.md. CT.1–CT.4 are reviewed and corrected.
-Read the required context and collection-types review notes, preserving all existing
-uncommitted work. Follow the reader-only extraction boundaries and tests-first
-qualification matrix. Keep sibling extractions separate from Collector integration
-and check affected consumers. Never equate structural analysis or normalized hashing
-with catalog verification. Stop after D04.1 for review with a concise changes/tests/
-qualification-limitations report. Do not implement D04.2, reset data, spawn agents
-or commit. Update the status, validation and handoff documents with actual evidence.
+Implement D04.2 and D04.3 in docs/wave-4-plan.md, in that order. CT.1–CT.4 and
+D04.1 are reviewed and corrected. Preserve the existing uncommitted work in all
+repositories. Follow D04.1's strict source/coordinate and external-oracle boundaries;
+complete D04.2's DAT matching/vector gates before D04.3 integration. Stop for an
+architectural conflict or missing required qualification. Otherwise continue through
+D04.3 and stop for review. Do not start D05, reset data, spawn agents or commit.
+Update status, validation and handoff documents with actual evidence.
 ```
