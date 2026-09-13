@@ -1,0 +1,26 @@
+schema = 1
+root = "D07"
+license = "Generated PCM"
+
+[[vectors]]
+id = "exact-flac-source"
+recipe = "hex"
+hex = "0080ff7fffff0100000000003930c7cf"
+length = 16
+sha256 = "890bb45096e8a0b0189c42a1905eb76e0e31a6005fcd5ad8184f25e12cfc02d3"
+sample_format = "signed little-endian i16 stereo 44100 Hz"
+expected = "FLAC decode reproduces all four frames exactly"
+
+[flac]
+tool = "flac"
+version = "1.5.0"
+level = 5
+status = "selected for D07.1 golden generation"
+
+[opus]
+tool = "opusenc"
+version = "unselected"
+bitrates_kbps = [96, 128, 192]
+frame_milliseconds = 20
+sample_rate = 48000
+status = "unavailable at W4.0; pin observed tool version before enabling"

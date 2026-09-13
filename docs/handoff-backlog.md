@@ -1,5 +1,7 @@
 # Handoff backlog
 
+Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
+
 Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
 ## How to use this backlog
@@ -22,6 +24,42 @@ Each ticket lists its owning layers, entry files, scope, acceptance and limits. 
 | 6 | R01, R02, R03 | Deployment, performance and release evidence |
 
 Within a wave follow the explicit dependencies below, not table position. Independent tracks may proceed separately if deliberately assigned. The next implementation wave is **Wave 4**; select one of its tickets only after checking its explicit dependencies and splitting it into bounded children where needed. Wave 3 completion does not qualify unavailable private fixtures, providers, hardware, or target platforms. Do not give a small model the entire table as one coding task.
+
+### Contract planning for remaining waves
+
+Use [pre-release evolution](decisions/pre-release-evolution.md) as the acceptance
+policy for all remaining tickets. Before each root, settle its immediate producer/
+consumer contract and one complete workflow; do not scaffold speculative endpoints.
+Wave 5 needs a shared client-service contract review before Slint/offline/Trash Amp
+integration. Wave 6 tests the current release format and real external imports; it
+does not automatically freeze backend compatibility. Update callers and generated
+contracts together, with a concrete preservation/conversion path for actual data.
+
+### Wave 4 execution entry point
+
+The [Wave 4 implementation handoff](wave-4-plan.md) is the detailed execution
+contract for D04–D07, P05, C01, S04 and C02. **W4.0 is reviewed and corrected;
+W4.1 contracts are reviewed and corrected; W4.2 durable processing integration is
+reviewed and corrected.**
+The [collection-type refactor](collection-types-plan.md) (CT.1–CT.4) is the inserted
+prerequisite. CT.1–CT.4 are reviewed and corrected; resume D04.1 and stop after
+its extraction/qualification checkpoint for review. Authenticated descriptors, availability-aware
+content permissions, generic owner-driven forms and valid unavailable-owner browser
+fallback coverage are present.
+The plan supplies child steps, fixed ownership,
+fixture requirements, failure tests and review checkpoints. C01 precedes S04,
+and C02 follows both. Its final section contains a ready-to-send agent prompt.
+
+W4.0 inspected Collector `c5c3ecfb2ada2624e780ac128b290e4c37f1d468`
+and the four current sibling revisions without changing them. The dated reuse map
+records drift, the complete advertised-operation matrix, schema reservations and
+exact dependency/tool selections. `fixtures/wave4/` contains reproducible generated
+vectors/manifests for every Wave 4 root and explicit private-oracle environment
+variables. No external real dump, Keychain, LAN, tailnet or independent security
+qualification is claimed. Architecture/link validation, formatting, 142 locked
+workspace tests, warning-free clippy, TypeScript, OpenAPI drift, web build and all
+8 fixture-manifest/22 vector and composite digest checks pass locally. Browser smoke and a server
+rebuild were not applicable because W4.0 changed no web or server asset.
 
 ### Completion rules and checks
 
@@ -266,6 +304,8 @@ Children: [S03.1 enrollment persistence/state, S03.2 browser approval/native tra
 
 ### S04 — Authenticated local TLS identity rotation
 
+**Status: planned; not implemented.** Ordered children: S04.1 rotation contract; S04.2 server lifecycle; S04.3 client lifecycle. Follow the [Wave 4 child instructions](wave-4-plan.md#s041--rotation-contract) and shared W4.0–W4.2 prerequisites in that plan.
+
 **Review · Dependencies:** S03, C01. **Owner:** server private identity lifecycle and client trust persistence.
 
 Implement a reviewed rotation protocol covering authenticated old-to-new identity transition, offline devices, expiry, interruption and explicit recovery enrollment. Keep durable server identity distinct from endpoint names/certificates.
@@ -424,6 +464,8 @@ Add configured inbox selection, package inventory/review, provisional associatio
 
 ### P05 — Export, full backup and explicit recovery
 
+**Status: planned; not implemented.** Ordered children: P05.1 portable export/changes; P05.2 full backup/restore; P05.3 operator surfaces/drills. Follow the [Wave 4 child instructions](wave-4-plan.md#p051--portable-export-and-changes) and shared W4.0–W4.2 prerequisites in that plan.
+
 **Review · Dependencies:** P01, P02, A04. **Owner:** store export/recovery adapter and app/admin commands.
 
 Implement portable archive export, exportable revisions/tombstones/changes, consistent full backup of private state, restore validation and explicit access reassignment for archive-only recovery. Start with CLI and add administration status/actions through the same services. Document restoration versus independent-server cloning and identity handling.
@@ -491,8 +533,8 @@ Execute reviewed narrow extractions of parsers, normalized hashing, disc identit
 
 ### D03 — Extract reusable audio services and reader contract
 
-**Status (2026-09-10): complete locally; W3.R passed. D04 is the next
-implementable ticket.** Junk
+**Status (2026-09-10): complete locally; W3.R passed. Wave 4 starts with the W4.0–W4.2
+prerequisites before D04 integration.** Junk
 Libs now has executable source/PCM coordinate contracts, opaque playback identity/
 position contracts, qualified PCM-WAV decode with exact integer-frame seeks, and
 path-free adapters for already-open CUE/redumper readers. It also has bounded
@@ -518,6 +560,8 @@ Define capability-based authorized media readers and extract decoding, integer-s
 
 ### D04 — Game analyzer and DAT verification integration
 
+**Status: planned; not implemented.** Ordered children: D04.1 reader-based primitives; D04.2 DAT snapshots/matching; D04.3 workflow/review. Follow the [Wave 4 child instructions](wave-4-plan.md#d041--qualified-reader-based-game-primitives) and shared W4.0–W4.2 prerequisites in that plan.
+
 **Review · Dependencies:** D02, A03, P02, P03. **Owner:** game module handlers; infrastructure catalog/provider adapters.
 
 Integrate qualified game operations through host services; ingest versioned DAT/catalog snapshots and append source-bound structure/normalized-hash/catalog-match observations. Populate a supported-operation matrix with fixture provenance and limits.
@@ -527,6 +571,8 @@ Integrate qualified game operations through host services; ingest versioned DAT/
 **Limit:** unsupported formats remain explicitly unavailable; no emulator or ripping support.
 
 ### D05 — Music CD structural and AccurateRip verification
+
+**Status: planned; not implemented.** Ordered children: D05.1 exact CD readers; D05.2 AccurateRip provider/policy; D05.3 workflow/review. Follow the [Wave 4 child instructions](wave-4-plan.md#d051--exact-cd-reading-and-bounded-accuraterip-input) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D02, A03, P02, P03. **Owner:** music handlers, verification primitives and provider adapters.
 
@@ -538,6 +584,8 @@ Support reviewed raw redumper and BIN/CUE track models, AccurateRip IDs/checksum
 
 ### D06 — Metadata resolution, providers and review
 
+**Status: planned; not implemented.** Ordered children: D06.1 metadata authority; D06.2 provider/artwork adapters; D06.3 review UI. Follow the [Wave 4 child instructions](wave-4-plan.md#d061--durable-metadata-authority) and shared W4.0–W4.2 prerequisites in that plan.
+
 **Routine integration with domain review · Dependencies:** A03, A04, P02, P03, U04. **Owner:** application resolver, infrastructure MusicBrainz/CAA and qualified game providers, web review UI.
 
 Persist candidate alternatives/raw responses; rank strong identity before language, prefer English display while retaining original text, and provide explicit manual selection/override controls. Fetch artwork through bounded provider adapters into the asset pipeline. Define provider rate/cache/retry policy in adapters.
@@ -547,6 +595,8 @@ Persist candidate alternatives/raw responses; rank strong identity before langua
 **Limit:** no price exchange; metadata is not verification. Live-provider checks supplement reproducible recorded fixtures.
 
 ### D07 — FLAC/Opus derivative jobs
+
+**Status: planned; not implemented.** Ordered children: D07.1 exact recipes/conversion; D07.2 publication; D07.3 availability/media. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D03, D05, P02, A04. **Owner:** audio transforms, application derivative jobs, store representations.
 
@@ -558,6 +608,8 @@ Implement immutable source/profile identity, FLAC default and configurable bound
 
 ### C01 — Persistent native server connections and trusted transport
 
+**Status: planned; not implemented.** Ordered children: C01.1 connection/secret persistence; C01.2 trusted routes/requests; C01.3 diagnostic surface. Follow the [Wave 4 child instructions](wave-4-plan.md#c011--connection-persistence-and-secrets) and shared W4.0–W4.2 prerequisites in that plan.
+
 **Review · Dependencies:** S03, A04. **Owner:** collector-client services and platform credential adapters. **Start:** client `Pairing`, `Endpoint`, trust/route tests.
 
 Persist multiple server connections, authenticated endpoint configuration and enrolled trust, with secure credential storage. Implement actual authorized queries/ranged readers with no credential-bearing cross-origin redirects. Keep server identity independent of path/hostname.
@@ -567,6 +619,8 @@ Persist multiple server connections, authenticated endpoint configuration and en
 **Limit:** route policy structs alone are not completion; automatic discovery/handover is C02.
 
 ### C02 — Discovery, health and real transfer failover
+
+**Status: planned; not implemented.** Ordered children: C02.1 discovery/probes; C02.2 transfer failover; C02.3 network qualification. Follow the [Wave 4 child instructions](wave-4-plan.md#c021--discovery-and-probes) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** C01, S04. **Owner:** client endpoint services; authenticated server discovery/configuration.
 

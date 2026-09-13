@@ -1,11 +1,15 @@
 use collector_app::{
-    AccessPort, ActiveOwnership, AuthenticatedPrincipal, CarrierDetails, Catalog,
-    CollectionService, CommandContext, ComponentDetails, ContentPort, CreateAssetCommand,
-    CreateImportCommand, CredentialKind, DisposeSpecimenCommand, IdempotencyPort, ImportCandidate,
-    ImportDeclaredFile, ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord,
-    ImportReviewDecision, ImportSourceKind, ImportSourceSummary, ImportView, JobPort, JobSpec,
-    MediaResource, ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand, ReturnedPossession,
-    ReviewImportCommand, SaveItemCommand, SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
+    AccessPort, ActiveOwnership, AdministrationPort, AuthenticatedPrincipal, CarrierDetails,
+    Catalog, CollectionService, CollectionTypeAdministrationService, CollectionTypePort,
+    CommandContext, ComponentDetails, ContentPort, CreateAssetCommand, CreateCollectionCommand,
+    CreateImportCommand, CredentialKind, DisposeSpecimenCommand, FrozenAcquisitionJob,
+    IdempotencyPort, ImportCandidate, ImportDeclaredFile, ImportIdentityDecision, ImportPhase,
+    ImportPort, ImportRecord, ImportReviewDecision, ImportSourceKind, ImportSourceSummary,
+    ImportView, JobPort, JobSpec, MediaResource, MetadataAuthorityRecord,
+    ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderRequest,
+    ProviderStreamResponse, ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand,
+    ReturnedPossession, ReviewImportCommand, SaveItemCommand, SnapshotPort, SnapshotQuery,
+    SnapshotRecord, SpecimenDetails, StartLoanCommand, StreamingProviderPort, UpdateAssetCommand,
 };
 use collector_core::*;
 use collector_modules::*;
@@ -25,23 +29,226 @@ struct ArtworkSelectingModule {
 }
 
 struct ImportAnalyzingModule;
+struct ReaderProcessingModule;
+struct UnknownStampsModule;
+struct LegacyUnavailableModule;
+
+impl CollectionModule for LegacyUnavailableModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        ModuleDescriptor {
+            id: ModuleId("org.example.unavailable".into()),
+            schema_version: 7,
+            display_name: "Temporary legacy fixture".into(),
+            collection_type_label: "Legacy fixtures".into(),
+            fields: vec![],
+            capabilities: vec![],
+        }
+    }
+    fn validate_current(&self, _data: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn apply_edit(&self, current: &ModuleData, _edit: &RawJson) -> ModuleResult<ModuleData> {
+        Ok(current.clone())
+    }
+    fn validate_metadata_overrides(&self, _overrides: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn validate_operation_result(
+        &self,
+        _capability: &CapabilityId,
+        _result: &RawJson,
+    ) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn present(&self, _data: &ModuleData) -> ModuleResult<ModulePresentation> {
+        Ok(Default::default())
+    }
+}
+
+impl CollectionModule for UnknownStampsModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        ModuleDescriptor {
+            id: ModuleId("org.example.stamps".into()),
+            schema_version: 4,
+            display_name: "Temporary stamps fixture".into(),
+            collection_type_label: "Stamp fixtures".into(),
+            fields: vec![],
+            capabilities: vec![],
+        }
+    }
+    fn validate_current(&self, _data: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn apply_edit(&self, current: &ModuleData, _edit: &RawJson) -> ModuleResult<ModuleData> {
+        Ok(current.clone())
+    }
+    fn validate_metadata_overrides(&self, _overrides: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn validate_operation_result(
+        &self,
+        _capability: &CapabilityId,
+        _result: &RawJson,
+    ) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn present(&self, _data: &ModuleData) -> ModuleResult<ModulePresentation> {
+        Ok(Default::default())
+    }
+}
+
+impl CollectionModule for ReaderProcessingModule {
+    fn descriptor(&self) -> ModuleDescriptor {
+        ModuleDescriptor {
+            id: ModuleId("org.example.reader".into()),
+            schema_version: 1,
+            display_name: "Reader processing fixture".into(),
+            collection_type_label: "Reader fixtures".into(),
+            fields: vec![],
+            capabilities: vec![Capability {
+                id: CapabilityId::new("org.example.reader.inspect").unwrap(),
+                display_name: "Inspect".into(),
+                availability: Availability::Available,
+                scope: OperationScope::SharedMedia,
+            }],
+        }
+    }
+    fn validate_current(&self, _data: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn apply_edit(&self, current: &ModuleData, _edit: &RawJson) -> ModuleResult<ModuleData> {
+        Ok(current.clone())
+    }
+    fn validate_metadata_overrides(&self, _overrides: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+    fn validate_operation_result(
+        &self,
+        _capability: &CapabilityId,
+        result: &RawJson,
+    ) -> ModuleResult<()> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ResultBody {
+            sha256: String,
+        }
+        let result: ResultBody = result
+            .parse()
+            .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+        Digest::new(HashAlgorithm::Sha256, result.sha256)
+            .map(|_| ())
+            .map_err(|error| ModuleError::Invalid(error.to_string()))
+    }
+    fn present(&self, _data: &ModuleData) -> ModuleResult<ModulePresentation> {
+        Ok(ModulePresentation::default())
+    }
+    fn operate(
+        &self,
+        request: OperationRequest,
+        host: &dyn ModuleHost,
+    ) -> ModuleResult<OperationOutput> {
+        let representation = match request.entity {
+            OperationEntity::Representation(id) => id,
+            _ => return Err(ModuleError::Invalid("wrong entity".into())),
+        };
+        let access = host.representation_access(representation)?;
+        let inventory = host.package_inventory(access)?;
+        for wrong in [
+            PackageAccess {
+                collection_id: CollectionId::new(),
+                ..access
+            },
+            PackageAccess {
+                scope: PackageScope::Representation(RepresentationId::new()),
+                ..access
+            },
+        ] {
+            assert!(matches!(
+                host.package_inventory(wrong),
+                Err(ModuleError::AccessDenied)
+            ));
+            assert!(matches!(
+                host.package_file(wrong, inventory.files[0].id),
+                Err(ModuleError::AccessDenied)
+            ));
+        }
+        let mut reader = host.package_file(access, inventory.files[0].id)?;
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+        Ok(OperationOutput {
+            value: RawJson::from_value(serde_json::json!({"sha256":Digest::sha256(&bytes).hex})),
+        })
+    }
+}
+
+struct FixtureStreamingProvider {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    bytes: Vec<u8>,
+}
+
+impl StreamingProviderPort for FixtureStreamingProvider {
+    fn acquire_stream(
+        &self,
+        _request: &ProviderRequest,
+        _execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(ProviderStreamResponse {
+            media_type: "application/octet-stream".into(),
+            bytes: ByteLength(self.bytes.len() as u64),
+            digest: Digest::sha256(&self.bytes),
+            parsed_observation: RawJson::from_value(serde_json::json!({"fixture":true})),
+            reader: Box::new(std::io::Cursor::new(self.bytes.clone())),
+        })
+    }
+}
 
 impl CollectionModule for ImportAnalyzingModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
-            id: ModuleId("org.example.imports".into()),
+            id: ModuleId("org.junk.music".into()),
             schema_version: 1,
             display_name: "Import analysis fixture".into(),
+            collection_type_label: "Import fixtures".into(),
+            fields: vec![],
             capabilities: vec![Capability {
-                id: CapabilityId::new("org.example.imports.import-analysis").unwrap(),
+                id: CapabilityId::new("org.junk.music.import-analysis").unwrap(),
                 display_name: "Import analysis".into(),
                 availability: Availability::Available,
+                scope: OperationScope::CollectionDomain,
             }],
         }
     }
 
     fn validate_current(&self, _data: &ModuleData) -> ModuleResult<()> {
         Ok(())
+    }
+
+    fn apply_edit(&self, current: &ModuleData, _edit: &RawJson) -> ModuleResult<ModuleData> {
+        Ok(current.clone())
+    }
+
+    fn validate_metadata_overrides(&self, _overrides: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+
+    fn validate_operation_result(
+        &self,
+        _capability: &CapabilityId,
+        result: &RawJson,
+    ) -> ModuleResult<()> {
+        let value = result
+            .value()
+            .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+        if value["candidates"].as_array().is_some() && value["limitations"].as_array().is_some() {
+            Ok(())
+        } else {
+            Err(ModuleError::Invalid(
+                "invalid import analysis result".into(),
+            ))
+        }
     }
 
     fn present(&self, _data: &ModuleData) -> ModuleResult<ModulePresentation> {
@@ -77,12 +284,30 @@ impl CollectionModule for ArtworkSelectingModule {
             id: ModuleId("org.junk.music".into()),
             schema_version: 1,
             display_name: "Artwork selection fixture".into(),
+            collection_type_label: "Music CDs".into(),
+            fields: vec![],
             capabilities: vec![],
         }
     }
 
     fn validate_current(&self, _data: &ModuleData) -> ModuleResult<()> {
         Ok(())
+    }
+
+    fn apply_edit(&self, current: &ModuleData, _edit: &RawJson) -> ModuleResult<ModuleData> {
+        Ok(current.clone())
+    }
+
+    fn validate_metadata_overrides(&self, _overrides: &ModuleData) -> ModuleResult<()> {
+        Ok(())
+    }
+
+    fn validate_operation_result(
+        &self,
+        capability: &CapabilityId,
+        _result: &RawJson,
+    ) -> ModuleResult<()> {
+        Err(ModuleError::UnknownCapability(capability.as_str().into()))
     }
 
     fn present(&self, data: &ModuleData) -> ModuleResult<ModulePresentation> {
@@ -126,6 +351,13 @@ impl Clock for TestClock {
 
 fn command() -> CommandContext {
     CommandContext::new(TransactionId::new().to_string()).unwrap()
+}
+
+fn typed_collection(name: &str) -> CreateCollectionCommand {
+    CreateCollectionCommand {
+        name: name.into(),
+        module: ModuleId("org.junk.music".into()),
+    }
 }
 
 fn test_authentication(principal: &Principal) -> AuthenticatedPrincipal {
@@ -264,6 +496,9 @@ fn entity_fault_at_each_publication_phase_recovers_to_pre_or_post_state() {
                     revision: Revision(1),
                     name: "fault fixture".into(),
                     created_at: chrono::Utc::now(),
+                    binding: CollectionBinding::Assigned {
+                        module: ModuleId("org.junk.music".into()),
+                    },
                 },
             )
             .unwrap();
@@ -555,7 +790,7 @@ fn collection_and_owner_grant_recover_as_one_retryable_effect() {
             service
                 .create_collection(
                     &test_authentication(&actor),
-                    "Recovered collection",
+                    typed_collection("Recovered collection"),
                     &context
                 )
                 .is_err()
@@ -568,7 +803,7 @@ fn collection_and_owner_grant_recover_as_one_retryable_effect() {
         let collection = service
             .create_collection(
                 &test_authentication(&actor),
-                "Recovered collection",
+                typed_collection("Recovered collection"),
                 &context,
             )
             .unwrap();
@@ -625,7 +860,7 @@ fn subprocess_collection_create_worker() {
     };
     let _ = service.create_collection(
         &test_authentication(&actor),
-        "Terminated collection",
+        typed_collection("Terminated collection"),
         &CommandContext::new("terminated-collection-create").unwrap(),
     );
     panic!("child collection creation unexpectedly returned");
@@ -682,7 +917,7 @@ fn sigkill_collection_create_recovers_exactly_one_owner_grant() {
         let collection = service
             .create_collection(
                 &test_authentication(&actor),
-                "Terminated collection",
+                typed_collection("Terminated collection"),
                 &CommandContext::new("terminated-collection-create").unwrap(),
             )
             .unwrap();
@@ -805,7 +1040,11 @@ fn setup() -> (
     };
     let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
     let collection = service
-        .create_collection(&test_authentication(&actor), "日本の音楽", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("日本の音楽"),
+            &command(),
+        )
         .unwrap();
     (root, store, actor, service, collection)
 }
@@ -833,6 +1072,323 @@ fn item(collection: CollectionId) -> Item {
         deleted: false,
         updated_at: chrono::Utc::now(),
     }
+}
+
+fn legacy_collection_fixture() -> (tempfile::TempDir, UserId, CollectionId, ItemId) {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Store::open(&archive, &state).unwrap();
+    let user = store
+        .create_user("owner", "a long test password", true)
+        .unwrap();
+    let collection = Catalog::create_collection(
+        &store,
+        user,
+        Collection {
+            id: CollectionId::new(),
+            revision: Revision(1),
+            name: "Legacy typed fixture".into(),
+            created_at: chrono::Utc::now(),
+            binding: CollectionBinding::Assigned {
+                module: ModuleId("org.junk.music".into()),
+            },
+        },
+    )
+    .unwrap();
+    let saved = Catalog::save(&store, item(collection.id), Revision(0)).unwrap();
+    drop(store);
+    let manifest = files_named(&archive, "collection.toml").remove(0);
+    let mut value: toml::Value = std::fs::read_to_string(&manifest).unwrap().parse().unwrap();
+    value.as_table_mut().unwrap().remove("binding");
+    std::fs::write(&manifest, toml::to_string_pretty(&value).unwrap()).unwrap();
+    (root, user, collection.id, saved.id)
+}
+
+#[test]
+fn ct2_legacy_assignment_is_journaled_idempotent_and_archive_rebuildable() {
+    let (root, user, collection_id, item_id) = legacy_collection_fixture();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let manifest = files_named(&archive, "collection.toml").remove(0);
+    let original_manifest = std::fs::read(&manifest).unwrap();
+    let item_record = files_named(&archive, "record.v3.json").remove(0);
+    let original_item = std::fs::read(&item_record).unwrap();
+    let store = Arc::new(Store::open(&archive, &state).unwrap());
+    let snapshot = CollectionTypePort::collection_type_snapshot(&*store, collection_id).unwrap();
+    assert_eq!(
+        snapshot.collection.binding,
+        CollectionBinding::LegacyUnassigned
+    );
+    assert_eq!(snapshot.item_domains.len(), 1);
+    let mut rejected = Catalog::item(&*store, item_id).unwrap();
+    rejected.title = "must remain unchanged".into();
+    assert!(matches!(
+        Catalog::save(&*store, rejected, Revision(1)),
+        Err(Error::Invalid(message)) if message.contains("content-read-only")
+    ));
+    assert_eq!(std::fs::read(&item_record).unwrap(), original_item);
+
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let application = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let presented = application
+        .collections(&actor)
+        .unwrap()
+        .into_iter()
+        .find(|collection| collection.id == collection_id)
+        .unwrap();
+    assert!(!presented.content_permissions.can_edit);
+    assert_eq!(
+        presented.content_permissions.status,
+        collector_app::ContentAvailabilityStatus::LegacyUnassigned
+    );
+    assert!(
+        presented
+            .content_permissions
+            .administrator_commands
+            .iter()
+            .any(|command| command.contains("inspect-collection-type --collection-id"))
+    );
+    assert!(
+        presented
+            .content_permissions
+            .administrator_commands
+            .iter()
+            .any(|command| command.contains("assign-collection-type --collection-id"))
+    );
+
+    let service =
+        CollectionTypeAdministrationService::new(store.clone(), Arc::new(Registry::builtins()));
+    let report = service.inspect(collection_id).unwrap();
+    assert_eq!(report.item_domain_counts["org.junk.music"], 1);
+    assert_eq!(
+        report.eligible_modules,
+        vec![ModuleId("org.junk.music".into())]
+    );
+    assert!(
+        service
+            .assign(
+                collection_id,
+                Revision(1),
+                ModuleId("org.junk.games".into()),
+                chrono::Utc::now(),
+            )
+            .is_err()
+    );
+    assert!(
+        files_named(&archive, "manifest.v3.toml")
+            .into_iter()
+            .all(|path| !path.to_string_lossy().contains("collection_metadata"))
+    );
+    assert_eq!(std::fs::read(&manifest).unwrap(), original_manifest);
+    assert_eq!(std::fs::read(&item_record).unwrap(), original_item);
+    let assigned = service
+        .assign(
+            collection_id,
+            Revision(1),
+            ModuleId("org.junk.music".into()),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+    assert_eq!(assigned.revision, Revision(2));
+    assert!(
+        service
+            .assign(
+                collection_id,
+                Revision(99),
+                ModuleId("org.junk.music".into()),
+                chrono::Utc::now()
+            )
+            .is_err()
+    );
+
+    assert_eq!(std::fs::read(&manifest).unwrap(), original_manifest);
+    assert_eq!(std::fs::read(&item_record).unwrap(), original_item);
+    assert_eq!(
+        Catalog::role(&*store, user, collection_id).unwrap(),
+        Role::Owner
+    );
+    assert_eq!(
+        service
+            .assign(
+                collection_id,
+                Revision(1),
+                ModuleId("org.junk.music".into()),
+                chrono::Utc::now(),
+            )
+            .unwrap()
+            .revision,
+        Revision(2)
+    );
+    drop(service);
+    drop(application);
+    drop(store);
+
+    let collection_dir = manifest.parent().unwrap().to_path_buf();
+    let renamed = collection_dir
+        .parent()
+        .unwrap()
+        .join(format!("renamed--{collection_id}"));
+    std::fs::rename(&collection_dir, &renamed).unwrap();
+    let rebuilt_state = root.path().join("rebuilt-state");
+    let rebuilt = Store::open(&archive, rebuilt_state).unwrap();
+    let rebuilt_snapshot =
+        CollectionTypePort::collection_type_snapshot(&rebuilt, collection_id).unwrap();
+    assert_eq!(rebuilt_snapshot.collection.revision, Revision(2));
+    assert!(matches!(
+        rebuilt_snapshot.collection.binding,
+        CollectionBinding::Assigned { module } if module == ModuleId("org.junk.music".into())
+    ));
+    assert!(matches!(
+        Catalog::role(&rebuilt, user, collection_id),
+        Err(Error::Forbidden)
+    ));
+}
+
+#[test]
+fn ct2_corrupt_binding_sidecar_cannot_replace_the_catalog() {
+    let (root, _, collection_id, _) = legacy_collection_fixture();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Arc::new(Store::open(&archive, &state).unwrap());
+    CollectionTypeAdministrationService::new(store.clone(), Arc::new(Registry::builtins()))
+        .assign(
+            collection_id,
+            Revision(1),
+            ModuleId("org.junk.music".into()),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+    drop(store);
+    let sidecar = files_named(&archive, "record.v3.json")
+        .into_iter()
+        .find(|path| path.to_string_lossy().contains("collection_metadata"))
+        .unwrap();
+    let mut bytes = std::fs::read(&sidecar).unwrap();
+    bytes[0] ^= 1;
+    std::fs::write(sidecar, bytes).unwrap();
+    assert!(Store::open(&archive, &state).is_err());
+}
+
+#[test]
+fn ct2_assignment_crashes_recover_to_pre_or_post_state() {
+    use collector_store::PublicationFaultPoint as Point;
+    for point in [
+        Point::Prepared,
+        Point::BytesStaged,
+        Point::PayloadPublished,
+        Point::RevisionCommitted,
+        Point::ProjectionApplied,
+        Point::Completed,
+    ] {
+        let (root, _, collection_id, _) = legacy_collection_fixture();
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                &archive,
+                &state,
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service =
+            CollectionTypeAdministrationService::new(store.clone(), Arc::new(Registry::builtins()));
+        assert!(
+            service
+                .assign(
+                    collection_id,
+                    Revision(1),
+                    ModuleId("org.junk.music".into()),
+                    chrono::Utc::now(),
+                )
+                .is_err()
+        );
+        drop(service);
+        drop(store);
+        let recovered = Store::open(&archive, &state).unwrap();
+        let current = CollectionTypePort::collection_type_snapshot(&recovered, collection_id)
+            .unwrap()
+            .collection;
+        if matches!(
+            point,
+            Point::Prepared | Point::BytesStaged | Point::PayloadPublished
+        ) {
+            assert_eq!(current.binding, CollectionBinding::LegacyUnassigned);
+        } else {
+            assert!(matches!(
+                current.binding,
+                CollectionBinding::Assigned { .. }
+            ));
+        }
+    }
+}
+
+#[test]
+fn ct2_creation_persists_builtin_and_third_module_and_binds_idempotency_to_type() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let user = store
+        .create_user("owner", "a long test password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let mut registry = Registry::builtins();
+    registry.register(Box::new(ReaderProcessingModule)).unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(registry));
+    for module in ["org.junk.games", "org.junk.music", "org.example.reader"] {
+        let created = service
+            .create_collection(
+                &test_authentication(&actor),
+                CreateCollectionCommand {
+                    name: format!("{module} collection"),
+                    module: ModuleId(module.into()),
+                },
+                &command(),
+            )
+            .unwrap();
+        assert!(matches!(
+            created.binding,
+            CollectionBinding::Assigned { module: owner } if owner == ModuleId(module.into())
+        ));
+    }
+    let context = CommandContext::new("ct2-type-bound-retry").unwrap();
+    let request = CreateCollectionCommand {
+        name: "Stable typed collection".into(),
+        module: ModuleId("org.junk.games".into()),
+    };
+    let first = service
+        .create_collection(&test_authentication(&actor), request.clone(), &context)
+        .unwrap();
+    assert_eq!(
+        service
+            .create_collection(&test_authentication(&actor), request, &context)
+            .unwrap()
+            .id,
+        first.id
+    );
+    assert!(matches!(
+        service.create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Stable typed collection".into(),
+                module: ModuleId("org.junk.music".into()),
+            },
+            &context,
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
 }
 
 #[test]
@@ -992,7 +1548,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        3
+        4
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -1000,7 +1556,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        10
     );
     assert_eq!(
         private
@@ -1308,6 +1864,9 @@ fn concurrent_last_authority_changes_cannot_both_commit() {
                 revision: Revision(1),
                 name: "Guarded collection".into(),
                 created_at: chrono::Utc::now(),
+                binding: CollectionBinding::Assigned {
+                    module: ModuleId("org.junk.music".into()),
+                },
             },
         )
         .unwrap();
@@ -1387,6 +1946,9 @@ fn local_recovery_requires_exclusive_lock_and_preserves_grants() {
                 revision: Revision(1),
                 name: "Preserved access".into(),
                 created_at: chrono::Utc::now(),
+                binding: CollectionBinding::Assigned {
+                    module: ModuleId("org.junk.music".into()),
+                },
             },
         )
         .unwrap();
@@ -1881,7 +2443,30 @@ fn schema_one_migration_rejects_identity_reuse_across_collections() {
 }
 #[test]
 fn revisions_recover_unknown_module_data_and_do_not_restore_grants() {
-    let (root, store, actor, service, collection) = setup();
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let user = store
+        .create_user("owner", "a long test password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let mut registry = Registry::builtins();
+    registry.register(Box::new(UnknownStampsModule)).unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(registry));
+    let collection = service
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Stamps".into(),
+                module: ModuleId("org.example.stamps".into()),
+            },
+            &command(),
+        )
+        .unwrap();
     let mut value = item(collection.id);
     value.domain = ModuleData {
         module: ModuleId("org.example.stamps".into()),
@@ -2449,7 +3034,11 @@ fn unsupported_or_invalid_asset_inputs_publish_nothing() {
         Err(Error::Invalid(_))
     ));
     let other = service
-        .create_collection(&test_authentication(&actor), "Other", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Other"),
+            &command(),
+        )
         .unwrap();
     let mut png = std::io::Cursor::new(Vec::new());
     image::RgbaImage::new(1, 1)
@@ -2498,6 +3087,9 @@ fn cover_payload_faults_recover_with_one_collection_asset() {
                     revision: Revision(1),
                     name: "cover fault fixture".into(),
                     created_at: chrono::Utc::now(),
+                    binding: CollectionBinding::Assigned {
+                        module: ModuleId("org.junk.music".into()),
+                    },
                 },
             )
             .unwrap();
@@ -2835,6 +3427,7 @@ fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
     .unwrap();
     let user = UserId::new();
     let first = JobSpec {
+        frozen_input: None,
         id: JobId::new(),
         user_id: user,
         collection_id: None,
@@ -2845,6 +3438,7 @@ fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
         request: serde_json::json!({"fixture":1}),
     };
     let second = JobSpec {
+        frozen_input: None,
         id: JobId::new(),
         kind: "test.second".into(),
         request: serde_json::json!({"fixture":2}),
@@ -2892,6 +3486,7 @@ fn durable_claims_enforce_the_global_limit_in_storage() {
     let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
     let jobs = (0..3)
         .map(|fixture| JobSpec {
+            frozen_input: None,
             id: JobId::new(),
             user_id: UserId::new(),
             collection_id: None,
@@ -2919,6 +3514,7 @@ fn durable_progress_is_monotonic_and_throttled_with_immediate_phase_changes() {
     let state = root.path().join("state");
     let store = Store::open_with_clock(root.path().join("archive"), &state, clock.clone()).unwrap();
     let job = JobSpec {
+        frozen_input: None,
         id: JobId::new(),
         user_id: UserId::new(),
         collection_id: None,
@@ -3034,7 +3630,7 @@ fn queued_and_running_upload_cancellation_retain_source_material() {
             .unwrap()
     );
     assert!(matches!(
-        store.commit_upload_for_job(claim.id, &claim.claim_token),
+        store.commit_upload_for_job(claim.id, &claim.claim_token, &mut || Ok(())),
         Err(Error::JobCancelled)
     ));
     store
@@ -3302,11 +3898,14 @@ fn reclaimed_integrity_job_does_not_publish_twice() {
         .unwrap();
     let evidence_after_publication = store.evidence(saved.id).unwrap().len();
     let revision_after_publication = store.item(saved.id).unwrap().revision;
+    // Recovery must not rehash changed/unavailable payloads or need the owner module.
+    let payload = find_file_with_bytes(&root.path().join("archive"), b"data").unwrap();
+    std::fs::write(payload, b"changed after the evidence commit").unwrap();
     drop(service);
     drop(store);
     let store =
         Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
-    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::default()));
 
     assert!(service.run_next_job("server-after-restart").unwrap());
     assert_eq!(
@@ -3404,6 +4003,7 @@ fn job_views_are_cursor_paged_and_omit_execution_secrets() {
         ids.push(id);
         store
             .enqueue_job(JobSpec {
+                frozen_input: None,
                 id,
                 user_id: user,
                 collection_id: None,
@@ -3483,7 +4083,13 @@ fn failed_integrity_job_retries_with_the_same_identity_and_attempt_history() {
     assert_eq!(queued.state, JobState::Queued);
     assert_eq!(queued.attempt, 2);
     assert!(service.run_next_job("server-a").unwrap());
-    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let completed = service.job(&actor, job).unwrap();
+    assert_eq!(
+        completed.state,
+        JobState::Completed,
+        "{:?}",
+        completed.error
+    );
 }
 
 #[test]
@@ -3550,7 +4156,11 @@ fn review_cannot_move_another_users_capture() {
         device_id: None,
     };
     let other_collection = service
-        .create_collection(&test_authentication(&attacker), "Other", &command())
+        .create_collection(
+            &test_authentication(&attacker),
+            typed_collection("Other"),
+            &command(),
+        )
         .unwrap();
     assert!(service.capture(&attacker, capture.id).is_err());
     let mut stolen = capture.clone();
@@ -3677,9 +4287,28 @@ fn capture_reassociation_retains_payload_and_survives_restart() {
         administrator: true,
         device_id: None,
     };
-    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
-    let new_item =
-        save_inventory(&service, &actor, item(original.collection_id), Revision(0)).unwrap();
+    let mut registry = Registry::builtins();
+    registry
+        .register(Box::new(LegacyUnavailableModule))
+        .unwrap();
+    let registry = Arc::new(registry);
+    let assignment = CollectionTypeAdministrationService::new(store.clone(), registry.clone());
+    let report = assignment.inspect(original.collection_id).unwrap();
+    let module = report.eligible_modules.first().unwrap().clone();
+    assignment
+        .assign(
+            original.collection_id,
+            Revision(1),
+            module.clone(),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+    drop(assignment);
+    let service = CollectionService::new(store.clone(), registry);
+    let mut new_value = item(original.collection_id);
+    new_value.domain.module = module;
+    new_value.domain.schema_version = 7;
+    let new_item = save_inventory(&service, &actor, new_value, Revision(0)).unwrap();
     let mut capture = original.captures[0].clone();
     capture.association = CaptureAssociation {
         item_id: Some(new_item.id),
@@ -3766,7 +4395,11 @@ fn nested_identity_cannot_be_reused_across_collections() {
     let mut second = first.clone();
     second.id = ItemId::new();
     second.collection_id = service
-        .create_collection(&test_authentication(&actor), "Other", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Other"),
+            &command(),
+        )
         .unwrap()
         .id;
     Catalog::save(&*store, first, Revision(0)).unwrap();
@@ -4375,6 +5008,9 @@ fn subprocess_command_receipt_worker() {
                         revision: Revision(1),
                         name: "New collection".into(),
                         created_at: chrono::Utc::now(),
+                        binding: CollectionBinding::Assigned {
+                            module: ModuleId("org.junk.music".into()),
+                        },
                     },
                 )
                 .unwrap(),
@@ -4723,7 +5359,7 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
 }
 
 #[test]
-fn schema_nine_persists_durable_imports_without_private_path_columns() {
+fn schema_ten_persists_durable_imports_without_private_path_columns() {
     let root = tempfile::tempdir().unwrap();
     let archive = root.path().join("archive");
     let state = root.path().join("state");
@@ -4737,7 +5373,7 @@ fn schema_nine_persists_durable_imports_without_private_path_columns() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        10
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -5169,12 +5805,18 @@ fn optional_import_analysis_persists_candidates_or_honest_unavailability() {
         .enqueue_import_analysis(
             &actor,
             import.id,
-            ModuleId("org.example.imports".into()),
+            ModuleId("org.junk.music".into()),
             &command(),
         )
         .unwrap();
     assert!(service.run_next_job("analysis-worker").unwrap());
-    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let completed = service.job(&actor, job).unwrap();
+    assert_eq!(
+        completed.state,
+        JobState::Completed,
+        "{:?}",
+        completed.error
+    );
     let analyzed = service.provisional_import(&actor, import.id).unwrap();
     assert_eq!(analyzed.phase, ImportPhase::AwaitingReview);
     assert_eq!(analyzed.analysis_job_id, Some(job));
@@ -5205,6 +5847,607 @@ fn optional_import_analysis_persists_candidates_or_honest_unavailability() {
     assert_eq!(unavailable.phase, ImportPhase::AwaitingReview);
     assert!(unavailable.candidates.is_empty());
     assert!(unavailable.limitations[0].contains("D04/D05"));
+}
+
+#[test]
+fn import_observation_rebinds_to_representation_and_rebuilds_without_private_imports() {
+    let (root, store, actor, base_service, collection) = setup();
+    let mut registry = Registry::default();
+    registry.register(Box::new(ImportAnalyzingModule)).unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(registry));
+    let import = staged_import(&service, &actor, collection.id, "portable-analysis");
+    let analysis_job = service
+        .enqueue_import_analysis(
+            &actor,
+            import.id,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    service.run_next_job("analysis-worker").unwrap();
+    let analyzed = service.provisional_import(&actor, import.id).unwrap();
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: analyzed.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let publication_job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    service.run_next_job("publication-worker").unwrap();
+
+    let portable = store
+        .processing_record(ObservationId(analysis_job.0))
+        .unwrap();
+    let rebinding = portable.import_rebinding.unwrap();
+    assert_eq!(
+        rebinding.provisional_fingerprint.source,
+        PackageScope::Import(import.id)
+    );
+    assert_eq!(
+        rebinding.committed_fingerprint.source,
+        PackageScope::Representation(import.representation_id)
+    );
+    assert_ne!(
+        rebinding.provisional_fingerprint.digest,
+        rebinding.committed_fingerprint.digest
+    );
+    assert_eq!(rebinding.files[0].sha256, Digest::sha256(b"data"));
+    assert_eq!(
+        service.job(&actor, publication_job).unwrap().state,
+        JobState::Completed
+    );
+
+    drop(service);
+    drop(base_service);
+    drop(store);
+    let collection_root = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let unknown =
+        collection_root.join("future_records/opaque/revisions/00000000000000000001/record.v9.json");
+    std::fs::create_dir_all(unknown.parent().unwrap()).unwrap();
+    let unknown_bytes = br#"{"future":1e+02,"ordered":[3,1],"unknown":null}"#;
+    std::fs::write(&unknown, unknown_bytes).unwrap();
+    let archive_only = Store::open(
+        root.path().join("archive"),
+        root.path().join("archive-only-state"),
+    )
+    .unwrap();
+    let rebuilt = archive_only
+        .processing_record(ObservationId(analysis_job.0))
+        .unwrap();
+    assert_eq!(
+        rebuilt.observation.source_fingerprint.source,
+        PackageScope::Representation(import.representation_id)
+    );
+    assert_eq!(
+        rebuilt.observation.typed_result.payload.get(),
+        r#"{"candidates":[{"key":"observed-disc","label":"Observed disc","observation":{"unknown":null,"ordered":[2,1],"number":1e+02}}],"limitations":["Fixture candidate is an observation, not verification"]}"#
+    );
+    assert_eq!(std::fs::read(unknown).unwrap(), unknown_bytes);
+}
+
+#[test]
+fn streamed_snapshot_is_hashed_and_survives_archive_only_rebuild() {
+    let (root, store, _actor, service, collection) = setup();
+    let bytes = b"streamed catalog bytes".to_vec();
+    let snapshot = SnapshotRecord {
+        id: SnapshotId::new(),
+        collection_id: collection.id,
+        provider: ModuleId("org.example.catalog".into()),
+        media_type: "application/octet-stream".into(),
+        bytes: ByteLength(bytes.len() as u64),
+        digest: Digest::sha256(&bytes),
+        parsed_observation: RawJson::from_value(serde_json::json!({"records":1})),
+        created_at: chrono::Utc::now(),
+    };
+    let mut reader = std::io::Cursor::new(bytes.clone());
+    store
+        .publish_snapshot(
+            JobId::new(),
+            "fixture-claim",
+            snapshot.clone(),
+            &mut reader,
+            &mut || Ok(false),
+        )
+        .unwrap();
+    drop(service);
+    drop(store);
+    let archive_only = Store::open(
+        root.path().join("archive"),
+        root.path().join("snapshot-rebuild-state"),
+    )
+    .unwrap();
+    let query = SnapshotQuery {
+        collection_id: collection.id,
+        snapshot_id: snapshot.id,
+    };
+    assert_eq!(
+        archive_only.snapshot(query).unwrap().digest,
+        snapshot.digest
+    );
+    let mut restored = Vec::new();
+    archive_only
+        .snapshot_bytes(query)
+        .unwrap()
+        .read_to_end(&mut restored)
+        .unwrap();
+    assert_eq!(restored, bytes);
+
+    let mut corrupt = std::io::Cursor::new(b"wrong".to_vec());
+    let mut changed = snapshot;
+    changed.id = SnapshotId::new();
+    assert!(matches!(
+        archive_only.publish_snapshot(
+            JobId::new(),
+            "fixture-claim",
+            changed,
+            &mut corrupt,
+            &mut || Ok(false)
+        ),
+        Err(Error::Invalid(_))
+    ));
+}
+
+#[test]
+fn streamed_snapshot_cancellation_aborts_before_commit_and_recovers_cleanly() {
+    let (root, store, _actor, service, collection) = setup();
+    let bytes = vec![7_u8; 2 * 1024 * 1024];
+    let snapshot = SnapshotRecord {
+        id: SnapshotId::new(),
+        collection_id: collection.id,
+        provider: ModuleId("org.example.catalog".into()),
+        media_type: "application/octet-stream".into(),
+        bytes: ByteLength(bytes.len() as u64),
+        digest: Digest::sha256(&bytes),
+        parsed_observation: RawJson::from_value(serde_json::json!({})),
+        created_at: chrono::Utc::now(),
+    };
+    let mut checks = 0;
+    assert!(matches!(
+        store.publish_snapshot(
+            JobId::new(),
+            "claim",
+            snapshot.clone(),
+            &mut std::io::Cursor::new(bytes),
+            &mut || {
+                checks += 1;
+                Ok(checks > 1)
+            },
+        ),
+        Err(Error::JobCancelled)
+    ));
+    assert!(matches!(
+        store.snapshot(SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: snapshot.id
+        }),
+        Err(Error::NotFound)
+    ));
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(matches!(
+        reopened.snapshot(SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: snapshot.id
+        }),
+        Err(Error::NotFound)
+    ));
+}
+
+#[test]
+fn acquisition_restart_after_snapshot_commit_reuses_frozen_response() {
+    let (root, store, actor, service, collection) = setup();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider_id = ModuleId("org.example.catalog".into());
+    let provider = Arc::new(FixtureStreamingProvider {
+        calls: calls.clone(),
+        bytes: b"one immutable provider response".to_vec(),
+    });
+    let service = service
+        .with_streaming_provider(provider_id.clone(), provider.clone())
+        .unwrap();
+    let snapshot_id = SnapshotId::new();
+    let frozen = FrozenAcquisitionJob {
+        collection_binding: collection.binding.clone(),
+        request: ProviderRequest {
+            collection_id: collection.id,
+            provider: provider_id.clone(),
+            operation: OperationId::new("org.example.catalog.acquire").unwrap(),
+            source_fingerprint: None,
+            query: RawJson::from_value(serde_json::json!({"catalog":"fixture"})),
+            maximum_response_bytes: 1024,
+        },
+        snapshot_id,
+        created_at: chrono::Utc::now(),
+    };
+    let mut mismatched = frozen.clone();
+    mismatched.collection_binding = CollectionBinding::Assigned {
+        module: ModuleId("org.junk.games".into()),
+    };
+    assert!(matches!(
+        service.enqueue_catalog_acquisition(&actor, mismatched, &command()),
+        Err(Error::Conflict)
+    ));
+    let job = service
+        .enqueue_catalog_acquisition(&actor, frozen, &command())
+        .unwrap();
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let stored: String = private
+        .query_row(
+            "SELECT frozen_input FROM processing_jobs WHERE job_id=?",
+            [job.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(stored.contains("acquisition"));
+    assert!(stored.contains(&snapshot_id.to_string()));
+    drop(private);
+    drop(service);
+    drop(store);
+
+    let crashing = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(PanicAtImportCommit),
+        )
+        .unwrap(),
+    );
+    let crashing_service = CollectionService::new(crashing.clone(), Arc::new(Registry::builtins()))
+        .with_streaming_provider(provider_id.clone(), provider.clone())
+        .unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crashing_service.run_next_job("acquisition-old")
+        }))
+        .is_err()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    drop(crashing_service);
+    drop(crashing);
+    let mut attempts = 0;
+    let reopened = loop {
+        match Store::open(root.path().join("archive"), root.path().join("state")) {
+            Ok(store) => break Arc::new(store),
+            Err(Error::Unavailable(_)) if attempts < 100 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => panic!("processing recovery failed: {error}"),
+        }
+    };
+    let recovered = CollectionService::new(reopened.clone(), Arc::new(Registry::default()));
+    assert!(recovered.run_next_job("acquisition-new").unwrap());
+    assert_eq!(
+        recovered.job(&actor, job).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        reopened
+            .snapshot(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id,
+            })
+            .unwrap()
+            .digest,
+        Digest::sha256(b"one immutable provider response")
+    );
+}
+
+#[test]
+fn processing_summary_marks_changed_input_historical_and_denies_other_collection() {
+    let (_root, store, actor, _base_service, collection) = setup();
+    let mut registry = Registry::default();
+    registry.register(Box::new(ImportAnalyzingModule)).unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(registry));
+    let import = staged_import(&service, &actor, collection.id, "currency");
+    let job = service
+        .enqueue_import_analysis(
+            &actor,
+            import.id,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    service.run_next_job("analysis").unwrap();
+    let analyzed = service.provisional_import(&actor, import.id).unwrap();
+    let provisional = store.provisional_observations(import.id).unwrap().remove(0);
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: analyzed.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let publication = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    service.run_next_job("publication").unwrap();
+    assert_eq!(
+        service.job(&actor, publication).unwrap().state,
+        JobState::Completed
+    );
+    let portable = store.processing_record(provisional.id).unwrap();
+    // Exercise SQL pagination past its first LIMIT window, including tied times.
+    let db = rusqlite::Connection::open(_root.path().join("state/catalog.sqlite")).unwrap();
+    for _ in 0..6 {
+        let mut copy = portable.clone();
+        copy.observation.id = ObservationId::new();
+        db.execute("INSERT INTO processing_observations(id,collection_id,source_scope,source_id,operation,created_at,record) VALUES(?,?,?,?,?,?,?)",
+            rusqlite::params![copy.observation.id.to_string(),collection.id.to_string(),"representation",import.representation_id.to_string(),copy.observation.operation.to_string(),copy.observation.created_at.timestamp(),serde_json::to_string(&copy).unwrap()]).unwrap();
+    }
+    let mut page_query = ProcessingQuery {
+        collection_id: collection.id,
+        source: PackageScope::Representation(import.representation_id),
+        source_fingerprint: portable.observation.source_fingerprint.clone(),
+        operation: None,
+        after: None,
+        limit: 2,
+    };
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        let page = collector_app::ProcessingReadPort::observations(&*store, &page_query).unwrap();
+        for entry in page.items {
+            assert!(seen.insert(entry.id));
+        }
+        match page.next_cursor {
+            Some(cursor) => page_query.after = Some(cursor.parse().unwrap()),
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 7);
+    page_query.after = Some(ObservationId::new());
+    assert!(collector_app::ProcessingReadPort::observations(&*store, &page_query).is_err());
+    db.execute(
+        "DELETE FROM processing_observations WHERE id != ?",
+        [provisional.id.to_string()],
+    )
+    .unwrap();
+    let query = ProcessingQuery {
+        collection_id: collection.id,
+        source: PackageScope::Representation(import.representation_id),
+        source_fingerprint: portable.observation.source_fingerprint.clone(),
+        operation: None,
+        after: None,
+        limit: 10,
+    };
+    assert!(
+        service
+            .processing_summaries(&actor, query.clone())
+            .unwrap()
+            .items[0]
+            .current
+    );
+    let mut changed_files = query.source_fingerprint.files.clone();
+    changed_files[0].sha256 = Digest::sha256(b"changed bytes");
+    let changed = SourceFingerprint::calculate(
+        query.source,
+        changed_files,
+        query.source_fingerprint.layout_profile_digest.clone(),
+        query.source_fingerprint.parameters.clone(),
+    )
+    .unwrap();
+    let historical = service
+        .processing_summaries(
+            &actor,
+            ProcessingQuery {
+                source_fingerprint: changed,
+                ..query.clone()
+            },
+        )
+        .unwrap();
+    assert!(
+        historical.items[0].current,
+        "client-supplied fingerprints cannot change authoritative currency"
+    );
+    let db = rusqlite::Connection::open(_root.path().join("state/catalog.sqlite")).unwrap();
+    let mut capture = Catalog::capture(&*store, import.capture_id).unwrap();
+    capture.representations[0].files[0].digest = Digest::sha256(b"new!");
+    db.execute(
+        "UPDATE captures SET record=? WHERE id=?",
+        rusqlite::params![
+            serde_json::to_string(&capture).unwrap(),
+            capture.id.to_string()
+        ],
+    )
+    .unwrap();
+    assert!(
+        !service
+            .processing_summaries(&actor, query.clone())
+            .unwrap()
+            .items[0]
+            .current
+    );
+    assert_eq!(historical.items[0].observation_id.0, job.0);
+
+    let stranger = Principal {
+        user_id: store
+            .create_user("stranger", "another long password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.processing_summaries(&stranger, query),
+        Err(Error::Forbidden)
+    ));
+}
+
+#[test]
+fn representation_executor_uses_registered_owner_and_publishes_once() {
+    let (_root, store, actor, base_service, collection) = setup();
+    let reviewed =
+        reviewed_unattached_import(&base_service, &actor, collection.id, "representation-op");
+    let publication = base_service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    base_service.run_next_job("publish").unwrap();
+    assert_eq!(
+        base_service.job(&actor, publication).unwrap().state,
+        JobState::Completed
+    );
+
+    let mut registry = Registry::builtins();
+    registry.register(Box::new(ReaderProcessingModule)).unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(registry));
+    let context = command();
+    let request = collector_app::StartProcessingCommand {
+        operation: OperationId::new("org.example.reader.inspect").unwrap(),
+        operation_version: 1,
+        representation_id: reviewed.representation_id,
+        snapshot_id: None,
+        selection: RawJson::from_value(serde_json::json!({})),
+    };
+    let job = service
+        .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &context)
+        .unwrap();
+    assert_eq!(
+        service
+            .enqueue_processing_operation(&actor, reviewed.capture_id, request, &context)
+            .unwrap(),
+        job
+    );
+    service.run_next_job("processing").unwrap();
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let record = store.processing_record(ObservationId(job.0)).unwrap();
+    assert_eq!(
+        record.observation.operation.as_str(),
+        "org.example.reader.inspect"
+    );
+    assert_eq!(
+        record.observation.typed_result.payload.value().unwrap()["sha256"],
+        Digest::sha256(b"data").hex
+    );
+    assert!(record.import_rebinding.is_none());
+    assert!(!service.run_next_job("processing").unwrap());
+}
+
+#[test]
+fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let invalid_authority = MetadataAuthorityRecord {
+        collection_id: collection.id,
+        item_id: saved.id,
+        revision: Revision(1),
+        authority: MetadataAuthority {
+            field_overrides: vec![
+                MetadataFieldOverride {
+                    field: MetadataField::Title,
+                    value: "one".into(),
+                    language: None,
+                },
+                MetadataFieldOverride {
+                    field: MetadataField::Title,
+                    value: "two".into(),
+                    language: None,
+                },
+            ],
+            ..Default::default()
+        },
+        updated_at: chrono::Utc::now(),
+    };
+    assert!(matches!(
+        store.publish_metadata_authority(TransactionId::new(), invalid_authority),
+        Err(Error::Invalid(_))
+    ));
+
+    let imported = reviewed_unattached_import(&service, &actor, collection.id, "recipe-source");
+    service
+        .enqueue_import_publication(&actor, imported.id, &command())
+        .unwrap();
+    service.run_next_job("recipe-source").unwrap();
+    let source = store
+        .recorded_source(
+            collection.id,
+            PackageScope::Representation(imported.representation_id),
+        )
+        .unwrap();
+    let recipe = ConversionRecipe {
+        id: RecipeId::new(),
+        version: 1,
+        settings: ConversionSettings::Flac { level: 5 },
+        source_fingerprint: source,
+        tracks: vec![ConversionTrack {
+            position: 1,
+            start: PcmFrame(0),
+            length: PcmFrame(2),
+        }],
+        encoder: "fixture".into(),
+        encoder_version: "1".into(),
+        input_format: PcmSampleFormat {
+            sample_rate: 44100,
+            channels: 2,
+            bits_per_sample: 16,
+            signed: true,
+            little_endian: true,
+        },
+        output_format: PcmSampleFormat {
+            sample_rate: 44100,
+            channels: 2,
+            bits_per_sample: 16,
+            signed: true,
+            little_endian: true,
+        },
+        digest: Digest::sha256(b"not canonical"),
+    };
+    assert!(matches!(
+        store.publish_recipe(JobId::new(), collection.id, recipe.clone()),
+        Err(Error::Invalid(_))
+    ));
+    let sealed = recipe.seal().unwrap();
+    store
+        .publish_recipe(JobId::new(), collection.id, sealed.clone())
+        .unwrap();
+    assert_eq!(store.recipe(sealed.id).unwrap().digest, sealed.digest);
+
+    let authority = MetadataAuthorityRecord {
+        collection_id: collection.id,
+        item_id: saved.id,
+        revision: Revision(1),
+        authority: MetadataAuthority::default(),
+        updated_at: chrono::Utc::now(),
+    };
+    store
+        .publish_metadata_authority(TransactionId::new(), authority)
+        .unwrap();
+    AdministrationPort::reindex(&*store).unwrap();
+    let db = rusqlite::Connection::open(_root.path().join("state/catalog.sqlite")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM conversion_recipes", [], |row| row
+            .get::<_, u32>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM metadata_authorities", [], |row| row
+            .get::<_, u32>(
+            0
+        ))
+        .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -5479,6 +6722,81 @@ fn import_publication_returns_to_review_when_the_associated_item_changes() {
 }
 
 #[test]
+fn revoked_curator_grant_before_import_commit_fails_without_publication() {
+    let (_root, store, owner, service, collection) = setup();
+    let curator_id = store
+        .create_user("processing-curator", "a curator password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, curator_id, Role::Curator).unwrap();
+    let curator = Principal {
+        user_id: curator_id,
+        administrator: false,
+        device_id: None,
+    };
+    let reviewed = reviewed_unattached_import(&service, &curator, collection.id, "revoked-before");
+    let job = service
+        .enqueue_import_publication(&curator, reviewed.id, &command())
+        .unwrap();
+    AccessPort::set_grant(&*store, collection.id, curator_id, Revision(1), None).unwrap();
+    assert!(service.run_next_job("revoked-worker").unwrap());
+    assert_eq!(service.job(&curator, job).unwrap().state, JobState::Failed);
+    assert!(matches!(
+        Catalog::capture(&*store, reviewed.capture_id),
+        Err(Error::NotFound)
+    ));
+    assert!(service.collections(&owner).is_ok());
+}
+
+#[test]
+fn revoked_grant_after_import_commit_does_not_block_reconciliation() {
+    let (root, store, _owner, service, collection) = setup();
+    let curator_id = store
+        .create_user("post-commit-curator", "a curator password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, curator_id, Role::Curator).unwrap();
+    let curator = Principal {
+        user_id: curator_id,
+        administrator: false,
+        device_id: None,
+    };
+    let reviewed = reviewed_unattached_import(&service, &curator, collection.id, "revoked-after");
+    let job = service
+        .enqueue_import_publication(&curator, reviewed.id, &command())
+        .unwrap();
+    drop(service);
+    drop(store);
+
+    let crashing = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(PanicAtImportCommit),
+        )
+        .unwrap(),
+    );
+    let crashing_service = CollectionService::new(crashing.clone(), Arc::new(Registry::builtins()));
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crashing_service.run_next_job("old-worker")
+        }))
+        .is_err()
+    );
+    drop(crashing_service);
+    drop(crashing);
+
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    AccessPort::set_grant(&*reopened, collection.id, curator_id, Revision(1), None).unwrap();
+    let recovered = CollectionService::new(reopened.clone(), Arc::new(Registry::builtins()));
+    assert!(recovered.run_next_job("new-worker").unwrap());
+    assert_eq!(
+        recovered.job(&curator, job).unwrap().state,
+        JobState::Completed
+    );
+    assert!(Catalog::capture(&*reopened, reviewed.capture_id).is_ok());
+}
+
+#[test]
 fn published_import_reconciles_a_crash_before_job_completion() {
     let (root, store, actor, service, collection) = setup();
     let reviewed = reviewed_unattached_import(&service, &actor, collection.id, "job-gap");
@@ -5491,7 +6809,7 @@ fn published_import_reconciles_a_crash_before_job_completion() {
         .unwrap();
     assert_eq!(claim.id, job);
     store
-        .publish_import_for_job(reviewed.id, job, &claim.claim_token)
+        .publish_import_for_job(reviewed.id, job, &claim.claim_token, &mut || Ok(()))
         .unwrap();
     assert_eq!(
         service
@@ -5651,7 +6969,7 @@ fn committed_import_after_item_edit() {
     let claim = crashing.claim_job("old-process", 30).unwrap().unwrap();
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-            || crashing.publish_import_for_job(import.id, job, &claim.claim_token)
+            || crashing.publish_import_for_job(import.id, job, &claim.claim_token, &mut || Ok(()))
         ))
         .is_err()
     );
@@ -5676,4 +6994,648 @@ fn committed_import_after_item_edit() {
         Catalog::item(&*reopened, saved.id).unwrap().title,
         "Updated title after restart"
     );
+}
+
+#[test]
+fn stale_analysis_cannot_be_rebound_to_different_published_bytes() {
+    let (root, store, actor, _base_service, collection) = setup();
+    let mut registry = Registry::default();
+    registry.register(Box::new(ImportAnalyzingModule)).unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(registry));
+    let import = staged_import(&service, &actor, collection.id, "portable-analysis");
+    let _analysis_job = service
+        .enqueue_import_analysis(
+            &actor,
+            import.id,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    service.run_next_job("analysis-worker").unwrap();
+    let analyzed = service.provisional_import(&actor, import.id).unwrap();
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: analyzed.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut observation = store.provisional_observations(import.id).unwrap().remove(0);
+    let mut files = observation.source_fingerprint.files.clone();
+    files[0].sha256 = Digest::sha256(b"else");
+    observation.source_fingerprint = SourceFingerprint::calculate(
+        PackageScope::Import(import.id),
+        files,
+        None,
+        Default::default(),
+    )
+    .unwrap();
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute(
+        "UPDATE provisional_processing_observations SET record=? WHERE observation_id=?",
+        rusqlite::params![
+            serde_json::to_string(&observation).unwrap(),
+            observation.id.to_string()
+        ],
+    )
+    .unwrap();
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    service.run_next_job("stale-publication").unwrap();
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Failed);
+    assert!(matches!(
+        Catalog::capture(&*store, import.capture_id),
+        Err(Error::NotFound)
+    ));
+    assert_eq!(
+        std::fs::read(
+            root.path()
+                .join("state/imports")
+                .join(import.id.to_string())
+                .join("0.part")
+        )
+        .unwrap(),
+        b"data"
+    );
+}
+
+#[test]
+fn snapshot_envelope_mismatch_does_not_partially_replace_catalog() {
+    let (root, store, _actor, _service, collection) = setup();
+    let snapshot = SnapshotRecord {
+        id: SnapshotId::new(),
+        collection_id: collection.id,
+        provider: ModuleId("org.example.catalog".into()),
+        media_type: "application/octet-stream".into(),
+        bytes: ByteLength(4),
+        digest: Digest::sha256(b"data"),
+        parsed_observation: RawJson::from_value(serde_json::json!({})),
+        created_at: chrono::Utc::now(),
+    };
+    store
+        .publish_snapshot(
+            JobId::new(),
+            "fixture",
+            snapshot.clone(),
+            &mut std::io::Cursor::new(b"data"),
+            &mut || Ok(false),
+        )
+        .unwrap();
+    let record_path = files_named(&root.path().join("archive"), "record.v4.json").remove(0);
+    let mut changed = snapshot.clone();
+    changed.collection_id = CollectionId::new();
+    let bytes = serde_json::to_vec_pretty(&changed).unwrap();
+    std::fs::write(&record_path, &bytes).unwrap();
+    let manifest_path = record_path.with_file_name("manifest.v4.toml");
+    let mut manifest: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["record_sha256"] = toml::Value::String(Digest::sha256(&bytes).hex);
+    std::fs::write(manifest_path, toml::to_string(&manifest).unwrap()).unwrap();
+    // Change a valid base record too: failed processing rebuild must roll it back.
+    let collection_path = files_named(&root.path().join("archive"), "collection.toml").remove(0);
+    let mut changed_collection = collection.clone();
+    changed_collection.name = "must not reach catalog".into();
+    std::fs::write(
+        collection_path,
+        toml::to_string(&changed_collection).unwrap(),
+    )
+    .unwrap();
+    assert!(AdministrationPort::reindex(&*store).is_err());
+    let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+    let old: String = db
+        .query_row(
+            "SELECT record FROM collections WHERE id=?",
+            [collection.id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Collection>(&old).unwrap().name,
+        collection.name
+    );
+    assert_eq!(
+        store
+            .snapshot(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: snapshot.id
+            })
+            .unwrap()
+            .digest,
+        snapshot.digest
+    );
+}
+
+#[test]
+fn historical_domain_authority_rebuilds_without_rewriting_original_records() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    store
+        .publish_metadata_authority(
+            TransactionId::new(),
+            MetadataAuthorityRecord {
+                collection_id: collection.id,
+                item_id: saved.id,
+                revision: Revision(1),
+                authority: MetadataAuthority::default(),
+                updated_at: chrono::Utc::now(),
+            },
+        )
+        .unwrap();
+    let path = files_named(&root.path().join("archive"), "record.v4.json").remove(0);
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    record["authority"]["field_overrides"] = serde_json::json!([
+        {"field":"artist","value":"Original artist","language":"ja"},
+        {"field":"platform","value":"Original platform","language":"en"}
+    ]);
+    let original = serde_json::to_vec_pretty(&record).unwrap();
+    std::fs::write(&path, &original).unwrap();
+    let manifest_path = path.with_file_name("manifest.v4.toml");
+    let mut manifest: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["record_sha256"] = toml::Value::String(Digest::sha256(&original).hex);
+    std::fs::write(&manifest_path, toml::to_string(&manifest).unwrap()).unwrap();
+    let original_manifest = std::fs::read(&manifest_path).unwrap();
+    drop(service);
+    drop(store);
+    let rebuilt =
+        Store::open(root.path().join("archive"), root.path().join("fresh-state")).unwrap();
+    AdministrationPort::reindex(&rebuilt).unwrap();
+    let db = rusqlite::Connection::open(root.path().join("fresh-state/catalog.sqlite")).unwrap();
+    let body: String = db
+        .query_row(
+            "SELECT record FROM metadata_authorities WHERE id=?",
+            [saved.id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let decoded: MetadataAuthorityRecord = serde_json::from_str(&body).unwrap();
+    assert!(decoded.authority.field_overrides.is_empty());
+    assert!(decoded.authority.domain_overrides.is_none());
+    assert_eq!(decoded.authority.preserved_field_overrides.len(), 2);
+    assert_eq!(
+        decoded.authority.preserved_field_overrides[0]
+            .value()
+            .unwrap()["language"],
+        "ja"
+    );
+    assert_eq!(std::fs::read(path).unwrap(), original);
+    assert_eq!(std::fs::read(manifest_path).unwrap(), original_manifest);
+}
+
+#[test]
+fn ct2_unknown_active_job_is_reported_and_blocks_assignment() {
+    let (root, user, collection, _) = legacy_collection_fixture();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let job = JobId::new();
+    db.execute("INSERT INTO jobs(id,user_id,collection_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,request) VALUES(?,?,?,'future_operation','queued','queued',0,1,0,0,0,'{}')",
+        rusqlite::params![job.to_string(),user.to_string(),collection.to_string()]).unwrap();
+    let service = CollectionTypeAdministrationService::new(store, Arc::new(Registry::builtins()));
+    assert!(!service.inspect(collection).unwrap().eligible);
+    let error = service
+        .assign(
+            collection,
+            Revision(1),
+            ModuleId("org.junk.music".into()),
+            chrono::Utc::now(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains(&job.to_string()));
+    db.execute(
+        "UPDATE jobs SET state='cancelled' WHERE id=?",
+        [job.to_string()],
+    )
+    .unwrap();
+    assert!(service.inspect(collection).unwrap().eligible);
+}
+
+#[test]
+fn ct3_content_policy_keeps_legacy_reads_and_independent_activity_and_access() {
+    let (root, user, collection_id, item_id) = legacy_collection_fixture();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+
+    let presented = service.item_presented(&actor, item_id).unwrap();
+    assert_eq!(presented.id, item_id);
+    service
+        .save_activity(
+            &actor,
+            item_id,
+            serde_json::json!({"favorite":true}),
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(service.activity(&actor, item_id).unwrap()["favorite"], true);
+    let viewer = store
+        .create_user("ct3-viewer", "a long viewer password", false)
+        .unwrap();
+    service
+        .grant(
+            &test_authentication(&actor),
+            collection_id,
+            viewer,
+            Role::Viewer,
+            &command(),
+        )
+        .unwrap();
+
+    let current = Catalog::item(&*store, item_id).unwrap();
+    let mut changed = SaveItemCommand::from(current.clone());
+    changed.title = "blocked legacy write".into();
+    assert!(matches!(
+        service.save_item(&actor, item_id, changed, current.revision, &command()),
+        Err(Error::Unavailable(message)) if message.contains("read-only")
+    ));
+    assert!(matches!(
+        service.create_specimen(
+            &actor,
+            item_id,
+            current.revision,
+            SpecimenDetails {
+                label: "blocked".into(),
+                condition: Condition::Unknown,
+                ownership: ActiveOwnership::Unknown,
+                possession: Possession::Unknown,
+                acquisition: None,
+                private_notes: None,
+            },
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.save_work(
+            &actor,
+            WorkId::new(),
+            collector_app::SaveWorkCommand {
+                collection_id,
+                provisional: true,
+                title: "blocked work".into(),
+                translations: vec![],
+                identifiers: vec![],
+            },
+            Revision(0),
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.save_edition(
+            &actor,
+            EditionId::new(),
+            collector_app::SaveEditionCommand {
+                collection_id,
+                work_id: None,
+                provisional: true,
+                title: "blocked edition".into(),
+                expected_components: vec![],
+                identifiers: vec![],
+            },
+            Revision(0),
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.save_capture(
+            &actor,
+            CaptureId::new(),
+            collector_app::SaveCaptureCommand {
+                collection_id,
+                association: CaptureAssociation::default(),
+            },
+            Revision(0),
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.publish_cover(
+            &actor,
+            item_id,
+            current.revision,
+            b"not parsed because policy denies first",
+            "blocked cover".into(),
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.create_upload(&actor, item_id, current.revision, vec![], &command()),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.enqueue_integrity_verification(&actor, item_id, &command()),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "unidentified.bin".into(),
+                },
+                files: vec![],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+}
+
+#[test]
+fn ct3_item_owner_and_schema_are_application_policy() {
+    let (_root, _store, actor, service, collection) = setup();
+    let mut wrong_owner = item(collection.id);
+    wrong_owner.domain = ModuleData {
+        module: ModuleId("org.junk.games".into()),
+        schema_version: 1,
+        payload: RawJson::from_value(serde_json::json!({})),
+    };
+    assert!(matches!(
+        service.save_item(
+            &actor,
+            wrong_owner.id,
+            wrong_owner.clone().into(),
+            Revision(0),
+            &command(),
+        ),
+        Err(Error::Invalid(message)) if message.contains("conflicts with collection owner")
+    ));
+
+    let mut unsupported = item(collection.id);
+    unsupported.domain.schema_version = 99;
+    assert!(matches!(
+        service.save_item(
+            &actor,
+            unsupported.id,
+            unsupported.into(),
+            Revision(0),
+            &command(),
+        ),
+        Err(Error::Unavailable(message)) if message.contains("unsupported")
+    ));
+
+    let wishlist = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    assert!(wishlist.wishlist);
+    assert!(wishlist.captures.is_empty());
+
+    let import = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "manual-and-soundtrack-package".into(),
+                },
+                files: vec![UploadFile {
+                    name: "manual-and-soundtrack.bin".into(),
+                    bytes: ByteLength(1),
+                    sha256: Some(Digest::sha256(b"x").hex),
+                }],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import.id, 0, 0, b"x")
+        .unwrap();
+    assert!(matches!(
+        service.enqueue_import_analysis(
+            &actor,
+            import.id,
+            ModuleId("org.junk.games".into()),
+            &command(),
+        ),
+        Err(Error::Invalid(message)) if message.contains("collection module")
+    ));
+}
+
+#[test]
+fn ct3_queued_job_rechecks_owner_availability() {
+    let (_root, store, actor, service, collection) = setup();
+    let provider = ModuleId("org.example.catalog".into());
+    let frozen = FrozenAcquisitionJob {
+        request: ProviderRequest {
+            collection_id: collection.id,
+            provider,
+            operation: OperationId::new("org.example.catalog.acquire").unwrap(),
+            source_fingerprint: None,
+            query: RawJson::from_value(serde_json::json!({"catalog":"fixture"})),
+            maximum_response_bytes: 1024,
+        },
+        collection_binding: collection.binding.clone(),
+        snapshot_id: SnapshotId::new(),
+        created_at: chrono::Utc::now(),
+    };
+    let job = service
+        .enqueue_catalog_acquisition(&actor, frozen, &command())
+        .unwrap();
+    drop(service);
+
+    let unavailable = CollectionService::new(store, Arc::new(Registry::default()));
+    assert!(unavailable.run_next_job("ct3-missing-owner").unwrap());
+    let failed = unavailable.job(&actor, job).unwrap();
+    assert_eq!(failed.state, JobState::Failed);
+    assert!(failed.error.unwrap().contains("not installed"));
+}
+
+#[test]
+fn ct3_edit_cannot_downgrade_an_archived_unknown_schema() {
+    let (_root, store, actor, service, collection) = setup();
+    let mut future = item(collection.id);
+    future.domain.schema_version = 99;
+    future.domain.payload =
+        RawJson::from_json(r#"{"future":{"precise":1.000,"unknown":[true,null]}}"#).unwrap();
+    let saved = Catalog::save(&*store, future, Revision(0)).unwrap();
+    let mut replacement = saved.clone();
+    replacement.domain = item(collection.id).domain;
+    replacement.title = "attempted downgrade".into();
+    assert!(matches!(
+        service.save_item(
+            &actor,
+            saved.id,
+            replacement.clone().into(),
+            saved.revision,
+            &command()
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.adapt_wave1_item_save(&actor, saved.id, replacement, saved.revision),
+        Err(Error::Unavailable(_))
+    ));
+    let retained = store.item(saved.id).unwrap();
+    assert_eq!(retained.revision, saved.revision);
+    assert_eq!(retained.domain.payload.get(), saved.domain.payload.get());
+}
+
+#[test]
+fn ct3_capture_publication_rechecks_policy_after_staging() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 0, 0, b"data")
+        .unwrap();
+    service
+        .enqueue_upload_commit(&actor, upload.id, &command())
+        .unwrap();
+    let claim = store.claim_job("policy-boundary", 30).unwrap().unwrap();
+    let mut checked = false;
+    let result = store.commit_upload_for_job(claim.id, &claim.claim_token, &mut || {
+        checked = true;
+        Err(Error::Forbidden)
+    });
+    assert!(checked);
+    assert!(matches!(result, Err(Error::Forbidden)));
+    assert!(store.item(saved.id).unwrap().captures.is_empty());
+    // Retained staged bytes can be published on an authorized retry.
+    let committed = store
+        .commit_upload_for_job(claim.id, &claim.claim_token, &mut || Ok(()))
+        .unwrap();
+    assert_eq!(committed.captures.len(), 1);
+}
+
+#[test]
+fn ct3_provisional_publication_policy_failure_keeps_staged_bytes() {
+    let (_root, store, actor, service, collection) = setup();
+    let reviewed = reviewed_unattached_import(&service, &actor, collection.id, "policy-check");
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    let claim = store.claim_job("policy-worker", 30).unwrap().unwrap();
+    let mut checked = false;
+    assert!(matches!(
+        store.publish_import_for_job(reviewed.id, job, &claim.claim_token, &mut || {
+            checked = true;
+            Err(Error::Forbidden)
+        }),
+        Err(Error::Forbidden)
+    ));
+    assert!(checked);
+    assert!(matches!(
+        Catalog::capture(&*store, reviewed.capture_id),
+        Err(Error::NotFound)
+    ));
+    let published = store
+        .publish_import_for_job(reviewed.id, job, &claim.claim_token, &mut || Ok(()))
+        .unwrap();
+    assert_eq!(published.view.phase, ImportPhase::Published);
+}
+
+#[test]
+fn ct3_legacy_upload_can_be_cancelled_without_its_owner_module() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    let unavailable = CollectionService::new(store.clone(), Arc::new(Registry::default()));
+    unavailable
+        .cancel_upload(&actor, upload.id, &command())
+        .unwrap();
+    assert!(unavailable.upload(&actor, upload.id).is_ok());
+    assert!(matches!(
+        unavailable.upload_chunk(&actor, upload.id, 0, 0, b"data"),
+        Err(Error::Unavailable(_))
+    ));
+}
+
+#[test]
+fn ct4_domain_patch_receipts_bind_original_request_not_resolved_payload() {
+    let (_root, store, actor, service, collection) = setup();
+    let id = ItemId::new();
+    let edit = |fields: serde_json::Value| -> collector_app::SaveItemEditCommand {
+        serde_json::from_value(serde_json::json!({
+            "collection_id":collection.id,"title":"Patch replay","subtitle":"",
+            "identity_link":{"kind":"none"},"domain_edit":{"module":"org.junk.music","fields":fields},
+            "identity":"unidentified","translations":[],"identifiers":[],"wishlist":false
+        })).unwrap()
+    };
+    let first = edit(serde_json::json!({"artist":"A"}));
+    let key = command();
+    let created = service
+        .save_item_edit(&actor, id, first.clone(), Revision(0), &key)
+        .unwrap();
+    let later = service
+        .save_item_edit(
+            &actor,
+            id,
+            edit(serde_json::json!({"release_year":2001})),
+            created.revision,
+            &command(),
+        )
+        .unwrap();
+    let replayed = service
+        .save_item_edit(&actor, id, first, Revision(0), &key)
+        .unwrap();
+    assert_eq!(replayed.revision, created.revision);
+    assert_eq!(store.item(id).unwrap().revision, later.revision);
+    assert_eq!(
+        store
+            .item(id)
+            .unwrap()
+            .domain
+            .payload
+            .parse::<serde_json::Value>()
+            .unwrap()["release_year"],
+        2001
+    );
+    assert!(matches!(
+        service.save_item_edit(
+            &actor,
+            id,
+            edit(serde_json::json!({"artist":"A","release_year":2001})),
+            Revision(0),
+            &key
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
 }

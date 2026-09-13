@@ -1,0 +1,16 @@
+schema = 1
+root = "S04"
+license = "Generated non-secret transition shape; fingerprints are placeholders"
+
+[[vectors]]
+id = "generation-2-transition-shape"
+recipe = "utf8"
+utf8 = '{"server_id":"018f0000-0000-7000-8000-000000000001","generation":2,"old_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","new_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+length = 227
+sha256 = "51145eff8855ecd62248b81406da29f28ea699ff428ea67d2af867bb2eae22cc"
+expected = "reject as an incomplete transition: PEM, SANs and activation/grace deadlines are absent; this is a byte-reproduction fixture, not a positive TLS or acceptance oracle"
+
+[state_matrix]
+states = ["active", "prepared", "activated-with-grace", "retired"]
+default_grace_days = 30
+external_gate = "independent security review plus real TLS handshakes"

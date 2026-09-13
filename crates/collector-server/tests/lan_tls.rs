@@ -1,4 +1,4 @@
-use collector_app::{AuthenticatedPrincipal, CredentialKind};
+use collector_app::{AuthenticatedPrincipal, CreateCollectionCommand, CredentialKind};
 use collector_client::{
     Endpoint, EnrolledClient, EnrolledCredential, NativeCredentialStorage, Pairing,
     PendingEnrollment, Route,
@@ -39,6 +39,12 @@ impl NativeCredentialStorage for TestCredentialStorage {
 }
 fn command() -> collector_app::CommandContext {
     collector_app::CommandContext::new(TransactionId::new().to_string()).unwrap()
+}
+fn typed_collection(name: &str) -> CreateCollectionCommand {
+    CreateCollectionCommand {
+        name: name.into(),
+        module: ModuleId("org.junk.games".into()),
+    }
 }
 fn test_authentication(principal: &Principal) -> AuthenticatedPrincipal {
     AuthenticatedPrincipal {
@@ -92,7 +98,11 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
     state.allowed_origins = Arc::new(vec![browser_origin.clone()]);
     let collection = state
         .service
-        .create_collection(&test_authentication(&owner), "Local archive", &command())
+        .create_collection(
+            &test_authentication(&owner),
+            typed_collection("Local archive"),
+            &command(),
+        )
         .unwrap();
     let item = Item {
         id: ItemId::new(),

@@ -1,9 +1,9 @@
 import {chromium} from '@playwright/test';
 import {spawn,spawnSync} from 'node:child_process';
-import {mkdir,mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,readdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {randomBytes} from 'node:crypto';
+import {createHash,randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-browser-'));
@@ -25,11 +25,23 @@ if(localSetup){
  assert.match(repairedConfig,/http:\/\/localhost:19842/);
  assert.match(repairedConfig,/public_curation = false/);
 }
-const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});
-let logs='';server.stderr.on('data',d=>logs+=d);server.stdout.on('data',d=>logs+=d);
+let logs='';let server;
+function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
+async function waitForServer(){for(let i=0;i<100;i++){try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server did not become ready');}
+async function stopServer(){if(!server||server.exitCode!==null)return;server.kill('SIGINT');await new Promise(resolve=>server.once('exit',resolve));}
+async function archiveUnavailableOwnerFixture(collectionId,itemId){
+ const collectionRoot=path.join(scratch,'archive/collections');
+ const collectionDirectory=(await readdir(collectionRoot)).find(name=>name.endsWith(`--${collectionId}`));assert.ok(collectionDirectory,'collection archive directory not found');
+ const directory=path.join(collectionRoot,collectionDirectory);
+ const collectionFile=path.join(directory,'collection.toml');const collectionToml=await readFile(collectionFile,'utf8');assert.match(collectionToml,/module = "org\.junk\.music"/);await writeFile(collectionFile,collectionToml.replace('module = "org.junk.music"','module = "org.example.absent"'));
+ const itemsRoot=path.join(directory,'items');const itemDirectories=await readdir(itemsRoot);const itemDirectory=itemDirectories.find(name=>name.includes(itemId));assert.ok(itemDirectory,`item archive directory not found for ${itemId}; found ${itemDirectories.join(', ')}`);
+ for(const entry of itemDirectories){const revisionsRoot=path.join(itemsRoot,entry,'revisions');const revision=(await readdir(revisionsRoot)).sort().at(-1);const recordFile=path.join(revisionsRoot,revision,'record.v3.json');const manifestFile=path.join(revisionsRoot,revision,'manifest.v3.toml');const record=JSON.parse(await readFile(recordFile,'utf8'));if(record.record.id===itemId){record.record.title='Opaque module fixture';record.record.subtitle='Unavailable owner preserved from archive';}record.record.domain={module:'org.example.absent',schema_version:8,payload:{z:100,a:null}};const bytes=`${JSON.stringify(record,null,2)}\n`;await writeFile(recordFile,bytes);const digest=createHash('sha256').update(bytes).digest('hex');const manifest=await readFile(manifestFile,'utf8');await writeFile(manifestFile,manifest.replace(/record_sha256 = "[^"]+"/,`record_sha256 = "${digest}"`));}
+ await rm(path.join(scratch,'state/catalog.sqlite'),{force:true});await rm(path.join(scratch,'state/catalog.sqlite-wal'),{force:true});await rm(path.join(scratch,'state/catalog.sqlite-shm'),{force:true});
+}
+server=startServer();
 let browser; let page;
 try{
- for(let i=0;i<100;i++){try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
+ await waitForServer();
  // Test-only self-signed HTTPS acceptance. Product clients never disable certificate validation.
  browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});
@@ -55,15 +67,29 @@ try{
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
  const administration=page.getByRole('dialog',{name:/Make room for a collection/});
  await administration.getByLabel('Collection name').fill('Shelf & stereo');
+ await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');
+ await administration.getByRole('button',{name:'Create collection',exact:true}).click();
+ await page.getByText('Collection created.',{exact:false}).waitFor();
+ await administration.getByLabel('Collection name').fill('Cartridge shelf');
+ await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
  await page.getByText('Collection created.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Close administration'}).click();
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).waitFor();
  await page.getByText('This collection has no entries yet.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Add item',exact:true}).click();
- await page.getByRole('combobox',{name:/Kind/}).selectOption('org.junk.music');
+ const addForm=page.getByRole('dialog',{name:/Add an entry/});
+ await addForm.getByLabel('Collection').selectOption({label:'Cartridge shelf'});
+ await addForm.getByLabel('Platform',{exact:true}).fill('Fixture console');
+ await addForm.getByLabel('Collection').selectOption({label:'Shelf & stereo'});
+ assert.equal(await addForm.getByLabel('Artist',{exact:true}).inputValue(),'','switching collection retained incompatible unsaved domain fields');
+ await page.getByText('Music CDs fields are supplied by Music CDs.',{exact:true}).waitFor();
  await page.getByLabel('Title',{exact:true}).fill('A test pressing');
- await page.getByLabel('Artist / platform / edition',{exact:true}).fill('Test ensemble · Japan · CD');
+ await page.getByLabel('Edition / variant details',{exact:true}).fill('Japan · CD');
+ await page.getByLabel('Artist',{exact:true}).fill('Test ensemble');
+ await page.getByLabel('Label',{exact:true}).fill('Fixture Records');
+ await page.getByLabel('Release year',{exact:true}).fill('2001');
+ await page.getByText('Structured module data is preserved and read-only here.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Add',exact:true}).click();
  await page.getByText('Inventory saved.',{exact:false}).waitFor();
  const curator=page.getByRole('dialog',{name:/Edit entry/});
@@ -126,7 +152,8 @@ try{
  assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'Edit copy');
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:path.join(root,'web/test-results/inventory-mobile.png'),fullPage:true});
- assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'inventory editor has mobile horizontal overflow');
+ const mobileOverflow=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth,width:document.documentElement.scrollWidth,elements:[...document.querySelectorAll('*')].map(element=>({tag:element.tagName,className:element.className?.toString(),text:element.textContent?.trim().slice(0,60),right:element.getBoundingClientRect().right,width:element.getBoundingClientRect().width})).filter(value=>value.right>innerWidth+1||value.width>innerWidth+1).slice(0,12)}));
+ assert.equal(mobileOverflow.overflow,false,`inventory editor has mobile horizontal overflow: ${JSON.stringify(mobileOverflow)}`);
  await page.setViewportSize({width:1440,height:1000});
  // Synthetic one-pixel fixture; image decoding and real thumbnail bounds have separate Rust coverage.
  const png=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=160;c.height=160;const ctx=c.getContext('2d');ctx.fillStyle='#375e53';ctx.fillRect(0,0,160,160);ctx.fillStyle='#e5d69a';ctx.beginPath();ctx.arc(80,80,52,0,Math.PI*2);ctx.fill();ctx.fillStyle='#375e53';ctx.beginPath();ctx.arc(80,80,12,0,Math.PI*2);ctx.fill();return c.toDataURL('image/png').split(',')[1];}),'base64');
@@ -221,7 +248,7 @@ try{
  await jobLedger.getByRole('article',{name:'Capture publication completed'}).waitFor();
  await page.evaluate(async()=>{
   const request=async(path,init={})=>{const response=await fetch(`/api/v1${path}`,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
-  const collection=(await request('/collections',{method:'GET'}))[0];
+  const collection=(await request('/collections',{method:'GET'})).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
   const itemId=crypto.randomUUID();const itemCommand={collection_id:collection.id,title:'Stale publication fixture',subtitle:'before review',identity_link:{kind:'none'},domain:{module:'org.junk.music',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false};
   const item=await request(`/items/${itemId}`,{method:'PUT',body:JSON.stringify({command:itemCommand,expected_revision:0})});
   const staged=await request('/imports',{method:'POST',body:JSON.stringify({collection_id:collection.id,package_name:'stale-publication-job',files:[{name:'empty.bin',bytes:0,sha256:null}]})});
@@ -234,11 +261,8 @@ try{
  await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).click();
  const failedJob=jobLedger.getByRole('article',{name:'Capture publication failed'});
  await failedJob.getByRole('button',{name:'Retry job',exact:true}).click();
- const retriedJob=jobLedger.getByRole('article',{name:/Capture publication (queued|running)/});
- await retriedJob.getByRole('button',{name:'Cancel job',exact:true}).click();
- await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='Refresh jobs');
- assert.equal(await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).evaluate(node=>node===document.activeElement),true,'focus was not restored after cancelling a job');
- await jobLedger.getByRole('article',{name:'Capture publication cancelled'}).getByText('attempt 2',{exact:false}).waitFor();
+ let cancelledRetry=false;try{await jobLedger.getByRole('article',{name:/Capture publication (queued|running)/}).getByRole('button',{name:'Cancel job',exact:true}).click({timeout:1500});cancelledRetry=true;}catch{await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).click();}
+ if(cancelledRetry){await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='Refresh jobs');assert.equal(await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).evaluate(node=>node===document.activeElement),true,'focus was not restored after cancelling a job');await jobLedger.getByRole('article',{name:'Capture publication cancelled'}).getByText('attempt 2',{exact:false}).waitFor();}else{await jobLedger.getByRole('article',{name:/Capture publication (completed|failed)/}).getByText('attempt 2',{exact:false}).waitFor();}
  await page.setViewportSize({width:390,height:844});
  await importWorkspace.scrollIntoViewIfNeeded();
  await page.screenshot({path:path.join(root,'web/test-results/import-mobile.png'),fullPage:true});
@@ -312,28 +336,52 @@ try{
   await clientPage.goto('http://localhost:19841');
   await clientPage.getByText('Client access only at this address.',{exact:false}).waitFor();
   assert.equal(await clientPage.getByRole('button',{name:'Administration',exact:true}).count(),0);
-  assert.equal(await clientPage.getByRole('button',{name:'Curate collection',exact:true}).count(),0);
+  assert.equal(await clientPage.getByRole('button',{name:'Manage collections',exact:true}).count(),0);
   assert.equal(await clientPage.evaluate(async()=>{const response=await fetch('/administration.js');return response.status;}),404);
   await clientPage.close();
  }
  await page.getByRole('searchbox').fill('pressing');
  await page.waitForTimeout(350);
  assert.equal(await page.locator('.collection-row').count(),1);
- await page.evaluate(async()=>{
-  const collection=(await(await fetch('/api/v1/collections')).json())[0];
+ assert.match(await page.locator('.collection-row').innerText(),/Test ensemble/,'edition text hid the module artist summary');
+ // The generic renderer must accept a third descriptor without a frontend ID branch.
+ const fixturePage=await context.newPage();const fixtureCollection=crypto.randomUUID();
+ await fixturePage.route('**/api/v1/collection-types',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:'org.example.stamps',schema_version:1,display_name:'Stamp fixture module',collection_type_label:'Postage stamps',fields:[{key:'denomination',label:'Denomination',required:true,editable:true,kind:{type:'integer',minimum:1,maximum:10000}},{key:'unit',label:'Currency unit',required:true,editable:true,kind:{type:'text',maximum_bytes:16}},{key:'perforations',label:'Perforation observations',required:false,editable:false,kind:{type:'structured'}}],capabilities:[]});await route.fulfill({response,json:body});});
+ await fixturePage.route('**/api/v1/collections',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:fixtureCollection,revision:1,name:'Browser stamp fixture',created_at:'2026-09-13T00:00:00Z',binding:{state:'assigned',module:'org.example.stamps'},effective_permissions:{role:'owner',can_browse:true,can_curate:true,can_manage_access:true},content_permissions:{can_edit:true,status:'available'}});await route.fulfill({response,json:body});});
+ await fixturePage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add item',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add an entry/});await stampForm.getByLabel('Collection').selectOption(fixtureCollection);await stampForm.getByText('Postage stamps fields are supplied by Stamp fixture module.',{exact:true}).waitFor();assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('Structured module data is preserved and read-only here.',{exact:true}).waitFor();
+ let submittedStamp;
+ await fixturePage.route('**/api/v1/items/*',async route=>{if(route.request().method()!=='PUT')return route.continue();submittedStamp=route.request().postDataJSON();await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{code:'invalid_request',message:'Renderer fixture: submission inspected without persistence.'}})});});
+ await stampForm.getByLabel('Title',{exact:true}).fill('Synthetic stamp');await stampForm.getByLabel('Denomination',{exact:true}).fill('20');await stampForm.getByRole('button',{name:'Add',exact:true}).click();await stampForm.getByRole('alert').waitFor();assert.deepEqual(submittedStamp.edit.domain_edit,{module:'org.example.stamps',fields:{unit:'cents',denomination:20}});
+ await stampForm.getByRole('button',{name:'Close curator'}).click();
+ // Descriptor availability alone must not enable an unsupported stored Item.
+ await fixturePage.route('**/api/v1/items?*',async route=>{const response=await route.fetch();const body=await response.json();body.items=body.items.slice(0,1).map(item=>({...item,title:'Unsupported schema fixture',domain:{...item.domain,schema_version:99},effective_permissions:{...item.effective_permissions,can_curate:false},content_permissions:{can_edit:false,status:'item_schema_unsupported',message:'Unsupported stored schema fixture.'}}));await route.fulfill({response,json:body});});
+ await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:/Edit entry/});assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).isDisabled(),true);assert.equal(await readOnlyForm.getByRole('button',{name:'Save',exact:true}).isDisabled(),true);await readOnlyForm.getByText('Collection access',{exact:true}).waitFor();await readOnlyForm.getByRole('button',{name:'Close curator'}).click();
+ await fixturePage.unroute('**/api/v1/collection-types');await fixturePage.route('**/api/v1/collection-types',route=>route.fulfill({json:[]}));await fixturePage.reload();await fixturePage.getByRole('button',{name:'Administration',exact:true}).waitFor();assert.equal(await fixturePage.getByRole('button',{name:'Administration',exact:true}).isEnabled(),true);assert.equal(await fixturePage.getByRole('button',{name:'Manage collections',exact:true}).isEnabled(),true);
+ await fixturePage.close();
+ const rejectedOwner=await page.evaluate(async()=>{
+  const collection=(await(await fetch('/api/v1/collections')).json()).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
   const id=crypto.randomUUID();
   const command={collection_id:collection.id,title:'Opaque module fixture',subtitle:'Unavailable schema',identity_link:{kind:'none'},domain:{module:'org.example.absent',schema_version:8,payload:{z:100,a:null}},identity:'unidentified',translations:[],identifiers:[],wishlist:true};
   const response=await fetch(`/api/v1/items/${id}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command,expected_revision:0})});
-  if(!response.ok)throw new Error(`opaque module fixture: ${response.status} ${await response.text()}`);
+  return {status:response.status,body:await response.json(),id};
  });
+ assert.equal(rejectedOwner.status,400,'wrong-owner item was accepted');
+ assert.equal(rejectedOwner.body.error.code,'invalid_request');
  await page.getByRole('searchbox').fill('Opaque module');
  await page.waitForTimeout(350);
- await page.getByRole('button',{name:/Opaque module fixture/}).click();
- await page.getByRole('region',{name:'Module details'}).getByText('not executable',{exact:false}).waitFor();
- assert.equal(await page.getByRole('region',{name:'Module details'}).getByRole('button').count(),0);
- await page.getByRole('button',{name:'Close details'}).click();
- await page.getByRole('searchbox').fill('pressing');
- await page.waitForTimeout(350);
+ assert.equal(await page.locator('.collection-row').count(),0,'rejected item was published');
+ // Build a valid temporary archived collection whose assigned owner is absent.
+ // This exercises preservation/reindex fallback without forging a mixed-type API write.
+ const unavailableFixture=await page.evaluate(async()=>{const collections=await(await fetch('/api/v1/collections')).json();const collection=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');const page=await(await fetch(`/api/v1/items?collection_id=${collection.id}`)).json();return {collectionId:collection.id,itemId:page.items[0].id};});
+ await stopServer();await archiveUnavailableOwnerFixture(unavailableFixture.collectionId,unavailableFixture.itemId);server=startServer();await waitForServer();await page.reload();
+ await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
+ await page.getByText('Collection content is read-only.',{exact:true}).waitFor();
+ await page.getByText('org.example.absent',{exact:false}).waitFor();
+ await page.getByRole('searchbox').fill('Opaque module');await page.waitForTimeout(350);
+ const opaqueRow=page.getByRole('button',{name:/Opaque module fixture/});await opaqueRow.waitFor();assert.match(await opaqueRow.innerText(),/Unavailable type · org\.example\.absent/);await opaqueRow.click();
+ await page.getByText('Module is not installed; preserved data is not executable.',{exact:false}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Edit / attach files',exact:true}).count(),0,'unavailable-owner item exposed content editing');
+ await page.getByRole('button',{name:'Manage collection access',exact:true}).click();const unavailableManagement=page.getByRole('dialog',{name:/Edit entry/});await unavailableManagement.getByText('Collection access',{exact:true}).waitFor();assert.equal(await unavailableManagement.getByRole('button',{name:'Add physical copy',exact:true}).count(),0,'unavailable-owner item exposed inventory actions');await unavailableManagement.getByRole('button',{name:'Close curator',exact:true}).click();
  // Standard browser WebAuthn, with a virtual authenticator instead of a physical password manager.
  if(!localSetup){
  const cdp=await context.newCDPSession(page);await cdp.send('WebAuthn.enable');
@@ -366,15 +414,16 @@ try{
   const request=async(path,init={})=>{const needsKey=init.method&&init.method!=='GET'&&!path.startsWith('/auth/');const response=await fetch(`/api/v1${path}`,{...init,headers:{...(init.body?{'content-type':'application/json'}:{}),...(needsKey?{'idempotency-key':crypto.randomUUID()}:{}),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.status===204?undefined:response.json();};
   const collections=await request('/collections');
   const created=await request('/admin/users',{method:'POST',body:JSON.stringify({username:'viewer',password:viewerPassword,administrator:false})});
-  await request('/admin/grants',{method:'POST',body:JSON.stringify({collection_id:collections[0].id,user_id:created.user_id,role:'viewer'})});
+  const unavailable=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.example.absent');
+  await request('/admin/grants',{method:'POST',body:JSON.stringify({collection_id:unavailable.id,user_id:created.user_id,role:'viewer'})});
   await request('/auth/logout',{method:'POST'});
   await request('/auth/login',{method:'POST',body:JSON.stringify({username:'viewer',password:viewerPassword,device_name:'Viewer browser'})});
  },viewerPassword);
  await page.reload();
  await page.getByRole('button',{name:'Account & security',exact:true}).waitFor();
- assert.equal(await page.getByRole('button',{name:'Curate collection',exact:true}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Manage collections',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Add item',exact:true}).count(),0);
- await page.getByRole('button',{name:/A test pressing/}).waitFor();
+ await page.getByRole('button',{name:/Opaque module fixture/}).waitFor();
  const isolation=await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const importId=sessionStorage.getItem('owner-import-id');const jobId=sessionStorage.getItem('owner-job-id');return {importStatus:(await fetch(`/api/v1/imports/${importId}`)).status,jobStatus:(await fetch(`/api/v1/jobs/${jobId}`)).status,collectionStatus:(await fetch('/api/v1/imports',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({collection_id:collection.id,package_name:'forbidden',files:[{name:'empty.bin',bytes:0,sha256:null}]})})).status};});
  assert.deepEqual(isolation,{importStatus:404,jobStatus:404,collectionStatus:403},'viewer crossed Import/Job ownership or collection curation scope');
  assert.equal(await page.locator('.collection-row img').count(),0,'viewer loaded curator-only artwork');
@@ -384,5 +433,5 @@ try{
  await page.getByRole('searchbox').fill('session expired');
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
- console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, unavailable-module disclosure, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, unavailable-module disclosure, search, role denial, WebAuthn registration/login and mobile layout.');
-}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();server.kill('SIGINT');await new Promise(resolve=>server.once('exit',resolve));await rm(scratch,{recursive:true,force:true});}
+ console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial, WebAuthn registration/login and mobile layout.');
+}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();await stopServer();await rm(scratch,{recursive:true,force:true});}

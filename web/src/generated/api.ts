@@ -260,6 +260,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/captures/{id}/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["start_processing_operation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collection-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["collection_types"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections": {
         parameters: {
             query?: never;
@@ -1247,6 +1279,12 @@ export interface components {
         };
         /** Format: int64 */
         ByteLength: number;
+        Capability: {
+            availability: components["schemas"]["Availability"];
+            display_name: string;
+            id: components["schemas"]["CapabilityId"];
+            scope: components["schemas"]["OperationScope"];
+        };
         CapabilityAffordance: {
             availability: components["schemas"]["Availability"];
             id: components["schemas"]["CapabilityId"];
@@ -1290,11 +1328,29 @@ export interface components {
             retrieved_at: string;
         };
         Collection: {
+            /**
+             * @description Absent in pre-CT.2 creation manifests. Deserialization classifies those
+             *     archives without rewriting their immutable original metadata.
+             */
+            binding?: components["schemas"]["CollectionBinding"];
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["CollectionId"];
             name: string;
             revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description Durable collection ownership. `LegacyUnassigned` is a recovery/read state for
+         *     archives created before collection ownership was recorded; typed creation
+         *     accepts an assigned module separately and can never request this variant.
+         */
+        CollectionBinding: {
+            module: components["schemas"]["ModuleId"];
+            /** @enum {string} */
+            state: "assigned";
+        } | {
+            /** @enum {string} */
+            state: "legacy_unassigned";
         };
         /** Format: uuid */
         CollectionId: string;
@@ -1327,6 +1383,14 @@ export interface components {
         ComponentKind: "cartridge" | "optical_disc" | "tape" | "memory_card" | "case" | "booklet" | "insert" | "other_data" | "other_physical";
         /** @enum {string} */
         Condition: "unknown" | "sealed" | "excellent" | "good" | "fair" | "poor" | "incomplete";
+        /** @enum {string} */
+        ContentAvailabilityStatus: "available" | "legacy_unassigned" | "owner_unavailable" | "item_schema_unsupported";
+        ContentPermissions: {
+            administrator_commands?: string[];
+            can_edit: boolean;
+            message?: string | null;
+            status: components["schemas"]["ContentAvailabilityStatus"];
+        };
         ConversionProfile: {
             /** @enum {string} */
             codec: "flac";
@@ -1335,6 +1399,15 @@ export interface components {
             bitrate_kbps: number;
             /** @enum {string} */
             codec: "opus";
+        };
+        /**
+         * @description Typed creation input reserved for CT.2 runtime integration. Keeping the
+         *     module mandatory here prevents `LegacyUnassigned` from becoming a valid new
+         *     collection request while CT.1 leaves persisted Collection unchanged.
+         */
+        CreateCollectionCommand: {
+            module: components["schemas"]["ModuleId"];
+            name: string;
         };
         CurrencyCode: string;
         /** Format: uuid */
@@ -1352,6 +1425,38 @@ export interface components {
             date: string;
             possession: components["schemas"]["ReturnedPossession"];
             reason: string;
+        };
+        /**
+         * @description A bounded owner-mediated patch. The raw object preserves JSON scalar types;
+         *     each owner deserializes it into its own typed patch where missing and null are
+         *     distinct operations.
+         */
+        DomainEdit: {
+            fields: Record<string, never>;
+            module: components["schemas"]["ModuleId"];
+        };
+        DomainFieldDescriptor: {
+            editable: boolean;
+            key: string;
+            kind: components["schemas"]["DomainFieldKind"];
+            label: string;
+            required: boolean;
+        };
+        DomainFieldKind: {
+            /** Format: int32 */
+            maximum_bytes: number;
+            /** @enum {string} */
+            type: "text";
+        } | {
+            /** Format: int64 */
+            maximum: number;
+            /** Format: int64 */
+            minimum: number;
+            /** @enum {string} */
+            type: "integer";
+        } | {
+            /** @enum {string} */
+            type: "structured";
         };
         /** Format: uuid */
         EditionId: string;
@@ -1393,19 +1498,10 @@ export interface components {
         EvidenceKind: "integrity" | "structure" | "game_catalog" | "accurate_rip" | "reconstruction" | "derivative_validation";
         /** @enum {string} */
         EvidenceOutcome: "passed" | "failed" | "inconclusive" | "unsupported";
-        FeatureCapability: {
-            availability: components["schemas"]["Availability"];
-            available: boolean;
-            display_name: string;
-            id: components["schemas"]["CapabilityId"];
-            limitation?: string | null;
-            name: string;
-        };
         FeaturesResponse: {
             administration: boolean;
             curation: boolean;
             default_username?: string | null;
-            modules: components["schemas"]["ModuleFeature"][];
             multi_user: boolean;
             passkeys: boolean;
         };
@@ -1621,9 +1717,11 @@ export interface components {
             /** Format: int32 */
             schema_version: number;
         };
-        ModuleFeature: {
-            capabilities: components["schemas"]["FeatureCapability"][];
+        ModuleDescriptor: {
+            capabilities: components["schemas"]["Capability"][];
+            collection_type_label: string;
             display_name: string;
+            fields: components["schemas"]["DomainFieldDescriptor"][];
             id: components["schemas"]["ModuleId"];
             /** Format: int32 */
             schema_version: number;
@@ -1657,9 +1755,6 @@ export interface components {
             label: string;
             revision: components["schemas"]["Revision"];
         };
-        NewCollection: {
-            name: string;
-        };
         NewProvisionalImport: {
             collection_id: components["schemas"]["CollectionId"];
             files: components["schemas"]["UploadFile"][];
@@ -1675,6 +1770,8 @@ export interface components {
             password: string;
             username: string;
         };
+        /** @enum {string} */
+        OperationScope: "collection_domain" | "shared_media";
         Ownership: {
             /** @enum {string} */
             state: "owned";
@@ -1721,6 +1818,7 @@ export interface components {
                 assets: components["schemas"]["PresentedAsset"][];
                 captures: components["schemas"]["PresentedCapture"][];
                 collection_id: components["schemas"]["CollectionId"];
+                content_permissions: components["schemas"]["ContentPermissions"];
                 deleted: boolean;
                 domain: components["schemas"]["PresentedModuleData"];
                 effective_permissions: components["schemas"]["EffectivePermissions"];
@@ -1795,6 +1893,8 @@ export interface components {
             revision: components["schemas"]["Revision"];
         };
         PresentedCollection: {
+            binding: components["schemas"]["CollectionBinding"];
+            content_permissions: components["schemas"]["ContentPermissions"];
             /** Format: date-time */
             created_at: string;
             effective_permissions: components["schemas"]["EffectivePermissions"];
@@ -1814,6 +1914,7 @@ export interface components {
             item_id: components["schemas"]["ItemId"];
             kind: components["schemas"]["EvidenceKind"];
             outcome: components["schemas"]["EvidenceOutcome"];
+            provenance_limitation?: string | null;
             representation_id: components["schemas"]["RepresentationId"];
         };
         /**
@@ -1824,6 +1925,7 @@ export interface components {
             assets: components["schemas"]["PresentedAsset"][];
             captures: components["schemas"]["PresentedCapture"][];
             collection_id: components["schemas"]["CollectionId"];
+            content_permissions: components["schemas"]["ContentPermissions"];
             deleted: boolean;
             domain: components["schemas"]["PresentedModuleData"];
             effective_permissions: components["schemas"]["EffectivePermissions"];
@@ -1934,7 +2036,26 @@ export interface components {
             command: components["schemas"]["SaveItemCommand"];
             expected_revision: components["schemas"]["Revision"];
         };
-        SaveItemEnvelope: components["schemas"]["SaveItemCommandEnvelope"] | components["schemas"]["Wave1SaveItemEnvelope"];
+        /**
+         * @description Item form input whose domain changes are applied by the owning module. The
+         *     client can edit declared scalar fields without replacing preserved raw data.
+         */
+        SaveItemEditCommand: {
+            collection_id: components["schemas"]["CollectionId"];
+            domain_edit: components["schemas"]["DomainEdit"];
+            identifiers: components["schemas"]["ProviderIdentity"][];
+            identity: components["schemas"]["IdentityState"];
+            identity_link: components["schemas"]["ItemIdentityLink"];
+            subtitle: string;
+            title: string;
+            translations: components["schemas"]["LocalizedText"][];
+            wishlist: boolean;
+        };
+        SaveItemEditCommandEnvelope: {
+            edit: components["schemas"]["SaveItemEditCommand"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        SaveItemEnvelope: components["schemas"]["SaveItemCommandEnvelope"] | components["schemas"]["SaveItemEditCommandEnvelope"] | components["schemas"]["Wave1SaveItemEnvelope"];
         /** Format: uuid */
         ServerId: string;
         /** Format: uuid */
@@ -1948,6 +2069,8 @@ export interface components {
             id: components["schemas"]["SessionId"];
             label: string;
         };
+        /** Format: uuid */
+        SnapshotId: string;
         Specimen: {
             acquisition?: null | components["schemas"]["Acquisition"];
             components: components["schemas"]["Component"][];
@@ -1994,6 +2117,14 @@ export interface components {
             due_at?: string | null;
             /** Format: date */
             lent_at: string;
+        };
+        StartProcessingCommand: {
+            operation: components["schemas"]["CapabilityId"];
+            /** Format: int32 */
+            operation_version: number;
+            representation_id: components["schemas"]["RepresentationId"];
+            selection: Record<string, never>;
+            snapshot_id?: null | components["schemas"]["SnapshotId"];
         };
         StoredFile: {
             bytes: components["schemas"]["ByteLength"];
@@ -2054,7 +2185,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NewCollection"];
+                "application/json": components["schemas"]["CreateCollectionCommand"];
             };
         };
         responses: {
@@ -2589,6 +2720,82 @@ export interface operations {
                 content?: never;
             };
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_processing_operation: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["CaptureId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartProcessingCommand"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    collection_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleDescriptor"][];
+                };
+            };
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

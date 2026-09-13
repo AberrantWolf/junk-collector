@@ -1,0 +1,49 @@
+schema = 1
+root = "D05"
+license = "Generated PCM plus factual outputs from cited public interoperability vectors"
+
+[[vectors]]
+id = "pcm-extremes-le-i16-stereo"
+recipe = "hex"
+hex = "0080ff7fffff0100000000003930c7cf"
+length = 16
+sha256 = "890bb45096e8a0b0189c42a1905eb76e0e31a6005fcd5ad8184f25e12cfc02d3"
+frames = 4
+sample_rate = 44100
+channels = 2
+oracle = "Generated frames [-32768,32767],[-1,1],[0,0],[12345,-12345]"
+
+[[vectors]]
+id = "stored-index-00-cue"
+recipe = "utf8"
+utf8 = """FILE "disc.bin" BINARY
+  TRACK 01 AUDIO
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    INDEX 00 00:00:01
+    INDEX 01 00:00:02
+"""
+length = 123
+sha256 = "d7a19e34e75611b94b0fcb9b6a80f7422f7aee2b8c5716e372429a0411ef2ee7"
+expected = "track 1 owns sector 0; track 2 owns its stored INDEX 00 sector beginning at sector 1"
+
+[published_arver_toc]
+first_track = 1
+last_track = 3
+leadout_sector = 336103
+track_offsets = [150, 75408, 130223]
+musicbrainz_disc_id = "dUmct3Sk4dAt1a98qUKYKC0ZjYU-"
+freedb_disc_id = "19117f03"
+accuraterip_id1 = "00084264"
+accuraterip_id2 = "001cc184"
+oracle = "ARver tests/discinfo_test.py; cross-checked by existing junk-libs-disc-id tests"
+
+[offset_contract]
+minimum_stereo_sample_frames = -2939
+maximum_stereo_sample_frames = 2939
+working_buffer_bytes = 67108864
+oracle = "CUETools/ARver-derived existing junk-libs vectors; streaming implementation remains D05.1"
+
+[external_owned_dump]
+environment = "JUNK_COLLECTOR_W4_CD_DUMP_ROOT"
+status = "externally unqualified when unset; never commit or print payload paths/content"

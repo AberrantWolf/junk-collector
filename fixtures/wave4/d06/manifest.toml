@@ -1,0 +1,31 @@
+schema = 1
+root = "D06"
+license = "Generated provider-shaped JSON; not a copied provider response"
+
+[[vectors]]
+id = "multilingual-ambiguous"
+recipe = "utf8"
+utf8 = '{"releases":[{"id":"00000000-0000-4000-8000-000000000001","title":"強い一致","score":80},{"id":"00000000-0000-4000-8000-000000000002","title":"English Name","score":100}]}'
+length = 175
+sha256 = "c685dac16b859af9f834771ac862c4e9d421eca9ff72fa848e214f859062a7fe"
+expected = "candidate 1 wins from independently supplied DiscLayout identity evidence despite candidate 2's higher provider search score and English language"
+oracle = "Generated resolver scenario, not a recorded MusicBrainz response or qualified provider parser fixture; search score is never identity strength"
+
+[[identity_inputs]]
+provider_record_id = "00000000-0000-4000-8000-000000000001"
+language = "ja"
+strength = "disc_layout"
+basis = "test-supplied matching TOC evidence; not derived from provider score"
+
+[[identity_inputs]]
+provider_record_id = "00000000-0000-4000-8000-000000000002"
+language = "en"
+strength = "name"
+basis = "name-only search candidate"
+
+[limits]
+json_body_bytes = 8388608
+dat_stream_bytes = 536870912
+timeout_seconds = 15
+transient_attempts = 3
+musicbrainz_minimum_interval_seconds = 1

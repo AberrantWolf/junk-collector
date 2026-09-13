@@ -3,7 +3,8 @@ use axum::{
     http::{Request, StatusCode},
 };
 use collector_app::{
-    AuthenticatedPrincipal, Catalog, CommandContext, CredentialKind, JobPort, JobSpec,
+    AuthenticatedPrincipal, Catalog, CommandContext, CreateCollectionCommand, CredentialKind,
+    JobPort, JobSpec,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -11,8 +12,186 @@ use collector_server::*;
 use collector_store::{Store, UploadFile};
 use std::sync::Arc;
 use tower::ServiceExt;
+
+struct AbsentFixtureModule;
+struct StampWebFixtureModule;
+impl collector_modules::CollectionModule for AbsentFixtureModule {
+    fn descriptor(&self) -> collector_modules::ModuleDescriptor {
+        collector_modules::ModuleDescriptor {
+            id: ModuleId("org.example.absent".into()),
+            schema_version: 8,
+            display_name: "Temporary absent fixture".into(),
+            collection_type_label: "Temporary fixtures".into(),
+            fields: vec![],
+            capabilities: vec![],
+        }
+    }
+    fn validate_current(&self, _data: &ModuleData) -> collector_modules::ModuleResult<()> {
+        Ok(())
+    }
+    fn apply_edit(
+        &self,
+        current: &ModuleData,
+        _edit: &RawJson,
+    ) -> collector_modules::ModuleResult<ModuleData> {
+        Ok(current.clone())
+    }
+    fn validate_metadata_overrides(
+        &self,
+        _overrides: &ModuleData,
+    ) -> collector_modules::ModuleResult<()> {
+        Ok(())
+    }
+    fn validate_operation_result(
+        &self,
+        _capability: &collector_modules::CapabilityId,
+        _result: &RawJson,
+    ) -> collector_modules::ModuleResult<()> {
+        Ok(())
+    }
+    fn present(
+        &self,
+        _data: &ModuleData,
+    ) -> collector_modules::ModuleResult<collector_modules::ModulePresentation> {
+        Ok(Default::default())
+    }
+}
+impl collector_modules::CollectionModule for StampWebFixtureModule {
+    fn descriptor(&self) -> collector_modules::ModuleDescriptor {
+        use collector_modules::{DomainFieldDescriptor, DomainFieldKind, ModuleDescriptor};
+        ModuleDescriptor {
+            id: ModuleId("org.example.stamps".into()),
+            schema_version: 1,
+            display_name: "Stamp fixture module".into(),
+            collection_type_label: "Postage stamps".into(),
+            fields: vec![
+                DomainFieldDescriptor {
+                    key: "denomination".into(),
+                    label: "Denomination".into(),
+                    required: true,
+                    editable: true,
+                    kind: DomainFieldKind::Integer {
+                        minimum: 1,
+                        maximum: 10_000,
+                    },
+                },
+                DomainFieldDescriptor {
+                    key: "unit".into(),
+                    label: "Currency unit".into(),
+                    required: true,
+                    editable: true,
+                    kind: DomainFieldKind::Text { maximum_bytes: 16 },
+                },
+                DomainFieldDescriptor {
+                    key: "perforations".into(),
+                    label: "Perforation observations".into(),
+                    required: false,
+                    editable: false,
+                    kind: DomainFieldKind::Structured,
+                },
+            ],
+            capabilities: vec![],
+        }
+    }
+    fn validate_current(&self, data: &ModuleData) -> collector_modules::ModuleResult<()> {
+        let value = data
+            .payload
+            .value()
+            .map_err(|error| collector_modules::ModuleError::Invalid(error.to_string()))?;
+        if value["denomination"]
+            .as_u64()
+            .is_some_and(|value| (1..=10_000).contains(&value))
+            && value["unit"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty() && value.len() <= 16)
+        {
+            Ok(())
+        } else {
+            Err(collector_modules::ModuleError::Invalid(
+                "valid denomination and currency unit are required".into(),
+            ))
+        }
+    }
+    fn apply_edit(
+        &self,
+        current: &ModuleData,
+        edit: &RawJson,
+    ) -> collector_modules::ModuleResult<ModuleData> {
+        let mut value = current
+            .payload
+            .value()
+            .map_err(|error| collector_modules::ModuleError::Invalid(error.to_string()))?;
+        let patch = edit
+            .value()
+            .map_err(|error| collector_modules::ModuleError::Invalid(error.to_string()))?;
+        let patch = patch.as_object().ok_or_else(|| {
+            collector_modules::ModuleError::Invalid("stamp patch must be an object".into())
+        })?;
+        if patch
+            .keys()
+            .any(|key| key != "denomination" && key != "unit")
+        {
+            return Err(collector_modules::ModuleError::Invalid(
+                "unknown stamp field".into(),
+            ));
+        }
+        let object = value.as_object_mut().ok_or_else(|| {
+            collector_modules::ModuleError::Invalid("stamp data must be an object".into())
+        })?;
+        for (key, field) in patch {
+            object.insert(key.clone(), field.clone());
+        }
+        let result = ModuleData {
+            module: current.module.clone(),
+            schema_version: current.schema_version,
+            payload: RawJson::from_value(value),
+        };
+        self.validate_current(&result)?;
+        Ok(result)
+    }
+    fn validate_metadata_overrides(
+        &self,
+        _overrides: &ModuleData,
+    ) -> collector_modules::ModuleResult<()> {
+        Ok(())
+    }
+    fn validate_operation_result(
+        &self,
+        _capability: &collector_modules::CapabilityId,
+        _result: &RawJson,
+    ) -> collector_modules::ModuleResult<()> {
+        Ok(())
+    }
+    fn present(
+        &self,
+        data: &ModuleData,
+    ) -> collector_modules::ModuleResult<collector_modules::ModulePresentation> {
+        self.validate_current(data)?;
+        let value = data.payload.value().unwrap();
+        Ok(collector_modules::ModulePresentation {
+            module_id: data.module.0.clone(),
+            schema_version: data.schema_version,
+            available: true,
+            fields: vec![collector_modules::PresentationText {
+                label: "Denomination".into(),
+                value: format!(
+                    "{} {}",
+                    value["denomination"],
+                    value["unit"].as_str().unwrap()
+                ),
+            }],
+            ..Default::default()
+        })
+    }
+}
 fn command() -> CommandContext {
     CommandContext::new(TransactionId::new().to_string()).unwrap()
+}
+fn typed_collection(name: &str) -> CreateCollectionCommand {
+    CreateCollectionCommand {
+        name: name.into(),
+        module: ModuleId("org.junk.music".into()),
+    }
 }
 fn test_authentication(principal: &Principal) -> AuthenticatedPrincipal {
     AuthenticatedPrincipal {
@@ -83,7 +262,9 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
                         .uri("/api/v1/admin/collections")
                         .header("origin", "https://collector.example")
                         .header("content-type", "application/json")
-                        .body(Body::from("{\"name\":\"Test\"}"))
+                        .body(Body::from(
+                            "{\"name\":\"Test\",\"module\":\"org.junk.music\"}",
+                        ))
                         .unwrap(),
                 )
                 .await
@@ -98,6 +279,185 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn authenticated_descriptors_drive_third_module_create_edit_browse_and_reindex() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let user = store
+        .create_user("stamp-owner", "a long stamp owner password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let mut registry = collector_modules::Registry::builtins();
+    registry.register(Box::new(StampWebFixtureModule)).unwrap();
+    let id = store.server_id().unwrap();
+    let mut state = AppState::new_with_registry(
+        store.clone(),
+        Pairing {
+            server_id: id,
+            certificate_pem: String::new(),
+            certificate_sha256: String::new(),
+            endpoints: vec![],
+        },
+        Arc::new(registry),
+    );
+    state.exposure.public_curation = true;
+    state.allowed_origins = Arc::new(vec!["https://collector.example".into()]);
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Stamp album".into(),
+                module: ModuleId("org.example.stamps".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let (token, _) = store.issue_session(user, "browser").unwrap();
+    let app = router(state);
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/collection-types")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+    let descriptors = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/collection-types")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(descriptors.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(descriptors.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let descriptors: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let stamps = descriptors
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| value["id"] == "org.example.stamps")
+        .unwrap();
+    assert_eq!(stamps["collection_type_label"], "Postage stamps");
+    assert_eq!(stamps["fields"][0]["kind"]["type"], "integer");
+    assert_eq!(stamps["fields"][2]["editable"], false);
+
+    let item_id = ItemId::new();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{item_id}"))
+                .header("authorization", format!("Bearer {token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "third-module-web-edit")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "edit": {
+                            "collection_id": collection.id,
+                            "title": "Blue definitive",
+                            "subtitle": "Perforated issue",
+                            "identity_link": {"kind":"none"},
+                            "domain_edit": {
+                                "module": "org.example.stamps",
+                                "fields": {"denomination":20,"unit":"cents"}
+                            },
+                            "identity": "unidentified",
+                            "translations": [],
+                            "identifiers": [],
+                            "wishlist": false
+                        },
+                        "expected_revision": 0
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let presented: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(presented["domain"]["payload"]["denomination"], 20);
+    assert_eq!(presented["content_permissions"]["can_edit"], true);
+    assert_eq!(
+        presented["presentation"]["fields"][0]["label"],
+        "Denomination"
+    );
+
+    store.reindex().unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items?collection_id={}", collection.id))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let page: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(page["items"][0]["domain"]["module"], "org.example.stamps");
+    assert_eq!(page["items"][0]["domain"]["payload"]["unit"], "cents");
+
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{}", ItemId::new()))
+                .header("authorization", format!("Bearer {token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "third-module-invalid-edit")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "edit": {
+                            "collection_id": collection.id,
+                            "title": "Invalid",
+                            "subtitle": "",
+                            "identity_link": {"kind":"none"},
+                            "domain_edit": {"module":"org.example.stamps","fields":{"denomination":"twenty","unit":"cents"}},
+                            "identity": "unidentified",
+                            "translations": [],
+                            "identifiers": [],
+                            "wishlist": false
+                        },
+                        "expected_revision": 0
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -119,7 +479,11 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
     };
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Imports", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Imports"),
+            &command(),
+        )
         .unwrap();
     let (owner_token, _) = state.store.issue_session(owner, "browser").unwrap();
     let (stranger_token, _) = state.store.issue_session(stranger, "browser").unwrap();
@@ -347,7 +711,11 @@ async fn legacy_upload_routes_delegate_to_imports_and_use_a_distinct_publication
     };
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Legacy uploads", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Legacy uploads"),
+            &command(),
+        )
         .unwrap();
     let item = Item {
         id: ItemId::new(),
@@ -357,7 +725,7 @@ async fn legacy_upload_routes_delegate_to_imports_and_use_a_distinct_publication
         subtitle: String::new(),
         identity_link: ItemIdentityLink::None,
         domain: ModuleData {
-            module: ModuleId("org.junkcollector.generic".into()),
+            module: ModuleId("org.junk.music".into()),
             schema_version: 1,
             payload: RawJson::from_value(serde_json::json!({})),
         },
@@ -998,7 +1366,7 @@ async fn direct_grant_api_matches_owner_policy_and_removal_is_immediate() {
         .unwrap();
     let collection = state
         .service
-        .create_collection(&owner_auth, "Access policy", &command())
+        .create_collection(&owner_auth, typed_collection("Access policy"), &command())
         .unwrap();
     let app = router(state);
 
@@ -1197,7 +1565,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 72);
+    assert_eq!(paths.len(), 74);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -1208,12 +1576,14 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/items/{id}/specimens/{specimen_id}/dispose",
         "/api/v1/imports",
         "/api/v1/imports/{id}",
+        "/api/v1/captures/{id}/operations",
         "/api/v1/imports/{id}/analysis",
         "/api/v1/imports/{id}/review",
         "/api/v1/imports/{id}/publish",
         "/api/v1/imports/{id}/files/{index}",
         "/api/v1/collections/{id}/inboxes",
         "/api/v1/collections/{collection}/inboxes/{label}/stage",
+        "/api/v1/collection-types",
     ] {
         assert!(
             paths.contains_key(path),
@@ -1257,7 +1627,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        3
     );
 
     let (_root, state) = state();
@@ -1286,9 +1656,22 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
         administrator: true,
         device_id: None,
     };
+    let mut creation_registry = collector_modules::Registry::builtins();
+    creation_registry
+        .register(Box::new(AbsentFixtureModule))
+        .unwrap();
+    state.service =
+        collector_app::CollectionService::new(state.store.clone(), Arc::new(creation_registry));
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Unknown data", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Unknown data".into(),
+                module: ModuleId("org.example.absent".into()),
+            },
+            &command(),
+        )
         .unwrap();
     let item = Item {
         id: ItemId::new(),
@@ -1317,6 +1700,41 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
         .service
         .save_item(&actor, item.id, item.into(), Revision(0), &command())
         .unwrap();
+    let png = [
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let saved = state
+        .service
+        .publish_cover(
+            &actor,
+            saved.id,
+            saved.revision,
+            &png,
+            "Preserved cover".into(),
+            &command(),
+        )
+        .unwrap();
+    let asset_id = saved.assets[0].id;
+    state.service = collector_app::CollectionService::new(
+        state.store.clone(),
+        Arc::new(collector_modules::Registry::builtins()),
+    );
+    let mut rejected = collector_app::SaveItemCommand::from(saved.clone());
+    rejected.title = "Must remain read-only".into();
+    assert!(matches!(
+        state
+            .service
+            .save_item(&actor, saved.id, rejected, saved.revision, &command()),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(
+        state
+            .service
+            .asset(&actor, saved.id, asset_id, true)
+            .is_ok()
+    );
     let (token, _) = state.store.issue_session(user, "test").unwrap();
     let response = router(state)
         .oneshot(
@@ -1334,6 +1752,9 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["presentation"]["available"], false);
+    assert_eq!(body["effective_permissions"]["can_curate"], false);
+    assert_eq!(body["content_permissions"]["can_edit"], false);
+    assert_eq!(body["content_permissions"]["status"], "owner_unavailable");
     assert!(
         body["presentation"]["limitations"][0]
             .as_str()
@@ -1362,7 +1783,11 @@ async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work
     };
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Durable work", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Durable work"),
+            &command(),
+        )
         .unwrap();
     let item = Item {
         id: ItemId::new(),
@@ -1372,7 +1797,7 @@ async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work
         subtitle: String::new(),
         identity_link: ItemIdentityLink::None,
         domain: ModuleData {
-            module: ModuleId("org.junkcollector.generic".into()),
+            module: ModuleId("org.junk.music".into()),
             schema_version: 1,
             payload: RawJson::from_value(serde_json::json!({})),
         },
@@ -1463,6 +1888,7 @@ async fn job_routes_are_submitter_scoped_idempotent_and_secret_free() {
     state
         .store
         .enqueue_job(JobSpec {
+            frozen_input: None,
             id: job,
             user_id: owner,
             collection_id: None,
@@ -1566,7 +1992,7 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         .service
         .create_collection(
             &test_authentication(&owner_actor),
-            "Read model firewall",
+            typed_collection("Read model firewall"),
             &command(),
         )
         .unwrap();
@@ -1599,8 +2025,8 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         subtitle: String::new(),
         identity_link: ItemIdentityLink::None,
         domain: ModuleData {
-            module: ModuleId("org.example.private-unknown".into()),
-            schema_version: 7,
+            module: ModuleId("org.junk.music".into()),
+            schema_version: 1,
             payload: RawJson::from_json(r#"{"private_raw_marker":"do-not-serialize"}"#).unwrap(),
         },
         identity: IdentityState::Unidentified,
@@ -1900,7 +2326,7 @@ async fn asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_select
         .service
         .create_collection(
             &test_authentication(&owner_actor),
-            "Asset authorization",
+            typed_collection("Asset authorization"),
             &command(),
         )
         .unwrap();
@@ -1918,7 +2344,7 @@ async fn asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_select
         .service
         .create_collection(
             &test_authentication(&owner_actor),
-            "Other asset collection",
+            typed_collection("Other asset collection"),
             &command(),
         )
         .unwrap();
@@ -2273,7 +2699,11 @@ async fn bounded_item_command_accepts_editable_fields_and_rejects_owned_state() 
     };
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Commands", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Commands"),
+            &command(),
+        )
         .unwrap();
     let (token, _) = state.store.issue_session(owner, "browser").unwrap();
     let id = ItemId::new();
@@ -2283,7 +2713,7 @@ async fn bounded_item_command_accepts_editable_fields_and_rejects_owned_state() 
         "subtitle": "Editable",
         "identity_link": {"kind":"none"},
         "domain": {
-            "module": "org.example.command-fixture",
+            "module": "org.junk.music",
             "schema_version": 1,
             "payload": {"preserved":true}
         },
@@ -2392,7 +2822,11 @@ async fn focused_inventory_routes_require_curator_role_and_revisioned_idempotent
     };
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Inventory", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Inventory"),
+            &command(),
+        )
         .unwrap();
     state
         .store
@@ -2406,7 +2840,7 @@ async fn focused_inventory_routes_require_curator_role_and_revisioned_idempotent
         subtitle: String::new(),
         identity_link: ItemIdentityLink::None,
         domain: ModuleData {
-            module: ModuleId("org.example.lifecycle".into()),
+            module: ModuleId("org.junk.music".into()),
             schema_version: 1,
             payload: RawJson::from_value(serde_json::json!({})),
         },
@@ -2521,7 +2955,11 @@ async fn mutation_requires_key_and_http_replay_has_stable_conflict_code() {
     };
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Idempotency", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Idempotency"),
+            &command(),
+        )
         .unwrap();
     let (token, _) = state.store.issue_session(owner, "browser").unwrap();
     let id = ItemId::new();
@@ -2530,7 +2968,7 @@ async fn mutation_requires_key_and_http_replay_has_stable_conflict_code() {
         "title": "One effect",
         "subtitle": "",
         "identity_link": {"kind":"none"},
-        "domain": {"module":"org.example.idempotency","schema_version":1,"payload":{}},
+        "domain": {"module":"org.junk.music","schema_version":1,"payload":{}},
         "identity": "unidentified",
         "translations": [],
         "identifiers": [],
@@ -2625,7 +3063,11 @@ async fn wave1_item_envelope_preserves_server_owned_state_and_rejects_changes() 
     };
     let collection = state
         .service
-        .create_collection(&test_authentication(&actor), "Legacy client", &command())
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Legacy client"),
+            &command(),
+        )
         .unwrap();
     let stored = Item {
         id: ItemId::new(),
@@ -2635,7 +3077,7 @@ async fn wave1_item_envelope_preserves_server_owned_state_and_rejects_changes() 
         subtitle: String::new(),
         identity_link: ItemIdentityLink::None,
         domain: ModuleData {
-            module: ModuleId("org.example.legacy".into()),
+            module: ModuleId("org.junk.music".into()),
             schema_version: 1,
             payload: RawJson::from_value(serde_json::json!({})),
         },

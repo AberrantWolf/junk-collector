@@ -6,15 +6,17 @@ mod files;
 mod jobs;
 mod migration;
 mod migration_v3;
+mod processing;
 mod provisional_imports;
 mod publication;
 use chrono::Utc;
 use collector_app::{
     AccessPort, AccountView, AdministrationPort, AssetState, AuthenticatedPrincipal,
-    AuthenticationPort, Catalog, ContentPort, CreateAssetCommand, CredentialKind, EnrollmentPort,
-    EnrollmentStart, EnrollmentView, GrantView, IdempotencyPort, ImportPort, JobClaim, JobPort,
-    JobRecord, JobSpec, MediaResource, NativeCredentialIssue, NativeDeviceView, ReceiptDecision,
-    SessionView, StoredPasskey,
+    AuthenticationPort, Catalog, CollectionTypeAuthorityFact, CollectionTypePendingReference,
+    CollectionTypePort, CollectionTypeSnapshot, ContentPort, CreateAssetCommand, CredentialKind,
+    EnrollmentPort, EnrollmentStart, EnrollmentView, GrantView, IdempotencyPort, ImportPort,
+    JobClaim, JobPort, JobRecord, JobSpec, MediaResource, MetadataAuthorityRecord,
+    NativeCredentialIssue, NativeDeviceView, ReceiptDecision, SessionView, StoredPasskey,
 };
 pub use collector_app::{Upload, UploadFile};
 use collector_core::*;
@@ -52,8 +54,40 @@ pub struct Store {
     command_result: Option<serde_json::Value>,
     publication_fault: std::sync::Arc<dyn PublicationFaultInjector>,
     pub(crate) clock: Arc<dyn Clock>,
-    _archive_lock: Arc<File>,
-    _private_lock: Arc<File>,
+    _archive_lock: Arc<ProcessLock>,
+    _private_lock: Arc<ProcessLock>,
+}
+
+// Release ownership explicitly when the last Store clone drops. Closing alone
+// can leave flock held by a duplicate descriptor (including a concurrent fork).
+struct ProcessLock(File);
+impl Drop for ProcessLock {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod process_lock_tests {
+    use super::*;
+
+    #[test]
+    fn last_owner_releases_lock_even_while_duplicate_descriptor_exists() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("writer.lock");
+        let file = File::create(&path).unwrap();
+        file.try_lock_exclusive().unwrap();
+        let duplicate = file.try_clone().unwrap();
+        let guard = Arc::new(ProcessLock(file));
+        let other_owner = guard.clone();
+        drop(guard);
+        let contender = File::open(&path).unwrap();
+        assert!(contender.try_lock_exclusive().is_err());
+        drop(other_owner);
+        contender.try_lock_exclusive().unwrap();
+        fs2::FileExt::unlock(&contender).unwrap();
+        drop(duplicate);
+    }
 }
 
 pub trait Clock: Send + Sync {
@@ -174,6 +208,7 @@ impl Store {
         private_lock
             .try_lock_exclusive()
             .map_err(|_| Error::Unavailable("private state is already in use".into()))?;
+        let private_lock = ProcessLock(private_lock);
         let archive_lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -184,6 +219,7 @@ impl Store {
         archive_lock
             .try_lock_exclusive()
             .map_err(|_| Error::Unavailable("archive already has a writer".into()))?;
+        let archive_lock = ProcessLock(archive_lock);
         for dir in ["collections", ".staging", ".transactions"] {
             fs::create_dir_all(archive.join(dir)).map_err(storage)?;
         }
@@ -282,8 +318,30 @@ impl Store {
             if !path.exists() {
                 continue;
             }
-            let collection: Collection =
+            let mut collection: Collection =
                 toml::from_str(&fs::read_to_string(&path).map_err(storage)?).map_err(storage)?;
+            let binding_revisions = read_latest_records::<CollectionBindingRevision>(
+                &dir.join("collection_metadata"),
+                collection.id,
+            )?;
+            if binding_revisions.len() > 1
+                || (!binding_revisions.is_empty()
+                    && !matches!(collection.binding, CollectionBinding::LegacyUnassigned))
+            {
+                return Err(Error::Storage(
+                    "collection has ambiguous binding metadata".into(),
+                ));
+            }
+            if let Some(binding) = binding_revisions.into_iter().next() {
+                binding.validate()?;
+                if binding.revision != Revision(collection.revision.0 + 1) {
+                    return Err(Error::Storage(
+                        "collection binding revision does not follow its creation manifest".into(),
+                    ));
+                }
+                collection.revision = binding.revision;
+                collection.binding = binding.binding;
+            }
             collections.push((collection.clone(), dir.clone()));
             assets_v3.extend(migration_v3::read_assets(&dir, collection.id)?);
             evidence_v3.extend(migration_v3::read_evidence(&dir, collection.id)?);
@@ -456,7 +514,7 @@ impl Store {
                 },
                 items,
             };
-            graph.validate(collection.id)?;
+            graph.validate_for_collection(collection)?;
             for previous in &graphs {
                 graph.validate_disjoint(previous)?;
             }
@@ -542,6 +600,7 @@ impl Store {
         for (record, path) in records {
             project(&tx, &record, &relative(&self.archive, &path)?)?;
         }
+        self.project_v4_records(&tx)?;
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
         Ok(())
@@ -1019,8 +1078,13 @@ impl ImportPort for Store {
         self.commit_upload_record(id)
     }
 
-    fn commit_upload_for_job(&self, id: JobId, claim_token: &str) -> Result<Item> {
-        self.commit_upload_job_record(id, claim_token)
+    fn commit_upload_for_job(
+        &self,
+        id: JobId,
+        claim_token: &str,
+        before_publish: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<Item> {
+        self.commit_upload_job_record(id, claim_token, before_publish)
     }
 
     fn queue_upload(&self, id: JobId) -> Result<JobId> {
@@ -1391,7 +1455,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 9 {
+    if private_version > 10 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -1727,10 +1791,32 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
+    if private_version < 10 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "CREATE TABLE private.processing_jobs (
+              job_id TEXT PRIMARY KEY,
+              frozen_input TEXT NOT NULL CHECK(length(frozen_input) <= 16777216),
+              output_references TEXT NOT NULL DEFAULT '[]' CHECK(length(output_references) <= 1048576),
+              checkpoint TEXT NOT NULL DEFAULT 'frozen'
+            );
+            CREATE TABLE private.provisional_processing_observations (
+              observation_id TEXT PRIMARY KEY,
+              import_id TEXT NOT NULL,
+              job_id TEXT NOT NULL,
+              record TEXT NOT NULL CHECK(length(record) <= 16777216)
+            );
+            CREATE INDEX private.provisional_processing_import
+              ON provisional_processing_observations(import_id,observation_id);
+            PRAGMA private.user_version = 10;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 3 {
+    if catalog_version > 4 {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -1774,6 +1860,42 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             );
             CREATE INDEX IF NOT EXISTS assets_collection ON assets(collection_id,id);
             PRAGMA main.user_version = 3;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
+    if catalog_version < 4 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS processing_observations (
+              id TEXT PRIMARY KEY,
+              collection_id TEXT NOT NULL,
+              source_scope TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              operation TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              record TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS processing_observations_source
+              ON processing_observations(collection_id,source_scope,source_id,created_at,id);
+            CREATE TABLE IF NOT EXISTS snapshots (
+              id TEXT PRIMARY KEY,
+              collection_id TEXT NOT NULL,
+              record TEXT NOT NULL,
+              payload_path TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS conversion_recipes (
+              id TEXT PRIMARY KEY,
+              collection_id TEXT NOT NULL,
+              record TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS metadata_authorities (
+              id TEXT PRIMARY KEY,
+              collection_id TEXT NOT NULL,
+              revision INTEGER NOT NULL,
+              record TEXT NOT NULL
+            );
+            PRAGMA main.user_version = 4;",
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
@@ -1916,6 +2038,197 @@ fn safe_collection_recovery_path(path: &str) -> bool {
             .all(|component| matches!(component, std::path::Component::Normal(_)))
 }
 
+impl CollectionTypePort for Store {
+    fn collection_type_snapshot(&self, collection: CollectionId) -> Result<CollectionTypeSnapshot> {
+        let db = lock(&self.db)?;
+        let collection_record: Collection =
+            projected_record(&db, "collections", &collection.to_string())?;
+        let items: Vec<Item> = projected_records(
+            &db,
+            "SELECT record FROM items WHERE collection_id=? ORDER BY id",
+            collection,
+        )?;
+        let mut pending = Vec::new();
+        {
+            let mut statement = db
+                .prepare("SELECT j.id,j.request,p.frozen_input,j.kind FROM private.jobs j LEFT JOIN private.processing_jobs p ON p.job_id=j.id WHERE j.collection_id=? AND j.state IN ('queued','running','cancel_requested') AND j.phase<>'revision_committed' ORDER BY j.id")
+                .map_err(storage)?;
+            let rows = statement
+                .query_map([collection.to_string()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })
+                .map_err(storage)?;
+            for row in rows {
+                let (id, request, frozen, kind) = row.map_err(storage)?;
+                let value: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+                let module = value
+                    .get("module")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|value| ModuleId(value.to_owned()));
+                let operation = frozen
+                    .as_deref()
+                    .map(serde_json::from_str::<collector_app::FrozenJobInput>)
+                    .transpose()
+                    .map_err(storage)?
+                    .map(|input| match input {
+                        collector_app::FrozenJobInput::Processing(job) => job.operation,
+                        collector_app::FrozenJobInput::Acquisition(job) => job.request.operation,
+                    });
+                if module.is_some()
+                    || operation.is_some()
+                    || !matches!(
+                        kind.as_str(),
+                        "integrity_verification" | "import_staging" | "import_publication"
+                    )
+                {
+                    pending.push(CollectionTypePendingReference {
+                        id,
+                        module,
+                        operation,
+                        description: "active pre-commit job".into(),
+                    });
+                }
+            }
+        }
+        {
+            let mut statement = db
+                .prepare("SELECT id,candidates,review FROM private.imports WHERE collection_id=? AND phase NOT IN ('published','cancelled') ORDER BY id")
+                .map_err(storage)?;
+            let rows = statement
+                .query_map([collection.to_string()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .map_err(storage)?;
+            for row in rows {
+                let (id, candidates, review) = row.map_err(storage)?;
+                let candidates: Vec<collector_app::ImportCandidate> =
+                    serde_json::from_str(&candidates).map_err(storage)?;
+                let selected = review
+                    .as_deref()
+                    .map(serde_json::from_str::<collector_app::ImportReviewDecision>)
+                    .transpose()
+                    .map_err(storage)?
+                    .and_then(|review| match review.identity {
+                        collector_app::ImportIdentityDecision::Candidate { key } => Some(key),
+                        collector_app::ImportIdentityDecision::Unidentified => None,
+                    });
+                for candidate in candidates
+                    .into_iter()
+                    .filter(|candidate| selected.as_ref().is_some_and(|key| &candidate.key == key))
+                {
+                    pending.push(CollectionTypePendingReference {
+                        id: id.clone(),
+                        module: Some(candidate.module),
+                        operation: None,
+                        description: "pending import".into(),
+                    });
+                }
+            }
+        }
+        let authorities: Vec<MetadataAuthorityRecord> = projected_records(
+            &db,
+            "SELECT record FROM metadata_authorities WHERE collection_id=? ORDER BY id",
+            collection,
+        )?;
+        Ok(CollectionTypeSnapshot {
+            collection: collection_record,
+            item_domains: items
+                .into_iter()
+                .map(|item| (item.id, item.domain.module))
+                .collect(),
+            pending,
+            authorities: authorities
+                .into_iter()
+                .map(|record| CollectionTypeAuthorityFact {
+                    item_id: record.item_id,
+                    authority: record.authority,
+                })
+                .collect(),
+        })
+    }
+
+    fn publish_collection_binding(
+        &self,
+        expected: Revision,
+        revision: CollectionBindingRevision,
+    ) -> Result<Collection> {
+        revision.validate()?;
+        let _writer = lock(&self.writer)?;
+        let (current, path): (String, String) = lock(&self.db)?
+            .query_row(
+                "SELECT record,path FROM collections WHERE id=?",
+                [revision.collection_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        let mut collection: Collection = serde_json::from_str(&current).map_err(storage)?;
+        if let CollectionBinding::Assigned { module } = &collection.binding {
+            return if revision.binding
+                == (CollectionBinding::Assigned {
+                    module: module.clone(),
+                })
+                && expected.0.checked_add(1) == Some(collection.revision.0)
+            {
+                Ok(collection)
+            } else {
+                Err(Error::Conflict)
+            };
+        }
+        if collection.revision != expected || Some(revision.revision.0) != expected.0.checked_add(1)
+        {
+            return Err(Error::Conflict);
+        }
+        let mut assigned = collection.clone();
+        assigned.revision = revision.revision;
+        assigned.binding = revision.binding.clone();
+        {
+            let db = lock(&self.db)?;
+            graph_from_projection(&db, collection.id)?.validate_for_collection(&assigned)?;
+        }
+        let directory = self.archive.join(&path);
+        let transaction = publish_v3_revision(
+            self,
+            V3RevisionTarget {
+                collection: &directory,
+                directory_kind: "collection_metadata",
+                entity_id: collection.id.to_string(),
+                collection_id: collection.id,
+                expected,
+                revision: revision.revision,
+            },
+            revision,
+            vec![],
+        )?;
+        collection = assigned;
+        let updated = lock(&self.db)?
+            .execute(
+                "UPDATE collections SET record=? WHERE id=? AND record=?",
+                params![
+                    serde_json::to_string(&collection).map_err(storage)?,
+                    collection.id.to_string(),
+                    current
+                ],
+            )
+            .map_err(storage)?;
+        if updated != 1 {
+            return Err(Error::Conflict);
+        }
+        finish_v3_publication(self, transaction)?;
+        Ok(collection)
+    }
+}
+
 impl Catalog for Store {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>> {
         let db = lock(&self.db)?;
@@ -1927,11 +2240,29 @@ impl Catalog for Store {
             .map(|v| serde_json::from_str(&v.map_err(storage)?).map_err(storage))
             .collect()
     }
+    fn collection(&self, id: CollectionId) -> Result<Collection> {
+        let record: Option<String> = lock(&self.db)?
+            .query_row(
+                "SELECT record FROM collections WHERE id=?",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        record
+            .map(|record| serde_json::from_str(&record).map_err(storage))
+            .transpose()?
+            .ok_or(Error::NotFound)
+    }
     fn create_collection(&self, user: UserId, requested: Collection) -> Result<Collection> {
         let _writer = lock(&self.writer)?;
-        if requested.revision != Revision(1) || requested.name.trim().is_empty() {
+        if requested.revision != Revision(1)
+            || requested.name.trim().is_empty()
+            || !matches!(requested.binding, CollectionBinding::Assigned { .. })
+        {
             return Err(Error::Invalid("invalid collection creation effect".into()));
         }
+        requested.binding.validate()?;
         let existing: Option<String> = lock(&self.db)?
             .query_row(
                 "SELECT record FROM collections WHERE id=?",
@@ -1942,7 +2273,7 @@ impl Catalog for Store {
             .map_err(storage)?;
         if let Some(existing) = existing {
             let existing: Collection = serde_json::from_str(&existing).map_err(storage)?;
-            if existing.name != requested.name {
+            if existing.name != requested.name || existing.binding != requested.binding {
                 return Err(Error::Conflict);
             }
             if self.role(user, existing.id)? != Role::Owner {
@@ -1964,7 +2295,7 @@ impl Catalog for Store {
             Some(record) => {
                 let recovery: CollectionCreateRecovery =
                     serde_json::from_str(&record).map_err(storage)?;
-                if recovery.owner_user_id != user || recovery.collection.name != requested.name {
+                if recovery.owner_user_id != user || recovery.collection != requested {
                     return Err(Error::Conflict);
                 }
                 recovery
@@ -2811,20 +3142,21 @@ fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
     Ok(())
 }
 
+fn projected_records<T: serde::de::DeserializeOwned>(
+    db: &Connection,
+    sql: &str,
+    collection: CollectionId,
+) -> Result<Vec<T>> {
+    let mut statement = db.prepare(sql).map_err(storage)?;
+    let rows = statement
+        .query_map([collection.to_string()], |row| row.get::<_, String>(0))
+        .map_err(storage)?;
+    rows.map(|row| serde_json::from_str(&row.map_err(storage)?).map_err(storage))
+        .collect()
+}
+
 fn graph_from_projection(db: &Connection, collection: CollectionId) -> Result<CollectionGraph> {
-    fn records<T: serde::de::DeserializeOwned>(
-        db: &Connection,
-        sql: &str,
-        collection: CollectionId,
-    ) -> Result<Vec<T>> {
-        let mut statement = db.prepare(sql).map_err(storage)?;
-        let rows = statement
-            .query_map([collection.to_string()], |row| row.get::<_, String>(0))
-            .map_err(storage)?;
-        rows.map(|row| serde_json::from_str(&row.map_err(storage)?).map_err(storage))
-            .collect()
-    }
-    let mut items: Vec<Item> = records(
+    let mut items: Vec<Item> = projected_records(
         db,
         "SELECT record FROM items WHERE collection_id=?",
         collection,
@@ -2832,23 +3164,23 @@ fn graph_from_projection(db: &Connection, collection: CollectionId) -> Result<Co
     for item in &mut items {
         hydrate_captures(db, item)?;
     }
-    let asset_records: Vec<archive_v3::AssetRecordV3> = records(
+    let asset_records: Vec<archive_v3::AssetRecordV3> = projected_records(
         db,
         "SELECT record FROM assets WHERE collection_id=?",
         collection,
     )?;
     Ok(CollectionGraph {
-        works: records(
+        works: projected_records(
             db,
             "SELECT record FROM works WHERE collection_id=?",
             collection,
         )?,
-        editions: records(
+        editions: projected_records(
             db,
             "SELECT record FROM editions WHERE collection_id=?",
             collection,
         )?,
-        captures: records(
+        captures: projected_records(
             db,
             "SELECT record FROM captures WHERE collection_id=?",
             collection,
@@ -2867,7 +3199,13 @@ fn validate_projected_graph(
     graph: &CollectionGraph,
     collection: CollectionId,
 ) -> Result<()> {
-    graph.validate(collection)?;
+    let owner: Collection = projected_record(db, "collections", &collection.to_string())?;
+    if matches!(owner.binding, CollectionBinding::LegacyUnassigned) {
+        return Err(Error::Invalid(
+            "legacy unassigned collections are content-read-only".into(),
+        ));
+    }
+    graph.validate_for_collection(&owner)?;
     let mut statement = db
         .prepare("SELECT id FROM collections WHERE id<>?")
         .map_err(storage)?;
@@ -3230,6 +3568,18 @@ trait TypedArchiveEntity {
     fn archive_id(&self) -> String;
     fn archive_collection(&self) -> CollectionId;
     fn archive_revision(&self) -> Revision;
+}
+impl TypedArchiveEntity for CollectionBindingRevision {
+    const KIND: &'static str = "collection_metadata";
+    fn archive_id(&self) -> String {
+        self.collection_id.to_string()
+    }
+    fn archive_collection(&self) -> CollectionId {
+        self.collection_id
+    }
+    fn archive_revision(&self) -> Revision {
+        self.revision
+    }
 }
 impl TypedArchiveEntity for Work {
     const KIND: &'static str = "work";

@@ -1,13 +1,20 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod collection_types;
+pub use collection_types::*;
+mod processing;
 pub mod security;
+
 use chrono::{DateTime, Utc};
 use collector_core::*;
 use collector_modules::{
-    CapabilityId, JobSubmission, ModuleError, ModuleHost, ModulePresentation, ModuleResult,
-    OperationEntity, OperationRequest, Registry, RepresentationReader,
+    CapabilityId, DomainEdit, JobSubmission, ModuleDescriptor, ModuleError, ModuleHost,
+    ModulePresentation, ModuleResult, OperationEntity, OperationRequest, PackageAccess, Registry,
+    RepresentationReader,
 };
+pub use processing::*;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use sha2::Digest as _;
 use std::io::{Read, Seek};
 use std::sync::Arc;
 
@@ -16,6 +23,7 @@ use std::sync::Arc;
 /// the remaining command families behind application policy.
 pub trait Catalog: Send + Sync {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>>;
+    fn collection(&self, id: CollectionId) -> Result<Collection>;
     fn create_collection(&self, user: UserId, collection: Collection) -> Result<Collection>;
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role>;
     fn grant(&self, collection: CollectionId, user: UserId, role: Role) -> Result<()>;
@@ -35,6 +43,7 @@ pub trait Catalog: Send + Sync {
 /// what a role is allowed to observe.
 pub trait CollectionReadPort: Send + Sync {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>>;
+    fn collection(&self, id: CollectionId) -> Result<Collection>;
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role>;
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>>;
     fn item(&self, id: ItemId) -> Result<Item>;
@@ -47,6 +56,9 @@ pub trait CollectionReadPort: Send + Sync {
 impl<T: Catalog + ?Sized> CollectionReadPort for T {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>> {
         Catalog::collections(self, user)
+    }
+    fn collection(&self, id: CollectionId) -> Result<Collection> {
+        Catalog::collection(self, id)
     }
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role> {
         Catalog::role(self, user, collection)
@@ -336,11 +348,14 @@ pub trait ProvisionalImportPort: Send + Sync {
         claim_token: &str,
         source_locator: &str,
     ) -> Result<ImportRecord>;
+    /// Recheck application policy after staging, immediately before a new Capture
+    /// commits. Do not call the guard when reconciling an existing commit.
     fn publish_import_for_job(
         &self,
         id: ImportId,
         job: JobId,
         claim_token: &str,
+        before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<ImportRecord>;
     fn cancel_import(&self, id: ImportId) -> Result<ImportRecord>;
 }
@@ -357,7 +372,14 @@ pub trait ImportPort: Send + Sync {
     fn upload_chunk(&self, id: JobId, index: usize, offset: u64, bytes: &[u8]) -> Result<Upload>;
     fn cancel_upload(&self, id: JobId) -> Result<()>;
     fn commit_upload(&self, id: JobId) -> Result<Item>;
-    fn commit_upload_for_job(&self, id: JobId, claim_token: &str) -> Result<Item>;
+    /// Recheck application policy before a new Capture commit, never during
+    /// completion of an already committed publication.
+    fn commit_upload_for_job(
+        &self,
+        id: JobId,
+        claim_token: &str,
+        before_publish: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<Item>;
     fn queue_upload(&self, id: JobId) -> Result<JobId>;
     fn queue_inbox_upload(&self, id: JobId, source_locator: &str) -> Result<JobId>;
     fn retry_upload(&self, id: JobId) -> Result<JobId>;
@@ -384,12 +406,14 @@ pub struct JobSpec {
     pub phase: String,
     pub total_units: u64,
     pub request: serde_json::Value,
+    pub frozen_input: Option<FrozenJobInput>,
 }
 
 #[derive(Clone, Debug)]
 pub struct JobClaim {
     pub id: JobId,
     pub user_id: UserId,
+    pub collection_id: Option<CollectionId>,
     pub item_id: Option<ItemId>,
     pub kind: String,
     pub request: serde_json::Value,
@@ -398,6 +422,7 @@ pub struct JobClaim {
     pub phase: String,
     pub completed_units: u64,
     pub created_at: chrono::DateTime<Utc>,
+    pub frozen_input: Option<FrozenJobInput>,
 }
 
 #[derive(Clone, Debug)]
@@ -449,6 +474,8 @@ impl From<JobRecord> for JobView {
                     | "import_staging"
                     | "import_analysis"
                     | "import_publication"
+                    | "catalog_acquisition"
+                    | "processing_operation"
             );
         Self {
             id: record.id,
@@ -825,7 +852,16 @@ pub struct CollectionService {
     enrollments: Arc<dyn EnrollmentPort>,
     idempotency: Arc<dyn IdempotencyPort>,
     jobs: Arc<dyn JobPort>,
+    processing: Arc<dyn ProcessingPort>,
+    streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     modules: Arc<Registry>,
+}
+
+#[derive(Clone, Debug)]
+struct ContentWriteEligibility {
+    binding: CollectionBinding,
+    owner: ModuleId,
+    schema_version: u32,
 }
 
 #[derive(Deserialize)]
@@ -845,13 +881,109 @@ struct ImportAnalysisOutput {
     limitations: Vec<String>,
 }
 
-struct ImportAnalysisHost;
+struct ProcessingHost<'a> {
+    port: &'a dyn ProcessingPort,
+    access: PackageAccess,
+}
 
-impl ModuleHost for ImportAnalysisHost {
-    fn representation(&self, _id: RepresentationId) -> ModuleResult<Box<dyn RepresentationReader>> {
-        Err(ModuleError::UnavailableCapability(
-            "staged package readers are supplied by format analyzers in D04/D05".into(),
-        ))
+struct DurableProcessingContext {
+    frozen: FrozenJobInput,
+    jobs: Arc<dyn JobPort>,
+    id: JobId,
+    claim_token: String,
+}
+
+struct JobHeartbeat {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl JobHeartbeat {
+    fn stop(mut self) -> Result<()> {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            thread
+                .join()
+                .map_err(|_| Error::Unavailable("job heartbeat worker panicked".into()))?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for JobHeartbeat {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl ProcessingExecutionContext for DurableProcessingContext {
+    fn frozen_job(&self) -> &FrozenJobInput {
+        &self.frozen
+    }
+
+    fn report_progress(
+        &mut self,
+        phase: &str,
+        completed_units: u64,
+        total_units: u64,
+    ) -> Result<()> {
+        if total_units == 0 || completed_units > total_units {
+            return Err(Error::Invalid("processing progress is invalid".into()));
+        }
+        self.jobs
+            .heartbeat_job(self.id, &self.claim_token, phase, completed_units, 30)
+    }
+
+    fn cancellation_requested(&self) -> Result<bool> {
+        self.jobs.cancellation_requested(self.id, &self.claim_token)
+    }
+}
+
+fn processing_module_error(error: Error) -> ModuleError {
+    match error {
+        Error::Forbidden => ModuleError::AccessDenied,
+        Error::NotFound => ModuleError::Invalid("package source is missing".into()),
+        error => ModuleError::FailedOperation(error.to_string()),
+    }
+}
+
+impl ModuleHost for ProcessingHost<'_> {
+    fn package_inventory(&self, access: PackageAccess) -> ModuleResult<PackageInventory> {
+        if access != self.access {
+            return Err(ModuleError::AccessDenied);
+        }
+        self.port
+            .package_inventory(access.collection_id, access.scope)
+            .map_err(processing_module_error)
+    }
+
+    fn package_file(
+        &self,
+        access: PackageAccess,
+        id: PackageFileId,
+    ) -> ModuleResult<Box<dyn RepresentationReader>> {
+        if access != self.access {
+            return Err(ModuleError::AccessDenied);
+        }
+        self.port
+            .package_file(access.collection_id, access.scope, id)
+            .map(|reader| Box::new(reader) as Box<dyn RepresentationReader>)
+            .map_err(processing_module_error)
+    }
+
+    fn representation_access(&self, id: RepresentationId) -> ModuleResult<PackageAccess> {
+        if self.access.scope == PackageScope::Representation(id) {
+            Ok(self.access)
+        } else {
+            Err(ModuleError::AccessDenied)
+        }
     }
 
     fn submit_job(&self, _request: JobSubmission) -> ModuleResult<JobId> {
@@ -867,6 +999,25 @@ pub struct EffectivePermissions {
     pub can_browse: bool,
     pub can_curate: bool,
     pub can_manage_access: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentAvailabilityStatus {
+    Available,
+    LegacyUnassigned,
+    OwnerUnavailable,
+    ItemSchemaUnsupported,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct ContentPermissions {
+    pub can_edit: bool,
+    pub status: ContentAvailabilityStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub administrator_commands: Vec<String>,
 }
 impl From<Role> for EffectivePermissions {
     fn from(role: Role) -> Self {
@@ -885,7 +1036,27 @@ pub struct PresentedCollection {
     pub revision: Revision,
     pub name: String,
     pub created_at: DateTime<Utc>,
+    pub binding: CollectionBinding,
     pub effective_permissions: EffectivePermissions,
+    pub content_permissions: ContentPermissions,
+}
+
+/// Typed creation input reserved for CT.2 runtime integration. Keeping the
+/// module mandatory here prevents `LegacyUnassigned` from becoming a valid new
+/// collection request while CT.1 leaves persisted Collection unchanged.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateCollectionCommand {
+    pub name: String,
+    pub module: ModuleId,
+}
+
+impl CreateCollectionCommand {
+    pub fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty() || self.name.len() > 256 {
+            return Err(Error::Invalid("collection name must be 1–256 bytes".into()));
+        }
+        self.module.validate()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -978,6 +1149,7 @@ pub struct PresentedItem {
     pub updated_at: DateTime<Utc>,
     pub presentation: ModulePresentation,
     pub effective_permissions: EffectivePermissions,
+    pub content_permissions: ContentPermissions,
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -998,6 +1170,7 @@ pub struct PresentedEvidence {
     pub catalog: Option<CatalogSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
+    pub provenance_limitation: Option<String>,
 }
 
 /// Editable inventory fields. Revision, timestamps, deletion state, metadata
@@ -1010,6 +1183,22 @@ pub struct SaveItemCommand {
     pub subtitle: String,
     pub identity_link: ItemIdentityLink,
     pub domain: ModuleData,
+    pub identity: IdentityState,
+    pub translations: Vec<LocalizedText>,
+    pub identifiers: Vec<ProviderIdentity>,
+    pub wishlist: bool,
+}
+
+/// Item form input whose domain changes are applied by the owning module. The
+/// client can edit declared scalar fields without replacing preserved raw data.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SaveItemEditCommand {
+    pub collection_id: CollectionId,
+    pub title: String,
+    pub subtitle: String,
+    pub identity_link: ItemIdentityLink,
+    pub domain_edit: DomainEdit,
     pub identity: IdentityState,
     pub translations: Vec<LocalizedText>,
     pub identifiers: Vec<ProviderIdentity>,
@@ -1208,6 +1397,7 @@ impl CollectionService {
             + IdempotencyPort
             + JobPort
             + ProvisionalImportPort
+            + ProcessingPort
             + 'static,
     {
         let reader: Arc<dyn CollectionReadPort> = catalog.clone();
@@ -1220,6 +1410,7 @@ impl CollectionService {
         let idempotency: Arc<dyn IdempotencyPort> = catalog.clone();
         let jobs: Arc<dyn JobPort> = catalog.clone();
         let access: Arc<dyn AccessPort> = catalog.clone();
+        let processing: Arc<dyn ProcessingPort> = catalog.clone();
         Self {
             reader,
             access,
@@ -1231,8 +1422,23 @@ impl CollectionService {
             enrollments,
             idempotency,
             jobs,
+            processing,
+            streaming_providers: Arc::new(Default::default()),
             modules,
         }
+    }
+    pub fn with_streaming_provider(
+        mut self,
+        id: ModuleId,
+        provider: Arc<dyn StreamingProviderPort>,
+    ) -> Result<Self> {
+        id.validate()?;
+        let mut providers = (*self.streaming_providers).clone();
+        if providers.insert(id.0, provider).is_some() {
+            return Err(Error::Invalid("duplicate streaming provider".into()));
+        }
+        self.streaming_providers = Arc::new(providers);
+        Ok(self)
     }
     fn execute_command<Request, Response>(
         &self,
@@ -1301,20 +1507,25 @@ impl CollectionService {
             .into_iter()
             .map(|collection| {
                 let role = self.reader.role(actor.user_id, collection.id)?;
+                let (effective_permissions, content_permissions) =
+                    self.presented_content_permissions(role, &collection, None);
                 Ok(PresentedCollection {
                     id: collection.id,
                     revision: collection.revision,
                     name: collection.name,
                     created_at: collection.created_at,
-                    effective_permissions: role.into(),
+                    binding: collection.binding,
+                    effective_permissions,
+                    content_permissions,
                 })
             })
             .collect()
     }
+
     pub fn create_collection(
         &self,
         authenticated: &AuthenticatedPrincipal,
-        name: &str,
+        command: CreateCollectionCommand,
         context: &CommandContext,
     ) -> Result<Collection> {
         authenticated.require_recent_at(self.authentication.now())?;
@@ -1322,17 +1533,28 @@ impl CollectionService {
         if !actor.administrator {
             return Err(Error::Forbidden);
         }
-        if name.trim().is_empty() || name.len() > 256 {
-            return Err(Error::Invalid("collection name must be 1–256 bytes".into()));
+        command.validate()?;
+        if !self.modules.has_module(&command.module) {
+            return Err(Error::Unavailable(format!(
+                "collection module {} is not registered",
+                command.module.0
+            )));
         }
-        let name = name.trim().to_owned();
+        let name = command.name.trim().to_owned();
         let collection = Collection {
             id: deterministic_collection_id(actor.user_id, context.key()),
             revision: Revision(1),
             name: name.clone(),
             created_at: self.authentication.now(),
+            binding: CollectionBinding::Assigned {
+                module: command.module.clone(),
+            },
         };
-        self.execute_command(actor, context, "collection.create", &name, |effects| {
+        let command = CreateCollectionCommand {
+            name,
+            module: command.module,
+        };
+        self.execute_command(actor, context, "collection.create", &command, |effects| {
             effects.create_collection(actor.user_id, collection.clone())
         })
     }
@@ -1377,6 +1599,9 @@ impl CollectionService {
         self.presented(item, role)
     }
     fn presented(&self, item: Item, role: Role) -> Result<PresentedItem> {
+        let collection = self.reader.collection(item.collection_id)?;
+        let (effective_permissions, content_permissions) =
+            self.presented_content_permissions(role, &collection, Some(&item.domain));
         let mut presentation = self.modules.presentation(&item.domain);
         let mut asset_states = self
             .content
@@ -1449,8 +1674,63 @@ impl CollectionService {
             deleted: item.deleted,
             updated_at: item.updated_at,
             presentation,
-            effective_permissions: role.into(),
+            effective_permissions,
+            content_permissions,
         })
+    }
+
+    pub fn save_item_edit(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        command: SaveItemEditCommand,
+        expected: Revision,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        let request = (id, expected, command.clone());
+        let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
+        if command.domain_edit.module != eligibility.owner {
+            return Err(Error::Invalid(format!(
+                "domain edit owner {} conflicts with collection owner {}",
+                command.domain_edit.module.0, eligibility.owner.0
+            )));
+        }
+        let current_domain = match self.reader.item(id) {
+            Ok(previous) => {
+                if previous.collection_id != command.collection_id {
+                    return Err(Error::Invalid(
+                        "moving items across collections is not supported".into(),
+                    ));
+                }
+                self.validate_owned_domain(&eligibility, &previous.domain)?;
+                previous.domain
+            }
+            Err(Error::NotFound) if expected == Revision(0) => ModuleData {
+                module: eligibility.owner.clone(),
+                schema_version: eligibility.schema_version,
+                payload: RawJson::from_json("{}")?,
+            },
+            Err(error) => return Err(error),
+        };
+        let domain = self.modules.edit(&current_domain, command.domain_edit)?;
+        self.save_item_with_receipt(
+            actor,
+            id,
+            SaveItemCommand {
+                collection_id: command.collection_id,
+                title: command.title,
+                subtitle: command.subtitle,
+                identity_link: command.identity_link,
+                domain,
+                identity: command.identity,
+                translations: command.translations,
+                identifiers: command.identifiers,
+                wishlist: command.wishlist,
+            },
+            expected,
+            context,
+            ("item.edit", &request),
+        )
     }
     pub fn save_item(
         &self,
@@ -1461,7 +1741,27 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Item> {
         let request = (id, expected, command.clone());
-        self.authorize(actor, command.collection_id, Action::Curate)?;
+        self.save_item_with_receipt(
+            actor,
+            id,
+            command,
+            expected,
+            context,
+            ("item.save", &request),
+        )
+    }
+
+    fn save_item_with_receipt<Request: Serialize>(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        command: SaveItemCommand,
+        expected: Revision,
+        context: &CommandContext,
+        receipt: (&str, &Request),
+    ) -> Result<Item> {
+        let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
+        self.validate_owned_domain(&eligibility, &command.domain)?;
         let (specimens, captures, assets, metadata, deleted, revision, updated_at) =
             match self.reader.item(id) {
                 Ok(previous) => {
@@ -1470,6 +1770,7 @@ impl CollectionService {
                             "moving items across collections is not supported".into(),
                         ));
                     }
+                    self.validate_owned_domain(&eligibility, &previous.domain)?;
                     (
                         previous.specimens,
                         previous.captures,
@@ -1511,8 +1812,7 @@ impl CollectionService {
             updated_at,
         };
         item.validate()?;
-        self.modules.validate(&item.domain)?;
-        self.execute_command(actor, context, "item.save", &request, |effects| {
+        self.execute_command(actor, context, receipt.0, receipt.1, |effects| {
             effects.save(item, expected)
         })
     }
@@ -1528,7 +1828,8 @@ impl CollectionService {
     ) -> Result<Item> {
         let (id, expected) = target;
         let mut item = self.reader.item(id)?;
-        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
         self.execute_command(actor, context, operation, request, move |effects| {
             change(&mut item)?;
             item.validate()?;
@@ -1913,10 +2214,13 @@ impl CollectionService {
         if path_id != item.id {
             return Err(Error::Invalid("item ID mismatch".into()));
         }
-        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
         match self.reader.item(path_id) {
             Ok(current) => {
-                self.authorize(actor, current.collection_id, Action::Curate)?;
+                let current_eligibility =
+                    self.content_write_eligibility(actor, current.collection_id)?;
+                self.validate_owned_domain(&current_eligibility, &current.domain)?;
                 let submitted_owned = serde_json::to_value((
                     item.revision,
                     &item.specimens,
@@ -1986,10 +2290,10 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Work> {
         let request = (id, expected, command.clone());
-        self.authorize(actor, command.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, command.collection_id)?;
         let (revision, migration_provenance, deleted, updated_at) = match self.reader.work(id) {
             Ok(previous) => {
-                self.authorize(actor, previous.collection_id, Action::Curate)?;
+                self.content_write_eligibility(actor, previous.collection_id)?;
                 if previous.collection_id != command.collection_id {
                     return Err(Error::Invalid("work cannot move across collections".into()));
                 }
@@ -2034,10 +2338,10 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Edition> {
         let request = (id, expected, command.clone());
-        self.authorize(actor, command.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, command.collection_id)?;
         let (revision, migration_provenance, deleted, updated_at) = match self.reader.edition(id) {
             Ok(previous) => {
-                self.authorize(actor, previous.collection_id, Action::Curate)?;
+                self.content_write_eligibility(actor, previous.collection_id)?;
                 if previous.collection_id != command.collection_id {
                     return Err(Error::Invalid(
                         "edition cannot move across collections".into(),
@@ -2082,7 +2386,7 @@ impl CollectionService {
         let request = (id, expected, command.clone());
         let (revision, created_at, representations) = match self.reader.capture(id) {
             Ok(previous) => {
-                self.authorize(actor, previous.collection_id, Action::Curate)?;
+                self.content_write_eligibility(actor, previous.collection_id)?;
                 if previous.collection_id != command.collection_id {
                     return Err(Error::Invalid(
                         "capture cannot move across collections".into(),
@@ -2097,7 +2401,7 @@ impl CollectionService {
             Err(Error::NotFound) => (Revision(0), Utc::now(), vec![]),
             Err(error) => return Err(error),
         };
-        self.authorize(actor, command.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, command.collection_id)?;
         let capture = Capture {
             id,
             collection_id: command.collection_id,
@@ -2131,8 +2435,42 @@ impl CollectionService {
                 implementation_version: private.then_some(evidence.implementation_version),
                 catalog: if private { evidence.catalog } else { None },
                 details: private.then_some(evidence.details),
+                provenance_limitation: Some(
+                    "Legacy schema-3 Evidence has limited provenance and is not current source-bound processing proof."
+                        .into(),
+                ),
             })
             .collect())
+    }
+    pub fn processing_summaries(
+        &self,
+        actor: &Principal,
+        query: ProcessingQuery,
+    ) -> Result<Page<ProcessingSummary>> {
+        query.validate()?;
+        self.authorize(actor, query.collection_id, Action::Browse)?;
+        let current_source = self
+            .processing
+            .recorded_source(query.collection_id, query.source)?;
+        let page = self.processing.observations(&query)?;
+        Ok(Page {
+            items: page
+                .items
+                .into_iter()
+                .map(|observation| ProcessingSummary {
+                    observation_id: observation.id,
+                    operation: observation.operation,
+                    source: observation.source_fingerprint.source,
+                    current: observation.source_fingerprint.source == current_source.source
+                        && observation.source_fingerprint.files == current_source.files,
+                    support: observation.support,
+                    limitations: observation.limitations,
+                    legacy_provenance: false,
+                    created_at: observation.created_at,
+                })
+                .collect(),
+            next_cursor: page.next_cursor,
+        })
     }
     pub fn activity(&self, actor: &Principal, id: ItemId) -> Result<serde_json::Value> {
         let item = self.reader.item(id)?;
@@ -2239,6 +2577,7 @@ impl CollectionService {
     ) -> Result<PresentedAsset> {
         validate_asset_upload(&command.kind, &command.alt_text, bytes)?;
         let role = self.authorize(actor, command.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, command.collection_id)?;
         let subject_collection = self.content.asset_subject_collection(command.subject)?;
         if subject_collection != command.collection_id {
             return Err(Error::Invalid(
@@ -2265,6 +2604,7 @@ impl CollectionService {
         }
         let current = self.content.asset_state(asset_id)?;
         let role = self.authorize(actor, current.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, current.collection_id)?;
         if current.deleted {
             return Err(Error::NotFound);
         }
@@ -2283,6 +2623,7 @@ impl CollectionService {
     ) -> Result<PresentedAsset> {
         let current = self.content.asset_state(asset_id)?;
         let role = self.authorize(actor, current.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, current.collection_id)?;
         if current.deleted {
             return Err(Error::NotFound);
         }
@@ -2303,7 +2644,8 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Item> {
         let item = self.reader.item(item_id)?;
-        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
         if item.revision != expected {
             return Err(Error::Conflict);
         }
@@ -2343,6 +2685,15 @@ impl CollectionService {
         self.authorize(actor, record.view.collection_id, Action::Curate)?;
         Ok(record)
     }
+    fn provisional_import_for_write(
+        &self,
+        actor: &Principal,
+        id: ImportId,
+    ) -> Result<(ImportRecord, ContentWriteEligibility)> {
+        let record = self.authorized_provisional_import(actor, id)?;
+        let eligibility = self.content_write_eligibility(actor, record.view.collection_id)?;
+        Ok((record, eligibility))
+    }
     pub fn create_provisional_import(
         &self,
         actor: &Principal,
@@ -2356,8 +2707,11 @@ impl CollectionService {
             association,
             expected_item_revision,
         } = command;
-        self.authorize(actor, collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, collection_id)?;
         let item = self.validate_import_association(collection_id, association)?;
+        if let Some(item) = &item {
+            self.validate_owned_domain(&eligibility, &item.domain)?;
+        }
         if item.is_some() != expected_item_revision.is_some() {
             return Err(Error::Invalid(
                 "an Item association requires its expected revision".into(),
@@ -2458,7 +2812,7 @@ impl CollectionService {
         offset: u64,
         bytes: &[u8],
     ) -> Result<ImportView> {
-        self.authorized_provisional_import(actor, id)?;
+        self.provisional_import_for_write(actor, id)?;
         Ok(self
             .provisional_imports
             .stage_import_chunk(id, index, offset, bytes)?
@@ -2471,7 +2825,7 @@ impl CollectionService {
         source_locator: &str,
         context: &CommandContext,
     ) -> Result<JobId> {
-        let record = self.authorized_provisional_import(actor, id)?;
+        let (record, _) = self.provisional_import_for_write(actor, id)?;
         if record.view.source.kind != ImportSourceKind::Inbox {
             return Err(Error::Invalid(
                 "only configured inbox Imports can stage from an inbox source".into(),
@@ -2491,6 +2845,7 @@ impl CollectionService {
                 "import_id": id,
                 "source_locator": source_locator,
             }),
+            frozen_input: None,
         };
         self.execute_command(
             actor,
@@ -2508,8 +2863,41 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         module.validate()?;
-        let record = self.authorized_provisional_import(actor, id)?;
+        let (record, eligibility) = self.provisional_import_for_write(actor, id)?;
         let job = deterministic_job_id(actor.user_id, "import.analyze", context.key());
+        let capability = CapabilityId::new(format!("{}.import-analysis", module.0))?;
+        let contract = self.modules.capability_contract(&capability)?;
+        if contract.scope != collector_modules::OperationScope::CollectionDomain
+            || contract.owner != eligibility.owner
+            || module != eligibility.owner
+        {
+            return Err(Error::Invalid(
+                "import identity analysis must be owned by the collection module".into(),
+            ));
+        }
+        let operation_version = contract.schema_version;
+        let inventory = self
+            .processing
+            .package_inventory(record.view.collection_id, PackageScope::Import(id))?;
+        let source_fingerprint = self.fingerprint_inventory(&inventory)?;
+        let selection = RawJson::from_value(serde_json::json!({
+            "import_id": id,
+            "representation_id": record.view.representation_id,
+            "files": record.view.files,
+        }));
+        let frozen = FrozenProcessingJob {
+            collection_id: record.view.collection_id,
+            collection_binding: eligibility.binding,
+            operation: capability,
+            operation_version,
+            source: PackageScope::Import(id),
+            source_fingerprint,
+            snapshot_id: None,
+            observation_id: ObservationId(job.0),
+            selection,
+            created_at: self.authentication.now(),
+        };
+        frozen.validate()?;
         let spec = JobSpec {
             id: job,
             user_id: actor.user_id,
@@ -2519,6 +2907,7 @@ impl CollectionService {
             phase: "queued".into(),
             total_units: 1,
             request: serde_json::json!({"import_id":id,"module":module}),
+            frozen_input: Some(FrozenJobInput::Processing(frozen)),
         };
         self.execute_command(
             actor,
@@ -2541,15 +2930,21 @@ impl CollectionService {
             .ok_or_else(|| Error::Storage("analysis job has no Import identity".into()))?
             .parse()
             .map_err(|error| Error::Storage(format!("invalid Import identity: {error}")))?;
-        let module = ModuleId(
-            claim
-                .request
-                .get("module")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| Error::Storage("analysis job has no module identity".into()))?
-                .to_owned(),
-        );
-        module.validate()?;
+        let frozen = match claim.frozen_input.as_ref() {
+            Some(FrozenJobInput::Processing(value)) => value,
+            _ => {
+                return Err(Error::Storage(
+                    "analysis job has no frozen processing input".into(),
+                ));
+            }
+        };
+        frozen.validate()?;
+        let (module, operation_version) = self.modules.capability_owner(&frozen.operation)?;
+        if operation_version != frozen.operation_version
+            || frozen.source != PackageScope::Import(id)
+        {
+            return Err(Error::Conflict);
+        }
         if self
             .jobs
             .cancellation_requested(claim.id, &claim.claim_token)?
@@ -2560,26 +2955,52 @@ impl CollectionService {
         if record.user_id != claim.user_id || record.view.phase != ImportPhase::Analyzing {
             return Err(Error::Conflict);
         }
-        let capability = CapabilityId::new(format!("{}.import-analysis", module.0))?;
-        let input = RawJson::from_value(serde_json::json!({
-            "import_id": id,
-            "representation_id": record.view.representation_id,
-            "files": record.view.files,
-        }));
+        if record.view.collection_id != frozen.collection_id
+            || !self
+                .reader
+                .role(claim.user_id, frozen.collection_id)?
+                .allows(Action::Curate)
+        {
+            return Err(Error::Forbidden);
+        }
+        let eligibility =
+            self.content_write_eligibility_for_user(claim.user_id, frozen.collection_id)?;
+        self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+        let contract = self.modules.capability_contract(&frozen.operation)?;
+        if contract.scope != collector_modules::OperationScope::CollectionDomain
+            || contract.owner != eligibility.owner
+            || contract.owner != module
+        {
+            return Err(Error::Conflict);
+        }
+        let inventory = self
+            .processing
+            .package_inventory(frozen.collection_id, frozen.source)?;
+        frozen.source_fingerprint.validate_inventory(&inventory)?;
+        if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+            return Err(Error::Conflict);
+        }
+        let host = ProcessingHost {
+            port: self.processing.as_ref(),
+            access: PackageAccess {
+                collection_id: frozen.collection_id,
+                scope: frozen.source,
+            },
+        };
         let analyzed = self.modules.operate(
             OperationRequest {
-                capability,
-                input,
-                collection_id: record.view.collection_id,
-                entity: OperationEntity::Representation(record.view.representation_id),
-                idempotency_key: format!("{}:{}", claim.id, claim.attempt),
+                capability: frozen.operation.clone(),
+                input: frozen.selection.clone(),
+                collection_id: frozen.collection_id,
+                entity: OperationEntity::Import(id),
+                idempotency_key: claim.id.to_string(),
             },
-            &ImportAnalysisHost,
+            &host,
         );
-        match analyzed {
+        let (support, typed_result, limitations) = match analyzed {
             Ok(output) => {
-                let output: ImportAnalysisOutput = output.value.parse()?;
-                record.view.candidates = output
+                let parsed: ImportAnalysisOutput = output.value.parse()?;
+                record.view.candidates = parsed
                     .candidates
                     .into_iter()
                     .map(|candidate| ImportCandidate {
@@ -2589,31 +3010,113 @@ impl CollectionService {
                         observation: candidate.observation,
                     })
                     .collect();
-                record.view.limitations = output.limitations;
+                record.view.limitations = parsed.limitations.clone();
+                (
+                    OperationSupport::Supported,
+                    ModuleData {
+                        module: module.clone(),
+                        schema_version: operation_version,
+                        payload: output.value,
+                    },
+                    parsed.limitations,
+                )
             }
             Err(ModuleError::UnavailableCapability(limitation)) => {
                 record.view.candidates.clear();
-                record.view.limitations = vec![limitation];
-            }
-            Err(ModuleError::UnknownCapability(_)) => {
-                record.view.candidates.clear();
-                record.view.limitations = vec![format!(
-                    "No import analyzer is registered for {}; review may continue unidentified.",
-                    module.0
-                )];
+                record.view.limitations = vec![limitation.clone()];
+                (
+                    OperationSupport::UnavailableDependency {
+                        dependency: module.0.clone(),
+                        reason: limitation.clone(),
+                    },
+                    ModuleData {
+                        module: module.clone(),
+                        schema_version: operation_version,
+                        payload: RawJson::from_value(serde_json::json!({"unavailable":limitation})),
+                    },
+                    vec![limitation],
+                )
             }
             Err(error) => return Err(error.into()),
-        }
+        };
         if self
             .jobs
             .cancellation_requested(claim.id, &claim.claim_token)?
         {
             return Err(Error::JobCancelled);
         }
+        let current =
+            self.content_write_eligibility_for_user(claim.user_id, frozen.collection_id)?;
+        self.validate_frozen_binding(&current, &frozen.collection_binding)?;
+        let current_contract = self.modules.capability_contract(&frozen.operation)?;
+        if current_contract.scope != collector_modules::OperationScope::CollectionDomain
+            || current_contract.owner != current.owner
+            || current_contract.owner != module
+            || current_contract.schema_version != frozen.operation_version
+        {
+            return Err(Error::Conflict);
+        }
+        if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+            return Err(Error::Conflict);
+        }
+        let observation = ProcessingObservation {
+            id: frozen.observation_id,
+            collection_id: frozen.collection_id,
+            operation: frozen.operation.clone(),
+            operation_version: frozen.operation_version,
+            source_fingerprint: frozen.source_fingerprint.clone(),
+            snapshot_id: frozen.snapshot_id,
+            support,
+            raw_observations: vec![],
+            typed_result,
+            limitations,
+            created_at: frozen.created_at,
+        };
+        observation.validate()?;
+        self.processing
+            .save_provisional_observation(id, claim.id, &observation)?;
         record.view.analysis_job_id = Some(claim.id);
         record.view.phase = ImportPhase::AwaitingReview;
         let revision = record.view.revision;
         Ok(self.provisional_imports.save_import(record, revision)?.view)
+    }
+
+    fn fingerprint_inventory(&self, inventory: &PackageInventory) -> Result<SourceFingerprint> {
+        inventory.validate()?;
+        let mut files = Vec::with_capacity(inventory.files.len());
+        for file in &inventory.files {
+            let mut reader =
+                self.processing
+                    .package_file(inventory.collection_id, inventory.scope, file.id)?;
+            let mut bytes = 0_u64;
+            let mut hasher = sha2::Sha256::new();
+            let mut buffer = vec![0; 1024 * 1024];
+            loop {
+                let read = reader
+                    .read(&mut buffer)
+                    .map_err(|error| Error::Storage(error.to_string()))?;
+                if read == 0 {
+                    break;
+                }
+                bytes = bytes
+                    .checked_add(read as u64)
+                    .ok_or_else(|| Error::Invalid("package length overflow".into()))?;
+                if bytes > file.bytes.0 {
+                    return Err(Error::Conflict);
+                }
+                use sha2::Digest as _;
+                hasher.update(&buffer[..read]);
+            }
+            if bytes != file.bytes.0 {
+                return Err(Error::Conflict);
+            }
+            files.push(PackageFileFingerprint {
+                id: file.id,
+                bytes: file.bytes,
+                sha256: Digest::new(HashAlgorithm::Sha256, hex::encode(hasher.finalize()))?,
+            });
+        }
+        SourceFingerprint::calculate(inventory.scope, files, None, Default::default())
     }
     fn validate_import_association(
         &self,
@@ -2684,7 +3187,7 @@ impl CollectionService {
         command: ReviewImportCommand,
         context: &CommandContext,
     ) -> Result<ImportView> {
-        let current = self.authorized_provisional_import(actor, id)?;
+        let (current, eligibility) = self.provisional_import_for_write(actor, id)?;
         if !matches!(
             current.view.phase,
             ImportPhase::Analyzing | ImportPhase::AwaitingReview
@@ -2693,6 +3196,9 @@ impl CollectionService {
         }
         let item =
             self.validate_import_association(current.view.collection_id, command.association)?;
+        if let Some(item) = &item {
+            self.validate_owned_domain(&eligibility, &item.domain)?;
+        }
         if item.is_some() != command.expected_item_revision.is_some() {
             return Err(Error::Invalid(
                 "an Item association requires its expected revision".into(),
@@ -2714,6 +3220,19 @@ impl CollectionService {
                 self.provisional_imports.save_import(preserved, revision)?;
             }
             return Err(Error::Conflict);
+        }
+        if let ImportIdentityDecision::Candidate { key } = &command.identity {
+            let candidate = current
+                .view
+                .candidates
+                .iter()
+                .find(|candidate| &candidate.key == key)
+                .ok_or_else(|| Error::Invalid("selected import candidate is unavailable".into()))?;
+            if candidate.module != eligibility.owner {
+                return Err(Error::Invalid(
+                    "selected import candidate conflicts with the collection owner".into(),
+                ));
+            }
         }
         self.execute_command(actor, context, "import.review", &(id, &command), |effects| {
             let mut record = effects.import_record(id)?;
@@ -2749,7 +3268,7 @@ impl CollectionService {
         id: ImportId,
         context: &CommandContext,
     ) -> Result<JobId> {
-        let record = self.authorized_provisional_import(actor, id)?;
+        let (record, _) = self.provisional_import_for_write(actor, id)?;
         let job = deterministic_job_id(actor.user_id, "import.publish", context.key());
         let spec = JobSpec {
             id: job,
@@ -2760,6 +3279,7 @@ impl CollectionService {
             phase: "queued".into(),
             total_units: record.view.files.iter().map(|file| file.bytes.0).sum(),
             request: serde_json::json!({"import_id":id}),
+            frozen_input: None,
         };
         self.execute_command(actor, context, "import.publish.enqueue", &id, |effects| {
             let current = effects.import_record(id)?;
@@ -2778,6 +3298,17 @@ impl CollectionService {
         self.authorize(actor, item.collection_id, Action::Curate)?;
         Ok(upload)
     }
+    fn upload_for_write(
+        &self,
+        actor: &Principal,
+        id: JobId,
+    ) -> Result<(Upload, ContentWriteEligibility)> {
+        let upload = self.authorized_upload(actor, id)?;
+        let item = self.reader.item(upload.item_id)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
+        Ok((upload, eligibility))
+    }
     pub fn create_upload(
         &self,
         actor: &Principal,
@@ -2787,7 +3318,8 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Upload> {
         let item = self.reader.item(item_id)?;
-        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
         let request = (item_id, expected, files.clone());
         self.execute_command(actor, context, "upload.create", &request, |effects| {
             effects.create_upload(actor.user_id, item_id, expected, files)
@@ -2801,7 +3333,8 @@ impl CollectionService {
     ) -> Result<()> {
         self.require_administrator(actor)?;
         let item = self.reader.item(item_id)?;
-        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
         if item.revision != expected {
             return Err(Error::Conflict);
         }
@@ -2818,7 +3351,7 @@ impl CollectionService {
         offset: u64,
         bytes: &[u8],
     ) -> Result<Upload> {
-        self.authorized_upload(actor, id)?;
+        self.upload_for_write(actor, id)?;
         self.imports.upload_chunk(id, index, offset, bytes)
     }
     pub fn cancel_upload(
@@ -2838,7 +3371,7 @@ impl CollectionService {
         id: JobId,
         context: &CommandContext,
     ) -> Result<Item> {
-        self.authorized_upload(actor, id)?;
+        self.upload_for_write(actor, id)?;
         let result = self.execute_command(actor, context, "upload.commit", &id, |effects| {
             effects.commit_upload(id)
         });
@@ -2858,7 +3391,7 @@ impl CollectionService {
         id: JobId,
         context: &CommandContext,
     ) -> Result<JobId> {
-        self.authorized_upload(actor, id)?;
+        self.upload_for_write(actor, id)?;
         self.execute_command(actor, context, "upload.commit.enqueue", &id, |effects| {
             effects.queue_upload(id)
         })
@@ -2869,7 +3402,7 @@ impl CollectionService {
         id: JobId,
         context: &CommandContext,
     ) -> Result<JobId> {
-        self.authorized_upload(actor, id)?;
+        self.upload_for_write(actor, id)?;
         self.execute_command(actor, context, "upload.retry", &id, |effects| {
             effects.retry_upload(id)
         })
@@ -2882,7 +3415,7 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         self.require_administrator(actor)?;
-        self.authorized_upload(actor, id)?;
+        self.upload_for_write(actor, id)?;
         let request = (id, source_locator);
         self.execute_command(
             actor,
@@ -2904,7 +3437,7 @@ impl CollectionService {
         })
     }
     pub fn fail_upload(&self, actor: &Principal, id: JobId, message: &str) -> Result<()> {
-        self.authorized_upload(actor, id)?;
+        self.upload_for_write(actor, id)?;
         self.imports.fail_upload(id, message)
     }
     pub fn verify_integrity(
@@ -2914,7 +3447,8 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Item> {
         let item = self.reader.item(item_id)?;
-        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
         self.execute_command(actor, context, "integrity.verify", &item_id, |effects| {
             effects.verify_integrity(item_id)
         })
@@ -2927,7 +3461,8 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         let item = self.reader.item(item_id)?;
-        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
         let id = deterministic_job_id(actor.user_id, "integrity.verify", context.key());
         let spec = JobSpec {
             id,
@@ -2943,6 +3478,7 @@ impl CollectionService {
                 .flat_map(|representation| &representation.files)
                 .count() as u64,
             request: serde_json::json!({"item_id":item_id}),
+            frozen_input: None,
         };
         if spec.total_units == 0 {
             return Err(Error::Invalid(
@@ -2954,6 +3490,107 @@ impl CollectionService {
             context,
             "job.integrity.enqueue",
             &item_id,
+            |effects| effects.enqueue_job(spec),
+        )
+    }
+
+    pub fn enqueue_catalog_acquisition(
+        &self,
+        actor: &Principal,
+        frozen: FrozenAcquisitionJob,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        frozen.request.validate()?;
+        let eligibility = self.content_write_eligibility(actor, frozen.request.collection_id)?;
+        self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+        let id = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+        let input = FrozenJobInput::Acquisition(frozen.clone());
+        input.validate()?;
+        let spec = JobSpec {
+            id,
+            user_id: actor.user_id,
+            collection_id: Some(frozen.request.collection_id),
+            item_id: None,
+            kind: "catalog_acquisition".into(),
+            phase: "queued".into(),
+            total_units: frozen.request.maximum_response_bytes,
+            request: serde_json::json!({
+                "provider": frozen.request.provider,
+                "snapshot_id": frozen.snapshot_id,
+            }),
+            frozen_input: Some(input),
+        };
+        self.execute_command(
+            actor,
+            context,
+            "catalog.acquire.enqueue",
+            &frozen,
+            |effects| effects.enqueue_job(spec),
+        )
+    }
+
+    pub fn enqueue_processing_operation(
+        &self,
+        actor: &Principal,
+        capture_id: CaptureId,
+        command: StartProcessingCommand,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        let capture = self.reader.capture(capture_id)?;
+        let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
+        if !capture
+            .representations
+            .iter()
+            .any(|value| value.id == command.representation_id)
+        {
+            return Err(Error::NotFound);
+        }
+        let registered_version =
+            self.validate_operation_eligibility(&eligibility, &command.operation)?;
+        if command.operation_version != registered_version {
+            return Err(Error::Invalid("operation version is not registered".into()));
+        }
+        if let Some(snapshot_id) = command.snapshot_id {
+            self.processing.snapshot(SnapshotQuery {
+                collection_id: capture.collection_id,
+                snapshot_id,
+            })?;
+        }
+        let source = PackageScope::Representation(command.representation_id);
+        let inventory = self
+            .processing
+            .package_inventory(capture.collection_id, source)?;
+        let fingerprint = self.fingerprint_inventory(&inventory)?;
+        let id = deterministic_job_id(actor.user_id, "processing.operation", context.key());
+        let frozen = FrozenProcessingJob {
+            collection_id: capture.collection_id,
+            collection_binding: eligibility.binding,
+            operation: command.operation.clone(),
+            operation_version: command.operation_version,
+            source,
+            source_fingerprint: fingerprint,
+            snapshot_id: command.snapshot_id,
+            observation_id: ObservationId(id.0),
+            selection: command.selection.clone(),
+            created_at: self.authentication.now(),
+        };
+        frozen.validate()?;
+        let spec = JobSpec {
+            id,
+            user_id: actor.user_id,
+            collection_id: Some(capture.collection_id),
+            item_id: capture.association.item_id,
+            kind: "processing_operation".into(),
+            phase: "queued".into(),
+            total_units: inventory.files.iter().map(|file| file.bytes.0).sum(),
+            request: serde_json::json!({"capture_id":capture_id,"observation_id":frozen.observation_id}),
+            frozen_input: Some(FrozenJobInput::Processing(frozen)),
+        };
+        self.execute_command(
+            actor,
+            context,
+            "processing.operation.enqueue",
+            &(capture_id, command),
             |effects| effects.enqueue_job(spec),
         )
     }
@@ -2976,27 +3613,49 @@ impl CollectionService {
         let heartbeat = std::thread::Builder::new()
             .name(format!("collector-job-heartbeat-{heartbeat_id}"))
             .spawn(move || {
-                while heartbeat_stop
-                    .recv_timeout(std::time::Duration::from_secs(5))
-                    .is_err()
-                {
-                    if heartbeat_jobs
-                        .renew_job_lease(heartbeat_id, &heartbeat_token, 30)
-                        .is_err()
-                    {
-                        break;
+                loop {
+                    match heartbeat_stop.recv_timeout(std::time::Duration::from_secs(5)) {
+                        Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            if heartbeat_jobs
+                                .renew_job_lease(heartbeat_id, &heartbeat_token, 30)
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                     }
                 }
             })
             .map_err(|error| Error::Unavailable(error.to_string()))?;
+        let heartbeat = JobHeartbeat {
+            stop: Some(stop_heartbeat),
+            thread: Some(heartbeat),
+        };
         let result = match claim.kind.as_str() {
-            "integrity_verification" => {
+            "integrity_verification" => (|| {
+                if claim.phase == "revision_committed" {
+                    let item = self.reader.item(claim.item_id.ok_or_else(|| {
+                        Error::Storage("integrity job has no Item identity".into())
+                    })?)?;
+                    return Ok(serde_json::json!({"item_id":item.id,"revision":item.revision}));
+                }
+                self.content_write_eligibility_for_job(
+                    claim.user_id,
+                    claim.collection_id,
+                    claim.item_id,
+                )?;
                 let item_id = claim
                     .item_id
                     .ok_or_else(|| Error::Storage("integrity job has no Item identity".into()))?;
                 let progress_jobs = self.jobs.clone();
                 let progress_token = claim.claim_token.clone();
                 let mut progress = |completed_units| {
+                    self.content_write_eligibility_for_job(
+                        claim.user_id,
+                        claim.collection_id,
+                        claim.item_id,
+                    )?;
                     if progress_jobs.cancellation_requested(claim.id, &progress_token)? {
                         return Err(Error::JobCancelled);
                     }
@@ -3017,12 +3676,32 @@ impl CollectionService {
                         &mut progress,
                     )
                     .map(|item| serde_json::json!({"item_id":item.id,"revision":item.revision}))
-            }
-            "preservation_import" => self
-                .imports
-                .commit_upload_for_job(claim.id, &claim.claim_token)
-                .map(|item| serde_json::json!({"item_id":item.id,"revision":item.revision})),
-            "import_staging" => {
+            })(),
+            "preservation_import" => (|| {
+                if claim.phase != "revision_committed" {
+                    self.content_write_eligibility_for_job(
+                        claim.user_id,
+                        claim.collection_id,
+                        claim.item_id,
+                    )?;
+                }
+                self.imports
+                    .commit_upload_for_job(claim.id, &claim.claim_token, &mut || {
+                        self.content_write_eligibility_for_job(
+                            claim.user_id,
+                            claim.collection_id,
+                            claim.item_id,
+                        )
+                        .map(|_| ())
+                    })
+                    .map(|item| serde_json::json!({"item_id":item.id,"revision":item.revision}))
+            })(),
+            "import_staging" => (|| {
+                self.content_write_eligibility_for_job(
+                    claim.user_id,
+                    claim.collection_id,
+                    claim.item_id,
+                )?;
                 let import_id = claim
                     .request
                     .get("import_id")
@@ -3035,14 +3714,18 @@ impl CollectionService {
                     .get("source_locator")
                     .and_then(serde_json::Value::as_str)
                     .ok_or_else(|| Error::Storage("staging job has no source locator".into()))?;
+                let record = self.provisional_imports.import_record(import_id)?;
+                if claim.collection_id != Some(record.view.collection_id) {
+                    return Err(Error::Conflict);
+                }
                 self.provisional_imports
                     .stage_inbox_import(import_id, claim.id, &claim.claim_token, source_locator)
                     .map(|record| serde_json::json!({"import_id":record.view.id}))
-            }
+            })(),
             "import_analysis" => self
                 .analyze_import_for_job(&claim)
                 .map(|view| serde_json::json!({"import_id":view.id,"revision":view.revision})),
-            "import_publication" => {
+            "import_publication" => (|| {
                 let import_id = claim
                     .request
                     .get("import_id")
@@ -3050,8 +3733,55 @@ impl CollectionService {
                     .ok_or_else(|| Error::Storage("publication job has no Import identity".into()))?
                     .parse()
                     .map_err(|error| Error::Storage(format!("invalid Import identity: {error}")))?;
+                if claim.phase != "revision_committed" {
+                    let record = self.provisional_imports.import_record(import_id)?;
+                    let collection_id = record.view.collection_id;
+                    if claim.collection_id != Some(collection_id) {
+                        return Err(Error::Conflict);
+                    }
+                    if !self
+                        .reader
+                        .role(claim.user_id, collection_id)?
+                        .allows(Action::Curate)
+                    {
+                        return Err(Error::Forbidden);
+                    }
+                    let eligibility = self.content_write_eligibility_for_job(
+                        claim.user_id,
+                        claim.collection_id,
+                        record.view.association.item_id,
+                    )?;
+                    if let Some(ImportReviewDecision {
+                        identity: ImportIdentityDecision::Candidate { key },
+                        ..
+                    }) = &record.view.review
+                    {
+                        let candidate = record
+                            .view
+                            .candidates
+                            .iter()
+                            .find(|candidate| &candidate.key == key)
+                            .ok_or_else(|| {
+                                Error::Invalid("selected import candidate is unavailable".into())
+                            })?;
+                        if candidate.module != eligibility.owner {
+                            return Err(Error::Invalid(
+                                "selected import candidate conflicts with the collection owner"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
                 self.provisional_imports
-                    .publish_import_for_job(import_id, claim.id, &claim.claim_token)
+                    .publish_import_for_job(import_id, claim.id, &claim.claim_token, &mut || {
+                        let record = self.provisional_imports.import_record(import_id)?;
+                        self.content_write_eligibility_for_job(
+                            claim.user_id,
+                            claim.collection_id,
+                            record.view.association.item_id,
+                        )
+                        .map(|_| ())
+                    })
                     .map(|record| {
                         serde_json::json!({
                             "import_id":record.view.id,
@@ -3059,16 +3789,198 @@ impl CollectionService {
                             "representation_id":record.view.representation_id
                         })
                     })
-            }
+            })(),
+            "catalog_acquisition" => (|| {
+                let frozen = match claim.frozen_input.clone() {
+                    Some(FrozenJobInput::Acquisition(value)) => value,
+                    _ => return Err(Error::Storage("acquisition job has no frozen input".into())),
+                };
+                if let Ok(existing) = self.processing.snapshot(SnapshotQuery {
+                    collection_id: frozen.request.collection_id,
+                    snapshot_id: frozen.snapshot_id,
+                }) {
+                    return Ok(serde_json::json!({"snapshot_id":existing.id}));
+                }
+                FrozenJobInput::Acquisition(frozen.clone()).validate()?;
+                let eligibility = self.content_write_eligibility_for_job(
+                    claim.user_id,
+                    claim.collection_id,
+                    claim.item_id,
+                )?;
+                self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+                let provider = self
+                    .streaming_providers
+                    .get(&frozen.request.provider.0)
+                    .ok_or_else(|| {
+                        Error::Unavailable("configured catalog provider is unavailable".into())
+                    })?;
+                let mut execution = DurableProcessingContext {
+                    frozen: FrozenJobInput::Acquisition(frozen.clone()),
+                    jobs: self.jobs.clone(),
+                    id: claim.id,
+                    claim_token: claim.claim_token.clone(),
+                };
+                if execution.cancellation_requested()? {
+                    return Err(Error::JobCancelled);
+                }
+                let mut response = provider.acquire_stream(&frozen.request, &mut execution)?;
+                let snapshot = SnapshotRecord {
+                    id: frozen.snapshot_id,
+                    collection_id: frozen.request.collection_id,
+                    provider: frozen.request.provider.clone(),
+                    media_type: response.media_type,
+                    bytes: response.bytes,
+                    digest: response.digest,
+                    parsed_observation: response.parsed_observation,
+                    created_at: frozen.created_at,
+                };
+                snapshot.validate()?;
+                if snapshot.bytes.0 > frozen.request.maximum_response_bytes {
+                    return Err(Error::Invalid(
+                        "provider stream exceeds its frozen request limit".into(),
+                    ));
+                }
+                self.processing.publish_snapshot(
+                    claim.id,
+                    &claim.claim_token,
+                    snapshot,
+                    response.reader.as_mut(),
+                    &mut || {
+                        let current = self.content_write_eligibility_for_job(
+                            claim.user_id,
+                            claim.collection_id,
+                            claim.item_id,
+                        )?;
+                        self.validate_frozen_binding(&current, &frozen.collection_binding)?;
+                        execution.cancellation_requested()
+                    },
+                )?;
+                Ok(serde_json::json!({"snapshot_id":frozen.snapshot_id}))
+            })(),
+            "processing_operation" => (|| {
+                let frozen = match claim.frozen_input.clone() {
+                    Some(FrozenJobInput::Processing(value)) => value,
+                    _ => return Err(Error::Storage("processing job has no frozen input".into())),
+                };
+                if self
+                    .processing
+                    .processing_record(frozen.observation_id)
+                    .is_ok()
+                {
+                    return Ok(serde_json::json!({"observation_id":frozen.observation_id}));
+                }
+                frozen.validate()?;
+                let eligibility = self.content_write_eligibility_for_job(
+                    claim.user_id,
+                    claim.collection_id,
+                    claim.item_id,
+                )?;
+                self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+                let registered_version =
+                    self.validate_operation_eligibility(&eligibility, &frozen.operation)?;
+                if registered_version != frozen.operation_version {
+                    return Err(Error::Conflict);
+                }
+                let inventory = self
+                    .processing
+                    .package_inventory(frozen.collection_id, frozen.source)?;
+                frozen.source_fingerprint.validate_inventory(&inventory)?;
+                if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+                    return Err(Error::Conflict);
+                }
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)?
+                {
+                    return Err(Error::JobCancelled);
+                }
+                let host = ProcessingHost {
+                    port: self.processing.as_ref(),
+                    access: PackageAccess {
+                        collection_id: frozen.collection_id,
+                        scope: frozen.source,
+                    },
+                };
+                let (module, version) = self.modules.capability_owner(&frozen.operation)?;
+                let operated = self.modules.operate(
+                    OperationRequest {
+                        capability: frozen.operation.clone(),
+                        input: frozen.selection.clone(),
+                        collection_id: frozen.collection_id,
+                        entity: OperationEntity::Representation(match frozen.source {
+                            PackageScope::Representation(id) => id,
+                            _ => {
+                                return Err(Error::Invalid(
+                                    "durable processing operation requires a Representation".into(),
+                                ));
+                            }
+                        }),
+                        idempotency_key: claim.id.to_string(),
+                    },
+                    &host,
+                );
+                let (support, payload, limitations) = match operated {
+                    Ok(output) => (OperationSupport::Supported, output.value, vec![]),
+                    Err(ModuleError::UnavailableCapability(reason)) => (
+                        OperationSupport::UnavailableDependency {
+                            dependency: module.0.clone(),
+                            reason: reason.clone(),
+                        },
+                        RawJson::from_value(serde_json::json!({"unavailable":reason})),
+                        vec![reason],
+                    ),
+                    Err(error) => return Err(error.into()),
+                };
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)?
+                {
+                    return Err(Error::JobCancelled);
+                }
+                let current = self.content_write_eligibility_for_job(
+                    claim.user_id,
+                    claim.collection_id,
+                    claim.item_id,
+                )?;
+                self.validate_frozen_binding(&current, &frozen.collection_binding)?;
+                self.validate_operation_eligibility(&current, &frozen.operation)?;
+                if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+                    return Err(Error::Conflict);
+                }
+                let observation = ProcessingObservation {
+                    id: frozen.observation_id,
+                    collection_id: frozen.collection_id,
+                    operation: frozen.operation,
+                    operation_version: frozen.operation_version,
+                    source_fingerprint: frozen.source_fingerprint,
+                    snapshot_id: frozen.snapshot_id,
+                    support,
+                    raw_observations: vec![],
+                    typed_result: ModuleData {
+                        module,
+                        schema_version: version,
+                        payload,
+                    },
+                    limitations,
+                    created_at: frozen.created_at,
+                };
+                observation.validate()?;
+                self.processing.publish_processing_record(
+                    claim.id,
+                    &claim.claim_token,
+                    PortableProcessingRecord {
+                        observation,
+                        import_rebinding: None,
+                    },
+                )?;
+                Ok(serde_json::json!({"observation_id":frozen.observation_id}))
+            })(),
             _ => Err(Error::Unavailable(format!(
                 "job kind {} has no registered executor",
                 claim.kind
             ))),
         };
-        let _ = stop_heartbeat.send(());
-        heartbeat
-            .join()
-            .map_err(|_| Error::Unavailable("job heartbeat worker panicked".into()))?;
+        heartbeat.stop()?;
         match result {
             Ok(result) => self
                 .jobs
@@ -3140,13 +4052,27 @@ impl CollectionService {
         if job.state != JobState::Failed {
             return Err(Error::Conflict);
         }
+        if matches!(
+            job.kind.as_str(),
+            "preservation_import"
+                | "integrity_verification"
+                | "import_staging"
+                | "import_analysis"
+                | "import_publication"
+                | "catalog_acquisition"
+                | "processing_operation"
+        ) {
+            self.content_write_eligibility_for_job(actor.user_id, job.collection_id, job.item_id)?;
+        }
         self.execute_command(actor, context, "job.retry", &id, |effects| {
             match job.kind.as_str() {
                 "preservation_import" => effects.retry_upload(id),
                 "integrity_verification"
                 | "import_staging"
                 | "import_analysis"
-                | "import_publication" => effects.retry_failed_job(id, actor.user_id),
+                | "import_publication"
+                | "catalog_acquisition"
+                | "processing_operation" => effects.retry_failed_job(id, actor.user_id),
                 _ => Err(Error::Unavailable("this job kind cannot be retried".into())),
             }
         })

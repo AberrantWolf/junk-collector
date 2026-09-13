@@ -15,7 +15,7 @@ cargo run -p collector-server -- setup
 cargo run -p collector-server -- serve
 ```
 
-Open the exact local management address printed by setup—by default **http://localhost:9842**—on the server computer. Sign in with the password from setup, choose **Create collection** (or open **Administration**), then choose **Add item**. Attach artwork and original files after saving the inventory item. The public and direct-LAN addresses are client surfaces by default and cannot perform initial management.
+Open the exact local management address printed by setup—by default **http://localhost:9842**—on the server computer. Sign in with the password from setup, choose **Create collection** (or open **Administration**), enter a name and choose its collection type, then choose **Add item**. Attach artwork and original files after saving the inventory item. The public and direct-LAN addresses are client surfaces by default and cannot perform initial management.
 
 `setup` creates `collector.toml`, archive/state directories, a local TLS identity and the default account. Re-running it repairs the local browser origin while keeping accounts, passwords, data, exposure settings and existing certificates. It backs up an existing configuration before rewriting it. Stop the server before running setup. Passwords can also be piped through stdin; never put them in command arguments. `init` remains available for scripted first-time initialization.
 
@@ -29,6 +29,29 @@ cargo run -p collector-server -- serve
 ```
 
 `doctor` checks configuration without acquiring the archive lock, so it also works while the server runs. An `origin_not_allowed` error means the browser address is missing from `allowed_origins`; it is distinct from an expired session and from a collection-role denial. Use `localhost` exactly for this local setup—`127.0.0.1` is a different browser origin. If the browser cannot retain a Secure cookie on localhost, the UI reports that explicitly; use trusted HTTPS as described below. Local HTTP onboarding is covered by the Chromium smoke test; other browsers remain to be qualified and may require trusted HTTPS.
+
+### Existing collections without an assigned type
+
+Older collections stay readable and retain their files. Before adding more inventory,
+stop the server and inspect the collection using its ID from the collections API
+(`GET /api/v1/collections` while signed in):
+
+```sh
+cargo run -p collector-server -- inspect-collection-type --collection-id <COLLECTION_ID>
+# Use the revision and an eligible module from that report; choose explicitly.
+cargo run -p collector-server -- assign-collection-type --collection-id <COLLECTION_ID> --expected-revision <REVISION> --module org.junk.music
+# For games, the built-in module is org.junk.games.
+cargo run -p collector-server -- serve
+```
+
+Both inspection and assignment require exclusive store access. Add `--config PATH`
+before the subcommand when using a non-default configuration. Assignment preserves
+the original manifest and records a new revision. Mixed or unavailable item types,
+incompatible pending work, or invalid active metadata block assignment; inspection
+reports the reason. Splitting mixed collections is not implemented. Historical
+metadata overrides are preserved without automatically activating them. Full
+application/job write gating and legacy UI notices are still being completed in
+CT.3–CT.4; graph publication already rejects unassigned collections.
 
 Default listeners:
 

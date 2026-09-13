@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use collector_app::CollectionTypeAdministrationService;
 use collector_client::{Endpoint, Pairing, Route};
 use collector_core::*;
 use collector_server::{AppState, router};
@@ -35,6 +36,20 @@ enum Command {
     Doctor,
     Serve,
     Reindex,
+    /// Inspect durable collection-type assignment eligibility without changing data.
+    InspectCollectionType {
+        #[arg(long)]
+        collection_id: CollectionId,
+    },
+    /// Assign a legacy collection to an installed module. Stop the server first.
+    AssignCollectionType {
+        #[arg(long)]
+        collection_id: CollectionId,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        module: String,
+    },
     /// Reset an account password locally and revoke its devices. New password is read from stdin.
     ResetPassword {
         #[arg(long, default_value = "owner")]
@@ -307,6 +322,33 @@ async fn main() -> Result<()> {
         Command::Reindex => {
             store.reindex()?;
             println!("Catalog rebuilt. Access grants were not reconstructed from archive records.");
+        }
+        Command::InspectCollectionType { collection_id } => {
+            let service = CollectionTypeAdministrationService::new(
+                store.clone(),
+                Arc::new(collector_modules::Registry::builtins()),
+            );
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&service.inspect(collection_id)?)?
+            );
+        }
+        Command::AssignCollectionType {
+            collection_id,
+            expected_revision,
+            module,
+        } => {
+            let service = CollectionTypeAdministrationService::new(
+                store.clone(),
+                Arc::new(collector_modules::Registry::builtins()),
+            );
+            let collection = service.assign(
+                collection_id,
+                Revision(expected_revision),
+                ModuleId(module),
+                chrono::Utc::now(),
+            )?;
+            println!("{}", serde_json::to_string_pretty(&collection)?);
         }
         Command::Pairing => {
             let mut pairing = tls(&config, false)?;

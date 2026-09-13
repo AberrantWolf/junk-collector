@@ -1,5 +1,7 @@
 # First-release requirements
 
+Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
+
 This is the repository-local summary of the user-approved plan, recorded for handoff from commit `98e9187`. It describes the target, not current capabilities. [Implementation status](implementation-status.md) describes what exists; [handoff backlog](handoff-backlog.md) defines the remaining work. Implementation shortcuts are not amendments to these requirements. If a requirement needs to change, record the discrepancy and resolve it explicitly.
 
 ## Product and scope
@@ -51,6 +53,8 @@ Browser trust is separate: use a browser-trusted hostname/local DNS, trusted loc
 Use Argon2id passwords, standard password-manager-compatible WebAuthn, a stable HTTPS authentication origin, browser-mediated client enrollment, revocable device credentials, recovery codes and local administrator recovery. Single-user mode uses the default profile and hides user selection without making access anonymous. Passkeys remain bound to the authentication origin; enrolled device credentials support alternate routes.
 
 Use versioned JSON APIs, generated OpenAPI/TypeScript contracts, cursor pagination, structured errors, optimistic revisions, idempotent commands, bounded resumable chunks, durable jobs, HTTP events with polling fallback and ranged media. Enforce authorization, private-field filtering, CSRF protection, secure sessions, rate limits, credential redaction and explicit proxy rules.
+
+Authenticated clients obtain bounded collection-type descriptors and server-computed content availability. Item creation inherits the collection owner; generic forms may edit only module-declared scalar fields through owner-validated patches, while structured and unknown data remains preserved. Missing modules and legacy-unassigned collections are visibly read-only without disabling independently authorized access management, personal activity, artwork or media reads. Type labels and safe summaries are data-driven rather than a fixed games/music client enum.
 
 ## Release acceptance
 

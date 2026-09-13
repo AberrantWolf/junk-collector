@@ -1,5 +1,10 @@
 //! Portable collection contracts. No filesystem, database, transport or UI dependencies.
+mod metadata;
+mod processing;
+
 use chrono::{DateTime, NaiveDate, Utc};
+pub use metadata::*;
+pub use processing::*;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -41,7 +46,11 @@ identity!(
     JobId,
     ImportId,
     TransactionId,
-    LoanId
+    LoanId,
+    PackageFileId,
+    ObservationId,
+    SnapshotId,
+    RecipeId
 );
 
 #[derive(
@@ -142,6 +151,58 @@ impl ModuleId {
             return Err(Error::Invalid("invalid module namespace".into()));
         }
         Ok(())
+    }
+}
+
+/// Durable collection ownership. `LegacyUnassigned` is a recovery/read state for
+/// archives created before collection ownership was recorded; typed creation
+/// accepts an assigned module separately and can never request this variant.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CollectionBinding {
+    Assigned {
+        module: ModuleId,
+    },
+    #[default]
+    LegacyUnassigned,
+}
+
+impl CollectionBinding {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::Assigned { module } => module.validate(),
+            Self::LegacyUnassigned => Ok(()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CollectionBinding {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            state: String,
+            module: Option<ModuleId>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let binding = match (wire.state.as_str(), wire.module) {
+            ("assigned", Some(module)) => Self::Assigned { module },
+            ("legacy_unassigned", None) => Self::LegacyUnassigned,
+            ("assigned", None) => {
+                return Err(serde::de::Error::custom(
+                    "assigned collection binding requires a module",
+                ));
+            }
+            ("legacy_unassigned", Some(_)) => {
+                return Err(serde::de::Error::custom(
+                    "legacy unassigned collection binding cannot name a module",
+                ));
+            }
+            _ => return Err(serde::de::Error::custom("unknown collection binding state")),
+        };
+        binding.validate().map_err(serde::de::Error::custom)?;
+        Ok(binding)
     }
 }
 
@@ -341,12 +402,40 @@ pub struct ProviderIdentity {
     pub provider: ModuleId,
     pub value: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Collection {
     pub id: CollectionId,
     pub revision: Revision,
     pub name: String,
     pub created_at: DateTime<Utc>,
+    /// Absent in pre-CT.2 creation manifests. Deserialization classifies those
+    /// archives without rewriting their immutable original metadata.
+    #[serde(default)]
+    pub binding: CollectionBinding,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionBindingRevision {
+    pub collection_id: CollectionId,
+    pub revision: Revision,
+    pub binding: CollectionBinding,
+    pub assigned_at: DateTime<Utc>,
+    pub provenance: String,
+}
+
+impl CollectionBindingRevision {
+    pub fn validate(&self) -> Result<()> {
+        if self.revision.0 < 2 || self.provenance.trim().is_empty() {
+            return Err(Error::Invalid("invalid collection binding revision".into()));
+        }
+        if !matches!(self.binding, CollectionBinding::Assigned { .. }) {
+            return Err(Error::Invalid(
+                "collection binding revision must assign an owner".into(),
+            ));
+        }
+        self.binding.validate()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -847,6 +936,21 @@ pub struct CollectionGraph {
     pub assets: Vec<Asset>,
 }
 impl CollectionGraph {
+    pub fn validate_for_collection(&self, collection: &Collection) -> Result<()> {
+        self.validate(collection.id)?;
+        if let CollectionBinding::Assigned { module } = &collection.binding {
+            for item in &self.items {
+                if &item.domain.module != module {
+                    return Err(Error::Invalid(format!(
+                        "item {} domain owner {} does not match assigned collection owner {}",
+                        item.id, item.domain.module.0, module.0
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The archive can contain several collections, but durable entity IDs cannot
     /// be reused between them. Storage supplies the other collection snapshots.
     pub fn validate_disjoint(&self, other: &Self) -> Result<()> {

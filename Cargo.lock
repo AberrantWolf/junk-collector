@@ -445,6 +445,7 @@ dependencies = [
  "chrono",
  "collector-core",
  "collector-modules",
+ "hex",
  "junk-libs-audio",
  "serde",
  "serde_json",

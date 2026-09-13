@@ -1,5 +1,7 @@
 # Implementation status
 
+Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
+
 Wave 3 review follow-up (2026-09-11; validated review-fix commit): interrupted pre-commit cancellations now
 resolve the Job and Import together at startup. Recovery of a committed Capture
 finishes publication despite later Item edits, and does not reserve payload space
@@ -233,6 +235,31 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
+## Wave 4 plan
+
+[Wave 4 implementation handoff](wave-4-plan.md) defines the next 28 ordered
+implementation/review steps from baseline `c5c3ecf`. It covers game/CD processing,
+metadata, derivatives, backup/restore and native connection/trust/failover services.
+W4.0 is reviewed and corrected. W4.1's portable processing/metadata types,
+source-bound package-reader and application port contracts, deterministic source
+fingerprints, and split game/music module files are implemented locally, reviewed and corrected. They add no analyzer, provider I/O, persistence, API, or runtime support
+claim. The baseline/dirty-state inventory, API drift assessment, operation
+matrix, exact dependency/tool selections, migration reservations, generated fixture
+recipes and external-oracle instructions are recorded; schema reservations are
+advisory under the pre-release policy.
+W4.2 durable records and executors are implemented locally, reviewed and corrected.
+D04.1 is next. Archive schema 4 and catalog schema 4 cover processing observations,
+streamed snapshots, metadata authority, and conversion recipes; private schema 10
+persists frozen Job input and provisional Import observations. Import publication
+rebinds evidence to its committed Representation with checked file mapping and
+retained provenance. Registered dispatch, authorization, restart/cancellation,
+idempotent retry, archive-only recovery, and current-versus-historical summaries
+have executable coverage. No production analyzer, provider network adapter, or
+domain support qualification is claimed. The validation evidence and remaining
+limits are recorded in [validation](validation.md).
+The native user-testable surface in this wave is a diagnostic CLI; Slint,
+offline-library management and the Trash Amp provider remain later tickets.
+
 ## Required before the planned first release
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
@@ -270,3 +297,68 @@ Private schema v7 adds prepared command outcomes and grant revision counters. Sc
 Application-owned security snapshots preserve transactional authority guards. Disabling accounts revokes browser/native access and pending enrollments permanently; replacing recovery codes preserves paired devices and pending enrollment. Grant removal never resets its revision history. Passkey ceremonies finalize against their original verified credential snapshot; the virtual-authenticator browser regression rejects stale ceremonies through HTTP.
 
 The review findings and A04.5 are closed. Linux filesystem/power-loss/NAS qualification, real authenticators, trusted remote-browser HTTPS, and native platform secure storage remain explicitly unqualified; these are not claims of the local tests.
+
+## Collection-type correction checkpoint
+
+[CT.1](collection-types-plan.md#ct1--ownership-and-module-contracts) is implemented,
+reviewed and corrected. Game processing
+results and music verification policy now belong to their modules; only genuinely
+shared CD/PCM coordinates and layout remain in core. Module descriptors declare
+bounded scalar/read-only fields and explicit operation scope. Owner-dispatched
+typed patches preserve omitted and untouched raw values, distinguish explicit null,
+and reject unknown/wrong-typed edits. Successful operation output and typed metadata
+domain overrides require owner validators.
+
+[CT.2](collection-types-plan.md#ct2--persistence-and-existing-collections) is
+reviewed and corrected locally. New collections persist an
+Assigned owner selected from the registered module registry; creation idempotency,
+recovery intent, collection DTOs and generated API contracts include that identity.
+Pre-CT.2 manifests deserialize as LegacyUnassigned without rewriting original files
+and remain readable; graph publication rejects unassigned collections. Local administrator inspection reports exact
+current item-domain counts, assignment eligibility, pending work, active authority
+conflicts and preserved historical overrides. Explicit homogeneous/empty assignment
+uses an optimistic, provenance-bearing collection metadata revision through the
+existing journal and is reconstructible from archive alone. Generic graph validation,
+normal publication and reindex reject item-domain/assigned-owner mismatches.
+
+Assignment validates full active authority payloads and pending operation scope;
+unknown active jobs block assignment, and retries honor the original expected revision.
+The CLI requires the stopped server and exclusive store access. A minimal browser
+creation picker now sends the explicitly selected module using the existing feature
+list.
+
+[CT.3](collection-types-plan.md#ct3--application-policy-and-jobs) is implemented
+and reviewed locally. One application policy now gates all implemented
+collection-content mutation families on Curate authority, Assigned binding, an
+installed owner and supported Item schema. Collection-domain analysis/processing
+must belong to that owner; explicitly SharedMedia operations remain usable across
+collection types. Durable processing/acquisition jobs freeze the binding and recheck
+it, operation ownership/version and module availability at execution/publication.
+Long import publication rechecks policy after copying bytes and before Capture
+commit, preserving sources on denial. Stored unsupported schemas cannot be replaced
+through ordinary edits. Already committed integrity recovery does not rehash payloads.
+Already committed recovery completes without modules or grants. Legacy/unavailable
+reads, authorized existing media/Artwork, personal activity and access administration
+remain available under their independent policies.
+
+[CT.4](collection-types-plan.md#ct4--user-facing-integration-and-completion) is
+reviewed and corrected locally. Authenticated clients receive bounded
+collection-type descriptors from the application registry; public feature discovery
+does not expose that registry. Collection and Item DTOs carry server-computed content
+editability and distinct assigned, legacy-unassigned, missing-owner and unsupported-
+schema availability. Generic web forms inherit the collection owner, render module-
+declared text/integer fields, visibly preserve structured fields as read-only, and
+send owner-mediated patches rather than replacement module JSON. Browse labels and
+safe summaries are descriptor/presentation driven, with no game/music module-ID UI
+switch. A test-only third module passes create/edit/browse/reindex and forged-input
+validation through real services, and Chromium covers a valid homogeneous archived
+collection whose owning module is absent.
+Unavailable module fallback remains readable; runtime plugins, automatic conversion,
+legacy graph splitting and type changes are outside this refactor. Historical field
+authority remains preserved verbatim and is never activated by assignment.
+
+CT.4 review also fixes stable patch-command receipts, unsupported-schema form
+controls and descriptor-independent access administration. Integer edits cannot
+silently round beyond the browser's safe range. The generic third-module browser
+fixture checks submission types; its production persistence remains covered by
+real HTTP/service/reindex tests. D04.1 is the next implementation child.

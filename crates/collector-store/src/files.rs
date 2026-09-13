@@ -472,9 +472,14 @@ impl Store {
         Ok(id)
     }
     pub(crate) fn commit_upload_record(&self, id: JobId) -> Result<Item> {
-        self.commit_upload_inner(id, None, None)
+        self.commit_upload_inner(id, None, None, &mut || Ok(()))
     }
-    pub(crate) fn commit_upload_job_record(&self, id: JobId, claim_token: &str) -> Result<Item> {
+    pub(crate) fn commit_upload_job_record(
+        &self,
+        id: JobId,
+        claim_token: &str,
+        before_publish: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<Item> {
         let (created_at, request): (i64, String) = lock(&self.db)?
             .query_row(
                 "SELECT created_at,request FROM private.jobs WHERE id=? AND claim_token=?",
@@ -492,7 +497,8 @@ impl Store {
             self.stage_inbox_upload_record(id, claim_token, Path::new(source_locator))?;
         }
         let journals = publication::PublicationJournalStore::new(&self.archive);
-        let result = self.commit_upload_inner(id, Some(claim_token), Some(created_at));
+        let result =
+            self.commit_upload_inner(id, Some(claim_token), Some(created_at), before_publish);
         if matches!(result, Err(Error::JobCancelled))
             && journals
                 .phase(TransactionId(id.0))?
@@ -506,7 +512,12 @@ impl Store {
         {
             self.reindex()?;
             finish_v3_publication(self, TransactionId(id.0))?;
-            return self.commit_upload_inner(id, Some(claim_token), Some(created_at));
+            return self.commit_upload_inner(
+                id,
+                Some(claim_token),
+                Some(created_at),
+                before_publish,
+            );
         }
         result
     }
@@ -561,6 +572,7 @@ impl Store {
         id: JobId,
         claim_token: Option<&str>,
         durable_created_at: Option<chrono::DateTime<Utc>>,
+        before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<Item> {
         let _guard = lock(&self.uploads)?;
         let _writer = lock(&self.writer)?;
@@ -661,12 +673,12 @@ impl Store {
                     })
                     .collect::<Vec<_>>();
                 self.publish_capture_payloads(
-                    TransactionId(upload.id.0),
                     upload.id,
                     collection_root,
                     capture,
                     &sources,
                     claim_token,
+                    before_publish,
                 )?
             }
         };
@@ -695,13 +707,14 @@ impl Store {
 
     pub(crate) fn publish_capture_payloads(
         &self,
-        transaction_id: TransactionId,
         job_id: JobId,
         collection_root: &Path,
         capture: Capture,
         sources: &[PathBuf],
         claim_token: Option<&str>,
+        before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<Capture> {
+        let transaction_id = TransactionId(job_id.0);
         if sources.len() != capture.representations[0].files.len() {
             return Err(Error::Storage(
                 "Capture payload source inventory changed".into(),
@@ -824,6 +837,12 @@ impl Store {
         {
             let _publication_gate = lock(&self.job_publication_gate)?;
             self.ensure_job_continues(job_id, claim_token)?;
+            if let Err(error) = before_publish() {
+                // Payload copies are still provisional. Retain upload sources while
+                // clearing this uncommitted attempt so an authorized retry can resume.
+                journals.abort(transaction_id)?;
+                return Err(error);
+            }
             let revision_destination = self.archive.join(&revision_relative);
             fs::create_dir_all(revision_destination.parent().unwrap()).map_err(storage)?;
             if revision_destination.exists() {

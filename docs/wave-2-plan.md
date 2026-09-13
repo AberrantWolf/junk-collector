@@ -1,5 +1,7 @@
 # Junk Collector Wave 2 execution plan
 
+Historical delivery plan. For new work, [pre-release evolution](decisions/pre-release-evolution.md) supersedes compatibility-only requirements here; completed migration evidence remains historical fact.
+
 Status: approved for execution on 2026-09-09. Child tickets remain planned until their own acceptance criteria and review checkpoints pass. Wave 1 is commit `e4cb6c5`.
 
 ## Readiness assessment

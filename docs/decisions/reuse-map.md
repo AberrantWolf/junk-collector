@@ -1,5 +1,7 @@
 # Reuse, extraction, and fixture map (D01)
 
+Schema reservations below record earlier planning, not fixed compatibility obligations. New work follows [pre-release evolution](pre-release-evolution.md) and actual persisted state.
+
 Status: accepted inventory gate, 2026-09-09. This is a read-only assessment. An
 operation is **supported** only when its source API and independent fixture establish
 the stated byte/coordinate domain; **unqualified** means useful code exists but the
@@ -148,3 +150,92 @@ The current divergence, old Phono pin, Retro license placeholder, Phono's stale
 "future offset" documentation, dirty Trash Amp checkout, single-track identification
 helpers, and externally gated real-dump/audio/hardware tests are blockers or
 qualifications owned by D02-D05; none is silently declared resolved by this map.
+
+## Wave 4 baseline and qualification lock-in — 2026-09-11
+
+This section is additive to the dated D01/D02 inventory above. No sibling checkout
+was changed. Collector is `c5c3ecfb2ada2624e780ac128b290e4c37f1d468` with the
+user's Wave 4 plan/status/backlog documentation edits present at inspection.
+
+| Checkout | Current revision and working state | Drift from the prior inventory |
+|---|---|---|
+| `../junk-libs` | `91dd63dc1d06d711e61d238c3291423466ccb281`, clean | D02/D03 shared DAT, AccurateRip, disc-ID, audio and playback work is now committed; current `main` remains ahead of `origin/main` |
+| `../retro-junk` | `d36bc9aefbd4251e72a684b168d3ee66af5f2e3a`, only the two previously recorded untracked sync files | consumes shared ordered disc hashing and neutral DAT parsing; MIT attribution placeholder remains unresolved; `main` is ahead of `origin/main` |
+| `../phono-junk` | `f459c5161225223f3799b86fc6580b6b03e1f8ba`, only untracked `AGENTS.md` | consumes shared disc-ID and AccurateRip primitives; its published dependency still does not pin the current unpublished junk-libs revision; `main` is ahead of `origin/main` |
+| `../trash-amp` | `cb95c57e7acbf249ccc1b0038dbf1bf339910e63`, with the substantial unrelated tracked/untracked edits listed above | migrated playback/audio consumers to shared services; the user worktree remains dirty and must not be overwritten; `main` is ahead of `origin/main` |
+
+The D02/D03 APIs still match the Wave 4 boundary: `MultiHasher` streams exact
+bytes; `compute_cue_track_spans` accepts declared CUE names and a length resolver;
+`visit_chd_raw_tracks` yields ordered raw 2352-byte frames; `junk-libs-dat::parse_dat`
+accepts `BufRead`; `junk-libs-disc-id` validates typed TOCs; `CueAudioReader` and
+redumper `RawAudioReader` expose seekable integer stereo frames; and
+`junk-libs-audio` keeps playback PCM floating-point. The planned D05.1 work remains
+real: `verify_with_offsets` still takes `Vec<DiscTrackSamples>` and constructs a
+whole-disc vector plus two prefix arrays, so it does not satisfy the 64-MiB reader
+budget. There is also no generic host-level preservation PCM reader yet. These are
+known gaps, not API drift that changes the selected extraction.
+
+### Frozen schema and dependency selections
+
+- Archive envelope schema 4 is additive. Private database v10 is reserved for
+  processing Job/checkpoint references and v11 for TLS rotation. Rebuildable
+  catalog schema v4 owns all new Wave 4 portable projections. Client connection
+  schemas v1 (C01) and v2 (S04 rotation) are independent.
+- Shared algorithms use the path checkout `junk-libs` 0.1.0 at
+  `91dd63dc1d06d711e61d238c3291423466ccb281`; publishing or an immutable Git pin
+  is required before a distributable build. No floating Git dependency is allowed.
+- DAT parsing is `junk-libs-dat` 0.1.0 at that revision with `quick-xml` 0.37.5.
+  CHD reading is `chd` 0.3.4. Provider HTTP composition stays on the Collector
+  lockfile's `reqwest` 0.12.28 and `rustls` 0.23.44.
+- D03 playback decoding/resampling remains `symphonia` 0.5.5 and `rubato` 0.16.2.
+  D07 production encoding uses directly spawned `flac` 1.5.0 for the first golden
+  FLAC gate. `opusenc` is not installed at this baseline, so no Opus golden version
+  is selected or claimed; D07.1 must record and pin the available `opusenc --version`
+  before enabling that profile. Phono's `flac-bound` 0.5.0 / `metaflac` 0.2.8 path
+  remains an inspected reference, not the selected Collector encoder adapter.
+- The optional CHD oracle is `/opt/homebrew/bin/chdman` 0.285. A different version
+  produces a distinct qualification row rather than silently replacing this one.
+
+### Wave 4 advertised-operation matrix
+
+“Advertised” here means eligible to become a registered capability only after the
+named child and oracle pass; every row remains unavailable/unqualified at W4.0.
+
+| Operation | Input domain -> output domain and exact target API | Feature/dependency | Fixture/oracle and provenance | W4.0 status |
+|---|---|---|---|---|
+| Raw game hashing | ordered authorized package readers -> raw SHA-256/CRC32/SHA-1 observation; `MultiHasher::{new,update,finalize}` | `junk-libs-core` | D04 `raw-published` vector; public published `123456789` digest vector; MIT/generated | ready for D04.1 qualification |
+| NES iNES/NES2 payload hashing | one validated iNES reader -> trainer-free normalized payload digest/version | game-formats extraction | D04 `ines-payload` and iNES/trainer composites; NES2/malformed-length cases and exact format-reference provenance remain D04.1 | unqualified; trainer-bearing input must be declined until separately proven |
+| N64 z64/v64/n64 normalization | one reader -> canonical big-endian ROM digest/version | game-formats extraction | D04 three byte-order recipes with independently fixed canonical bytes; generated | unqualified |
+| SNES copier-header handling | one reader -> explicitly qualified headerless payload digest/version | game-formats extraction | D04 paired 32-KiB generated payload/header recipe; format oracle still required | externally unqualified |
+| PCE copier-header handling | one reader -> explicitly qualified bank-aligned payload digest/version | game-formats extraction | D04 paired 8-KiB generated payload/header recipe; format oracle still required | externally unqualified |
+| Ordered BIN/CUE raw-2352 hashing | CUE plus complete ordered package readers -> per-track raw-byte digests/layout | `junk-libs-disc::compute_cue_track_spans` | D04 two-track generated recipe; stored/synthetic pregap variants required in D04.1 | ready for synthetic qualification; real mixed mode unqualified |
+| CHD raw-CD track hashing | authorized CHD reader -> ordered raw-2352 digests/layout | `junk-libs-disc`, `chd` 0.3.4, `chdman` 0.285 oracle | D04 CHD recipe/digest to be generated by pinned tool | disabled until oracle passes |
+| DAT snapshot parse/match | bounded raw DAT snapshot -> typed catalog rows and zero/unique/ambiguous/partial result | `junk-libs-dat`, `quick-xml` 0.37.5 | D04.2 must add equivalent XML/text bodies and duplicate/reordered cases; seed manifest does not contain them | planned D04.2; no match support claimed |
+| CD CUE/redumper layout | declared package readers/sidecars -> typed sectors, tracks, INDEX 00/01 and gap ownership | `junk-libs-disc` | D05 generated CUE/PCM plus Phono published layouts; owned dump via `JUNK_COLLECTOR_W4_CD_DUMP_ROOT` | generated layouts ready; real redumper/mixed mode external |
+| CD IDs | validated typed TOC sectors -> MusicBrainz/FreeDB/AccurateRip IDs; `calculate_disc_ids` | `junk-libs-disc-id` | D05 ARver 3-track published values | qualified primitive; Collector integration planned D05.1 |
+| AccurateRip v1/v2 and signed offset search | exact i16 stereo 44.1-kHz frames -> per-track checksums and signed stereo-frame offset result | `junk-libs-accuraterip`; new bounded reader API | D05 extremes plus ARver/CUETools vectors; owned dump via `JUNK_COLLECTOR_W4_CD_DUMP_ROOT` | vector primitive exists; bounded path and real dump unqualified |
+| AccurateRip dBAR acquisition | frozen typed disc query -> bounded raw response plus parsed snapshot | provider adapter, `reqwest` 0.12.28 | recorded dBAR response/local HTTP fixture; live opt-in only | planned D05.2 |
+| Metadata resolution | portable candidates/authority -> effective typed display fields/artwork selection | app resolver | D06 generated multilingual bytes plus separate identity-evidence inputs; full provider and unknown-field history tests remain D06 | planned D06.1 |
+| MusicBrainz/CAA/DAT metadata | frozen identifiers/search -> bounded raw response, candidates and Asset input | provider adapter, reqwest/rustls, shared limiter | recorded responses/local HTTPS fixture; live opt-in | planned D06.2; never audio verification |
+| FLAC level 5 | exact i16 stereo 44.1-kHz reader -> immutable FLAC recipe/output plus decoded-PCM validation | configured `flac` 1.5.0 | D07 extreme PCM recipe and later encoded golden; generated | planned D07.1 |
+| Opus 96/128/192 kbps | exact source PCM -> immutable 48-kHz stereo music-mode Opus recipe/output | configured version-pinned `opusenc` | D07 PCM recipe; golden blocked on absent tool | unavailable at baseline |
+| Portable export/change inventory | frozen archive revisions -> verified directory bundle/inventory digest | Store/app export ports | P05 unknown lexical JSON and failure recipes; generated | planned P05.1 |
+| Full backup/restore | stopped archive/private/config/scratch -> validated restoration or independent clone | SQLite backup API, both process locks | P05 temporary-root matrix | planned P05.2 |
+| Persistent native connection | enrollment/trust observations -> client DB v1 plus secure secret reference | SQLite; macOS Keychain adapter | C01 single-route seed; C01.1 must add two-server/two-profile cases; opt-in `JUNK_COLLECTOR_W4_KEYCHAIN_TEST=1` | planned C01.1; Keychain external |
+| Authenticated route/typed transfer | enrolled local TLS or Web PKI origin -> typed DTO/media bytes | rustls 0.23.44/reqwest 0.12.28 | C01 local TLS fixtures and immutable body digest | planned C01.2/C01.3 |
+| TLS trust rotation | authenticated transition over existing trust -> client/server generation state | rustls/Axum server, schemas private v11/client v2 | S04 transition/state recipes; independent security review required | planned S04; no cryptographic qualification claimed |
+| Discovery/probing | DNS-SD/configured host hints -> uncredentialed bounded candidates/health | production mDNS adapter | C02 forged/expiry recipes; real LAN via `JUNK_COLLECTOR_W4_LAN_TEST=1` | planned C02.1; multicast external |
+| Ranged failover | immutable manifest plus trusted routes -> verified final bytes/resume state | HTTP Range/If-Range, TLS | C02 body/digest and deterministic disconnect recipes; real tailnet via `JUNK_COLLECTOR_W4_TAILNET_TEST=1` | planned C02.2; LAN/tailnet external |
+
+Fixture recipes and exact expected digests live under `fixtures/wave4/`. Retro's
+license placeholder, unpublished shared pins, absent `opusenc`, private owned-dump
+input, Keychain, independent security review, and real LAN/mDNS/tailnet environments
+remain visible gates. None is converted into a passing result by this lock-in.
+
+W4.0 review correction: `scripts/check_wave4_fixtures.py` now reproduces every
+seed vector/composite and is part of the normal architecture check. Seed-byte
+checks do not certify normalization, provider schemas, PCM correctness or TLS.
+D06 candidate strength comes from separate test-supplied identity evidence, never
+provider search score; the incomplete S04 transition must fail complete parsing.
+The Opus version and other named external/semantic gates remain open for their
+owning children. They do not block W4.1 contract work.

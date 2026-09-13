@@ -10,15 +10,16 @@ use axum::{
 };
 use collector_app::{
     AccountUpdate, AccountView, AuthenticatedPrincipal, CollectionService, CommandContext,
-    ComponentDetails, CreateAssetCommand, CreateImportCommand, DisposeSpecimenCommand,
-    EnrollmentStart, EnrollmentView, GrantView, ImportSourceKind, ImportSourceSummary, ImportView,
-    JobView, MediaResource, NativeDeviceView, PasskeyView, PresentedAsset, PresentedCollection,
-    PresentedEvidence, PresentedItem, ReturnLoanCommand, ReviewImportCommand, SaveItemCommand,
-    SessionView, SpecimenDetails, StartLoanCommand, UpdateAssetCommand,
+    ComponentDetails, CreateAssetCommand, CreateCollectionCommand, CreateImportCommand,
+    DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView, ImportSourceKind,
+    ImportSourceSummary, ImportView, JobView, MediaResource, NativeDeviceView, PasskeyView,
+    PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem, ReturnLoanCommand,
+    ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails,
+    StartLoanCommand, StartProcessingCommand, UpdateAssetCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
-use collector_modules::{Availability, Registry};
+use collector_modules::{ModuleDescriptor, Registry};
 use collector_store::{Store, Upload, UploadFile};
 use serde::Deserialize;
 use std::{
@@ -50,7 +51,11 @@ pub struct AppState {
 }
 impl AppState {
     pub fn new(store: Arc<Store>, pairing: Pairing) -> Self {
-        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        Self::new_with_registry(store, pairing, Arc::new(Registry::builtins()))
+    }
+
+    pub fn new_with_registry(store: Arc<Store>, pairing: Pairing, modules: Arc<Registry>) -> Self {
+        let service = CollectionService::new(store.clone(), modules);
         Self {
             store,
             service,
@@ -461,6 +466,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_enrollment))
         .routes(routes!(native_devices))
         .routes(routes!(revoke_native_device))
+        .routes(routes!(collection_types))
         .routes(routes!(collections))
         .routes(routes!(browse))
         .routes(routes!(item))
@@ -486,6 +492,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(return_loan))
         .routes(routes!(dispose_specimen))
         .routes(routes!(verify))
+        .routes(routes!(start_processing_operation))
         .routes(routes!(create_upload))
         .routes(routes!(create_provisional_import))
         .routes(routes!(provisional_import))
@@ -680,31 +687,12 @@ pub struct IdentityResponse {
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
-pub struct FeatureCapability {
-    pub name: String,
-    pub available: bool,
-    pub limitation: Option<String>,
-    pub id: collector_modules::CapabilityId,
-    pub display_name: String,
-    pub availability: Availability,
-}
-
-#[derive(serde::Serialize, utoipa::ToSchema)]
-pub struct ModuleFeature {
-    pub id: ModuleId,
-    pub schema_version: u32,
-    pub display_name: String,
-    pub capabilities: Vec<FeatureCapability>,
-}
-
-#[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct FeaturesResponse {
     pub default_username: Option<String>,
     pub multi_user: bool,
     pub curation: bool,
     pub administration: bool,
     pub passkeys: bool,
-    pub modules: Vec<ModuleFeature>,
 }
 
 #[utoipa::path(get, path = "/api/v1/identity", responses((status = 200, body = IdentityResponse)))]
@@ -716,44 +704,6 @@ async fn identity(State(state): State<AppState>) -> Json<IdentityResponse> {
 }
 #[utoipa::path(get, path = "/api/v1/features", responses((status = 200, body = FeaturesResponse)))]
 async fn features(State(state): State<AppState>) -> Json<FeaturesResponse> {
-    let modules = Registry::builtins()
-        .descriptors()
-        .into_iter()
-        .map(|module| {
-            let capabilities = module
-                .capabilities
-                .into_iter()
-                .map(|capability| {
-                    let (available, limitation) = match &capability.availability {
-                        Availability::Available => (true, None),
-                        Availability::Unavailable { limitation } => {
-                            (false, Some(limitation.clone()))
-                        }
-                    };
-                    FeatureCapability {
-                        name: capability
-                            .id
-                            .as_str()
-                            .rsplit('.')
-                            .next()
-                            .unwrap_or_default()
-                            .replace('-', "_"),
-                        available,
-                        limitation,
-                        id: capability.id,
-                        display_name: capability.display_name,
-                        availability: capability.availability,
-                    }
-                })
-                .collect::<Vec<_>>();
-            ModuleFeature {
-                id: module.id,
-                schema_version: module.schema_version,
-                display_name: module.display_name,
-                capabilities,
-            }
-        })
-        .collect::<Vec<_>>();
     Json(FeaturesResponse {
         default_username: (!state.multi_user).then(|| state.default_username.clone()),
         multi_user: state.multi_user,
@@ -762,7 +712,6 @@ async fn features(State(state): State<AppState>) -> Json<FeaturesResponse> {
             .exposure
             .allows(state.ingress, Surface::Administration),
         passkeys: state.passkeys.is_some(),
-        modules,
     })
 }
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -1089,6 +1038,14 @@ async fn revoke_native_device(
         .revoke_native_device(&actor, id, query.expected_revision, &context)?;
     Ok(StatusCode::NO_CONTENT)
 }
+#[utoipa::path(get, path = "/api/v1/collection-types", responses((status = 200, body = Vec<ModuleDescriptor>), (status = 401)))]
+async fn collection_types(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Vec<ModuleDescriptor>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(state.service.collection_type_descriptors(&actor)))
+}
 #[utoipa::path(get, path = "/api/v1/collections", responses((status = 200, body = Vec<PresentedCollection>), (status = 401)))]
 async fn collections(
     State(state): State<AppState>,
@@ -1129,6 +1086,12 @@ struct SaveItemCommandEnvelope {
 }
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
+struct SaveItemEditCommandEnvelope {
+    edit: SaveItemEditCommand,
+    expected_revision: Revision,
+}
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 struct Wave1SaveItemEnvelope {
     item: Item,
     expected_revision: Revision,
@@ -1137,6 +1100,7 @@ struct Wave1SaveItemEnvelope {
 #[serde(untagged)]
 enum SaveItemEnvelope {
     Command(SaveItemCommandEnvelope),
+    Edit(SaveItemEditCommandEnvelope),
     Wave1(Wave1SaveItemEnvelope),
 }
 impl<'de> serde::Deserialize<'de> for SaveItemEnvelope {
@@ -1149,15 +1113,22 @@ impl<'de> serde::Deserialize<'de> for SaveItemEnvelope {
         let object = shape
             .as_object()
             .ok_or_else(|| serde::de::Error::custom("item save must be an object"))?;
-        match (object.contains_key("command"), object.contains_key("item")) {
-            (true, false) => serde_json::from_str(raw.get())
+        match (
+            object.contains_key("command"),
+            object.contains_key("edit"),
+            object.contains_key("item"),
+        ) {
+            (true, false, false) => serde_json::from_str(raw.get())
                 .map(SaveItemEnvelope::Command)
                 .map_err(serde::de::Error::custom),
-            (false, true) => serde_json::from_str(raw.get())
+            (false, true, false) => serde_json::from_str(raw.get())
+                .map(SaveItemEnvelope::Edit)
+                .map_err(serde::de::Error::custom),
+            (false, false, true) => serde_json::from_str(raw.get())
                 .map(SaveItemEnvelope::Wave1)
                 .map_err(serde::de::Error::custom),
             _ => Err(serde::de::Error::custom(
-                "item save must contain exactly one of command or item",
+                "item save must contain exactly one of command, edit or item",
             )),
         }
     }
@@ -1173,8 +1144,21 @@ async fn save_item(
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
-            let (command, expected_revision) = match input {
-                SaveItemEnvelope::Command(input) => (input.command, input.expected_revision),
+            let saved = match input {
+                SaveItemEnvelope::Command(input) => state.service.save_item(
+                    &actor,
+                    id,
+                    input.command,
+                    input.expected_revision,
+                    &context,
+                )?,
+                SaveItemEnvelope::Edit(input) => state.service.save_item_edit(
+                    &actor,
+                    id,
+                    input.edit,
+                    input.expected_revision,
+                    &context,
+                )?,
                 SaveItemEnvelope::Wave1(input) => {
                     let command = state.service.adapt_wave1_item_save(
                         &actor,
@@ -1182,13 +1166,15 @@ async fn save_item(
                         input.item,
                         input.expected_revision,
                     )?;
-                    (command, input.expected_revision)
+                    state.service.save_item(
+                        &actor,
+                        id,
+                        command,
+                        input.expected_revision,
+                        &context,
+                    )?
                 }
             };
-            let saved =
-                state
-                    .service
-                    .save_item(&actor, id, command, expected_revision, &context)?;
             state.service.item_presented(&actor, saved.id)
         })
         .await?,
@@ -1910,6 +1896,28 @@ struct AnalyzeProvisionalImport {
     module: ModuleId,
 }
 
+#[utoipa::path(post, path = "/api/v1/captures/{id}/operations", params(("id" = CaptureId, Path), ("Idempotency-Key" = String, Header)), request_body = StartProcessingCommand, responses((status = 202, body = serde_json::Value), (status = 400), (status = 403), (status = 404), (status = 409)))]
+async fn start_processing_operation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CaptureId>,
+    Json(input): Json<StartProcessingCommand>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .enqueue_processing_operation(&actor, id, input, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
+}
+
 #[utoipa::path(post, path = "/api/v1/imports/{id}/analysis", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = AnalyzeProvisionalImport, responses((status = 202, body = serde_json::Value), (status = 404), (status = 409)))]
 async fn analyze_provisional_import(
     State(state): State<AppState>,
@@ -2501,25 +2509,16 @@ async fn reassign_default_user(
     blocking(move || state.service.reassign_default(&actor, id, &context)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
-#[derive(Deserialize, utoipa::ToSchema)]
-struct NewCollection {
-    name: String,
-}
-#[utoipa::path(post, path = "/api/v1/admin/collections", params(("Idempotency-Key" = String, Header)), request_body = NewCollection, responses((status = 200, body = Collection), (status = 403), (status = 409)))]
+#[utoipa::path(post, path = "/api/v1/admin/collections", params(("Idempotency-Key" = String, Header)), request_body = CreateCollectionCommand, responses((status = 200, body = Collection), (status = 403), (status = 409)))]
 async fn create_collection(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(input): Json<NewCollection>,
+    Json(input): Json<CreateCollectionCommand>,
 ) -> ApiResult<Json<Collection>> {
     let actor = authenticated(&state, &headers)?;
     let context = command_context(&headers)?;
     Ok(Json(
-        blocking(move || {
-            state
-                .service
-                .create_collection(&actor, &input.name, &context)
-        })
-        .await?,
+        blocking(move || state.service.create_collection(&actor, input, &context)).await?,
     ))
 }
 #[derive(Deserialize, utoipa::ToSchema)]

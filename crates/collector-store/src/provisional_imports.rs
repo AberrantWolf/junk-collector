@@ -1,7 +1,8 @@
 use super::*;
 use crate::files::safe_name;
 use collector_app::{
-    ImportIdentityDecision, ImportPhase, ImportRecord, ImportSourceKind, ProvisionalImportPort,
+    ImportIdentityDecision, ImportPhase, ImportRecord, ImportSourceKind, PortableProcessingRecord,
+    ProcessingPort, ProvisionalImportPort,
 };
 use rusqlite::TransactionBehavior;
 use std::collections::HashSet;
@@ -587,9 +588,10 @@ impl ProvisionalImportPort for Store {
         id: ImportId,
         job: JobId,
         claim_token: &str,
+        before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<ImportRecord> {
         let journals = publication::PublicationJournalStore::new(&self.archive);
-        let result = self.publish_import_inner(id, job, claim_token);
+        let result = self.publish_import_inner(id, job, claim_token, before_publish);
         let transaction = TransactionId(job.0);
         if matches!(result, Err(Error::JobCancelled))
             && journals
@@ -610,7 +612,7 @@ impl ProvisionalImportPort for Store {
         {
             self.reindex()?;
             finish_v3_publication(self, transaction)?;
-            return self.publish_import_inner(id, job, claim_token);
+            return self.publish_import_inner(id, job, claim_token, before_publish);
         }
         result
     }
@@ -638,6 +640,7 @@ impl Store {
         id: ImportId,
         job: JobId,
         claim_token: &str,
+        before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<ImportRecord> {
         self.ensure_job_continues(job, Some(claim_token))?;
         let _writer = lock(&self.writer)?;
@@ -713,6 +716,23 @@ impl Store {
             });
             sources.push(source);
         }
+        let provisional = self.provisional_observations(id)?;
+        for observation in &provisional {
+            let inventory =
+                self.package_inventory(record.view.collection_id, PackageScope::Import(id))?;
+            observation
+                .source_fingerprint
+                .validate_inventory(&inventory)?;
+            if observation
+                .source_fingerprint
+                .files
+                .iter()
+                .zip(&files)
+                .any(|(observed, staged)| observed.sha256 != staged.digest)
+            {
+                return Err(Error::Conflict);
+            }
+        }
         let capture = Capture {
             id: record.view.capture_id,
             collection_id: record.view.collection_id,
@@ -754,15 +774,88 @@ impl Store {
             }
             Err(Error::NotFound) => {
                 self.publish_capture_payloads(
-                    TransactionId(job.0),
                     job,
                     &collection,
                     capture.clone(),
                     &sources,
                     Some(claim_token),
+                    before_publish,
                 )?;
             }
             Err(error) => return Err(error),
+        }
+
+        // Provisional analysis is not portable evidence until its Import source
+        // has been rebound to the committed Representation inventory. The two
+        // fingerprints intentionally retain distinct scoped file identities.
+        if !provisional.is_empty() {
+            let import_inventory =
+                self.package_inventory(record.view.collection_id, PackageScope::Import(id))?;
+            let representation_inventory = self.package_inventory(
+                record.view.collection_id,
+                PackageScope::Representation(record.view.representation_id),
+            )?;
+            if import_inventory.files.len() != representation_inventory.files.len() {
+                return Err(Error::Storage(
+                    "published package inventory changed shape".into(),
+                ));
+            }
+            for observation in provisional {
+                observation
+                    .source_fingerprint
+                    .validate_inventory(&import_inventory)?;
+                let files = observation
+                    .source_fingerprint
+                    .files
+                    .iter()
+                    .zip(&representation_inventory.files)
+                    .zip(&files)
+                    .map(|((source, target), published)| {
+                        if source.sha256 != published.digest || source.bytes != target.bytes {
+                            return Err(Error::Storage("published package length changed".into()));
+                        }
+                        Ok(PackageFileFingerprint {
+                            id: target.id,
+                            bytes: target.bytes,
+                            sha256: source.sha256.clone(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let committed_fingerprint = SourceFingerprint::calculate(
+                    PackageScope::Representation(record.view.representation_id),
+                    files,
+                    observation.source_fingerprint.layout_profile_digest.clone(),
+                    observation.source_fingerprint.parameters.clone(),
+                )?;
+                let mappings = observation
+                    .source_fingerprint
+                    .files
+                    .iter()
+                    .zip(&committed_fingerprint.files)
+                    .map(|(source, target)| SourceFileRebinding {
+                        import_file_id: source.id,
+                        representation_file_id: target.id,
+                        bytes: source.bytes,
+                        sha256: source.sha256.clone(),
+                    })
+                    .collect();
+                let rebinding = ImportSourceRebinding {
+                    provisional_fingerprint: observation.source_fingerprint.clone(),
+                    committed_fingerprint: committed_fingerprint.clone(),
+                    files: mappings,
+                };
+                rebinding.validate()?;
+                let mut committed = observation;
+                committed.source_fingerprint = committed_fingerprint;
+                self.publish_processing_record_under_writer(
+                    JobId(committed.id.0),
+                    PortableProcessingRecord {
+                        observation: committed,
+                        import_rebinding: Some(rebinding),
+                    },
+                    &mut || Ok(false),
+                )?;
+            }
         }
 
         let evidence = archive_v3::EvidenceRecordV3 {

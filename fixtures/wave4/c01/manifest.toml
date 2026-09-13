@@ -1,0 +1,16 @@
+schema = 1
+root = "C01"
+license = "Generated connection manifest"
+
+[[vectors]]
+id = "one-server-local-route"
+recipe = "utf8"
+utf8 = '{"server_id":"018f0000-0000-7000-8000-000000000001","routes":["https://collector.local:7443"]}'
+length = 94
+sha256 = "ff916d9635eca9caec7c0afd942ae9f935e99497f59bd39fe3c3935d6a10fff2"
+expected = "route is only a suggestion until TLS and authenticated server/profile identity checks pass"
+
+[external_keychain]
+environment = "JUNK_COLLECTOR_W4_KEYCHAIN_TEST"
+enabled_value = "1"
+status = "externally unqualified when unset or off"

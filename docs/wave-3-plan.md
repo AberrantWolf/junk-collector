@@ -1,5 +1,7 @@
 # Junk Collector Wave 3 execution plan
 
+Historical delivery plan. For new work, [pre-release evolution](decisions/pre-release-evolution.md) supersedes compatibility-only requirements here; completed migration evidence remains historical fact.
+
 Status: implemented and reviewed locally, with validated review corrections on
 2026-09-11. The initial ledger ends at `756e251`; the subsequent review-fix commit
 includes the corrections below. Wave 2 was the implementation

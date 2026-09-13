@@ -1,5 +1,260 @@
 # Validation recorded for the foundation
 
+# CT.2 persistence and legacy assignment checkpoint — 2026-09-11
+
+- Added durable collection binding to runtime collections, presented DTOs, typed
+  creation receipts/recovery and generated contracts. New creation requires a
+  registered module; retries preserve the same type/grant and another type under the
+  same key conflicts.
+- Legacy manifests with no binding are classified without rewrite and are readable
+  but content-read-only. Local administrator inspection and explicit assignment use
+  application-owned policy over mechanism-only store facts; names, files and provider
+  identities are never used to infer ownership.
+- Assignment checks all current projected items including tombstones, pending
+  imports and pre-commit jobs with known owner identity, current metadata authority,
+  and preserved historical override entries. Mixed and unknown collections remain
+  unassigned with actionable explanations; empty assignment still requires the
+  operator to name the module.
+- Assignment publishes a validated provenance-bearing `collection_metadata` revision
+  with the existing schema-3 journal and then updates the derived projection. Startup
+  recovery/reindex selects it by durable collection identity. Original creation and
+  item revision bytes and private grants remain unchanged; corrupt or ambiguous
+  sidecars fail closed.
+- Synthetic regressions cover game/music/third-module creation, type-bound
+  idempotency, every collection-assignment publication fault point, archive-only
+  rebuild without grants, directory rename, empty/single/mixed/unknown legacy cases,
+  rejected/repeated assignment, unchanged source bytes, and corruption atomicity.
+- Passed: `python3 scripts/check_architecture.py`; `cargo fmt --all -- --check`;
+  `cargo test --workspace --locked` (187 tests); `cargo clippy --workspace
+  --all-targets --locked -- -D warnings`; `npm --prefix web run check`;
+  `npm --prefix web run check:api`; `npm --prefix web run build`; and
+  `cargo build -p collector-server --locked`.
+- Browser smoke was not run because the browser type-selection workflow belongs to
+  CT.4 and is intentionally not implemented at this CT.2 review stop. No sibling
+  checkout, real user archive/configuration, commit, graph split, coercion, CT.3 or
+  CT.4 implementation was touched. CT.2 is awaiting technical review before CT.3.
+
+# CT.1 review corrections — 2026-09-11
+
+- Common metadata deserialization preserves unrecognized historical field entries
+  in an explicit bounded raw list. Artist/platform language and lexical values
+  survive without reintroducing domain-specific fields into core or applying them
+  under an inferred owner. Invalid known title/subtitle entries still fail.
+- Added a real archive-only reopen/reindex regression for prior artist/platform
+  authority records. Original record and manifest bytes remain unchanged; repeated
+  serialization/reindex does not duplicate preserved fields.
+- Catalog ambiguity requires at least two distinct provider/record identities;
+  repeated candidates and duplicate matched-file IDs are rejected. Permanent tests
+  cover invalid cases and a valid two-candidate result.
+- These fix both failing review probes. CT.2 must explicitly handle any preserved
+  domain authority during owner-aware conversion; no collection assignment is
+  performed by this correction.
+
+
+- Final checks passed: all 181 locked workspace tests, all-target Clippy with
+  warnings denied, architecture/link/fixture checks, formatting, diff checks,
+  TypeScript and generated API checks, web build and rebuilt server. No browser
+  behavior changed; browser smoke was not repeated.
+- CT.1 is reviewed and corrected; CT.2 is next. No commit or user-data conversion
+  was performed.
+
+# CT.1 ownership and module contract checkpoint — 2026-09-11
+
+- Added validated core binding wire contracts for Assigned module ownership and the
+  legacy read/recovery state. Runtime `Collection`, creation, persistence and DTOs
+  remain unchanged until CT.2; homogeneous collections are not claimed.
+- Built-in and test module descriptors now validate safe collection labels, bounded
+  scalar/read-only field descriptions, stable keys and explicit domain/shared-media
+  operation scope. The test-only stamp module still registers without a core kind.
+- Owner-mediated typed patches preserve omission, distinguish explicit null, retain
+  untouched structured/unknown raw values (including lexical numeric form), and
+  reject unknown keys, wrong scalar types, wrong owners and schema changes.
+- Game result/catalog/normalization contracts moved from core to `modules::games`.
+  AccurateRip outcome/confidence/checksum and CD result contracts moved to
+  `modules::music`; signed offsets, integer CD/PCM coordinates and shared track
+  layout remain in core. Exact serialized result fixtures, source fingerprint and
+  recipe digest goldens are unchanged.
+- Common metadata authority now contains only title/subtitle plus artwork/candidate
+  authority and an optional owner-bound lossless domain envelope. Game platform and
+  music artist overrides are typed and owner-validated. Existing authority JSON
+  omits the absent new field, preserving its prior wire body.
+- Registry dispatch invokes a required module result validator for every successful
+  operation before the result can reach application publication. The regression
+  suite rejects a success-shaped malformed third-module result; missing handlers
+  remain explicitly unavailable rather than successful no-ops.
+- Passed: `python3 scripts/check_architecture.py`; `cargo fmt --all -- --check`;
+  `cargo test --workspace --locked` (178 tests); `cargo clippy --workspace
+  --all-targets --locked -- -D warnings`; `npm --prefix web run check`;
+  `npm --prefix web run check:api`; `npm --prefix web run build`; and
+  `cargo build -p collector-server --locked`.
+- Browser smoke was not run because CT.1 changes no route, DTO, embedded web asset
+  or runtime user workflow. No sibling checkout, user archive/configuration, commit,
+  or CT.2 behavior was touched. CT.1 is stopped for technical review.
+
+# Wave 4 W4.2 review corrections — 2026-09-11
+
+- Enforced exact authorized package scope on the production module host; fixture
+  operations now assert denial for both another collection and another source.
+- Fixed SQL cursor pagination beyond the first window, including tied timestamps,
+  and reject unknown/out-of-scope cursors. Evidence currency uses server-owned
+  committed file records, not a caller-provided fingerprint; browsing does not
+  hash payloads. This is source currency, not a new verification result.
+- Reject stale provisional digests before Capture commit and verify the explicit
+  rebinding against published file digests. Portable observations require a
+  Representation source; package file IDs use explicit versioned encoding instead
+  of Debug formatting. Package readers reject paths escaping their storage root.
+- Validate archive record identities against their envelopes. Base and processing
+  projections rebuild in one transaction; a malformed processing record cannot
+  leave a partially replaced catalog. Added a real archive corruption regression.
+- Spool bounded provider streams outside the archive writer lock, recheck grants
+  during acquisition publication, and retain journal/hash validation at commit.
+  Recipe publication rejects immutable identity conflicts and missing sources.
+  Processing command receipts now bind the Capture path identity as well as input.
+- The contracts validate generic result envelopes; operation-specific game/CD
+  semantic validators still belong to their future domain handlers. No unavailable
+  analyzer/provider qualification is claimed by this review.
+- Updated remaining wave plans and release/architecture/backlog guidance with the
+  accepted pre-release evolution policy: coordinated breaking changes, explicit
+  preservation of actual data, immediate producer/consumer contract reviews, and
+  no speculative production placeholders or checkpoint compatibility mandate.
+- Two full runs exposed transient lock retention in different existing restart
+  tests, while the isolated recovery case passed. Store ownership now explicitly
+  unlocks at the last shared handle's drop rather than relying on descriptor close.
+  A deterministic duplicate-descriptor regression verifies release while preserving
+  exclusion until the final owner drops. This also covers early-open failures.
+
+
+- Final gates passed: all 173 locked workspace tests, final lock regression,
+  architecture/link/fixture checks, formatting, diff checks, warning-free all-target
+  Clippy, TypeScript, generated API drift, web build and subsequent server build.
+  Browser smoke was not repeated: no browser UI behavior changed. Existing HTTP
+  tests include the curation operation route exposure check.
+- W4.2 is reviewed and corrected; D04.1 is next. Changes remain uncommitted.
+
+# Wave 4 W4.2 implementation evidence — 2026-09-11
+
+- Added archive schema 4 processing observation, streamed snapshot, metadata
+  authority, and conversion-recipe records with catalog schema 4 projections and
+  mixed v3/v4 reindex. Existing archive bytes and unknown record directories remain
+  untouched; archive-only rebuild restores the portable processing history.
+- Added private schema 10 frozen Job inputs and provisional Import observations.
+  Existing user databases migrate additively in place; no reset or automatic data
+  deletion is performed. Because these are pre-release schemas, no permanent
+  reverse-compatibility machinery was added solely for earlier Wave checkpoints.
+- Added Import- and Representation-scoped package readers. Service-entry and
+  pre-publication checks bind inventories, fingerprints, typed results, metadata,
+  recipes, and snapshot metadata. Snapshot bodies are streamed and checked against
+  their recorded byte length and SHA-256 before commit.
+- Import publication checks the ordered provisional/committed file mapping and
+  rebinds observations to the committed Representation fingerprint while retaining
+  the provisional Import fingerprint and mapping as provenance. Legacy schema-3
+  evidence remains visibly limited rather than being promoted to current proof.
+- TDD coverage exercises v3/v4 rebuild and unknown preservation, raw streamed
+  snapshot recovery, corrupt snapshot rejection, cancellation followed by restart,
+  frozen acquisition recovery without a duplicate provider call, registered
+  operation retry/idempotence, revocation before and after commit, archive-only
+  Import recovery, invalid result/metadata/recipe rejection, and changed-input
+  current-versus-historical summaries with authorization denial.
+- Added the authenticated curation operation-enqueue API; generated OpenAPI and
+  TypeScript artifacts were regenerated. There is no production provider network
+  adapter, game/CD analyzer, metadata search workflow, derivative encoder, or new
+  browser UI in W4.2. D04.1 has not started.
+- Final checks passed: `python3 scripts/check_architecture.py`; `cargo fmt --all
+  -- --check`; `git diff --check`; `cargo test --workspace --locked` (170 tests);
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`; `npm --prefix
+  web run check`; `npm --prefix web run check:api`; `npm --prefix web run build`;
+  and `cargo build -p collector-server --locked`. Browser smoke was not run because
+  W4.2 adds no browser UI behavior; the server was rebuilt after generated API/web
+  artifacts changed.
+
+# Wave 4 W4.1 review corrections — 2026-09-11
+
+- Tightened package collision checks, fingerprint deserialization/inventory binding,
+  typed metadata authority, canonical conversion recipe digests and audio success
+  invariants. Recipe SHA-256 is checked against an independently calculated Python
+  vector; changed settings and duplicate tracks are rejected.
+- Unified stored operation and registry capability identities while retaining the
+  existing OpenAPI schema name. The compatibility reader rejects a host returning
+  the wrong Representation scope. Structural values retain numeric/Boolean types.
+- Separated frozen acquisition inputs from file processing, introduced bounded
+  streaming catalog/snapshot readers, and bounded observation pagination.
+- Added regression coverage for the above contracts. The initial three targeted
+  regressions failed before the fixes. No production provider or storage adapter
+  is claimed; W4.2 must enforce validation and authorization at its boundaries.
+- Final review gates passed: architecture/link/fixture checks, formatting, all 161
+  locked workspace tests, warning-free workspace/all-target clippy, TypeScript
+  check, generated API drift check, web build and subsequent server build. Focused
+  suites include 13 core, 8 module and 3 app processing contract tests. Browser
+  smoke was not repeated because no routes or web behavior changed.
+- W4.1 is reviewed and cleared for W4.2; changes remain uncommitted.
+
+# Wave 4 W4.1 initial implementation evidence — 2026-09-11
+
+- Added portable scoped package inventories/file identities, versioned deterministic
+  source fingerprints, processing observations/support outcomes, snapshot/recipe
+  identities, typed game/CD results with distinct sector/frame/offset units,
+  conversion recipes and metadata authority. Lossless module/raw JSON remains the
+  extension envelope.
+- Replaced module byte access with collection- and Import/Representation-bound
+  inventory/per-file handles. Tests deny wrong collection/source/file access,
+  reject missing and ambiguous one-file access, and resolve nested logical member
+  references without permitting package escape or exposing adapter paths.
+- Added source-bound processing, provider and snapshot application ports plus a
+  frozen execution input carrying source/snapshot identity, output identity and
+  timestamp. No provider network mechanism, analyzer, persistent row, route or
+  support qualification was introduced.
+- Split the built-in game/music implementations into focused files without changing
+  their outputs. A schema-2 third module operates over a two-file package without a
+  core enum or built-in-module special case.
+- Focused contract tests pass: 6 core, 6 module, and 2 application tests. The core
+  golden vector fixes the exact source-fingerprint bytes and SHA-256; changing only
+  a second track changes the identity; unknown lexical JSON round-trips unchanged.
+- Passed: `python3 scripts/check_architecture.py`; `cargo fmt --all -- --check`;
+  `cargo test --workspace --locked` (151 tests); `cargo clippy --workspace
+  --all-targets -- -D warnings`; `npm --prefix web run check`; `npm --prefix web
+  run check:api`; `npm --prefix web run build`; and `cargo build -p
+  collector-server --locked`. Browser smoke is not applicable because W4.1 changes
+  no web asset, route, or browser behavior.
+- Initial implementation stopped for review; see corrections above. W4.2 is not started.
+
+# Wave 4 W4.0 baseline and qualification lock-in — 2026-09-11
+
+- Re-read Collector architecture/status/release/backlog and every sibling
+  `AGENTS.md` before inspection. Collector remained at `c5c3ecf`; Junk Libs,
+  Retro, Phono and Trash Amp were inspected at the exact revisions and dirty states
+  recorded in the dated reuse map, without changing a sibling checkout.
+- Verified the D02/D03 public API boundary against source. The existing whole-disc
+  `DiscTrackSamples`/prefix allocation and missing generic preservation PCM host
+  contract remain explicit D05.1 work rather than being treated as complete.
+- Added eight per-root Wave 4 fixture manifests. A temporary checker parsed all
+  manifests and reproduced 22 inline/formula/composite source vector digests from
+  the declared bytes. Private dump, Keychain, security, LAN/mDNS and tailnet gates
+  remain external and unclaimed.
+- Passed: `python3 scripts/check_architecture.py`; `cargo fmt --all -- --check`;
+  `cargo test --workspace --locked` (142 tests); `cargo clippy --workspace
+  --all-targets -- -D warnings`; `npm --prefix web run check`; `npm --prefix web
+  run check:api`; and `npm --prefix web run build`.
+- Browser smoke and a Rust server rebuild were not run because W4.0 changes only
+  documentation and fixture manifests. No runtime Wave 4 capability or support
+  qualification is claimed. W4.1 is the next child after review.
+
+## W4.0 review corrections — 2026-09-11
+
+- Independently confirmed all four sibling HEAD/dirty states, selected Collector/
+  Junk Libs lockfile versions, FLAC 1.5.0, chdman 0.285, and the published TOC/ID
+  constants against the existing disc-ID test. No sibling files were changed.
+- Added a permanent bounded, non-evaluating fixture recipe checker and wired it
+  into the architecture check. All eight manifests and 22 byte/composite digests
+  reproduce, including declared SHA-1/CRC32 values. Temporary corrupted copies
+  prove rejection of bad digest, length, unknown recipe and missing root manifest.
+- Corrected D06's search-score/identity ambiguity with separate identity inputs;
+  marked S04's deliberately incomplete transition as a negative parser fixture.
+  Clarified planned versus implemented architecture and seed versus future fixtures.
+- Passed `python3 scripts/check_wave4_fixtures.py`,
+  `python3 scripts/check_architecture.py` and `git diff --check`. This review did
+  not rerun the unchanged Rust/browser suites; the baseline run above remains the
+  implementing agent's recorded evidence. W4.0 is cleared; W4.1 is the next child.
+
 # Wave 3 integration review — 2026-09-10
 
 - The permanent root-by-root acceptance trace is
@@ -1253,3 +1508,165 @@ Local process termination and virtual authenticators do not certify those surfac
 - Resume compares retained prefixes using bounded read-only chunk replay. This
   avoids mixing changed source files but retransfers the retained bytes for
   comparison. Target-Linux/NAS/power-loss and other external gates remain open.
+
+## CT.2 review corrections — 2026-09-11
+
+- Assignment validates complete active metadata authority through module validators,
+  not just owner IDs. Invalid typed payloads/schema envelopes block assignment;
+  preserved historical raw overrides remain inactive and unchanged.
+- Pending-work inspection distinguishes shared-media capabilities from domain
+  operations, blocks unknown active jobs, and uses explicitly selected import
+  candidates. Cancelled jobs cease blocking. Same-owner retries require the original
+  expected revision. Policy is isolated in the application's collection-types module;
+  storage supplies facts and journaled publication.
+- Restored browser collection creation with an explicit registry-driven type picker.
+  Updated the former mixed-owner smoke fixture to assert rejection and no published
+  item. Unavailable-owner browser fallback now needs a preserved archive fixture,
+  explicitly assigned to CT.4; the old successful-looking coverage claim was removed.
+- Passed: 190 locked workspace tests, strict all-target Clippy, formatting,
+  architecture/document/fixture checks, generated API drift check, TypeScript,
+  web build and embedded-assets server rebuild. Normal HTTPS/virtual-WebAuthn and
+  LOCAL_SETUP=1 browser smoke both pass with temporary server state/profiles.
+  Chrome required approved sandbox escalation; the sandbox-only launch aborted.
+  Initial browser attempts exposed an exact-label locator mismatch and the obsolete
+  mixed-owner fixture; both were corrected before the successful runs.
+- CLI inspection/assignment require exclusive stopped-server access. README includes
+  the commands and eligibility limitations. At this CT.2 checkpoint, CT.3 still
+  owned complete application/job
+  write gating; CT.4 owns descriptor-driven forms and unavailable-owner browser
+  coverage. No user archive was changed, sibling repository modified, or commit made.
+
+## CT.3 local implementation — 2026-09-11
+
+- Centralized application content-write policy covers focused and Wave 1 Item,
+  specimen/component/loan, Work/Edition/Capture, Asset, legacy upload, provisional
+  Import, integrity, acquisition and processing boundaries. It requires Curate,
+  Assigned ownership, an installed owner and supported Item schema. Provisional
+  Import inspection was deliberately left as an authorized read.
+- Import analysis and selected candidates are owner-bound at enqueue, execution,
+  review and publication. Registry-declared SharedMedia processing remains allowed
+  without changing collection identity. Frozen processing/acquisition inputs bind
+  the Assigned owner; queued work rechecks binding, module, scope and version.
+- Missing-owner queued work fails durably. Existing snapshots/observations and
+  revision-committed archive effects reconcile before availability/grant checks.
+  An acquisition crash-after-commit regression now completes with an empty module
+  registry and does not reacquire provider bytes.
+- Legacy and unavailable-owner content remains readable. Tests prove activity and
+  grant management remain independent, existing Artwork bytes remain authorized,
+  and new Item/inventory/Import mutations are denied. Wrong-owner/unsupported-schema
+  Item input and cross-owner analysis are rejected before persistence. Wishlist and
+  unidentified/no-Capture inventory remain valid.
+- Passed: architecture/document/fixture checks; 193 locked workspace Rust tests;
+  warning-free locked all-target Clippy; Rust formatting; generated API drift and
+  TypeScript checks; web build. The embedded server rebuild is recorded after the
+  final documentation pass. No browser smoke was rerun because CT.3 changes no web
+  workflow; existing HTTP tests cover listener composition, viewer and
+  cross-collection denials. No user archive, sibling checkout or commit was touched.
+- Metadata-authority and recipe publication still have mechanism-only W4.2 ports,
+  not production application entry points. CT.3 did not add placeholder APIs; the
+  real D06/D07 producers must use the centralized policy. CT.4 remains unimplemented.
+
+## CT.3 review corrections — 2026-09-11
+
+- Moved shared collection write eligibility into the application collection-types
+  module and removed a duplicate grant lookup. Ordinary and compatibility Item
+  edits validate the stored schema as well as submitted data, preventing an edit
+  from overwriting unsupported preserved payloads. A regression retains raw numeric,
+  structured and unknown values unchanged after rejected downgrade attempts.
+- Long import workers now pass an application-policy guard to the shared Capture
+  commit mechanism. It runs after payload staging, immediately before a new revision
+  commits, and is skipped during completion of an existing commit. Denial aborts
+  provisional copies/journal only; original upload sources remain retryable. Both
+  legacy and provisional import paths have denial/retry regression coverage.
+- Integrity jobs recheck eligibility during progress and before publication.
+  Revision-committed recovery finishes without hashing again. The existing crash
+  regression now changes payload bytes after evidence commit and reopens with no
+  module registry, proving recovery preserves that historical evidence.
+- Legacy upload cancellation, like provisional import/job cancellation, remains
+  available when the owner module disappears; further content writes stay denied.
+- Passed: 197 locked workspace tests, warning-free all-target Clippy, formatting,
+  architecture/document/fixture checks, generated API drift and TypeScript checks,
+  web build and rebuilt embedded-assets server. The initial new denial/retry tests
+  found an uncleared provisional journal; cleanup was corrected before these passes.
+- CT.4 remains responsible for authenticated descriptors, availability-aware UI
+  permissions, owner-driven forms and valid unavailable-owner browser fixtures.
+  Policy rechecks do not claim an atomic transaction with concurrent grant changes.
+  No user archive or sibling checkout was modified; no commit was made.
+
+The CT.3 normal HTTPS/WebAuthn browser flow passes. Its first run caught a smoke
+assertion coupled to the former storage error prose; the test now checks the stable
+structured error code while retaining rejection/no-publication assertions.
+
+The private LOCAL_SETUP=1 browser flow also passes. Both runs used isolated Chrome
+profiles and temporary server/archive state with approved sandbox escalation.
+
+## CT.4 local implementation — 2026-09-13
+
+- Added an authenticated application query and `/api/v1/collection-types` read API
+  for the active registry's validated descriptors. The unauthenticated feature probe
+  no longer contains module identities/capabilities. OpenAPI and the generated
+  TypeScript surface changed together.
+- Collection and Item responses now report application-computed content permissions
+  and availability. Curate-role flags are no longer presented as executable when a
+  binding is legacy-unassigned, its owner is missing, or an Item schema is unsupported.
+  Access management remains independently authorized. Legacy responses include the
+  exact stopped-server `inspect-collection-type` and `assign-collection-type` commands.
+- The web creation picker uses authenticated descriptors. Item creation inherits the
+  collection owner and sends a bounded owner-mediated patch. Generic text/integer
+  controls preserve numeric types, empty edited values send explicit null, omitted
+  values remain untouched, and structured fields are visibly read-only. Switching a
+  new Item's collection clears incompatible unsaved domain fields. Browse uses module
+  labels and safe presentation summaries without built-in module-ID branches.
+- A test-only postage-stamp module declares required integer/text fields plus a
+  structured read-only field and its own validator. HTTP coverage proves descriptor
+  authentication, typed creation/edit, malformed edit rejection, browse and reindex.
+  Registration regressions reject unsafe labels, invalid keys, excessive field counts,
+  duplicate capabilities and foreign capability ownership.
+- Normal HTTPS/virtual-WebAuthn and `LOCAL_SETUP=1` Chromium smoke both pass. They
+  create separate game/music collections, exercise distinct generic fields and draft
+  clearing, preserve read-only tracks, reject a wrong-owner API write, and rebuild a
+  temporary homogeneous archive assigned to an absent module. The fallback remains
+  browsable with Artwork/media paths and no content edit action. This replaces the
+  invalid mixed-owner fixture without changing user data.
+- Passed: 198 locked workspace tests; strict locked all-target Clippy; Rust formatting;
+  architecture/document and Wave 4 fixture checks (8 manifests, 22 vector/composite
+  digests); generated API drift; TypeScript; web build; and rebuilt Rust server with
+  embedded assets. Browser iteration found and corrected a two-collection mobile
+  intrinsic-width regression and stale assumptions about collection order and the
+  schema-3 fixture envelope before the successful runs.
+- No external format oracle, real authenticator, trusted remote-browser HTTPS, target
+  platform qualification, sibling checkout, user archive or commit is claimed. CT.4
+  is stopped for final review; D04.1 has not begun.
+
+## CT.4 review corrections — 2026-09-13
+
+- Domain-edit receipts now bind the original patch command under a distinct operation,
+  not a resolved full payload derived from mutable current state. A permanent test
+  retries an earlier patch after a later edit and checks the original response,
+  unchanged latest data, and rejection of a different patch reusing the same key.
+- Collection-type descriptors and permission presentation now live with collection
+  policy. Registration bounds capability counts and unavailable-reason text as well
+  as fields/labels. Failed-registration tests verify no partial registry pollution.
+- The generic web form honors Item and Collection content permissions even when the
+  owner descriptor is installed. Account/access administration remains available
+  without descriptors. New entries prefer the browsed writable collection; changing
+  destination explicitly reports cleared type-specific draft fields. Integer edits
+  reject unsafe numeric conversions. Rows retain module artist/platform summaries
+  alongside edition text instead of hiding them when a subtitle exists.
+- Browser fixtures check numeric third-module patch submission (without pretending
+  the fixture is production persistence), installed-owner/unsupported-item disabled
+  controls, descriptor-independent administration and artist text in artwork rows.
+  Actual third-module creation/validation/reindex remains covered through real HTTP
+  and application services. Unavailable-owner preservation uses temporary archive
+  reconstruction rather than a forbidden mixed-collection write.
+- Passed: 200 locked workspace tests, strict all-target Clippy, formatting,
+  architecture/document/fixture checks, API drift checking, TypeScript/build and
+  embedded server rebuild. No user archive, sibling repository or commit was changed.
+- CT.1–CT.4 are reviewed locally; D04.1 resumes under its reader-only extraction,
+  affected-consumer and independent-vector qualification gates. Runtime plugins,
+  offline clients and platform/real-dump release qualifications remain unimplemented
+  or external as previously recorded.
+
+Both final CT.4 browser runs pass: normal HTTPS/virtual-WebAuthn and private
+LOCAL_SETUP=1, including the artist-summary assertion. They used isolated Chrome
+profiles and temporary servers with approved sandbox escalation.

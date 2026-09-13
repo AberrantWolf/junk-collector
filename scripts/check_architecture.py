@@ -3,16 +3,20 @@
 import pathlib
 import hashlib
 import re
+import subprocess
+import sys
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED = {
     "collector-core": set(),
+    "collector-api-types": {"collector-core"},
     "collector-modules": {"collector-core"},
-    "collector-app": {"collector-core", "collector-modules"},
+    "collector-app": {"collector-core", "collector-modules", "collector-api-types"},
+    "collector-providers": {"collector-core", "collector-api-types", "collector-app"},
     "collector-store": {"collector-core", "collector-app"},
-    "collector-client": {"collector-core"},
-    "collector-server": {"collector-core", "collector-modules", "collector-app", "collector-store", "collector-client"},
+    "collector-client": {"collector-core", "collector-api-types"},
+    "collector-server": {"collector-core", "collector-api-types", "collector-modules", "collector-app", "collector-providers", "collector-store", "collector-client"},
 }
 FORBIDDEN_IN_DOMAIN = {"tokio", "reqwest", "axum", "rusqlite", "sqlx", "slint", "egui", "eframe", "cpal"}
 errors = []
@@ -29,10 +33,7 @@ for manifest in (ROOT / "crates").glob("*/Cargo.toml"):
         if name in {"collector-core", "collector-modules"} and dependency in FORBIDDEN_IN_DOMAIN:
             errors.append(f"{name} -> {dependency}: domain code cannot own infrastructure")
 
-for source in [
-    ROOT / "crates/collector-server/src/lib.rs",
-    ROOT / "crates/collector-server/src/passkeys.rs",
-]:
+for source in (ROOT / "crates/collector-server/src").rglob("*.rs"):
     if re.search(r"\bstate\.store\b", source.read_text()):
         errors.append(
             f"{source.relative_to(ROOT)}: HTTP policy must call application services, not Store"
@@ -59,6 +60,12 @@ for manifest in fixture.rglob("manifest.toml"):
     actual = hashlib.sha256(record.read_bytes()).hexdigest()
     if data.get("record_sha256") != actual:
         errors.append(f"{manifest.relative_to(ROOT)}: fixture record digest mismatch")
+wave4 = subprocess.run(
+    [sys.executable, str(ROOT / "scripts/check_wave4_fixtures.py")],
+    capture_output=True, text=True,
+)
+if wave4.returncode:
+    errors.append(wave4.stdout + wave4.stderr)
 if errors:
     raise SystemExit("\n".join(errors))
 print("Architecture, documentation link, and fixture manifest checks passed.")

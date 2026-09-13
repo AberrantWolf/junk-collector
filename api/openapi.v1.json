@@ -22,7 +22,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NewCollection"
+                "$ref": "#/components/schemas/CreateCollectionCommand"
               }
             }
           },
@@ -532,6 +532,85 @@
             "description": ""
           },
           "429": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/captures/{id}/operations": {
+      "post": {
+        "operationId": "start_processing_operation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartProcessingCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collection-types": {
+      "get": {
+        "operationId": "collection_types",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ModuleDescriptor"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
             "description": ""
           }
         }
@@ -3698,6 +3777,29 @@
         "format": "int64",
         "minimum": 0
       },
+      "Capability": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_name",
+          "availability",
+          "scope"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CapabilityId"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/OperationScope"
+          }
+        }
+      },
       "CapabilityAffordance": {
         "type": "object",
         "required": [
@@ -3884,6 +3986,10 @@
           "created_at"
         ],
         "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/CollectionBinding",
+            "description": "Absent in pre-CT.2 creation manifests. Deserialization classifies those\narchives without rewriting their immutable original metadata."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -3898,6 +4004,43 @@
             "$ref": "#/components/schemas/Revision"
           }
         }
+      },
+      "CollectionBinding": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "module",
+              "state"
+            ],
+            "properties": {
+              "module": {
+                "$ref": "#/components/schemas/ModuleId"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "assigned"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "legacy_unassigned"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Durable collection ownership. `LegacyUnassigned` is a recovery/read state for\narchives created before collection ownership was recorded; typed creation\naccepts an assigned module separately and can never request this variant."
       },
       "CollectionId": {
         "type": "string",
@@ -4037,6 +4180,42 @@
           "incomplete"
         ]
       },
+      "ContentAvailabilityStatus": {
+        "type": "string",
+        "enum": [
+          "available",
+          "legacy_unassigned",
+          "owner_unavailable",
+          "item_schema_unsupported"
+        ]
+      },
+      "ContentPermissions": {
+        "type": "object",
+        "required": [
+          "can_edit",
+          "status"
+        ],
+        "properties": {
+          "administrator_commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "can_edit": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContentAvailabilityStatus"
+          }
+        }
+      },
       "ConversionProfile": {
         "oneOf": [
           {
@@ -4074,6 +4253,22 @@
             }
           }
         ]
+      },
+      "CreateCollectionCommand": {
+        "type": "object",
+        "description": "Typed creation input reserved for CT.2 runtime integration. Keeping the\nmodule mandatory here prevents `LegacyUnassigned` from becoming a valid new\ncollection request while CT.1 leaves persisted Collection unchanged.",
+        "required": [
+          "name",
+          "module"
+        ],
+        "properties": {
+          "module": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "CurrencyCode": {
         "type": "string"
@@ -4133,6 +4328,112 @@
           }
         },
         "additionalProperties": false
+      },
+      "DomainEdit": {
+        "type": "object",
+        "description": "A bounded owner-mediated patch. The raw object preserves JSON scalar types;\neach owner deserializes it into its own typed patch where missing and null are\ndistinct operations.",
+        "required": [
+          "module",
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "type": "object"
+          },
+          "module": {
+            "$ref": "#/components/schemas/ModuleId"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DomainFieldDescriptor": {
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "required",
+          "editable",
+          "kind"
+        ],
+        "properties": {
+          "editable": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DomainFieldKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DomainFieldKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "maximum_bytes",
+              "type"
+            ],
+            "properties": {
+              "maximum_bytes": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "minimum",
+              "maximum",
+              "type"
+            ],
+            "properties": {
+              "maximum": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "minimum": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "integer"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "structured"
+                ]
+              }
+            }
+          }
+        ]
       },
       "EditionId": {
         "type": "string",
@@ -4278,47 +4579,13 @@
           "unsupported"
         ]
       },
-      "FeatureCapability": {
-        "type": "object",
-        "required": [
-          "name",
-          "available",
-          "id",
-          "display_name",
-          "availability"
-        ],
-        "properties": {
-          "availability": {
-            "$ref": "#/components/schemas/Availability"
-          },
-          "available": {
-            "type": "boolean"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "id": {
-            "$ref": "#/components/schemas/CapabilityId"
-          },
-          "limitation": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "name": {
-            "type": "string"
-          }
-        }
-      },
       "FeaturesResponse": {
         "type": "object",
         "required": [
           "multi_user",
           "curation",
           "administration",
-          "passkeys",
-          "modules"
+          "passkeys"
         ],
         "properties": {
           "administration": {
@@ -4332,12 +4599,6 @@
               "string",
               "null"
             ]
-          },
-          "modules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ModuleFeature"
-            }
           },
           "multi_user": {
             "type": "boolean"
@@ -5191,23 +5452,34 @@
           }
         }
       },
-      "ModuleFeature": {
+      "ModuleDescriptor": {
         "type": "object",
         "required": [
           "id",
           "schema_version",
           "display_name",
+          "collection_type_label",
+          "fields",
           "capabilities"
         ],
         "properties": {
           "capabilities": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FeatureCapability"
+              "$ref": "#/components/schemas/Capability"
             }
+          },
+          "collection_type_label": {
+            "type": "string"
           },
           "display_name": {
             "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainFieldDescriptor"
+            }
           },
           "id": {
             "$ref": "#/components/schemas/ModuleId"
@@ -5334,17 +5606,6 @@
           }
         }
       },
-      "NewCollection": {
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
-          }
-        }
-      },
       "NewProvisionalImport": {
         "type": "object",
         "required": [
@@ -5407,6 +5668,13 @@
             "type": "string"
           }
         }
+      },
+      "OperationScope": {
+        "type": "string",
+        "enum": [
+          "collection_domain",
+          "shared_media"
+        ]
       },
       "Ownership": {
         "oneOf": [
@@ -5614,7 +5882,8 @@
                 "deleted",
                 "updated_at",
                 "presentation",
-                "effective_permissions"
+                "effective_permissions",
+                "content_permissions"
               ],
               "properties": {
                 "assets": {
@@ -5631,6 +5900,9 @@
                 },
                 "collection_id": {
                   "$ref": "#/components/schemas/CollectionId"
+                },
+                "content_permissions": {
+                  "$ref": "#/components/schemas/ContentPermissions"
                 },
                 "deleted": {
                   "type": "boolean"
@@ -5936,9 +6208,17 @@
           "revision",
           "name",
           "created_at",
-          "effective_permissions"
+          "binding",
+          "effective_permissions",
+          "content_permissions"
         ],
         "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/CollectionBinding"
+          },
+          "content_permissions": {
+            "$ref": "#/components/schemas/ContentPermissions"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -6016,6 +6296,12 @@
           "outcome": {
             "$ref": "#/components/schemas/EvidenceOutcome"
           },
+          "provenance_limitation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "representation_id": {
             "$ref": "#/components/schemas/RepresentationId"
           }
@@ -6042,7 +6328,8 @@
           "deleted",
           "updated_at",
           "presentation",
-          "effective_permissions"
+          "effective_permissions",
+          "content_permissions"
         ],
         "properties": {
           "assets": {
@@ -6059,6 +6346,9 @@
           },
           "collection_id": {
             "$ref": "#/components/schemas/CollectionId"
+          },
+          "content_permissions": {
+            "$ref": "#/components/schemas/ContentPermissions"
           },
           "deleted": {
             "type": "boolean"
@@ -6510,10 +6800,80 @@
         },
         "additionalProperties": false
       },
+      "SaveItemEditCommand": {
+        "type": "object",
+        "description": "Item form input whose domain changes are applied by the owning module. The\nclient can edit declared scalar fields without replacing preserved raw data.",
+        "required": [
+          "collection_id",
+          "title",
+          "subtitle",
+          "identity_link",
+          "domain_edit",
+          "identity",
+          "translations",
+          "identifiers",
+          "wishlist"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "domain_edit": {
+            "$ref": "#/components/schemas/DomainEdit"
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderIdentity"
+            }
+          },
+          "identity": {
+            "$ref": "#/components/schemas/IdentityState"
+          },
+          "identity_link": {
+            "$ref": "#/components/schemas/ItemIdentityLink"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "translations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalizedText"
+            }
+          },
+          "wishlist": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SaveItemEditCommandEnvelope": {
+        "type": "object",
+        "required": [
+          "edit",
+          "expected_revision"
+        ],
+        "properties": {
+          "edit": {
+            "$ref": "#/components/schemas/SaveItemEditCommand"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
       "SaveItemEnvelope": {
         "oneOf": [
           {
             "$ref": "#/components/schemas/SaveItemCommandEnvelope"
+          },
+          {
+            "$ref": "#/components/schemas/SaveItemEditCommandEnvelope"
           },
           {
             "$ref": "#/components/schemas/Wave1SaveItemEnvelope"
@@ -6556,6 +6916,10 @@
             "type": "string"
           }
         }
+      },
+      "SnapshotId": {
+        "type": "string",
+        "format": "uuid"
       },
       "Specimen": {
         "type": "object",
@@ -6754,6 +7118,42 @@
           "lent_at": {
             "type": "string",
             "format": "date"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartProcessingCommand": {
+        "type": "object",
+        "required": [
+          "operation",
+          "operation_version",
+          "representation_id",
+          "selection"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/CapabilityId"
+          },
+          "operation_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "selection": {
+            "type": "object"
+          },
+          "snapshot_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SnapshotId"
+              }
+            ]
           }
         },
         "additionalProperties": false

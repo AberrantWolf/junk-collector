@@ -1,0 +1,15 @@
+schema = 1
+root = "P05"
+license = "Generated archive envelope"
+
+[[vectors]]
+id = "unknown-lexical-json"
+recipe = "utf8"
+utf8 = '{"module":"org.example.future","schema_version":99,"payload":{"z":1e+02,"a":null,"ordered":[3,2,1]}}'
+length = 100
+sha256 = "78feb15b67bd43b233aff99ce7b138282e52df5f2c18e841eb8a56223dd038ab"
+expected = "portable export, restore and reindex preserve these exact bytes"
+
+[matrix]
+portable_export = ["frozen-cut", "partial-copy", "unknown-record", "tombstone", "missing-dependency", "changed-base"]
+full_restore = ["same-installation", "independent-clone", "archive-only", "corrupt", "live-lock-denied", "pending-import"]

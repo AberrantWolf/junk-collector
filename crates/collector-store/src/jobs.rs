@@ -138,6 +138,37 @@ impl Store {
                     && expected
                         .iter()
                         .all(|id| evidence.iter().any(|value| value.id == *id))
+            } else if kind == "catalog_acquisition" {
+                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+                request
+                    .get("snapshot_id")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| value.parse::<SnapshotId>().ok())
+                    .is_some_and(|snapshot_id| {
+                        lock(&self.db).is_ok_and(|db| {
+                            db.query_row(
+                                "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id=?)",
+                                [snapshot_id.to_string()],
+                                |row| row.get::<_, bool>(0),
+                            )
+                            .unwrap_or(false)
+                        })
+                    })
+            } else if kind == "processing_operation" {
+                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+                request
+                    .get("observation_id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|observation_id| {
+                        lock(&self.db).is_ok_and(|db| {
+                            db.query_row(
+                                "SELECT EXISTS(SELECT 1 FROM processing_observations WHERE id=?)",
+                                [observation_id],
+                                |row| row.get::<_, bool>(0),
+                            )
+                            .unwrap_or(false)
+                        })
+                    })
             } else {
                 false
             };
@@ -180,6 +211,15 @@ impl Store {
             ));
         }
         let request = serde_json::to_string(&spec.request).map_err(storage)?;
+        if let Some(input) = &spec.frozen_input {
+            input.validate()?;
+        }
+        let frozen_input = spec
+            .frozen_input
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(storage)?;
         if request.len() > 16 * 1024 * 1024 {
             return Err(Error::Invalid("job request is too large".into()));
         }
@@ -235,6 +275,27 @@ impl Store {
                     now,
                     request,
                 ],
+            )
+            .map_err(storage)?;
+        }
+        if let Some(frozen_input) = frozen_input {
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT frozen_input FROM private.processing_jobs WHERE job_id=?",
+                    [spec.id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(storage)?;
+            if existing
+                .as_ref()
+                .is_some_and(|value| value != &frozen_input)
+            {
+                return Err(Error::IdempotencyConflict);
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO private.processing_jobs(job_id,frozen_input) VALUES(?,?)",
+                params![spec.id.to_string(), frozen_input],
             )
             .map_err(storage)?;
         }
@@ -309,6 +370,7 @@ impl Store {
         let row: (
             String,
             Option<String>,
+            Option<String>,
             String,
             String,
             u32,
@@ -317,7 +379,7 @@ impl Store {
             i64,
         ) = tx
             .query_row(
-                "SELECT user_id,item_id,kind,request,attempt,phase,completed_units,created_at
+                "SELECT user_id,collection_id,item_id,kind,request,attempt,phase,completed_units,created_at
                  FROM private.jobs WHERE id=? AND claim_token=?",
                 params![id, claim_token],
                 |row| {
@@ -330,27 +392,43 @@ impl Store {
                         row.get(5)?,
                         row.get(6)?,
                         row.get(7)?,
+                        row.get(8)?,
                     ))
                 },
             )
             .map_err(storage)?;
+        let frozen_input: Option<String> = tx
+            .query_row(
+                "SELECT frozen_input FROM private.processing_jobs WHERE job_id=?",
+                [&id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
         tx.commit().map_err(storage)?;
-        let created_at = chrono::DateTime::from_timestamp(row.7, 0)
+        let created_at = chrono::DateTime::from_timestamp(row.8, 0)
             .ok_or_else(|| Error::Storage("job creation timestamp is invalid".into()))?;
         Ok(Some(JobClaim {
             id: id.parse().map_err(storage)?,
             user_id: row.0.parse().map_err(storage)?,
-            item_id: row
+            collection_id: row
                 .1
                 .map(|value| value.parse().map_err(storage))
                 .transpose()?,
-            kind: row.2,
-            request: serde_json::from_str(&row.3).map_err(storage)?,
+            item_id: row
+                .2
+                .map(|value| value.parse().map_err(storage))
+                .transpose()?,
+            kind: row.3,
+            request: serde_json::from_str(&row.4).map_err(storage)?,
             claim_token,
-            attempt: row.4,
-            phase: row.5,
-            completed_units: row.6,
+            attempt: row.5,
+            phase: row.6,
+            completed_units: row.7,
             created_at,
+            frozen_input: frozen_input
+                .map(|value| serde_json::from_str(&value).map_err(storage))
+                .transpose()?,
         }))
     }
 
@@ -695,6 +773,8 @@ impl Store {
                     | "import_staging"
                     | "import_analysis"
                     | "import_publication"
+                    | "catalog_acquisition"
+                    | "processing_operation"
             )
         {
             return Err(Error::Conflict);
