@@ -456,12 +456,13 @@ impl Store {
         }
         for (record, path) in snapshots {
             tx.execute(
-                "INSERT INTO snapshots(id,collection_id,record,payload_path) VALUES(?,?,?,?)",
+                "INSERT INTO snapshots(id,collection_id,record,payload_path,created_at) VALUES(?,?,?,?,?)",
                 params![
                     record.id.to_string(),
                     record.collection_id.to_string(),
                     serde_json::to_string(&record).map_err(storage)?,
-                    path
+                    path,
+                    record.created_at.timestamp()
                 ],
             )
             .map_err(storage)?;
@@ -650,6 +651,78 @@ impl SnapshotPort for Store {
         Ok(Box::new(
             File::open(self.archive.join(path)).map_err(storage)?,
         ))
+    }
+
+    fn snapshots(
+        &self,
+        collection_id: CollectionId,
+        after: Option<SnapshotId>,
+        limit: u16,
+    ) -> Result<Page<SnapshotRecord>> {
+        if !(1..=200).contains(&limit) {
+            return Err(Error::Invalid("snapshot page limit must be 1..=200".into()));
+        }
+        let db = lock(&self.db)?;
+        let cursor = after
+            .map(|id| {
+                db.query_row(
+                    "SELECT created_at,id FROM snapshots WHERE id=? AND collection_id=?",
+                    params![id.to_string(), collection_id.to_string()],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()
+                .map_err(storage)?
+                .ok_or_else(|| Error::Invalid("invalid snapshot cursor".into()))
+            })
+            .transpose()?;
+        let mut statement = db
+            .prepare(
+                "SELECT record FROM snapshots WHERE collection_id=? AND (? IS NULL OR (created_at,id) < (?,?)) ORDER BY created_at DESC,id DESC LIMIT ?",
+            )
+            .map_err(storage)?;
+        let rows = statement
+            .query_map(
+                params![
+                    collection_id.to_string(),
+                    cursor.as_ref().map(|value| value.0),
+                    cursor.as_ref().map(|value| value.0),
+                    cursor.as_ref().map(|value| value.1.as_str()),
+                    i64::from(limit) + 1
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(storage)?;
+        let mut items = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(|record| serde_json::from_str(&record).map_err(storage))
+            .collect::<Result<Vec<SnapshotRecord>>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|snapshot| snapshot.id.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
+    fn active_snapshot(
+        &self,
+        collection_id: CollectionId,
+        provider: &ModuleId,
+    ) -> Result<Option<SnapshotId>> {
+        let value: Option<String> = lock(&self.db)?
+            .query_row(
+                "SELECT snapshot_id FROM private.active_catalog_snapshots WHERE collection_id=? AND provider=?",
+                params![collection_id.to_string(), provider.0],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        value
+            .map(|value| value.parse().map_err(storage))
+            .transpose()
     }
 }
 
@@ -851,7 +924,7 @@ impl ProcessingPort for Store {
         };
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
-        tx.execute("INSERT INTO snapshots(id,collection_id,record,payload_path) VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING",params![record.id.to_string(),record.collection_id.to_string(),serde_json::to_string(&record).map_err(storage)?,path]).map_err(storage)?;
+        tx.execute("INSERT INTO snapshots(id,collection_id,record,payload_path,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING",params![record.id.to_string(),record.collection_id.to_string(),serde_json::to_string(&record).map_err(storage)?,path,record.created_at.timestamp()]).map_err(storage)?;
         tx.execute("UPDATE private.processing_jobs SET output_references=?,checkpoint='snapshot_committed' WHERE job_id=?",params![serde_json::to_string(&vec![record.id]).map_err(storage)?,job.to_string()]).map_err(storage)?;
         tx.commit().map_err(storage)?;
         finish_v3_publication(self, txid)

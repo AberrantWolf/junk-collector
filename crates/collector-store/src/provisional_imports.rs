@@ -909,6 +909,48 @@ impl Store {
             tx.commit().map_err(storage)?;
             finish_v3_publication(self, publication)?;
         }
+        if let Some(item_id) = record.view.association.item_id {
+            let item_path = self.item_path(item_id).map_err(|error| {
+                Error::Storage(format!("Import Evidence Item path lookup failed: {error}"))
+            })?;
+            let projected_revisions = item_path.join("revisions");
+            let revisions_path = if projected_revisions.exists() {
+                projected_revisions
+            } else {
+                item_path
+                    .parent()
+                    .ok_or_else(|| Error::Storage("Item archive path has no parent".into()))?
+                    .join(item_id.to_string())
+                    .join("revisions")
+            };
+            let mut revisions = directories(&revisions_path).map_err(|error| {
+                Error::Storage(format!(
+                    "Import Evidence Item history lookup failed at {}: {error}",
+                    revisions_path.display()
+                ))
+            })?;
+            revisions.sort();
+            let already_referenced = revisions
+                .last()
+                .filter(|revision| revision.join("manifest.v3.toml").exists())
+                .map(|revision| {
+                    migration_v3::read_item(revision, record.view.collection_id).map(
+                        |(_, references)| references.iter().any(|value| value.id == evidence.id),
+                    )
+                })
+                .transpose()?
+                .unwrap_or(false);
+            if !already_referenced {
+                let item = self.item(item_id)?;
+                let revision = item.revision;
+                self.publish_under_writer(item, revision, vec![])
+                    .map_err(|error| {
+                        Error::Storage(format!(
+                            "Import Evidence Item reference publication failed: {error}"
+                        ))
+                    })?;
+            }
+        }
         record = self.import_record(id)?;
         record.view.phase = ImportPhase::Published;
         let revision = record.view.revision;

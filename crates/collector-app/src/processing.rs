@@ -90,14 +90,14 @@ impl FrozenProcessingJob {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotQuery {
     pub collection_id: CollectionId,
     pub snapshot_id: SnapshotId,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotRecord {
     pub id: SnapshotId,
@@ -106,6 +106,7 @@ pub struct SnapshotRecord {
     pub media_type: String,
     pub bytes: ByteLength,
     pub digest: Digest,
+    #[schema(value_type = Object)]
     pub parsed_observation: RawJson,
     pub created_at: DateTime<Utc>,
 }
@@ -211,6 +212,56 @@ pub trait SnapshotPort: Send + Sync {
     /// The adapter enforces the same collection scope for metadata and bytes.
     /// Large DAT snapshots must not become a Vec in the shared application DTO.
     fn snapshot_bytes(&self, query: SnapshotQuery) -> Result<Box<dyn std::io::Read + Send>>;
+    fn snapshots(
+        &self,
+        collection_id: CollectionId,
+        after: Option<SnapshotId>,
+        limit: u16,
+    ) -> Result<collector_core::Page<SnapshotRecord>>;
+    fn active_snapshot(
+        &self,
+        collection_id: CollectionId,
+        provider: &ModuleId,
+    ) -> Result<Option<SnapshotId>>;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogSnapshotStatus {
+    pub snapshot: SnapshotRecord,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCatalogSnapshotCommand {
+    pub collection_id: CollectionId,
+    pub provider: ModuleId,
+    pub source: String,
+}
+
+impl ImportCatalogSnapshotCommand {
+    pub fn validate(&self) -> Result<()> {
+        self.provider.validate()?;
+        if self.source.is_empty()
+            || self.source.len() > 120
+            || !self
+                .source
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(collector_core::Error::Invalid(
+                "invalid configured catalog source".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ActivateCatalogSnapshotCommand {
+    pub snapshot_id: SnapshotId,
 }
 
 /// JSON/dBAR responses are capped at 8 MiB. Large catalogs use StreamingProviderPort.
@@ -287,6 +338,46 @@ pub trait StreamingProviderPort: Send + Sync {
     ) -> Result<ProviderStreamResponse>;
 }
 
+#[derive(Clone, Debug)]
+pub struct ParsedCatalogSnapshot {
+    pub observation: RawJson,
+    pub entries: Vec<RawJson>,
+}
+
+impl ParsedCatalogSnapshot {
+    pub fn validate(&self) -> Result<()> {
+        if self.observation.get().len() > MAX_PARSED_OBSERVATION_BYTES
+            || self.entries.is_empty()
+            || self.entries.len() > 1_000_000
+        {
+            return Err(collector_core::Error::Invalid(
+                "parsed catalog snapshot is invalid or oversized".into(),
+            ));
+        }
+        let mut bytes = 0_usize;
+        for entry in &self.entries {
+            bytes = bytes.saturating_add(entry.get().len());
+            if entry.get().len() > 64 * 1024 || bytes > 64 * 1024 * 1024 {
+                return Err(collector_core::Error::Invalid(
+                    "parsed catalog index exceeds its resource bound".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Rebuildable parser/index adapter for exact archived provider bytes. The
+/// returned rows are neutral raw observations; module policy interprets them.
+pub trait CatalogParserPort: Send + Sync {
+    fn parse_snapshot(
+        &self,
+        record: &SnapshotRecord,
+        reader: &mut dyn std::io::Read,
+        cancelled: &mut dyn FnMut() -> Result<bool>,
+    ) -> Result<ParsedCatalogSnapshot>;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PortableProcessingRecord {
@@ -317,12 +408,18 @@ impl PortableProcessingRecord {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessingSummary {
     pub observation_id: ObservationId,
     pub operation: OperationId,
     pub source: PackageScope,
+    pub snapshot_id: Option<SnapshotId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub snapshot_observation: Option<RawJson>,
+    #[schema(value_type = Object)]
+    pub result: RawJson,
     pub current: bool,
     pub support: collector_core::OperationSupport,
     pub limitations: Vec<String>,

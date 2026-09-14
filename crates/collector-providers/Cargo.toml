@@ -1,0 +1,17 @@
+[package]
+name = "collector-providers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+collector-core.workspace = true
+collector-app.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+junk-libs-dat.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

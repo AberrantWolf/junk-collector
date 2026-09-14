@@ -3,16 +3,18 @@ use collector_app::{
     Catalog, CollectionService, CollectionTypeAdministrationService, CollectionTypePort,
     CommandContext, ComponentDetails, ContentPort, CreateAssetCommand, CreateCollectionCommand,
     CreateImportCommand, CredentialKind, DisposeSpecimenCommand, FrozenAcquisitionJob,
-    IdempotencyPort, ImportCandidate, ImportDeclaredFile, ImportIdentityDecision, ImportPhase,
-    ImportPort, ImportRecord, ImportReviewDecision, ImportSourceKind, ImportSourceSummary,
-    ImportView, JobPort, JobSpec, MediaResource, MetadataAuthorityRecord,
-    ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderRequest,
-    ProviderStreamResponse, ProvisionalImportPort, ReceiptDecision, ReturnLoanCommand,
-    ReturnedPossession, ReviewImportCommand, SaveItemCommand, SnapshotPort, SnapshotQuery,
-    SnapshotRecord, SpecimenDetails, StartLoanCommand, StreamingProviderPort, UpdateAssetCommand,
+    IdempotencyPort, ImportCandidate, ImportCatalogSnapshotCommand, ImportDeclaredFile,
+    ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord, ImportReviewDecision,
+    ImportSourceKind, ImportSourceSummary, ImportView, JobPort, JobSpec, MediaResource,
+    MetadataAuthorityRecord, ProcessingExecutionContext, ProcessingPort, ProcessingQuery,
+    ProviderRequest, ProviderStreamResponse, ProvisionalImportPort, ReceiptDecision,
+    ReturnLoanCommand, ReturnedPossession, ReviewImportCommand, SaveItemCommand, SnapshotPort,
+    SnapshotQuery, SnapshotRecord, SpecimenDetails, StartLoanCommand, StartProcessingCommand,
+    StreamingProviderPort, UpdateAssetCommand,
 };
 use collector_core::*;
 use collector_modules::*;
+use collector_providers::{LOCAL_DAT_PROVIDER_ID, LocalDatProvider, LocalDatSource};
 use collector_store::{Clock, Store, UploadFile};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -1548,7 +1550,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        4
+        5
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -1556,7 +1558,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        10
+        11
     );
     assert_eq!(
         private
@@ -5359,7 +5361,7 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
 }
 
 #[test]
-fn schema_ten_persists_durable_imports_without_private_path_columns() {
+fn schema_eleven_preserves_durable_imports_without_private_path_columns() {
     let root = tempfile::tempdir().unwrap();
     let archive = root.path().join("archive");
     let state = root.path().join("state");
@@ -5373,7 +5375,7 @@ fn schema_ten_persists_durable_imports_without_private_path_columns() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        10
+        11
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -5901,9 +5903,12 @@ fn import_observation_rebinds_to_representation_and_rebuilds_without_private_imp
         rebinding.committed_fingerprint.digest
     );
     assert_eq!(rebinding.files[0].sha256, Digest::sha256(b"data"));
+    let completed_publication = service.job(&actor, publication_job).unwrap();
     assert_eq!(
-        service.job(&actor, publication_job).unwrap().state,
-        JobState::Completed
+        completed_publication.state,
+        JobState::Completed,
+        "{:?}",
+        completed_publication.error
     );
 
     drop(service);
@@ -6046,6 +6051,314 @@ fn streamed_snapshot_cancellation_aborts_before_commit_and_recovers_cleanly() {
         }),
         Err(Error::NotFound)
     ));
+}
+
+#[test]
+fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let dat_path = root.path().join("games.dat");
+    let dat = |version: &str, sha1: &str| {
+        format!(
+            r#"<datafile><header><name>Fixture Games</name><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="{sha1}"/></game></datafile>"#
+        )
+    };
+    std::fs::write(
+        &dat_path,
+        dat("1", "a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd"),
+    )
+    .unwrap();
+    let store = Arc::new(Store::open(&archive, &state).unwrap());
+    let user = store
+        .create_user("game-owner", "a long test password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let provider = Arc::new(
+        LocalDatProvider::new(std::collections::BTreeMap::from([(
+            "nes".into(),
+            LocalDatSource {
+                path: dat_path.clone(),
+                system: "nes".into(),
+                catalog: "fixture-games".into(),
+                byte_domain: "org.junk.game.raw-bytes".into(),
+                byte_domain_version: 1,
+            },
+        )]))
+        .unwrap(),
+    );
+    let provider_id = ModuleId(LOCAL_DAT_PROVIDER_ID.into());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .with_streaming_provider(provider_id.clone(), provider.clone())
+        .unwrap()
+        .with_catalog_parser(provider_id.clone(), provider)
+        .unwrap();
+    let collection = service
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Qualified games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut game = item(collection.id);
+    game.title = "Unidentified game".into();
+    game.subtitle = "NES".into();
+    game.domain = ModuleData {
+        module: ModuleId("org.junk.games".into()),
+        schema_version: 1,
+        payload: RawJson::from_value(serde_json::json!({
+            "platform":"nes",
+            "region":null,
+            "publisher":null,
+            "release_year":null
+        })),
+    };
+    let game = Catalog::save(&*store, game, Revision(0)).unwrap();
+
+    let import_snapshot = |service: &CollectionService| {
+        let job = service
+            .import_catalog_snapshot(
+                &actor,
+                ImportCatalogSnapshotCommand {
+                    collection_id: collection.id,
+                    provider: provider_id.clone(),
+                    source: "nes".into(),
+                },
+                &command(),
+            )
+            .unwrap();
+        assert!(service.run_next_job("dat-acquisition").unwrap());
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+        SnapshotId(job.0)
+    };
+    let first_snapshot = import_snapshot(&service);
+    service
+        .activate_catalog_snapshot(&actor, collection.id, first_snapshot, &command())
+        .unwrap();
+    let curator_id = store
+        .create_user("game-curator", "another long test password", false)
+        .unwrap();
+    let viewer_id = store
+        .create_user("game-viewer", "a third long test password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, curator_id, Role::Curator).unwrap();
+    Catalog::grant(&*store, collection.id, viewer_id, Role::Viewer).unwrap();
+    let curator = Principal {
+        user_id: curator_id,
+        administrator: false,
+        device_id: None,
+    };
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&curator, collection.id, None, 10)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert!(matches!(
+        service.catalog_snapshots(&curator, collection.id, None, 10),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.curation_catalog_snapshots(&viewer, collection.id, None, 10),
+        Err(Error::Forbidden)
+    ));
+
+    let import = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "synthetic-game".into(),
+                },
+                files: vec![UploadFile {
+                    name: "game.bin".into(),
+                    bytes: ByteLength(4),
+                    sha256: None,
+                }],
+                association: CaptureAssociation {
+                    item_id: Some(game.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(game.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import.id, 0, 0, b"data")
+        .unwrap();
+    let analysis_job = service
+        .enqueue_import_analysis(
+            &actor,
+            import.id,
+            ModuleId("org.junk.games".into()),
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("game-analysis").unwrap());
+    let analyzed = service.provisional_import(&actor, import.id).unwrap();
+    assert_eq!(analyzed.candidates.len(), 1);
+    assert!(analyzed.candidates[0].label.contains("exact catalog match"));
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: analyzed.revision,
+                identity: ImportIdentityDecision::Candidate {
+                    key: analyzed.candidates[0].key.clone(),
+                },
+                association: analyzed.association,
+                expected_item_revision: Some(game.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    let publication_job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    assert!(service.run_next_job("game-publication").unwrap());
+    let completed_publication = service.job(&actor, publication_job).unwrap();
+    assert_eq!(
+        completed_publication.state,
+        JobState::Completed,
+        "{:?}",
+        completed_publication.error
+    );
+    let published = service.provisional_import(&actor, import.id).unwrap();
+    let capture = Catalog::capture(&*store, published.capture_id).unwrap();
+    let representation = published.representation_id;
+
+    let mismatched_snapshot_job = service
+        .enqueue_processing_operation(
+            &actor,
+            capture.id,
+            StartProcessingCommand {
+                operation: OperationId::new("org.junk.games.catalog-verification").unwrap(),
+                operation_version: 1,
+                representation_id: representation,
+                snapshot_id: Some(first_snapshot),
+                selection: RawJson::from_value(serde_json::json!({
+                    "snapshot_id":SnapshotId::new(),
+                    "system":"nes",
+                    "input":"raw_files"
+                })),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("mismatched-snapshot").unwrap());
+    assert_eq!(
+        service.job(&actor, mismatched_snapshot_job).unwrap().state,
+        JobState::Failed
+    );
+
+    let operation = service
+        .enqueue_processing_operation(
+            &actor,
+            capture.id,
+            StartProcessingCommand {
+                operation: OperationId::new("org.junk.games.catalog-verification").unwrap(),
+                operation_version: 1,
+                representation_id: representation,
+                snapshot_id: Some(first_snapshot),
+                selection: RawJson::from_value(serde_json::json!({
+                    "snapshot_id":first_snapshot,
+                    "system":"nes",
+                    "input":"raw_files"
+                })),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("game-verification").unwrap());
+    let completed_operation = service.job(&actor, operation).unwrap();
+    assert_eq!(
+        completed_operation.state,
+        JobState::Completed,
+        "{:?}",
+        completed_operation.error
+    );
+
+    std::fs::write(
+        &dat_path,
+        dat("2", "580393f5a94fb469585f5dd2a6859a4aab899f37"),
+    )
+    .unwrap();
+    let second_snapshot = import_snapshot(&service);
+    service
+        .activate_catalog_snapshot(&actor, collection.id, second_snapshot, &command())
+        .unwrap();
+    let statuses = service
+        .catalog_snapshots(&actor, collection.id, None, 10)
+        .unwrap();
+    assert_eq!(statuses.items.len(), 2);
+    assert!(
+        statuses
+            .items
+            .iter()
+            .any(|value| value.snapshot.id == first_snapshot && !value.active)
+    );
+    assert!(
+        statuses
+            .items
+            .iter()
+            .any(|value| value.snapshot.id == second_snapshot && value.active)
+    );
+    assert!(matches!(
+        service.catalog_snapshots(&actor, collection.id, Some(SnapshotId::new()), 10),
+        Err(Error::Invalid(_))
+    ));
+
+    let summaries = service
+        .capture_processing_summaries(&actor, capture.id, representation, None, 20)
+        .unwrap();
+    assert!(
+        summaries
+            .items
+            .iter()
+            .any(|summary| summary.snapshot_id == Some(first_snapshot)
+                && summary.result.get().contains("unique_complete_match"))
+    );
+    assert!(
+        summaries
+            .items
+            .iter()
+            .any(|summary| summary.observation_id == ObservationId(analysis_job.0))
+    );
+
+    store.reindex().unwrap();
+    assert_eq!(
+        store
+            .snapshot(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: first_snapshot,
+            })
+            .unwrap()
+            .digest,
+        Digest::sha256(dat("1", "a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd").as_bytes())
+    );
+    assert_eq!(
+        store.active_snapshot(collection.id, &provider_id).unwrap(),
+        Some(second_snapshot)
+    );
 }
 
 #[test]
@@ -6238,6 +6551,16 @@ fn processing_summary_marks_changed_input_historical_and_denies_other_collection
             .unwrap()
             .items[0]
             .current
+    );
+    // Historical evidence remains readable when its module is not installed.
+    let without_modules = CollectionService::new(store.clone(), Arc::new(Registry::default()));
+    assert_eq!(
+        without_modules
+            .processing_summaries(&actor, query.clone())
+            .unwrap()
+            .items
+            .len(),
+        1
     );
     let mut changed_files = query.source_fingerprint.files.clone();
     changed_files[0].sha256 = Digest::sha256(b"changed bytes");

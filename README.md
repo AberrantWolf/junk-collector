@@ -113,6 +113,24 @@ The public app and management entrypoints are separate bundles. Rebuild the Rust
 
 Configure named inbox roots in `[inboxes]`, for example `rips = "/srv/incoming"`. Curators can list safe package names through the collection-scoped Import API and stage a direct child directory into the unified review workflow; configured roots are never returned. The curation workbench selects browser files or a configured inbox package, shows its inventory/progress and honest analyzer limitations, records catalog/physical review, and publishes the capture. Its submitter-scoped background-work ledger shows active/history progress and offers server-authorized cancel/retry controls, polling every two seconds while work is active and every 30 seconds while idle. The deprecated administrator endpoints remain compatibility adapters: `GET /api/v1/admin/inboxes` lists configured names and `POST /api/v1/admin/inboxes/{name}/import`, with `item_id`, `expected_revision`, and `package`, creates a provisional Import plus staging Job that still requires review before publication. Sources are retained; symlinks and special files are rejected. The `/api/v1/uploads` surface is also a compatibility adapter and is scheduled with the administrator inbox surface for removal in a future API major.
 
+## Game DAT catalogs
+
+Configure local catalog files by safe source name; source paths stay server-side:
+
+```toml
+[dat_sources.nes]
+path = "/srv/catalogs/nes.dat"
+system = "nes"
+catalog = "My NES DAT"
+byte_domain = "org.junk.game.raw-bytes"
+byte_domain_version = 1
+```
+
+The private administration panel imports exact DAT bytes as immutable snapshots
+and selects the active snapshot for future analysis. Curators can run explicit
+game hashing, structure, track and catalog operations against preserved captures;
+old results remain tied to their original source bytes and snapshot after refresh.
+
 ## Recovery
 
 ```sh

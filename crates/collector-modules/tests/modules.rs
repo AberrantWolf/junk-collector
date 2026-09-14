@@ -1094,8 +1094,11 @@ fn catalog_results_require_distinct_candidates_and_file_identities() {
         provider: ModuleId("org.example.dat".into()),
         provider_record_id: "one".into(),
         label: "One".into(),
-        matched_files: vec![PackageFileId::new()],
-        matched_digests: vec![Digest::sha256(b"data")],
+        matched_units: vec![CatalogMatchedUnit {
+            source_file_id: PackageFileId::new(),
+            track_number: None,
+            digest: Digest::sha256(b"data"),
+        }],
     };
     let check = |catalog| {
         Games.validate_operation_result(
@@ -1127,17 +1130,267 @@ fn catalog_results_require_distinct_candidates_and_file_identities() {
     );
     let mut duplicated_file = candidate;
     duplicated_file
-        .matched_files
-        .push(duplicated_file.matched_files[0]);
-    duplicated_file
-        .matched_digests
-        .push(duplicated_file.matched_digests[0].clone());
+        .matched_units
+        .push(duplicated_file.matched_units[0].clone());
     assert!(
         check(CatalogMatchResult::UniqueCompleteMatch {
             candidate: duplicated_file
         })
         .is_err()
     );
+}
+
+fn dat_header(system: &str, count: u64) -> RawJson {
+    RawJson::from_value(serde_json::json!({
+        "schema_version": 1,
+        "system": system,
+        "catalog": "Fixture DAT",
+        "version": "2026-09-13",
+        "byte_domain": "org.junk.game.raw-bytes",
+        "byte_domain_version": 1,
+        "game_count": count
+    }))
+}
+
+fn dat_row(id: &str, label: &str, files: &[(&str, &[u8])]) -> RawJson {
+    RawJson::from_value(serde_json::json!({
+        "record_id": id,
+        "label": label,
+        "files": files.iter().map(|(name, bytes)| {
+            let digest = raw_game_digest(PackageFileId::new(), bytes);
+            let sha1 = digest.digests.iter().find(|value| value.algorithm == HashAlgorithm::Sha1).unwrap();
+            serde_json::json!({
+                "name": name,
+                "bytes": bytes.len(),
+                "crc32": null,
+                "sha1": sha1.hex,
+                "md5": null
+            })
+        }).collect::<Vec<_>>()
+    }))
+}
+
+fn raw_game_digest(id: PackageFileId, bytes: &[u8]) -> GameFileDigest {
+    let GameProcessingResult::Hashes { mut files } =
+        hash_game_file(id, &mut Cursor::new(bytes.to_vec()), GameHashProfile::Raw).unwrap()
+    else {
+        unreachable!()
+    };
+    files.remove(0)
+}
+
+#[test]
+fn dat_matching_distinguishes_complete_ambiguous_partial_and_no_match() {
+    let provider = ModuleId("org.junk.providers.local-dat".into());
+    let first = PackageFileId::new();
+    let second = PackageFileId::new();
+    let files = vec![
+        raw_game_digest(first, b"first"),
+        raw_game_digest(second, b"second"),
+    ];
+    let unique = [dat_row(
+        "fixture:0",
+        "Complete title",
+        &[("one.bin", b"first"), ("two.bin", b"second")],
+    )];
+    let result = match_dat_file_catalog(
+        provider.clone(),
+        "nes",
+        &dat_header("nes", 1),
+        unique.iter(),
+        &files,
+    )
+    .unwrap();
+    assert!(matches!(
+        result,
+        GameProcessingResult::CatalogMatch {
+            catalog: CatalogMatchResult::UniqueCompleteMatch { .. }
+        }
+    ));
+
+    let duplicate = [
+        dat_row(
+            "fixture:0",
+            "First dump",
+            &[("one.bin", b"first"), ("two.bin", b"second")],
+        ),
+        dat_row(
+            "fixture:1",
+            "Second dump",
+            &[("one.bin", b"first"), ("two.bin", b"second")],
+        ),
+    ];
+    assert!(matches!(
+        match_dat_file_catalog(
+            provider.clone(),
+            "nes",
+            &dat_header("nes", 2),
+            duplicate.iter(),
+            &files,
+        )
+        .unwrap(),
+        GameProcessingResult::CatalogMatch {
+            catalog: CatalogMatchResult::AmbiguousCompleteMatches { .. }
+        }
+    ));
+
+    let reordered = [dat_row(
+        "fixture:0",
+        "Wrong track order",
+        &[("two.bin", b"second"), ("one.bin", b"first")],
+    )];
+    let partial = match_dat_file_catalog(
+        provider.clone(),
+        "nes",
+        &dat_header("nes", 1),
+        reordered.iter(),
+        &files,
+    )
+    .unwrap();
+    assert!(matches!(
+        partial,
+        GameProcessingResult::CatalogMatch {
+            catalog: CatalogMatchResult::PartialIdentification {
+                matched_files: 2,
+                total_files: 2,
+                ..
+            }
+        }
+    ));
+
+    let changed = vec![
+        raw_game_digest(first, b"first"),
+        raw_game_digest(second, b"changed"),
+    ];
+    assert!(matches!(
+        match_dat_file_catalog(
+            provider,
+            "nes",
+            &dat_header("nes", 1),
+            unique.iter(),
+            &changed,
+        )
+        .unwrap(),
+        GameProcessingResult::CatalogMatch {
+            catalog: CatalogMatchResult::PartialIdentification {
+                matched_files: 1,
+                total_files: 2,
+                ..
+            }
+        }
+    ));
+}
+
+#[test]
+fn dat_matching_is_inconclusive_for_wrong_platform_domain_or_missing_checksums() {
+    let provider = ModuleId("org.junk.providers.local-dat".into());
+    let files = vec![raw_game_digest(PackageFileId::new(), b"first")];
+    let row = dat_row("fixture:0", "Title", &[("one.bin", b"first")]);
+    for header in [
+        dat_header("snes", 1),
+        RawJson::from_value(serde_json::json!({
+            "schema_version": 1,
+            "system": "nes",
+            "catalog": "Fixture DAT",
+            "version": "1",
+            "byte_domain": "org.junk.game.nes.ines-payload",
+            "byte_domain_version": 1,
+            "game_count": 1
+        })),
+    ] {
+        assert!(matches!(
+            match_dat_file_catalog(provider.clone(), "nes", &header, [&row], &files).unwrap(),
+            GameProcessingResult::CatalogMatch {
+                catalog: CatalogMatchResult::Inconclusive { .. }
+            }
+        ));
+    }
+    let no_hash = RawJson::from_value(serde_json::json!({
+        "record_id": "fixture:0",
+        "label": "Title",
+        "files": [{"name":"one.bin","bytes":5,"crc32":null,"sha1":null,"md5":null}]
+    }));
+    assert!(matches!(
+        match_dat_file_catalog(
+            provider.clone(),
+            "nes",
+            &dat_header("nes", 1),
+            [&no_hash],
+            &files
+        )
+        .unwrap(),
+        GameProcessingResult::CatalogMatch {
+            catalog: CatalogMatchResult::Inconclusive { .. }
+        }
+    ));
+    let other = dat_row("fixture:1", "Different bytes", &[("other.bin", b"other")]);
+    assert!(matches!(
+        match_dat_file_catalog(
+            provider,
+            "nes",
+            &dat_header("nes", 2),
+            [&no_hash, &other],
+            &files
+        )
+        .unwrap(),
+        GameProcessingResult::CatalogMatch {
+            catalog: CatalogMatchResult::Inconclusive { .. }
+        }
+    ));
+}
+
+#[test]
+fn dat_matching_retains_crc32_as_the_actual_non_cryptographic_algorithm() {
+    let provider = ModuleId("org.junk.providers.local-dat".into());
+    let file = raw_game_digest(PackageFileId::new(), b"first");
+    let crc32 = file
+        .digests
+        .iter()
+        .find(|value| value.algorithm == HashAlgorithm::Crc32)
+        .unwrap()
+        .hex
+        .clone();
+    let row = RawJson::from_value(serde_json::json!({
+        "record_id": "fixture:0",
+        "label": "CRC-only title",
+        "files": [{"name":"one.bin","bytes":5,"crc32":crc32,"sha1":null,"md5":null}]
+    }));
+    let GameProcessingResult::CatalogMatch {
+        catalog: CatalogMatchResult::UniqueCompleteMatch { candidate },
+    } = match_dat_file_catalog(
+        provider.clone(),
+        "nes",
+        &dat_header("nes", 1),
+        [&row],
+        std::slice::from_ref(&file),
+    )
+    .unwrap()
+    else {
+        panic!("expected a complete CRC-only match");
+    };
+    assert_eq!(
+        candidate.matched_units[0].digest.algorithm,
+        HashAlgorithm::Crc32
+    );
+
+    let inconsistent = RawJson::from_value(serde_json::json!({
+        "record_id": "fixture:0",
+        "label": "Inconsistent checksums",
+        "files": [{"name":"one.bin","bytes":5,"crc32":crc32,"sha1":"0000000000000000000000000000000000000000","md5":null}]
+    }));
+    assert!(matches!(
+        match_dat_file_catalog(
+            provider,
+            "nes",
+            &dat_header("nes", 1),
+            [&inconsistent],
+            &[file]
+        )
+        .unwrap(),
+        GameProcessingResult::CatalogMatch {
+            catalog: CatalogMatchResult::NoMatch
+        }
+    ));
 }
 
 struct DescriptorFixture(ModuleDescriptor);

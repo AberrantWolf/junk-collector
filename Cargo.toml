@@ -12,6 +12,7 @@ license = "MIT"
 collector-core = { path = "crates/collector-core" }
 collector-modules = { path = "crates/collector-modules" }
 collector-app = { path = "crates/collector-app" }
+collector-providers = { path = "crates/collector-providers" }
 collector-store = { path = "crates/collector-store" }
 collector-client = { path = "crates/collector-client" }
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +31,7 @@ utoipa-axum = "0.2"
 url = "2"
 junk-libs-audio = { path = "../junk-libs/junk-libs-audio" }
 junk-libs-game-formats = { path = "../junk-libs/junk-libs-game-formats" }
+junk-libs-dat = { path = "../junk-libs/junk-libs-dat" }
 
 [profile.release]
 lto = "thin"

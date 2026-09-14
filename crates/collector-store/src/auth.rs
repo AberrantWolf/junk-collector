@@ -367,7 +367,7 @@ impl Store {
         let version: u32 = connection
             .query_row("PRAGMA private.user_version", [], |row| row.get(0))
             .map_err(storage)?;
-        if !matches!(version, 5..=10) {
+        if !matches!(version, 5..=11) {
             return Err(Error::Unavailable(format!(
                 "private state schema {version} must be upgraded by this server before local recovery"
             )));

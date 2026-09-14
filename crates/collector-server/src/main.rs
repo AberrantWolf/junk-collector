@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use collector_app::CollectionTypeAdministrationService;
 use collector_client::{Endpoint, Pairing, Route};
 use collector_core::*;
+use collector_providers::{LOCAL_DAT_PROVIDER_ID, LocalDatProvider, LocalDatSource};
 use collector_server::{AppState, router};
 use collector_store::Store;
 use serde::{Deserialize, Serialize};
@@ -78,9 +79,25 @@ struct Config {
     exposure: Exposure,
     authentication_origin: Option<String>,
     inboxes: std::collections::BTreeMap<String, PathBuf>,
+    dat_sources: std::collections::BTreeMap<String, DatSourceConfig>,
     tls_names: Vec<String>,
     allowed_origins: Vec<String>,
     endpoints: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatSourceConfig {
+    path: PathBuf,
+    system: String,
+    catalog: String,
+    byte_domain: String,
+    #[serde(default = "default_domain_version")]
+    byte_domain_version: u32,
+}
+
+fn default_domain_version() -> u32 {
+    1
 }
 impl Default for Config {
     fn default() -> Self {
@@ -95,6 +112,7 @@ impl Default for Config {
             exposure: Exposure::default(),
             authentication_origin: None,
             inboxes: std::collections::BTreeMap::new(),
+            dat_sources: std::collections::BTreeMap::new(),
             tls_names: vec![
                 "localhost".into(),
                 "junk-collector.local".into(),
@@ -367,6 +385,41 @@ async fn main() -> Result<()> {
             state.default_username = default_username;
             state.exposure = config.exposure;
             state.inboxes = Arc::new(config.inboxes.clone());
+            let dat_sources = config
+                .dat_sources
+                .iter()
+                .map(|(id, source)| {
+                    (
+                        id.clone(),
+                        LocalDatSource {
+                            path: source.path.clone(),
+                            system: source.system.clone(),
+                            catalog: source.catalog.clone(),
+                            byte_domain: source.byte_domain.clone(),
+                            byte_domain_version: source.byte_domain_version,
+                        },
+                    )
+                })
+                .collect();
+            let dat_provider = Arc::new(LocalDatProvider::new(dat_sources)?);
+            let provider_id = ModuleId(LOCAL_DAT_PROVIDER_ID.into());
+            state.service = state
+                .service
+                .clone()
+                .with_streaming_provider(provider_id.clone(), dat_provider.clone())?
+                .with_catalog_parser(provider_id, dat_provider.clone())?;
+            state.catalog_sources = Arc::new(
+                dat_provider
+                    .configured_sources()
+                    .map(|(id, source)| collector_server::CatalogSourceView {
+                        id: id.into(),
+                        system: source.system.clone(),
+                        catalog: source.catalog.clone(),
+                        byte_domain: source.byte_domain.clone(),
+                        byte_domain_version: source.byte_domain_version,
+                    })
+                    .collect(),
+            );
             state.multi_user = config.multi_user;
             state.allowed_origins = Arc::new(config.allowed_origins.clone());
             if let Some(origin) = &config.authentication_origin {

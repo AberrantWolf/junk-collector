@@ -6,7 +6,7 @@ type ImportView=components['schemas']['ImportView'];
 type InboxSource=components['schemas']['InboxSourceView'];
 type JobView=components['schemas']['JobView'];
 type Association=components['schemas']['CaptureAssociation'];
-type Props={item:Item;busy:boolean;setBusy:(value:boolean)=>void;onError:(error:unknown)=>void};
+type Props={item:Item;busy:boolean;setBusy:(value:boolean)=>void;onPublished:(item:Item)=>void;onError:(error:unknown)=>void};
 
 const terminal=new Set<JobView['state']>(['completed','failed','cancelled']);
 const phaseLabel:Record<ImportView['phase'],string>={staging:'Staging package',analyzing:'Ready for review',awaiting_review:'Review recorded',publishing:'Publishing capture',published:'Capture published',cancelled:'Import cancelled'};
@@ -28,7 +28,7 @@ async function waitForJob(id:string,onProgress:(job:JobView)=>void){
  }
 }
 
-export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
+export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:Props){
  const [source,setSource]=useState<'browser'|'inbox'>('browser');
  const [files,setFiles]=useState<File[]>([]);const [inboxes,setInboxes]=useState<InboxSource[]>([]);
  const [label,setLabel]=useState('');const [inboxPackage,setInboxPackage]=useState('');
@@ -111,7 +111,7 @@ export default function ImportWorkspace({item,busy,setBusy,onError}:Props){
   if(!record)return;setBusy(true);setJob(undefined);
   try{
    const accepted=await api<{job_id:string}>(`/imports/${record.id}/analysis`,{method:'POST',body:JSON.stringify({module:item.domain.module})});
-   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));
+   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));onPublished(await api<Item>(`/items/${item.id}`));
   }catch(error){onError(error);}finally{setBusy(false);}
  }
  function association():Association{

@@ -36,7 +36,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 - S03 advances private state to v6 with expiring targeted enrollment and separately hashed/revocable native credentials. Same-user recent browser approval, cancellation/expiry/replay protection, one-time issuance, header-independent native authentication, and native-device inventory/revocation are implemented. `collector-client` owns an injectable secure-storage port, refuses redirects/cross-origin credential delivery, validates enrolled server identity/certificate material, and completes the LAN TLS integration through real enrollment.
 - U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted.
 - Private SQLite advances through explicit migrations and stores a durable default UserId selected once from legacy first-row behavior. First-account creation sets it transactionally; later accounts do not change it.
-- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally, while D04.2–D04.3 and D05 runtime integration remain outstanding.
+- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally and D05 remains outstanding.
 - Separate private operational database; collection roles, private field filtering, revisioned accounts/grants, password/passkey recovery, browser-session inventory, and revocable paired native credentials.
 - Separate public/private HTTP routers and direct LAN TLS. Public curation/admin independently configured; disabled APIs and management bundles are absent.
 - WebAuthn passkey registration/login backend and browser integration when an HTTPS authentication origin is configured. Registration and passwordless login pass a Chromium virtual-authenticator end-to-end test; real password-manager/hardware acceptance remains a release gate.
@@ -248,19 +248,24 @@ matrix, exact dependency/tool selections, migration reservations, generated fixt
 recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
-D04.1 is reviewed and corrected locally; D04.2–D04.3 are next.
-Archive schema 4 and catalog schema 4 cover processing observations,
-streamed snapshots, metadata authority, and conversion recipes; private schema 10
-persists frozen Job input and provisional Import observations. Import publication
+D04.1–D04.3 are reviewed and corrected locally; D05.1 is next.
+Archive schema 4 and catalog schema 5 cover processing observations,
+streamed snapshots, metadata authority, and conversion recipes; private schema 11
+persists frozen Job input, provisional Import observations and active catalog
+selection. Import publication
 rebinds evidence to its committed Representation with checked file mapping and
 retained provenance. Registered dispatch, authorization, restart/cancellation,
 idempotent retry, archive-only recovery, and current-versus-historical summaries
-have executable coverage. No provider network adapter, DAT match, or production
-operation capability is claimed. D04.1 adds a
+have executable coverage. D04.2 adds a configured local-DAT provider using
+`junk-libs-dat`, immutable exact-byte snapshots, rebuildable row indexes and
+complete/ambiguous/partial/inconclusive game matching. D04.3 registers the
+qualified game operations, connects Import and committed-Capture jobs, and exposes
+admin/curation status without leaking configured paths. D04.1 adds a
 reader-only shared game-format crate for exact raw, trainer-free iNES/NES2, N64,
 explicit SNES/PCE, ordered raw-2352 CUE, and pinned-oracle CHD hashing. Collector
-maps those outputs into validated module results without registering a runtime
-operation; actual Retro Junk consumers use the same algorithms. The validation
+maps those outputs into validated module results; D04.3 registers the qualified
+runtime subset, while CHD remains an external/unexposed gate. Actual Retro Junk
+consumers use the same algorithms. The validation
 evidence and remaining limits are recorded in [validation](validation.md).
 The native user-testable surface in this wave is a diagnostic CLI; Slint,
 offline-library management and the Trash Amp provider remain later tickets.
@@ -366,5 +371,12 @@ CT.4 review also fixes stable patch-command receipts, unsupported-schema form
 controls and descriptor-independent access administration. Integer edits cannot
 silently round beyond the browser's safe range. The generic third-module browser
 fixture checks submission types; its production persistence remains covered by
-real HTTP/service/reindex tests. D04.1 subsequently implemented the bounded shared
-reader/result primitives and is awaiting review before D04.2.
+real HTTP/service/reindex tests. D04.1 subsequently implemented and qualified the
+bounded shared reader/result primitives; D04.2–D04.3 now integrate their local DAT
+and game workflows and have passed local D04 review.
+
+D04 review preserves exact DAT snapshot length/digest checks on every parse, rejects
+malformed catalog entries rather than silently omitting them, and checks job
+cancellation during package reads and catalog scans. Curator evidence reads remain
+available without an installed owner module. The catalog currently uses bounded
+per-job parsing and linear comparison; large-corpus/index performance is unqualified.

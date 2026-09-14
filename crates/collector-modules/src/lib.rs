@@ -216,6 +216,11 @@ pub struct JobSubmission {
     pub idempotency_key: String,
 }
 pub trait ModuleHost {
+    /// Cooperative cancellation / lease check during CPU-only processing loops.
+    fn checkpoint(&self) -> ModuleResult<()> {
+        Ok(())
+    }
+
     fn package_inventory(&self, access: PackageAccess) -> ModuleResult<PackageInventory>;
     fn package_file(
         &self,
@@ -223,6 +228,12 @@ pub trait ModuleHost {
         id: PackageFileId,
     ) -> ModuleResult<Box<dyn RepresentationReader>>;
     fn representation_access(&self, id: RepresentationId) -> ModuleResult<PackageAccess>;
+
+    fn catalog_snapshot(&self, _id: SnapshotId) -> ModuleResult<CatalogSnapshotInput> {
+        Err(ModuleError::UnavailableCapability(
+            "catalog snapshot access is unavailable".into(),
+        ))
+    }
 
     fn single_package_reader(
         &self,
@@ -266,6 +277,14 @@ pub struct OperationRequest {
 #[derive(Clone, Debug)]
 pub struct OperationOutput {
     pub value: RawJson,
+}
+
+#[derive(Clone, Debug)]
+pub struct CatalogSnapshotInput {
+    pub id: SnapshotId,
+    pub provider: ModuleId,
+    pub observation: RawJson,
+    pub entries: Vec<RawJson>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

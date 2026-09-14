@@ -177,9 +177,10 @@ known gaps, not API drift that changes the selected extraction.
 
 ### Frozen schema and dependency selections
 
-- Archive envelope schema 4 is additive. Private database v10 is reserved for
-  processing Job/checkpoint references and v11 for TLS rotation. Rebuildable
-  catalog schema v4 owns all new Wave 4 portable projections. Client connection
+- Archive envelope schema 4 is additive. Private database v10 owns processing
+  Job/checkpoint references, v11 owns active catalog selection, and v12 is reserved
+  for TLS rotation. Rebuildable
+  catalog schema v5 owns all new Wave 4 portable projections and snapshot pagination indexes. Client connection
   schemas v1 (C01) and v2 (S04 rotation) are independent.
 - Shared algorithms use the path checkout `junk-libs` 0.1.0 at
   `91dd63dc1d06d711e61d238c3291423466ccb281`; publishing or an immutable Git pin
@@ -205,14 +206,14 @@ registration.
 
 | Operation | Input domain -> output domain and exact target API | Feature/dependency | Fixture/oracle and provenance | Current status |
 |---|---|---|---|---|
-| Raw game hashing | one authorized package reader -> versioned exact-byte SHA-256/CRC32/SHA-1/MD5 observation | `junk-libs-game-formats::hash_raw` | D04 `raw-published` vector; public published `123456789` digest vector; MIT/generated | D04.1 locally qualified |
-| NES iNES/NES2 payload hashing | one validated iNES reader -> trainer-free normalized payload digest/version | `junk-libs-game-formats::{inspect_ines,hash_ines_payload}` | D04 payload plus iNES, NES2 exponent, trainer, misc-ROM and malformed-length cases; NESdev format reference | D04.1 locally qualified for exact trainer-free payloads; other variants explicitly unavailable |
-| N64 z64/v64/n64 normalization | one reader -> canonical big-endian ROM digest/version | `junk-libs-game-formats::hash_n64` | D04 three byte-order recipes and hostile three-byte reader chunks with independently fixed canonical bytes; generated | D04.1 locally qualified |
-| SNES copier-header handling | one reader plus explicit layout -> headerless payload digest/version | `junk-libs-game-formats::hash_snes_payload` | D04 paired 32-KiB generated payload/header recipe; SNESdev whole-bank copier-header rule | D04.1 locally qualified for explicit layouts; real dumps external |
-| PCE copier-header handling | one reader plus explicit layout -> bank-aligned payload digest/version | `junk-libs-game-formats::hash_pce_payload` | D04 paired 8-KiB generated payload/header recipe; Retro consumer cross-check | D04.1 locally qualified for explicit layouts; real dumps external |
-| Ordered BIN/CUE raw-2352 hashing | CUE plus complete frozen package readers -> per-track raw-byte digests/layout | `junk-libs-game-formats::hash_cue_raw_2352` over `junk-libs-disc` spans | combined/split sources, stored/synthetic pregap, missing/reordered/truncated/cooked cases | D04.1 locally qualified for complete raw-2352 layouts; real mixed mode external |
-| CHD raw-CD track hashing | authorized CHD reader -> ordered unpadded raw-2352 digests/layout | `junk-libs-game-formats::hash_chd_raw_2352` feature plus `junk-libs-disc`/`chd` 0.3.4 | pinned `chdman` 0.285 creates a 3/5-frame two-track CHD; independently computed per-track SHA-256 | D04.1 pinned synthetic oracle passed; real dumps and other tool versions external |
-| DAT snapshot parse/match | bounded raw DAT snapshot -> typed catalog rows and zero/unique/ambiguous/partial result | `junk-libs-dat`, `quick-xml` 0.37.5 | D04.2 must add equivalent XML/text bodies and duplicate/reordered cases; seed manifest does not contain them | planned D04.2; no match support claimed |
+| Raw game hashing | one authorized package reader -> versioned exact-byte SHA-256/CRC32/SHA-1/MD5 observation | `junk-libs-game-formats::hash_raw` | D04 `raw-published` vector; public published `123456789` digest vector; MIT/generated | D04.3 registered as `org.junk.games.hash` and used by Import analysis |
+| NES iNES/NES2 payload hashing | one validated iNES reader -> trainer-free normalized payload digest/version | `junk-libs-game-formats::{inspect_ines,hash_ines_payload}` | D04 payload plus iNES, NES2 exponent, trainer, misc-ROM and malformed-length cases; NESdev format reference | D04.3 registered for explicit iNES payload hashing and structure inspection; unsupported variants fail closed |
+| N64 z64/v64/n64 normalization | one reader -> canonical big-endian ROM digest/version | `junk-libs-game-formats::hash_n64` | D04 three byte-order recipes and hostile three-byte reader chunks with independently fixed canonical bytes; generated | D04.3 registered under the explicit N64 profile |
+| SNES copier-header handling | one reader plus explicit layout -> headerless payload digest/version | `junk-libs-game-formats::hash_snes_payload` | D04 paired 32-KiB generated payload/header recipe; SNESdev whole-bank copier-header rule | D04.3 registered only with explicit copier-header layout; real dumps external |
+| PCE copier-header handling | one reader plus explicit layout -> bank-aligned payload digest/version | `junk-libs-game-formats::hash_pce_payload` | D04 paired 8-KiB generated payload/header recipe; Retro consumer cross-check | D04.3 registered only with explicit copier-header layout; real dumps external |
+| Ordered BIN/CUE raw-2352 hashing | CUE plus complete frozen package readers -> per-track raw-byte digests/layout | `junk-libs-game-formats::hash_cue_raw_2352` over `junk-libs-disc` spans | combined/split sources, stored/synthetic pregap, missing/reordered/truncated/cooked cases | D04.3 registered as `org.junk.games.hash-tracks`; real mixed mode external |
+| CHD raw-CD track hashing | authorized CHD reader -> ordered unpadded raw-2352 digests/layout | `junk-libs-game-formats::hash_chd_raw_2352` feature plus `junk-libs-disc`/`chd` 0.3.4 | pinned `chdman` 0.285 creates a 3/5-frame two-track CHD; independently computed per-track SHA-256 | not exposed by D04.3; pinned synthetic oracle passed, real dumps/tool versions external |
+| DAT snapshot parse/match | bounded raw DAT snapshot -> typed catalog rows and zero/unique/ambiguous/partial/inconclusive result | `junk-libs-dat`, `quick-xml` 0.37.5 | exact generated XML/text bodies plus duplicate, wrong-system/domain, missing-checksum, CRC-only, reordered and modified cases | D04.2 locally implemented; independent real corpus external |
 | CD CUE/redumper layout | declared package readers/sidecars -> typed sectors, tracks, INDEX 00/01 and gap ownership | `junk-libs-disc` | D05 generated CUE/PCM plus Phono published layouts; owned dump via `JUNK_COLLECTOR_W4_CD_DUMP_ROOT` | generated layouts ready; real redumper/mixed mode external |
 | CD IDs | validated typed TOC sectors -> MusicBrainz/FreeDB/AccurateRip IDs; `calculate_disc_ids` | `junk-libs-disc-id` | D05 ARver 3-track published values | qualified primitive; Collector integration planned D05.1 |
 | AccurateRip v1/v2 and signed offset search | exact i16 stereo 44.1-kHz frames -> per-track checksums and signed stereo-frame offset result | `junk-libs-accuraterip`; new bounded reader API | D05 extremes plus ARver/CUETools vectors; owned dump via `JUNK_COLLECTOR_W4_CD_DUMP_ROOT` | vector primitive exists; bounded path and real dump unqualified |
@@ -225,7 +226,7 @@ registration.
 | Full backup/restore | stopped archive/private/config/scratch -> validated restoration or independent clone | SQLite backup API, both process locks | P05 temporary-root matrix | planned P05.2 |
 | Persistent native connection | enrollment/trust observations -> client DB v1 plus secure secret reference | SQLite; macOS Keychain adapter | C01 single-route seed; C01.1 must add two-server/two-profile cases; opt-in `JUNK_COLLECTOR_W4_KEYCHAIN_TEST=1` | planned C01.1; Keychain external |
 | Authenticated route/typed transfer | enrolled local TLS or Web PKI origin -> typed DTO/media bytes | rustls 0.23.44/reqwest 0.12.28 | C01 local TLS fixtures and immutable body digest | planned C01.2/C01.3 |
-| TLS trust rotation | authenticated transition over existing trust -> client/server generation state | rustls/Axum server, schemas private v11/client v2 | S04 transition/state recipes; independent security review required | planned S04; no cryptographic qualification claimed |
+| TLS trust rotation | authenticated transition over existing trust -> client/server generation state | rustls/Axum server, schemas private v12/client v2 | S04 transition/state recipes; independent security review required | planned S04; no cryptographic qualification claimed |
 | Discovery/probing | DNS-SD/configured host hints -> uncredentialed bounded candidates/health | production mDNS adapter | C02 forged/expiry recipes; real LAN via `JUNK_COLLECTOR_W4_LAN_TEST=1` | planned C02.1; multicast external |
 | Ranged failover | immutable manifest plus trusted routes -> verified final bytes/resume state | HTTP Range/If-Range, TLS | C02 body/digest and deterministic disconnect recipes; real tailnet via `JUNK_COLLECTOR_W4_TAILNET_TEST=1` | planned C02.2; LAN/tailnet external |
 

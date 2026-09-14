@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 reviewed and corrected; D04.1 reviewed and corrected; D04.2–D04.3 are next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1 next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -71,8 +71,8 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 2 | W4.1 | W4.0 | Package readers, typed results and source binding | Reviewed/corrected 2026-09-11; proceed to W4.2 |
 | 3 | W4.2 | W4.1 | Durable observations, snapshots and job integration | Reviewed/corrected 2026-09-11; proceed to D04.1 |
 | 4 | D04.1 | W4.2 | Qualified game primitive extraction | Reviewed/corrected 2026-09-13; sibling gates passed |
-| 5 | D04.2 | D04.1 | DAT snapshots and complete-match policy | Routine plus vectors |
-| 6 | D04.3 | D04.2 | Game jobs, curation and supported-operation matrix | D04 root review |
+| 5 | D04.2 | D04.1 | DAT snapshots and complete-match policy | Reviewed/corrected 2026-09-13; vectors pass |
+| 6 | D04.3 | D04.2 | Game jobs, curation and supported-operation matrix | Reviewed/corrected 2026-09-13; proceed to D05.1 |
 | 7 | D05.1 | W4.2 | Exact CD PCM/layout and bounded checksum readers | Review; sibling gates |
 | 8 | D05.2 | D05.1 | AccurateRip acquisition and result policy | Review |
 | 9 | D05.3 | D05.2 | CD jobs, curation and fixture qualification | D05 root review |
@@ -174,8 +174,8 @@ W4.2 review corrected host scope enforcement, cursor pagination, source currency
 pre-commit evidence rebinding, archive envelope identity checks, atomic reindex,
 provider spooling/grant rechecks, recipe replay and command path binding. It also
 fixed final-owner lock release exposed by parallel recovery tests. Final validation
-is recorded in [validation](validation.md). D04.1 is now implemented locally and
-awaiting review; D04.2 has not started.
+is recorded in [validation](validation.md). D04.1 is reviewed and corrected;
+D04.2 and D04.3 are reviewed and corrected; see [the review](wave-4-review.md).
 
 ## Fixed architecture and scope decisions
 
@@ -453,6 +453,8 @@ dumps, target platforms and immutable dependency pins remain external gates.
 
 ### D04.2 — DAT snapshots and matching
 
+**Status (2026-09-13): reviewed and corrected locally with D04.3.**
+
 **Edit:** provider catalog adapter, game module matching, app/admin snapshot commands.
 
 1. Load administrator-selected local DAT bytes or an explicitly configured source
@@ -473,6 +475,8 @@ missing/reordered/modified tracks; old snapshot after refresh; malformed/oversiz
 DAT; parser cancellation and source outage. Snapshot bytes survive backup/reindex.
 
 ### D04.3 — Game workflow and root acceptance
+
+**Status (2026-09-13): reviewed and corrected locally; D05.1 is the next bounded implementation checkpoint.**
 
 Wire game structural and DAT operations into Import analysis and committed Capture
 jobs, then web curation. Show operation availability, snapshot/version, exact versus
@@ -953,10 +957,11 @@ Wave 3 final-chunk replay, interrupted cancellation and post-commit recovery cas
 ## Ready-to-send implementing-agent prompt
 
 ```text
-Implement D04.2 and D04.3 next, in that order. D04.1 and CT.1–CT.4 are reviewed
-and corrected. Complete D04.2 matching/vector gates before integrating D04.3.
-Stop for architectural conflicts or missing required qualification; stop for review
-after D04.3. Do not proceed into D05.
+Implement D05.1 only. D04 and CT.1–CT.4 are reviewed and corrected locally.
+Read docs/wave-4-review.md and preserve its snapshot-integrity, strict-parser,
+cancellation and historical-read guarantees. Use independent integer PCM/offset
+vectors and bounded readers. Stop before D05.2 provider/network integration.
+Stop for architectural conflicts or missing required qualification.
 Preserve the existing working-tree changes. Read decisions/pre-release-evolution.md
 alongside the required architecture/status/release documents. Inspect the immediate
 reader/result contract, qualified primitives, independent vectors, and migrated

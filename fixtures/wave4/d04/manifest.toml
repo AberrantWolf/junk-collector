@@ -80,6 +80,22 @@ length = 2352
 sha256 = "96a73cb6a73b2175a8100a573ef0eef4fbb5e268797277ef2096fbb6f0f738fb"
 oracle = "Generated one-sector raw-2352 track; mutation proves track-one identification is incomplete"
 
+[[vectors]]
+id = "dat-xml"
+recipe = "utf8"
+utf8 = "<datafile><header><name>Fixture</name><version>1</version></header><game name=\"Title &amp; More\"><rom name=\"one.bin\" size=\"5\" crc=\"9271EE57\" sha1=\"e0996a37c13d44c3b06074939d43fa3759bd32c1\"/></game></datafile>"
+length = 208
+sha256 = "8a78babe052e7d15cbb4e6cec4042d6a1cad95b9b2be2c9489264927169c5ce1"
+oracle = "Exact generated Logiqx XML DAT body; semantic observation equals dat-text"
+
+[[vectors]]
+id = "dat-text"
+recipe = "utf8"
+utf8 = "clrmamepro (\n name \"Fixture\"\n version 1\n)\ngame (\n name \"Title & More\"\n rom ( name \"one.bin\" size 5 crc 9271EE57 sha1 e0996a37c13d44c3b06074939d43fa3759bd32c1 )\n)\n"
+length = 162
+sha256 = "b3c50943b5a41131200367576ecac1ab74b7434ed8970c9e2afa7ee4e078cca5"
+oracle = "Exact generated ClrMamePro text DAT body; semantic observation equals dat-xml"
+
 [external_chd]
 tool = "/opt/homebrew/bin/chdman"
 version = "0.285"

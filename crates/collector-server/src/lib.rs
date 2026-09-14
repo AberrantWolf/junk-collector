@@ -9,11 +9,12 @@ use axum::{
     routing::get,
 };
 use collector_app::{
-    AccountUpdate, AccountView, AuthenticatedPrincipal, CollectionService, CommandContext,
-    ComponentDetails, CreateAssetCommand, CreateCollectionCommand, CreateImportCommand,
-    DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView, ImportSourceKind,
-    ImportSourceSummary, ImportView, JobView, MediaResource, NativeDeviceView, PasskeyView,
-    PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem, ReturnLoanCommand,
+    AccountUpdate, AccountView, ActivateCatalogSnapshotCommand, AuthenticatedPrincipal,
+    CatalogSnapshotStatus, CollectionService, CommandContext, ComponentDetails, CreateAssetCommand,
+    CreateCollectionCommand, CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart,
+    EnrollmentView, GrantView, ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary,
+    ImportView, JobView, MediaResource, NativeDeviceView, PasskeyView, PresentedAsset,
+    PresentedCollection, PresentedEvidence, PresentedItem, ProcessingSummary, ReturnLoanCommand,
     ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails,
     StartLoanCommand, StartProcessingCommand, UpdateAssetCommand,
 };
@@ -35,6 +36,15 @@ use utoipa_axum::{
     routes,
 };
 
+#[derive(Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct CatalogSourceView {
+    pub id: String,
+    pub system: String,
+    pub catalog: String,
+    pub byte_domain: String,
+    pub byte_domain_version: u32,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<Store>,
@@ -45,6 +55,7 @@ pub struct AppState {
     pub multi_user: bool,
     pub default_username: String,
     pub inboxes: Arc<std::collections::BTreeMap<String, std::path::PathBuf>>,
+    pub catalog_sources: Arc<Vec<CatalogSourceView>>,
     pub allowed_origins: Arc<Vec<String>>,
     pub passkeys: Option<Arc<passkeys::Passkeys>>,
     pub rate_limits: Arc<RateLimits>,
@@ -65,6 +76,7 @@ impl AppState {
             multi_user: false,
             default_username: "owner".into(),
             inboxes: Arc::new(std::collections::BTreeMap::new()),
+            catalog_sources: Arc::new(Vec::new()),
             allowed_origins: Arc::new(vec![]),
             rate_limits: Arc::new(RateLimits::default()),
             passkeys: None,
@@ -493,6 +505,8 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(dispose_specimen))
         .routes(routes!(verify))
         .routes(routes!(start_processing_operation))
+        .routes(routes!(capture_processing_summaries))
+        .routes(routes!(curation_catalog_snapshots))
         .routes(routes!(create_upload))
         .routes(routes!(create_provisional_import))
         .routes(routes!(provisional_import))
@@ -528,6 +542,9 @@ fn administration_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_collection))
         .routes(routes!(grant))
         .routes(routes!(reindex))
+        .routes(routes!(catalog_sources))
+        .routes(routes!(catalog_snapshots, import_catalog_snapshot))
+        .routes(routes!(activate_catalog_snapshot))
 }
 
 pub fn openapi() -> OpenApi {
@@ -1918,6 +1935,40 @@ async fn start_processing_operation(
         .into_response())
 }
 
+#[derive(Deserialize)]
+struct ProcessingPageQuery {
+    representation_id: RepresentationId,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[utoipa::path(get, path = "/api/v1/captures/{id}/operations", params(("id" = CaptureId, Path), ("representation_id" = RepresentationId, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<ProcessingSummary>), (status = 400), (status = 403), (status = 404)))]
+async fn capture_processing_summaries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CaptureId>,
+    Query(query): Query<ProcessingPageQuery>,
+) -> ApiResult<Json<Page<ProcessingSummary>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|value| value.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid processing cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state.service.capture_processing_summaries(
+                &actor,
+                id,
+                query.representation_id,
+                after,
+                query.limit.unwrap_or(50),
+            )
+        })
+        .await?,
+    ))
+}
+
 #[utoipa::path(post, path = "/api/v1/imports/{id}/analysis", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = AnalyzeProvisionalImport, responses((status = 202, body = serde_json::Value), (status = 404), (status = 409)))]
 async fn analyze_provisional_import(
     State(state): State<AppState>,
@@ -2425,6 +2476,124 @@ async fn settings(
         .require_administrator(&principal(&state, &headers)?)?;
     Ok(Json(
         serde_json::json!({"exposure":state.exposure,"multi_user":state.multi_user,"server_id":state.pairing.server_id,"ingress":format!("{:?}",state.ingress)}),
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/admin/catalog-sources", responses((status = 200, body = Vec<CatalogSourceView>), (status = 403)))]
+async fn catalog_sources(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Vec<CatalogSourceView>>> {
+    let actor = principal(&state, &headers)?;
+    state.service.require_administrator(&actor)?;
+    Ok(Json(state.catalog_sources.as_ref().clone()))
+}
+
+#[derive(Deserialize)]
+struct SnapshotPageQuery {
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{id}/catalog-snapshots", params(("id" = CollectionId, Path), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<CatalogSnapshotStatus>), (status = 400), (status = 403)))]
+async fn curation_catalog_snapshots(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Query(query): Query<SnapshotPageQuery>,
+) -> ApiResult<Json<Page<CatalogSnapshotStatus>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|value| value.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid snapshot cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .curation_catalog_snapshots(&actor, id, after, query.limit.unwrap_or(50))
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/admin/collections/{id}/catalog-snapshots", params(("id" = CollectionId, Path), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<CatalogSnapshotStatus>), (status = 400), (status = 403)))]
+async fn catalog_snapshots(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Query(query): Query<SnapshotPageQuery>,
+) -> ApiResult<Json<Page<CatalogSnapshotStatus>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|value| value.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid snapshot cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .catalog_snapshots(&actor, id, after, query.limit.unwrap_or(50))
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CatalogImportRequest {
+    source: String,
+}
+
+#[utoipa::path(post, path = "/api/v1/admin/collections/{id}/catalog-snapshots", params(("id" = CollectionId, Path), ("Idempotency-Key" = String, Header)), request_body = CatalogImportRequest, responses((status = 202, body = serde_json::Value), (status = 400), (status = 403), (status = 409)))]
+async fn import_catalog_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Json(input): Json<CatalogImportRequest>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state.service.import_catalog_snapshot(
+            &actor,
+            ImportCatalogSnapshotCommand {
+                collection_id: id,
+                provider: ModuleId(collector_providers::LOCAL_DAT_PROVIDER_ID.into()),
+                source: input.source,
+            },
+            &context,
+        )
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
+}
+
+#[utoipa::path(put, path = "/api/v1/admin/collections/{id}/catalog-snapshots/{snapshot_id}/active", params(("id" = CollectionId, Path), ("snapshot_id" = SnapshotId, Path), ("Idempotency-Key" = String, Header)), request_body = ActivateCatalogSnapshotCommand, responses((status = 200, body = CatalogSnapshotStatus), (status = 400), (status = 403), (status = 404), (status = 409)))]
+async fn activate_catalog_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, snapshot_id)): Path<(CollectionId, SnapshotId)>,
+    Json(input): Json<ActivateCatalogSnapshotCommand>,
+) -> ApiResult<Json<CatalogSnapshotStatus>> {
+    if input.snapshot_id != snapshot_id {
+        return Err(Error::Invalid("snapshot path and body identities differ".into()).into());
+    }
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .activate_catalog_snapshot(&actor, id, snapshot_id, &context)
+        })
+        .await?,
     ))
 }
 #[derive(Deserialize, utoipa::ToSchema)]

@@ -1216,6 +1216,45 @@ impl AdministrationPort for Store {
     fn reassign_default(&self, user: UserId) -> Result<()> {
         Store::reassign_default(self, user)
     }
+
+    fn activate_catalog_snapshot(
+        &self,
+        collection: CollectionId,
+        provider: &ModuleId,
+        snapshot: SnapshotId,
+    ) -> Result<collector_app::CatalogSnapshotStatus> {
+        provider.validate()?;
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        let record: String = tx
+            .query_row(
+                "SELECT record FROM snapshots WHERE id=? AND collection_id=?",
+                params![snapshot.to_string(), collection.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        let record: collector_app::SnapshotRecord =
+            serde_json::from_str(&record).map_err(storage)?;
+        if &record.provider != provider {
+            return Err(Error::Invalid(
+                "snapshot provider does not match activation target".into(),
+            ));
+        }
+        let result = collector_app::CatalogSnapshotStatus {
+            snapshot: record,
+            active: true,
+        };
+        tx.execute(
+            "INSERT INTO private.active_catalog_snapshots(collection_id,provider,snapshot_id,activated_at) VALUES(?,?,?,?) ON CONFLICT(collection_id,provider) DO UPDATE SET snapshot_id=excluded.snapshot_id,activated_at=excluded.activated_at",
+            params![collection.to_string(), provider.0, snapshot.to_string(), self.clock.now().timestamp()],
+        )
+        .map_err(storage)?;
+        self.record_command(&tx, &result)?;
+        tx.commit().map_err(storage)?;
+        Ok(result)
+    }
 }
 
 impl AuthenticationPort for Store {
@@ -1455,7 +1494,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 10 {
+    if private_version > 11 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -1813,10 +1852,25 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
+    if private_version < 11 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "CREATE TABLE private.active_catalog_snapshots (
+              collection_id TEXT NOT NULL,
+              provider TEXT NOT NULL,
+              snapshot_id TEXT NOT NULL,
+              activated_at INTEGER NOT NULL,
+              PRIMARY KEY(collection_id,provider)
+            );
+            PRAGMA private.user_version = 11;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 4 {
+    if catalog_version > 5 {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -1896,6 +1950,19 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
               record TEXT NOT NULL
             );
             PRAGMA main.user_version = 4;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
+    if catalog_version < 5 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "ALTER TABLE snapshots ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+            UPDATE snapshots
+              SET created_at = unixepoch(json_extract(record, '$.created_at'));
+            CREATE INDEX IF NOT EXISTS snapshots_collection
+              ON snapshots(collection_id,created_at,id);
+            PRAGMA main.user_version = 5;",
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)?;

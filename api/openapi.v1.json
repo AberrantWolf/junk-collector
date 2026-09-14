@@ -5,6 +5,29 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/admin/catalog-sources": {
+      "get": {
+        "operationId": "catalog_sources",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogSourceView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/admin/collections": {
       "post": {
         "operationId": "create_collection",
@@ -41,6 +64,174 @@
             }
           },
           "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/admin/collections/{id}/catalog-snapshots": {
+      "get": {
+        "operationId": "catalog_snapshots",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_CatalogSnapshotStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "import_catalog_snapshot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogImportRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/admin/collections/{id}/catalog-snapshots/{snapshot_id}/active": {
+      "put": {
+        "operationId": "activate_catalog_snapshot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SnapshotId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateCatalogSnapshotCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSnapshotStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           },
           "409": {
@@ -538,6 +729,66 @@
       }
     },
     "/api/v1/captures/{id}/operations": {
+      "get": {
+        "operationId": "capture_processing_summaries",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          {
+            "name": "representation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RepresentationId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ProcessingSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      },
       "post": {
         "operationId": "start_processing_operation",
         "parameters": [
@@ -1076,6 +1327,57 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{id}/catalog-snapshots": {
+      "get": {
+        "operationId": "curation_catalog_snapshots",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_CatalogSnapshotStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
             "description": ""
           }
         }
@@ -3499,6 +3801,18 @@
           }
         }
       },
+      "ActivateCatalogSnapshotCommand": {
+        "type": "object",
+        "required": [
+          "snapshot_id"
+        ],
+        "properties": {
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          }
+        },
+        "additionalProperties": false
+      },
       "ActiveOwnership": {
         "type": "string",
         "enum": [
@@ -3957,6 +4271,18 @@
           "other"
         ]
       },
+      "CatalogImportRequest": {
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "CatalogSnapshot": {
         "type": "object",
         "required": [
@@ -3974,6 +4300,51 @@
           "retrieved_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "CatalogSnapshotStatus": {
+        "type": "object",
+        "required": [
+          "snapshot",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/SnapshotRecord"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogSourceView": {
+        "type": "object",
+        "required": [
+          "id",
+          "system",
+          "catalog",
+          "byte_domain",
+          "byte_domain_version"
+        ],
+        "properties": {
+          "byte_domain": {
+            "type": "string"
+          },
+          "byte_domain_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "catalog": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "system": {
+            "type": "string"
           }
         }
       },
@@ -5669,11 +6040,91 @@
           }
         }
       },
+      "ObservationId": {
+        "type": "string",
+        "format": "uuid"
+      },
       "OperationScope": {
         "type": "string",
         "enum": [
           "collection_domain",
           "shared_media"
+        ]
+      },
+      "OperationSupport": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "support"
+            ],
+            "properties": {
+              "support": {
+                "type": "string",
+                "enum": [
+                  "supported"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "dependency",
+              "reason",
+              "support"
+            ],
+            "properties": {
+              "dependency": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "support": {
+                "type": "string",
+                "enum": [
+                  "unavailable_dependency"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "support"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "support": {
+                "type": "string",
+                "enum": [
+                  "unsupported_layout"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "support"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "support": {
+                "type": "string",
+                "enum": [
+                  "externally_unqualified"
+                ]
+              }
+            }
+          }
         ]
       },
       "Ownership": {
@@ -5744,6 +6195,79 @@
             }
           }
         ]
+      },
+      "PackageScope": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "scope"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ImportId"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "import"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "scope"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RepresentationId"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "representation"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "Page_CatalogSnapshotStatus": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "snapshot",
+                "active"
+              ],
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "snapshot": {
+                  "$ref": "#/components/schemas/SnapshotRecord"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "Page_JobView": {
         "type": "object",
@@ -5980,6 +6504,87 @@
                   "type": "boolean"
                 }
               }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_ProcessingSummary": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "observation_id",
+                "operation",
+                "source",
+                "result",
+                "current",
+                "support",
+                "limitations",
+                "legacy_provenance",
+                "created_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "current": {
+                  "type": "boolean"
+                },
+                "legacy_provenance": {
+                  "type": "boolean"
+                },
+                "limitations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "observation_id": {
+                  "$ref": "#/components/schemas/ObservationId"
+                },
+                "operation": {
+                  "$ref": "#/components/schemas/CapabilityId"
+                },
+                "result": {
+                  "type": "object"
+                },
+                "snapshot_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SnapshotId"
+                    }
+                  ]
+                },
+                "snapshot_observation": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "source": {
+                  "$ref": "#/components/schemas/PackageScope"
+                },
+                "support": {
+                  "$ref": "#/components/schemas/OperationSupport"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "next_cursor": {
@@ -6529,6 +7134,70 @@
           }
         }
       },
+      "ProcessingSummary": {
+        "type": "object",
+        "required": [
+          "observation_id",
+          "operation",
+          "source",
+          "result",
+          "current",
+          "support",
+          "limitations",
+          "legacy_provenance",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "legacy_provenance": {
+            "type": "boolean"
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observation_id": {
+            "$ref": "#/components/schemas/ObservationId"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/CapabilityId"
+          },
+          "result": {
+            "type": "object"
+          },
+          "snapshot_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SnapshotId"
+              }
+            ]
+          },
+          "snapshot_observation": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/PackageScope"
+          },
+          "support": {
+            "$ref": "#/components/schemas/OperationSupport"
+          }
+        },
+        "additionalProperties": false
+      },
       "ProfileChange": {
         "type": "object",
         "required": [
@@ -6920,6 +7589,47 @@
       "SnapshotId": {
         "type": "string",
         "format": "uuid"
+      },
+      "SnapshotRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection_id",
+          "provider",
+          "media_type",
+          "bytes",
+          "digest",
+          "parsed_observation",
+          "created_at"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "parsed_observation": {
+            "type": "object"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ModuleId"
+          }
+        },
+        "additionalProperties": false
       },
       "Specimen": {
         "type": "object",

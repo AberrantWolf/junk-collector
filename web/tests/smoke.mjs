@@ -13,8 +13,11 @@ const port=19843;
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nauthentication_origin = "https://localhost:${port}"\nallowed_origins = ["https://localhost:${port}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["https://localhost:${port}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
+const datPath=path.join(scratch,'fixture.dat');
+await writeFile(datPath,'<datafile><header><name>Browser fixture</name><version>1</version></header><game name="Browser game"><rom name="game.bin" size="5" crc="9271ee57"/></game></datafile>');
 const binary=path.join(root,'target/debug/collector-server');
 if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nallowed_origins = []\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
+await writeFile(config,`\n[dat_sources.browser]\npath = "${datPath}"\nsystem = "nes"\ncatalog = "Browser fixture"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`,{flag:'a'});
 const init=spawnSync(binary,['--config',config,localSetup?'setup':'init', '--username',localSetup?'collector':'owner'],{input:password,encoding:'utf8'});
 assert.equal(init.status,0,init.stderr);
 if(localSetup){
@@ -74,6 +77,10 @@ try{
  await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
  await page.getByText('Collection created.',{exact:false}).waitFor();
+ await administration.getByRole('button',{name:'Import immutable snapshot',exact:true}).click();
+ await administration.getByText('The exact DAT source bytes were archived and indexed.',{exact:false}).waitFor();
+ await administration.getByRole('button',{name:'Activate',exact:true}).click();
+ await administration.getByRole('button',{name:'Active',exact:true}).waitFor();
  await page.getByRole('button',{name:'Close administration'}).click();
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).waitFor();
  await page.getByText('This collection has no entries yet.',{exact:false}).waitFor();

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, io::Read};
 
 use collector_core::{
     ByteLength, Digest, HashAlgorithm, ModuleData, ModuleId, PackageFileId, PackageInventory,
@@ -8,8 +8,9 @@ use junk_libs_game_formats::{CopierHeader, InesVersion, QualifiedHashes};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CapabilityId, CollectionModule, DomainFieldDescriptor, DomainFieldKind, ModuleDescriptor,
-    ModuleError, ModulePresentation, ModuleResult, OperationOutput, OperationRequest, PatchValue,
+    Availability, Capability, CapabilityId, CollectionModule, DomainFieldDescriptor,
+    DomainFieldKind, ModuleDescriptor, ModuleError, ModulePresentation, ModuleResult,
+    OperationEntity, OperationOutput, OperationRequest, OperationScope, PackageAccess, PatchValue,
     apply_patch_value, basic_presentation, descriptor, module_data_from_raw_object,
     raw_domain_object,
 };
@@ -43,13 +44,23 @@ pub struct CatalogCandidate {
     pub provider: ModuleId,
     pub provider_record_id: String,
     pub label: String,
-    pub matched_files: Vec<PackageFileId>,
-    pub matched_digests: Vec<Digest>,
+    pub matched_units: Vec<CatalogMatchedUnit>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogMatchedUnit {
+    pub source_file_id: PackageFileId,
+    pub track_number: Option<u8>,
+    pub digest: Digest,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "match", rename_all = "snake_case")]
 pub enum CatalogMatchResult {
+    Inconclusive {
+        reason: String,
+    },
     NoMatch,
     UniqueCompleteMatch {
         candidate: CatalogCandidate,
@@ -128,6 +139,464 @@ pub enum GameHashProfile {
     N64BigEndian,
     SnesPayload { copier_header: bool },
     PcePayload { copier_header: bool },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "profile", rename_all = "snake_case", deny_unknown_fields)]
+enum GameHashSelection {
+    Raw,
+    InesPayload,
+    N64BigEndian,
+    SnesPayload { copier_header: bool },
+    PcePayload { copier_header: bool },
+}
+
+impl From<GameHashSelection> for GameHashProfile {
+    fn from(value: GameHashSelection) -> Self {
+        match value {
+            GameHashSelection::Raw => Self::Raw,
+            GameHashSelection::InesPayload => Self::InesPayload,
+            GameHashSelection::N64BigEndian => Self::N64BigEndian,
+            GameHashSelection::SnesPayload { copier_header } => Self::SnesPayload { copier_header },
+            GameHashSelection::PcePayload { copier_header } => Self::PcePayload { copier_header },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct GameFileOperationInput {
+    file_index: usize,
+    #[serde(flatten)]
+    profile: GameHashSelection,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GameCueOperationInput {
+    cue_file_index: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GameInspectOperationInput {
+    file_index: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "input", rename_all = "snake_case", deny_unknown_fields)]
+enum CatalogAnalysisSelection {
+    RawFiles,
+    File {
+        file_index: usize,
+        #[serde(flatten)]
+        profile: GameHashSelection,
+    },
+    CueRaw2352 {
+        cue_file_index: usize,
+    },
+}
+
+#[derive(Deserialize)]
+struct CatalogVerificationInput {
+    snapshot_id: collector_core::SnapshotId,
+    system: String,
+    #[serde(flatten)]
+    analysis: CatalogAnalysisSelection,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportAnalysisInput {
+    #[serde(default)]
+    snapshot_id: Option<collector_core::SnapshotId>,
+    #[serde(default)]
+    system: Option<String>,
+    #[serde(default)]
+    domain: Option<ModuleData>,
+    #[serde(default)]
+    import_id: Option<collector_core::ImportId>,
+    #[serde(default)]
+    representation_id: Option<collector_core::RepresentationId>,
+    #[serde(default)]
+    files: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GameImportCandidateOutput {
+    key: String,
+    label: String,
+    observation: RawJson,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GameImportAnalysisOutput {
+    candidates: Vec<GameImportCandidateOutput>,
+    limitations: Vec<String>,
+    observations: Vec<RawJson>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatSnapshotObservation {
+    schema_version: u32,
+    system: String,
+    catalog: String,
+    #[serde(default)]
+    document_name: String,
+    #[serde(default)]
+    description: String,
+    version: String,
+    byte_domain: String,
+    byte_domain_version: u32,
+    game_count: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatCatalogEntryObservation {
+    record_id: String,
+    label: String,
+    #[serde(default)]
+    region: Option<String>,
+    #[serde(default)]
+    serial: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    files: Vec<DatCatalogFileObservation>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatCatalogFileObservation {
+    name: String,
+    bytes: ByteLength,
+    #[serde(default)]
+    serial: Option<String>,
+    crc32: Option<String>,
+    sha1: Option<String>,
+    md5: Option<String>,
+}
+
+#[derive(Clone)]
+struct CatalogInputUnit<'a> {
+    source_file_id: PackageFileId,
+    track_number: Option<u8>,
+    bytes: ByteLength,
+    domain: &'a NormalizedByteDomain,
+    digests: &'a [Digest],
+}
+
+/// Match qualified per-file hashes against a provider-parsed DAT snapshot.
+/// Completeness requires the declared system and normalized byte domain, the
+/// same number of files, and an ordered size/checksum match for every file.
+pub fn match_dat_file_catalog<'a>(
+    provider: ModuleId,
+    expected_system: &str,
+    snapshot: &RawJson,
+    entries: impl IntoIterator<Item = &'a RawJson>,
+    files: &[GameFileDigest],
+) -> ModuleResult<GameProcessingResult> {
+    let units = files
+        .iter()
+        .map(|file| CatalogInputUnit {
+            source_file_id: file.file_id,
+            track_number: None,
+            bytes: file.bytes,
+            domain: &file.domain,
+            digests: &file.digests,
+        })
+        .collect::<Vec<_>>();
+    match_dat_catalog(
+        provider,
+        expected_system,
+        snapshot,
+        entries,
+        &units,
+        &mut || Ok(()),
+    )
+}
+
+/// Match qualified ordered raw-2352 track hashes. Track order is part of the
+/// completeness decision even when every checksum appears elsewhere in a DAT row.
+pub fn match_dat_track_catalog<'a>(
+    provider: ModuleId,
+    expected_system: &str,
+    snapshot: &RawJson,
+    entries: impl IntoIterator<Item = &'a RawJson>,
+    tracks: &[GameTrackDigest],
+) -> ModuleResult<GameProcessingResult> {
+    let units = tracks
+        .iter()
+        .map(|track| CatalogInputUnit {
+            source_file_id: track.source_file_id,
+            track_number: Some(track.track_number),
+            bytes: track.bytes,
+            domain: &track.domain,
+            digests: &track.digests,
+        })
+        .collect::<Vec<_>>();
+    match_dat_catalog(
+        provider,
+        expected_system,
+        snapshot,
+        entries,
+        &units,
+        &mut || Ok(()),
+    )
+}
+
+fn match_dat_catalog<'a>(
+    provider: ModuleId,
+    expected_system: &str,
+    snapshot: &RawJson,
+    entries: impl IntoIterator<Item = &'a RawJson>,
+    units: &[CatalogInputUnit<'_>],
+    checkpoint: &mut dyn FnMut() -> ModuleResult<()>,
+) -> ModuleResult<GameProcessingResult> {
+    provider
+        .validate()
+        .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+    let header: DatSnapshotObservation = snapshot.parse().map_err(|error| {
+        ModuleError::Invalid(format!("invalid DAT snapshot observation: {error}"))
+    })?;
+    let safe_header_text = |value: &str, maximum: usize, allow_empty: bool| {
+        (allow_empty || !value.trim().is_empty())
+            && value.len() <= maximum
+            && !value.chars().any(char::is_control)
+    };
+    if header.schema_version != 1
+        || !safe_header_text(&header.system, 120, false)
+        || !safe_header_text(&header.catalog, 255, false)
+        || !safe_header_text(&header.document_name, 4096, true)
+        || !safe_header_text(&header.description, 4096, true)
+        || !safe_header_text(&header.version, 4096, false)
+        || !safe_header_text(&header.byte_domain, 120, false)
+        || header.byte_domain_version == 0
+        || header.game_count == 0
+        || units.is_empty()
+        || units.len() > 4096
+    {
+        return Err(ModuleError::Invalid(
+            "invalid DAT snapshot or match input".into(),
+        ));
+    }
+    if header.system != expected_system {
+        return catalog_result(CatalogMatchResult::Inconclusive {
+            reason: format!(
+                "snapshot system {} does not match requested system {}",
+                header.system, expected_system
+            ),
+        });
+    }
+    if units.iter().any(|unit| {
+        unit.domain.name != header.byte_domain
+            || unit.domain.version != header.byte_domain_version
+            || unit.digests.iter().any(|digest| digest.validate().is_err())
+    }) {
+        return catalog_result(CatalogMatchResult::Inconclusive {
+            reason: "snapshot and analyzed bytes use different normalization domains".into(),
+        });
+    }
+
+    let mut complete = Vec::new();
+    let mut partial = Vec::new();
+    let mut saw_usable_checksums = false;
+    let mut unresolved_row = false;
+    let mut seen = 0_u64;
+    for entry in entries {
+        checkpoint()?;
+        seen = seen.saturating_add(1);
+        if seen > header.game_count {
+            return Err(ModuleError::Invalid(
+                "DAT index contains more rows than its snapshot declares".into(),
+            ));
+        }
+        let entry: DatCatalogEntryObservation = entry
+            .parse()
+            .map_err(|error| ModuleError::Invalid(format!("invalid DAT catalog row: {error}")))?;
+        validate_dat_entry(&entry)?;
+        saw_usable_checksums |= entry.files.iter().any(has_usable_checksum);
+
+        let ordered = entry.files.len() == units.len()
+            && entry
+                .files
+                .iter()
+                .zip(units)
+                .all(|(file, unit)| match_file(file, unit).is_some());
+        // A plausible row with absent checksums cannot be ruled out by a
+        // different row's usable but nonmatching checksum.
+        unresolved_row |= !ordered
+            && entry.files.len() == units.len()
+            && entry.files.iter().zip(units).all(|(file, unit)| {
+                file.bytes == unit.bytes
+                    && [
+                        (HashAlgorithm::Sha1, file.sha1.as_deref()),
+                        (HashAlgorithm::Md5, file.md5.as_deref()),
+                        (HashAlgorithm::Crc32, file.crc32.as_deref()),
+                    ]
+                    .into_iter()
+                    .all(|(algorithm, expected)| {
+                        expected.is_none_or(|expected| {
+                            unit.digests
+                                .iter()
+                                .find(|digest| digest.algorithm == algorithm)
+                                .is_none_or(|digest| digest.hex == expected)
+                        })
+                    })
+            });
+        let mut matched = Vec::new();
+        let mut claimed = std::collections::BTreeSet::new();
+        for unit in units {
+            checkpoint()?;
+            let found = entry.files.iter().enumerate().find_map(|(index, file)| {
+                (!claimed.contains(&index))
+                    .then(|| match_file(file, unit).map(|digest| (index, digest)))
+                    .flatten()
+            });
+            if let Some((index, digest)) = found {
+                claimed.insert(index);
+                matched.push(CatalogMatchedUnit {
+                    source_file_id: unit.source_file_id,
+                    track_number: unit.track_number,
+                    digest,
+                });
+            }
+        }
+        if matched.is_empty() {
+            continue;
+        }
+        let candidate = CatalogCandidate {
+            provider: provider.clone(),
+            provider_record_id: entry.record_id,
+            label: entry.label,
+            matched_units: matched,
+        };
+        if ordered {
+            complete.push(candidate);
+        } else {
+            partial.push(candidate);
+        }
+        if complete.len() > 128 || partial.len() > 128 {
+            return Err(ModuleError::Invalid("too many DAT match candidates".into()));
+        }
+    }
+    if seen != header.game_count {
+        return Err(ModuleError::Invalid(
+            "DAT index row count does not match its snapshot".into(),
+        ));
+    }
+    let result = match complete.len() {
+        1 => CatalogMatchResult::UniqueCompleteMatch {
+            candidate: complete.remove(0),
+        },
+        count if count > 1 => CatalogMatchResult::AmbiguousCompleteMatches {
+            candidates: complete,
+        },
+        _ if !partial.is_empty() => CatalogMatchResult::PartialIdentification {
+            matched_files: partial
+                .iter()
+                .map(|candidate| candidate.matched_units.len())
+                .max()
+                .unwrap_or(0) as u32,
+            total_files: units.len() as u32,
+            candidates: partial,
+        },
+        _ if !saw_usable_checksums || unresolved_row => CatalogMatchResult::Inconclusive {
+            reason: "insufficient supported checksums to exclude an unresolved catalog row".into(),
+        },
+        _ => CatalogMatchResult::NoMatch,
+    };
+    catalog_result(result)
+}
+
+fn catalog_result(catalog: CatalogMatchResult) -> ModuleResult<GameProcessingResult> {
+    let result = GameProcessingResult::CatalogMatch { catalog };
+    validate_processing_result(&result)?;
+    Ok(result)
+}
+
+fn validate_dat_entry(entry: &DatCatalogEntryObservation) -> ModuleResult<()> {
+    let safe = |value: &str, maximum| {
+        !value.trim().is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
+    };
+    if !safe(&entry.record_id, 1024)
+        || !safe(&entry.label, 4096)
+        || entry.files.is_empty()
+        || entry.files.len() > 4096
+        || entry.files.iter().any(|file| {
+            !safe(&file.name, 4096)
+                || file.serial.as_ref().is_some_and(|value| !safe(value, 4096))
+                || file
+                    .crc32
+                    .as_ref()
+                    .is_some_and(|value| !valid_hex(value, 8))
+                || file
+                    .sha1
+                    .as_ref()
+                    .is_some_and(|value| !valid_hex(value, 40))
+                || file.md5.as_ref().is_some_and(|value| !valid_hex(value, 32))
+        })
+    {
+        return Err(ModuleError::Invalid("invalid DAT catalog entry".into()));
+    }
+    if [
+        entry.region.as_deref(),
+        entry.serial.as_deref(),
+        entry.version.as_deref(),
+        entry.category.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| !safe(value, 4096))
+    {
+        return Err(ModuleError::Invalid("invalid DAT catalog metadata".into()));
+    }
+    Ok(())
+}
+
+fn valid_hex(value: &str, digits: usize) -> bool {
+    value.len() == digits
+        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && value.bytes().all(|byte| !byte.is_ascii_uppercase())
+}
+
+fn has_usable_checksum(file: &DatCatalogFileObservation) -> bool {
+    file.sha1.is_some() || file.md5.is_some() || file.crc32.is_some()
+}
+
+fn match_file(file: &DatCatalogFileObservation, unit: &CatalogInputUnit<'_>) -> Option<Digest> {
+    if file.bytes != unit.bytes {
+        return None;
+    }
+    let declared = [
+        (HashAlgorithm::Sha1, file.sha1.as_deref()),
+        (HashAlgorithm::Md5, file.md5.as_deref()),
+        (HashAlgorithm::Crc32, file.crc32.as_deref()),
+    ];
+    if !declared.iter().any(|(_, expected)| expected.is_some())
+        || declared.iter().any(|(algorithm, expected)| {
+            expected.is_some_and(|expected| {
+                !unit
+                    .digests
+                    .iter()
+                    .any(|digest| digest.algorithm == *algorithm && digest.hex == expected)
+            })
+        })
+    {
+        return None;
+    }
+    declared.into_iter().find_map(|(algorithm, expected)| {
+        expected.and_then(|_| {
+            unit.digests
+                .iter()
+                .find(|digest| digest.algorithm == algorithm)
+                .cloned()
+        })
+    })
 }
 
 fn module_hash_error(error: junk_libs_game_formats::AnalysisError) -> ModuleError {
@@ -293,7 +762,7 @@ pub struct Games;
 
 impl CollectionModule for Games {
     fn descriptor(&self) -> ModuleDescriptor {
-        descriptor(
+        let mut descriptor = descriptor(
             "org.junk.games",
             "Video games",
             vec![
@@ -311,7 +780,27 @@ impl CollectionModule for Games {
                     },
                 },
             ],
-        )
+        );
+        for capability in &mut descriptor.capabilities {
+            if matches!(
+                capability.id.as_str(),
+                "org.junk.games.import-analysis" | "org.junk.games.catalog-verification"
+            ) {
+                capability.availability = Availability::Available;
+            }
+        }
+        let capability = |suffix: &str, display_name: &str| Capability {
+            id: CapabilityId::new(format!("org.junk.games.{suffix}")).unwrap(),
+            display_name: display_name.into(),
+            availability: Availability::Available,
+            scope: OperationScope::CollectionDomain,
+        };
+        descriptor.capabilities.extend([
+            capability("hash", "Hash game data"),
+            capability("inspect-ines", "Inspect iNES structure"),
+            capability("hash-tracks", "Hash raw 2352-byte tracks"),
+        ]);
+        descriptor
     }
 
     fn validate_current(&self, data: &ModuleData) -> ModuleResult<()> {
@@ -345,13 +834,93 @@ impl CollectionModule for Games {
 
     fn validate_operation_result(
         &self,
-        _capability: &CapabilityId,
+        capability: &CapabilityId,
         result: &RawJson,
     ) -> ModuleResult<()> {
+        if capability.as_str() == "org.junk.games.import-analysis" {
+            let output = result
+                .parse::<GameImportAnalysisOutput>()
+                .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+            if output.candidates.len() > 128
+                || output.limitations.len() > 64
+                || !(1..=2).contains(&output.observations.len())
+                || output.candidates.iter().any(|candidate| {
+                    candidate.key.trim().is_empty()
+                        || candidate.key.len() > 1024
+                        || candidate.label.trim().is_empty()
+                        || candidate.label.len() > 4096
+                        || candidate.observation.get().len() > 64 * 1024
+                })
+                || output.limitations.iter().any(|value| {
+                    value.trim().is_empty()
+                        || value.len() > 4096
+                        || value.chars().any(char::is_control)
+                })
+            {
+                return Err(ModuleError::Invalid(
+                    "invalid game Import analysis result".into(),
+                ));
+            }
+            for candidate in &output.candidates {
+                let observation = candidate
+                    .observation
+                    .parse::<CatalogCandidate>()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                validate_catalog_match(&CatalogMatchResult::UniqueCompleteMatch {
+                    candidate: observation.clone(),
+                })?;
+                if candidate.key
+                    != format!(
+                        "{}:{}",
+                        observation.provider.0, observation.provider_record_id
+                    )
+                    || !candidate.label.starts_with(&observation.label)
+                {
+                    return Err(ModuleError::Invalid(
+                        "game Import candidate does not match its observation".into(),
+                    ));
+                }
+            }
+            for (index, observation) in output.observations.into_iter().enumerate() {
+                let observation = observation
+                    .parse::<GameProcessingResult>()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                validate_processing_result(&observation)?;
+                if !matches!(
+                    (index, &observation),
+                    (0, GameProcessingResult::Hashes { .. })
+                        | (1, GameProcessingResult::CatalogMatch { .. })
+                ) {
+                    return Err(ModuleError::Invalid(
+                        "game Import analysis contains an unexpected observation".into(),
+                    ));
+                }
+            }
+            return Ok(());
+        }
         let result = result
             .parse::<GameProcessingResult>()
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
-        validate_processing_result(&result)
+        validate_processing_result(&result)?;
+        let expected_shape = match capability.as_str() {
+            "org.junk.games.hash" => matches!(result, GameProcessingResult::Hashes { .. }),
+            "org.junk.games.inspect-ines" => {
+                matches!(result, GameProcessingResult::Structure { .. })
+            }
+            "org.junk.games.hash-tracks" => {
+                matches!(result, GameProcessingResult::TrackHashes { .. })
+            }
+            "org.junk.games.catalog-verification" => {
+                matches!(result, GameProcessingResult::CatalogMatch { .. })
+            }
+            _ => false,
+        };
+        if !expected_shape {
+            return Err(ModuleError::Invalid(
+                "game operation result does not match its capability".into(),
+            ));
+        }
+        Ok(())
     }
 
     fn present(&self, data: &ModuleData) -> ModuleResult<ModulePresentation> {
@@ -361,13 +930,320 @@ impl CollectionModule for Games {
 
     fn operate(
         &self,
-        _request: OperationRequest,
-        _host: &dyn crate::ModuleHost,
+        request: OperationRequest,
+        host: &dyn crate::ModuleHost,
     ) -> ModuleResult<OperationOutput> {
-        Err(ModuleError::UnavailableCapability(
-            "game operation handler is not implemented".into(),
-        ))
+        let access = operation_access(&request)?;
+        let inventory = host.package_inventory(access)?;
+        let result = match request.capability.as_str() {
+            "org.junk.games.hash" => {
+                let input: GameFileOperationInput = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                hash_inventory_file(
+                    host,
+                    access,
+                    &inventory,
+                    input.file_index,
+                    input.profile.into(),
+                )?
+            }
+            "org.junk.games.inspect-ines" => {
+                let input: GameInspectOperationInput = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                let file = inventory
+                    .files
+                    .get(input.file_index)
+                    .ok_or_else(|| ModuleError::Invalid("file index is out of bounds".into()))?;
+                let mut reader = host.package_file(access, file.id)?;
+                inspect_ines_structure(reader.as_mut())?
+            }
+            "org.junk.games.hash-tracks" => {
+                let input: GameCueOperationInput = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                hash_inventory_cue(host, access, &inventory, input.cue_file_index)?
+            }
+            "org.junk.games.catalog-verification" => {
+                let input: CatalogVerificationInput = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                let hashes = analyze_selection(host, access, &inventory, input.analysis)?;
+                match_snapshot(host, input.snapshot_id, &input.system, &hashes)?
+            }
+            "org.junk.games.import-analysis" => {
+                let input: ImportAnalysisInput = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                let _ = (input.import_id, input.representation_id, input.files);
+                let system = match (input.system, input.domain) {
+                    (system @ Some(_), _) => system,
+                    (None, Some(domain)) => {
+                        self.validate_current(&domain)?;
+                        domain
+                            .payload
+                            .parse::<GameItemData>()
+                            .map_err(|error| ModuleError::Invalid(error.to_string()))?
+                            .platform
+                    }
+                    (None, None) => None,
+                };
+                return import_analysis(host, access, &inventory, input.snapshot_id, system);
+            }
+            _ => {
+                return Err(ModuleError::UnknownCapability(
+                    request.capability.to_string(),
+                ));
+            }
+        };
+        Ok(OperationOutput {
+            value: RawJson::from_value(
+                serde_json::to_value(result)
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+            ),
+        })
     }
+}
+
+fn operation_access(request: &OperationRequest) -> ModuleResult<PackageAccess> {
+    let scope = match request.entity {
+        OperationEntity::Import(id) => collector_core::PackageScope::Import(id),
+        OperationEntity::Representation(id) => collector_core::PackageScope::Representation(id),
+        _ => {
+            return Err(ModuleError::Invalid(
+                "game processing requires an Import or Representation".into(),
+            ));
+        }
+    };
+    Ok(PackageAccess {
+        collection_id: request.collection_id,
+        scope,
+    })
+}
+
+fn hash_inventory_file(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    index: usize,
+    profile: GameHashProfile,
+) -> ModuleResult<GameProcessingResult> {
+    let file = inventory
+        .files
+        .get(index)
+        .ok_or_else(|| ModuleError::Invalid("file index is out of bounds".into()))?;
+    let mut reader = host.package_file(access, file.id)?;
+    hash_game_file(file.id, reader.as_mut(), profile)
+}
+
+fn hash_raw_inventory(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+) -> ModuleResult<GameProcessingResult> {
+    let mut files = Vec::with_capacity(inventory.files.len());
+    for (index, _) in inventory.files.iter().enumerate() {
+        let GameProcessingResult::Hashes { files: mut result } =
+            hash_inventory_file(host, access, inventory, index, GameHashProfile::Raw)?
+        else {
+            unreachable!()
+        };
+        files.append(&mut result);
+    }
+    Ok(GameProcessingResult::Hashes { files })
+}
+
+fn hash_inventory_cue(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    cue_index: usize,
+) -> ModuleResult<GameProcessingResult> {
+    let cue = inventory
+        .files
+        .get(cue_index)
+        .ok_or_else(|| ModuleError::Invalid("CUE file index is out of bounds".into()))?;
+    if cue.bytes.0 > 1024 * 1024 {
+        return Err(ModuleError::Invalid("CUE sheet is oversized".into()));
+    }
+    let mut reader = host.package_file(access, cue.id)?;
+    let mut text = String::new();
+    reader
+        .read_to_string(&mut text)
+        .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+    hash_cue_package(&text, cue.id, inventory, |id| host.package_file(access, id))
+}
+
+fn analyze_selection(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    selection: CatalogAnalysisSelection,
+) -> ModuleResult<GameProcessingResult> {
+    match selection {
+        CatalogAnalysisSelection::RawFiles => hash_raw_inventory(host, access, inventory),
+        CatalogAnalysisSelection::File {
+            file_index,
+            profile,
+        } => hash_inventory_file(host, access, inventory, file_index, profile.into()),
+        CatalogAnalysisSelection::CueRaw2352 { cue_file_index } => {
+            hash_inventory_cue(host, access, inventory, cue_file_index)
+        }
+    }
+}
+
+fn match_snapshot(
+    host: &dyn crate::ModuleHost,
+    snapshot_id: collector_core::SnapshotId,
+    system: &str,
+    hashes: &GameProcessingResult,
+) -> ModuleResult<GameProcessingResult> {
+    let snapshot = host.catalog_snapshot(snapshot_id)?;
+    let units = match hashes {
+        GameProcessingResult::Hashes { files } => files
+            .iter()
+            .map(|file| CatalogInputUnit {
+                source_file_id: file.file_id,
+                track_number: None,
+                bytes: file.bytes,
+                domain: &file.domain,
+                digests: &file.digests,
+            })
+            .collect::<Vec<_>>(),
+        GameProcessingResult::TrackHashes { tracks } => tracks
+            .iter()
+            .map(|track| CatalogInputUnit {
+                source_file_id: track.source_file_id,
+                track_number: Some(track.track_number),
+                bytes: track.bytes,
+                domain: &track.domain,
+                digests: &track.digests,
+            })
+            .collect(),
+        _ => {
+            return Err(ModuleError::Invalid(
+                "catalog matching requires qualified hashes".into(),
+            ));
+        }
+    };
+    match_dat_catalog(
+        snapshot.provider,
+        system,
+        &snapshot.observation,
+        snapshot.entries.iter(),
+        &units,
+        &mut || host.checkpoint(),
+    )
+}
+
+fn import_analysis(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    snapshot_id: Option<collector_core::SnapshotId>,
+    system: Option<String>,
+) -> ModuleResult<OperationOutput> {
+    let hashes = hash_raw_inventory(host, access, inventory)?;
+    let mut limitations = Vec::new();
+    let mut observations = vec![result_json(&hashes)?];
+    let mut candidates = Vec::new();
+    match (snapshot_id, system.filter(|value| !value.trim().is_empty())) {
+        (Some(snapshot_id), Some(system)) => {
+            let matched = match_snapshot(host, snapshot_id, &system, &hashes)?;
+            if let GameProcessingResult::CatalogMatch { catalog } = &matched {
+                let (values, limitation) = import_candidates(catalog)?;
+                candidates = values;
+                if let Some(limitation) = limitation {
+                    limitations.push(limitation);
+                }
+            }
+            observations.push(result_json(&matched)?);
+        }
+        (None, _) => limitations.push(
+            "No active DAT snapshot was selected; exact hashes were retained for later matching."
+                .into(),
+        ),
+        (Some(_), None) => limitations
+            .push("The collection item has no explicit platform/system for DAT matching.".into()),
+    }
+    let output = GameImportAnalysisOutput {
+        candidates,
+        limitations,
+        observations,
+    };
+    Ok(OperationOutput {
+        value: RawJson::from_value(
+            serde_json::to_value(output)
+                .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+        ),
+    })
+}
+
+fn result_json(result: &GameProcessingResult) -> ModuleResult<RawJson> {
+    Ok(RawJson::from_value(serde_json::to_value(result).map_err(
+        |error| ModuleError::Invalid(error.to_string()),
+    )?))
+}
+
+fn import_candidates(
+    catalog: &CatalogMatchResult,
+) -> ModuleResult<(Vec<GameImportCandidateOutput>, Option<String>)> {
+    let (values, suffix, limitation): (&[CatalogCandidate], &str, Option<String>) = match catalog {
+        CatalogMatchResult::UniqueCompleteMatch { candidate } => {
+            (std::slice::from_ref(candidate), "exact catalog match", None)
+        }
+        CatalogMatchResult::AmbiguousCompleteMatches { candidates } => (
+            candidates,
+            "exact but ambiguous catalog match",
+            Some("Multiple complete catalog matches require curator review.".into()),
+        ),
+        CatalogMatchResult::PartialIdentification { candidates, .. } => (
+            candidates,
+            "partial identification only",
+            Some(
+                "Partial catalog matches are tentative identity candidates, not verification."
+                    .into(),
+            ),
+        ),
+        CatalogMatchResult::Inconclusive { reason } => {
+            return Ok((Vec::new(), Some(reason.clone())));
+        }
+        CatalogMatchResult::NoMatch => {
+            return Ok((
+                Vec::new(),
+                Some("No catalog row matched the complete analyzed package.".into()),
+            ));
+        }
+    };
+    let candidates = values
+        .iter()
+        .map(|candidate| {
+            let checksum_note = if candidate
+                .matched_units
+                .iter()
+                .all(|unit| unit.digest.algorithm == HashAlgorithm::Crc32)
+            {
+                " (CRC32 only; not cryptographic identity)"
+            } else {
+                ""
+            };
+            Ok(GameImportCandidateOutput {
+                key: format!("{}:{}", candidate.provider.0, candidate.provider_record_id),
+                label: format!("{} — {suffix}{checksum_note}", candidate.label),
+                observation: RawJson::from_value(
+                    serde_json::to_value(candidate)
+                        .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+                ),
+            })
+        })
+        .collect::<ModuleResult<Vec<_>>>()?;
+    Ok((candidates, limitation))
 }
 
 fn text_field(key: &str, label: &str) -> DomainFieldDescriptor {
@@ -495,6 +1371,17 @@ fn valid_qualified_digests(digests: &[Digest]) -> bool {
 
 fn validate_catalog_match(result: &CatalogMatchResult) -> ModuleResult<()> {
     let candidates: &[CatalogCandidate] = match result {
+        CatalogMatchResult::Inconclusive { reason } => {
+            if reason.trim().is_empty()
+                || reason.len() > 4096
+                || reason.chars().any(char::is_control)
+            {
+                return Err(ModuleError::Invalid(
+                    "invalid inconclusive catalog result".into(),
+                ));
+            }
+            return Ok(());
+        }
         CatalogMatchResult::NoMatch => return Ok(()),
         CatalogMatchResult::UniqueCompleteMatch { candidate } => std::slice::from_ref(candidate),
         CatalogMatchResult::AmbiguousCompleteMatches { candidates } => {
@@ -514,7 +1401,7 @@ fn validate_catalog_match(result: &CatalogMatchResult) -> ModuleResult<()> {
             matched_files,
             total_files,
         } => {
-            if *total_files == 0 || *matched_files == 0 || matched_files >= total_files {
+            if *total_files == 0 || *matched_files == 0 || matched_files > total_files {
                 return Err(ModuleError::Invalid(
                     "invalid partial catalog match counts".into(),
                 ));
@@ -530,21 +1417,67 @@ fn validate_catalog_match(result: &CatalogMatchResult) -> ModuleResult<()> {
                 || candidate.provider_record_id.len() > 1024
                 || candidate.label.is_empty()
                 || candidate.label.len() > 4096
+                || candidate.matched_units.is_empty()
                 || candidate
-                    .matched_files
+                    .matched_units
                     .iter()
+                    .any(|unit| unit.track_number == Some(0) || unit.digest.validate().is_err())
+                || candidate
+                    .matched_units
+                    .iter()
+                    .map(|unit| (unit.source_file_id, unit.track_number))
                     .collect::<std::collections::BTreeSet<_>>()
                     .len()
-                    != candidate.matched_files.len()
-                || candidate.matched_files.is_empty()
-                || candidate.matched_files.len() != candidate.matched_digests.len()
-                || candidate
-                    .matched_digests
-                    .iter()
-                    .any(|digest| digest.validate().is_err())
+                    != candidate.matched_units.len()
         })
     {
         return Err(ModuleError::Invalid("invalid catalog match result".into()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn catalog_scan_stops_at_host_checkpoint() {
+        let header = RawJson::from_value(serde_json::json!({
+            "schema_version":1,"system":"nes","catalog":"fixture","version":"1",
+            "byte_domain":"org.junk.game.raw-bytes","byte_domain_version":1,"game_count":2
+        }));
+        let row = RawJson::from_value(serde_json::json!({
+            "record_id":"one","label":"One","files":[{"name":"one","bytes":1,"crc32":"00000000"}]
+        }));
+        let domain = NormalizedByteDomain {
+            name: "org.junk.game.raw-bytes".into(),
+            version: 1,
+        };
+        let digests = [Digest::new(HashAlgorithm::Crc32, "11111111").unwrap()];
+        let units = [CatalogInputUnit {
+            source_file_id: PackageFileId::new(),
+            track_number: None,
+            bytes: ByteLength(1),
+            domain: &domain,
+            digests: &digests,
+        }];
+        let mut checks = 0;
+        let result = match_dat_catalog(
+            ModuleId("org.junk.providers.local-dat".into()),
+            "nes",
+            &header,
+            [&row, &row],
+            &units,
+            &mut || {
+                checks += 1;
+                if checks >= 2 {
+                    Err(ModuleError::FailedOperation("cancelled".into()))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(matches!(result, Err(ModuleError::FailedOperation(_))));
+        assert_eq!(checks, 2);
+    }
 }

@@ -898,6 +898,16 @@ async fn provisional_import_routes_follow_curation_listener_composition() {
                 serde_json::Value::Null,
             ),
             (
+                "GET",
+                format!("/api/v1/collections/{collection}/catalog-snapshots"),
+                serde_json::Value::Null,
+            ),
+            (
+                "GET",
+                format!("/api/v1/captures/{collection}/operations?representation_id={collection}"),
+                serde_json::Value::Null,
+            ),
+            (
                 "POST",
                 format!("/api/v1/collections/{collection}/inboxes/label/stage"),
                 serde_json::json!({"package":"package"}),
@@ -908,7 +918,7 @@ async fn provisional_import_routes_follow_curation_listener_composition() {
                 .oneshot(
                     Request::builder()
                         .method(method)
-                        .uri(path)
+                        .uri(&path)
                         .header("origin", "https://collector.example")
                         .header("idempotency-key", "import-listener-probe")
                         .header("content-type", "application/json")
@@ -928,6 +938,64 @@ async fn provisional_import_routes_follow_curation_listener_composition() {
                 } else {
                     StatusCode::NOT_FOUND
                 }
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn catalog_administration_routes_follow_administration_listener_composition() {
+    let collection = CollectionId::new();
+    let snapshot = SnapshotId::new();
+    for enabled in [false, true] {
+        let (_root, mut state) = state();
+        state.exposure.public_administration = enabled;
+        let app = router(state);
+        for (method, path, body) in [
+            ("GET", "/api/v1/admin/catalog-sources".into(), None),
+            (
+                "GET",
+                format!("/api/v1/admin/collections/{collection}/catalog-snapshots"),
+                None,
+            ),
+            (
+                "POST",
+                format!("/api/v1/admin/collections/{collection}/catalog-snapshots"),
+                Some(serde_json::json!({"source":"nes"})),
+            ),
+            (
+                "PUT",
+                format!(
+                    "/api/v1/admin/collections/{collection}/catalog-snapshots/{snapshot}/active"
+                ),
+                Some(serde_json::json!({"snapshot_id":snapshot})),
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(&path)
+                        .header("origin", "https://collector.example")
+                        .header("idempotency-key", "catalog-listener-probe")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            body.map(|value| serde_json::to_vec(&value).unwrap())
+                                .unwrap_or_default(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if enabled {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::NOT_FOUND
+                },
+                "{method} {path}, administration={enabled}"
             );
         }
     }
@@ -1565,7 +1633,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 74);
+    assert_eq!(paths.len(), 78);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -1577,6 +1645,10 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/imports",
         "/api/v1/imports/{id}",
         "/api/v1/captures/{id}/operations",
+        "/api/v1/collections/{id}/catalog-snapshots",
+        "/api/v1/admin/catalog-sources",
+        "/api/v1/admin/collections/{id}/catalog-snapshots",
+        "/api/v1/admin/collections/{id}/catalog-snapshots/{snapshot_id}/active",
         "/api/v1/imports/{id}/analysis",
         "/api/v1/imports/{id}/review",
         "/api/v1/imports/{id}/publish",

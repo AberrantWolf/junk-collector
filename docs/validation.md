@@ -1,5 +1,74 @@
 # Validation recorded for the foundation
 
+## D04 root review corrections — 2026-09-13
+
+See [review findings and next checkpoint](wave-4-review.md). Review fixes cover
+exact snapshot length/SHA-256 checks, strict shared DAT parsing, incomplete-checksum
+outcomes, cancellation during reads/scans, missing-module historical reads, and
+curation/admin usability. No archive schema change was added during review.
+
+- `cargo test --workspace --locked`: 216 tests passed; focused module tests were
+  rerun after the final incomplete-checksum regression and passed.
+- Architecture checker, formatting, strict workspace Clippy, TypeScript check,
+  generated API check, web build, and embedded server rebuild passed.
+- Shared `junk-libs-dat` tests: 3 passed; strict Clippy passed. Affected Retro Junk
+  DAT/catalog tests: 104 passed including doctests. The shared parser changes are
+  checkpointed in Junk Libs commit `6350026e95dd0715ff6cdfddffede91d1f666c1c`.
+  Collector still consumes the sibling through a local path dependency.
+- Normal and `LOCAL_SETUP=1` Chromium smoke passed against rebuilt servers, including newly added
+  real synthetic DAT import/activation through administration, plus the existing
+  inventory, artwork/search, exposure, authorization and WebAuthn checks.
+
+Large DAT corpus/index performance and owned real-dump qualification remain
+external. Parsing regenerates a bounded in-memory row view per job, not a persistent
+indexed lookup. No scale qualification is claimed.
+
+
+## D04.2–D04.3 local implementation — 2026-09-13
+
+- Added `collector-providers` at the reserved infrastructure boundary. Its local
+  DAT adapter accepts only configured source names, parses bounded Logiqx XML or
+  ClrMamePro text through `junk-libs-dat`, retains exact source bytes and SHA-256,
+  and regenerates bounded typed catalog rows from the archived snapshot. Empty,
+  malformed, oversized, cancelled, missing and changed inputs fail without a
+  synthetic successful snapshot.
+- Game matching requires the declared system, normalized byte-domain name/version,
+  expected lengths and every declared checksum for every ordered file or track.
+  Results distinguish no match, one complete match, multiple complete matches,
+  partial identification and inconclusive input. Matched units retain the actual
+  SHA-1, MD5 or CRC32 algorithm; CRC-only candidates are explicitly described as
+  non-cryptographic identity.
+- Private schema 11 stores only the active collection/provider snapshot selection.
+  Exact DAT bytes and parsed observations are archive-schema-4 Snapshot records;
+  the rebuildable catalog index is regenerated from those bytes. Activation uses
+  the existing transactional command receipt path and does not rewrite snapshots.
+- Registered raw/profile hash, iNES structure, raw-2352 CUE-track and DAT comparison
+  operations run through the existing frozen Job executor. Import analysis records
+  exact hashes and optionally uses the active snapshot; committed Capture operations
+  freeze their Representation source fingerprint and SnapshotId. The web surfaces
+  expose configured-source names to administrators, explicit byte domains/systems
+  to curators, and current/historical result language without a verified badge.
+- The synthetic end-to-end test imports and activates a DAT, analyzes and publishes
+  a game package, commits an exact catalog-match observation, imports a changed DAT,
+  activates it, and rebuilds the catalog. The original snapshot bytes, digest,
+  SnapshotId and exact-match history remain readable while the new snapshot stays
+  active. This also exposed and fixed attached Import publication so the schema-3
+  Item revision references newly published standalone integrity Evidence.
+- Focused provider, module, store and HTTP tests cover equivalent XML/text bodies,
+  duplicate and CRC-only rows, conflicting checksums, wrong system/domain, missing
+  checksums, reordered/modified files, cancellation/outage/size failures, listener
+  composition, role-aware snapshot access, refresh and reindex.
+- Passed: `python3 scripts/check_architecture.py`; `cargo fmt --all -- --check`;
+  214 tests under `cargo test --workspace --locked`; warning-free
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`; TypeScript and
+  generated-contract checks; web build; rebuilt embedded `collector-server`; and
+  the Chromium smoke suite covering session, management bundles, inventory,
+  role-aware artwork, typed collections, search, denial, WebAuthn and mobile layout.
+- **External/unavailable:** real copyrighted dumps and large independent DAT corpora,
+  real mixed-mode CUEs, target Linux/NAS behavior, and runtime CHD operation exposure
+  remain external. The pinned synthetic CHD primitive is not advertised by the D04.3
+  runtime. D05 has not started.
+
 ## D04.1 repository checkpoint
 
 The reviewed shared extraction is committed in Junk Libs at `cd385d8`; the
@@ -224,7 +293,7 @@ distributable immutable pins. Unrelated Retro sync scripts were excluded.
 # Wave 4 W4.2 implementation evidence — 2026-09-11
 
 - Added archive schema 4 processing observation, streamed snapshot, metadata
-  authority, and conversion-recipe records with catalog schema 4 projections and
+  authority, and conversion-recipe records with catalog schema 5 projections and
   mixed v3/v4 reindex. Existing archive bytes and unknown record directories remain
   untouched; archive-only rebuild restores the portable processing history.
 - Added private schema 10 frozen Job inputs and provisional Import observations.

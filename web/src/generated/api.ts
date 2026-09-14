@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/v1/admin/catalog-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["catalog_sources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/collections": {
         parameters: {
             query?: never;
@@ -14,6 +30,38 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["create_collection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/collections/{id}/catalog-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["catalog_snapshots"];
+        put?: never;
+        post: operations["import_catalog_snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/collections/{id}/catalog-snapshots/{snapshot_id}/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["activate_catalog_snapshot"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -267,7 +315,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["capture_processing_summaries"];
         put?: never;
         post: operations["start_processing_operation"];
         delete?: never;
@@ -414,6 +462,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["stage_inbox_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{id}/catalog-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["curation_catalog_snapshots"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1213,6 +1277,9 @@ export interface components {
             date?: string | null;
             source?: string | null;
         };
+        ActivateCatalogSnapshotCommand: {
+            snapshot_id: components["schemas"]["SnapshotId"];
+        };
         /** @enum {string} */
         ActiveOwnership: "owned" | "borrowed" | "unknown";
         AnalyzeProvisionalImport: {
@@ -1321,11 +1388,26 @@ export interface components {
         CarrierId: string;
         /** @enum {string} */
         CarrierKind: "cartridge" | "optical_disc" | "tape" | "card" | "booklet" | "case" | "other";
+        CatalogImportRequest: {
+            source: string;
+        };
         CatalogSnapshot: {
             digest: components["schemas"]["Digest"];
             provider: components["schemas"]["ModuleId"];
             /** Format: date-time */
             retrieved_at: string;
+        };
+        CatalogSnapshotStatus: {
+            active: boolean;
+            snapshot: components["schemas"]["SnapshotRecord"];
+        };
+        CatalogSourceView: {
+            byte_domain: string;
+            /** Format: int32 */
+            byte_domain_version: number;
+            catalog: string;
+            id: string;
+            system: string;
         };
         Collection: {
             /**
@@ -1770,8 +1852,27 @@ export interface components {
             password: string;
             username: string;
         };
+        /** Format: uuid */
+        ObservationId: string;
         /** @enum {string} */
         OperationScope: "collection_domain" | "shared_media";
+        OperationSupport: {
+            /** @enum {string} */
+            support: "supported";
+        } | {
+            dependency: string;
+            reason: string;
+            /** @enum {string} */
+            support: "unavailable_dependency";
+        } | {
+            reason: string;
+            /** @enum {string} */
+            support: "unsupported_layout";
+        } | {
+            reason: string;
+            /** @enum {string} */
+            support: "externally_unqualified";
+        };
         Ownership: {
             /** @enum {string} */
             state: "owned";
@@ -1787,6 +1888,22 @@ export interface components {
             reason: string;
             /** @enum {string} */
             state: "disposed";
+        };
+        PackageScope: {
+            id: components["schemas"]["ImportId"];
+            /** @enum {string} */
+            scope: "import";
+        } | {
+            id: components["schemas"]["RepresentationId"];
+            /** @enum {string} */
+            scope: "representation";
+        };
+        Page_CatalogSnapshotStatus: {
+            items: {
+                active: boolean;
+                snapshot: components["schemas"]["SnapshotRecord"];
+            }[];
+            next_cursor?: string | null;
         };
         Page_JobView: {
             items: {
@@ -1837,6 +1954,23 @@ export interface components {
                 /** Format: date-time */
                 updated_at: string;
                 wishlist: boolean;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_ProcessingSummary: {
+            items: {
+                /** Format: date-time */
+                created_at: string;
+                current: boolean;
+                legacy_provenance: boolean;
+                limitations: string[];
+                observation_id: components["schemas"]["ObservationId"];
+                operation: components["schemas"]["CapabilityId"];
+                result: Record<string, never>;
+                snapshot_id?: null | components["schemas"]["SnapshotId"];
+                snapshot_observation?: Record<string, never> | null;
+                source: components["schemas"]["PackageScope"];
+                support: components["schemas"]["OperationSupport"];
             }[];
             next_cursor?: string | null;
         };
@@ -1967,6 +2101,20 @@ export interface components {
             device_id?: null | components["schemas"]["DeviceId"];
             user_id: components["schemas"]["UserId"];
         };
+        ProcessingSummary: {
+            /** Format: date-time */
+            created_at: string;
+            current: boolean;
+            legacy_provenance: boolean;
+            limitations: string[];
+            observation_id: components["schemas"]["ObservationId"];
+            operation: components["schemas"]["CapabilityId"];
+            result: Record<string, never>;
+            snapshot_id?: null | components["schemas"]["SnapshotId"];
+            snapshot_observation?: Record<string, never> | null;
+            source: components["schemas"]["PackageScope"];
+            support: components["schemas"]["OperationSupport"];
+        };
         ProfileChange: {
             display_name: string;
             expected_revision: components["schemas"]["Revision"];
@@ -2071,6 +2219,17 @@ export interface components {
         };
         /** Format: uuid */
         SnapshotId: string;
+        SnapshotRecord: {
+            bytes: components["schemas"]["ByteLength"];
+            collection_id: components["schemas"]["CollectionId"];
+            /** Format: date-time */
+            created_at: string;
+            digest: components["schemas"]["Digest"];
+            id: components["schemas"]["SnapshotId"];
+            media_type: string;
+            parsed_observation: Record<string, never>;
+            provider: components["schemas"]["ModuleId"];
+        };
         Specimen: {
             acquisition?: null | components["schemas"]["Acquisition"];
             components: components["schemas"]["Component"][];
@@ -2174,6 +2333,31 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    catalog_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSourceView"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     create_collection: {
         parameters: {
             query?: never;
@@ -2198,6 +2382,139 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    catalog_snapshots: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_CatalogSnapshotStatus"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    import_catalog_snapshot: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogImportRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    activate_catalog_snapshot: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["CollectionId"];
+                snapshot_id: components["schemas"]["SnapshotId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivateCatalogSnapshotCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSnapshotStatus"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2727,6 +3044,49 @@ export interface operations {
             };
         };
     };
+    capture_processing_summaries: {
+        parameters: {
+            query: {
+                representation_id: components["schemas"]["RepresentationId"];
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["CaptureId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ProcessingSummary"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     start_processing_operation: {
         parameters: {
             query?: never;
@@ -3155,6 +3515,42 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    curation_catalog_snapshots: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_CatalogSnapshotStatus"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

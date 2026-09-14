@@ -25,4 +25,5 @@ tempfile.workspace = true
 
 [dev-dependencies]
 collector-modules.workspace = true
+collector-providers.workspace = true
 anyhow.workspace = true

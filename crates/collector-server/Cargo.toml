@@ -8,6 +8,7 @@ license.workspace = true
 collector-core.workspace = true
 collector-app.workspace = true
 collector-modules.workspace = true
+collector-providers.workspace = true
 collector-store.workspace = true
 collector-client.workspace = true
 serde.workspace = true

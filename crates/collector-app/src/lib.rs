@@ -7,9 +7,9 @@ pub mod security;
 use chrono::{DateTime, Utc};
 use collector_core::*;
 use collector_modules::{
-    CapabilityId, DomainEdit, JobSubmission, ModuleDescriptor, ModuleError, ModuleHost,
-    ModulePresentation, ModuleResult, OperationEntity, OperationRequest, PackageAccess, Registry,
-    RepresentationReader,
+    CapabilityId, CatalogSnapshotInput, DomainEdit, JobSubmission, ModuleDescriptor, ModuleError,
+    ModuleHost, ModulePresentation, ModuleResult, OperationEntity, OperationRequest, PackageAccess,
+    Registry, RepresentationReader,
 };
 pub use processing::*;
 use serde::de::DeserializeOwned;
@@ -540,6 +540,12 @@ pub trait AdministrationPort: Send + Sync {
         administrator: bool,
     ) -> Result<AccountView>;
     fn reassign_default(&self, user: UserId) -> Result<()>;
+    fn activate_catalog_snapshot(
+        &self,
+        collection: CollectionId,
+        provider: &ModuleId,
+        snapshot: SnapshotId,
+    ) -> Result<CatalogSnapshotStatus>;
 }
 
 pub trait AuthenticationPort: Send + Sync {
@@ -854,6 +860,7 @@ pub struct CollectionService {
     jobs: Arc<dyn JobPort>,
     processing: Arc<dyn ProcessingPort>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
+    catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
     modules: Arc<Registry>,
 }
 
@@ -879,11 +886,18 @@ struct ImportAnalysisOutput {
     candidates: Vec<ImportAnalysisCandidateOutput>,
     #[serde(default)]
     limitations: Vec<String>,
+    #[serde(default, rename = "observations")]
+    _observations: Vec<RawJson>,
 }
 
 struct ProcessingHost<'a> {
     port: &'a dyn ProcessingPort,
     access: PackageAccess,
+    frozen_snapshot_id: Option<SnapshotId>,
+    catalog_parsers: &'a std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>,
+    jobs: Arc<dyn JobPort>,
+    job_id: JobId,
+    claim_token: String,
 }
 
 struct DurableProcessingContext {
@@ -954,7 +968,44 @@ fn processing_module_error(error: Error) -> ModuleError {
     }
 }
 
+struct ProcessingReader {
+    reader: Box<dyn RepresentationReader>,
+    jobs: Arc<dyn JobPort>,
+    job_id: JobId,
+    claim_token: String,
+}
+
+impl std::io::Read for ProcessingReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self
+            .jobs
+            .cancellation_requested(self.job_id, &self.claim_token)
+            .map_err(std::io::Error::other)?
+        {
+            return Err(std::io::Error::other("processing cancelled"));
+        }
+        self.reader.read(buffer)
+    }
+}
+
+impl std::io::Seek for ProcessingReader {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.reader.seek(position)
+    }
+}
+
 impl ModuleHost for ProcessingHost<'_> {
+    fn checkpoint(&self) -> ModuleResult<()> {
+        if self
+            .jobs
+            .cancellation_requested(self.job_id, &self.claim_token)
+            .map_err(processing_module_error)?
+        {
+            return Err(ModuleError::FailedOperation("processing cancelled".into()));
+        }
+        Ok(())
+    }
+
     fn package_inventory(&self, access: PackageAccess) -> ModuleResult<PackageInventory> {
         if access != self.access {
             return Err(ModuleError::AccessDenied);
@@ -974,7 +1025,14 @@ impl ModuleHost for ProcessingHost<'_> {
         }
         self.port
             .package_file(access.collection_id, access.scope, id)
-            .map(|reader| Box::new(reader) as Box<dyn RepresentationReader>)
+            .map(|reader| {
+                Box::new(ProcessingReader {
+                    reader: Box::new(reader),
+                    jobs: self.jobs.clone(),
+                    job_id: self.job_id,
+                    claim_token: self.claim_token.clone(),
+                }) as Box<dyn RepresentationReader>
+            })
             .map_err(processing_module_error)
     }
 
@@ -984,6 +1042,47 @@ impl ModuleHost for ProcessingHost<'_> {
         } else {
             Err(ModuleError::AccessDenied)
         }
+    }
+
+    fn catalog_snapshot(&self, id: SnapshotId) -> ModuleResult<CatalogSnapshotInput> {
+        if self.frozen_snapshot_id != Some(id) {
+            return Err(ModuleError::Invalid(
+                "operation requested a catalog snapshot that was not frozen with its job".into(),
+            ));
+        }
+        let query = SnapshotQuery {
+            collection_id: self.access.collection_id,
+            snapshot_id: id,
+        };
+        let record = self.port.snapshot(query).map_err(processing_module_error)?;
+        let parser = self
+            .catalog_parsers
+            .get(&record.provider.0)
+            .ok_or_else(|| {
+                ModuleError::UnavailableCapability(format!(
+                    "catalog parser {} is unavailable",
+                    record.provider.0
+                ))
+            })?;
+        let mut reader = self
+            .port
+            .snapshot_bytes(query)
+            .map_err(processing_module_error)?;
+        let jobs = self.jobs.clone();
+        let job_id = self.job_id;
+        let claim_token = self.claim_token.clone();
+        let parsed = parser
+            .parse_snapshot(&record, reader.as_mut(), &mut || {
+                jobs.cancellation_requested(job_id, &claim_token)
+            })
+            .map_err(processing_module_error)?;
+        parsed.validate().map_err(processing_module_error)?;
+        Ok(CatalogSnapshotInput {
+            id,
+            provider: record.provider,
+            observation: parsed.observation,
+            entries: parsed.entries,
+        })
     }
 
     fn submit_job(&self, _request: JobSubmission) -> ModuleResult<JobId> {
@@ -1424,6 +1523,7 @@ impl CollectionService {
             jobs,
             processing,
             streaming_providers: Arc::new(Default::default()),
+            catalog_parsers: Arc::new(Default::default()),
             modules,
         }
     }
@@ -1438,6 +1538,20 @@ impl CollectionService {
             return Err(Error::Invalid("duplicate streaming provider".into()));
         }
         self.streaming_providers = Arc::new(providers);
+        Ok(self)
+    }
+
+    pub fn with_catalog_parser(
+        mut self,
+        id: ModuleId,
+        parser: Arc<dyn CatalogParserPort>,
+    ) -> Result<Self> {
+        id.validate()?;
+        let mut parsers = (*self.catalog_parsers).clone();
+        if parsers.insert(id.0, parser).is_some() {
+            return Err(Error::Invalid("duplicate catalog parser".into()));
+        }
+        self.catalog_parsers = Arc::new(parsers);
         Ok(self)
     }
     fn execute_command<Request, Response>(
@@ -2448,7 +2562,7 @@ impl CollectionService {
         query: ProcessingQuery,
     ) -> Result<Page<ProcessingSummary>> {
         query.validate()?;
-        self.authorize(actor, query.collection_id, Action::Browse)?;
+        self.authorize(actor, query.collection_id, Action::Curate)?;
         let current_source = self
             .processing
             .recorded_source(query.collection_id, query.source)?;
@@ -2457,20 +2571,70 @@ impl CollectionService {
             items: page
                 .items
                 .into_iter()
-                .map(|observation| ProcessingSummary {
-                    observation_id: observation.id,
-                    operation: observation.operation,
-                    source: observation.source_fingerprint.source,
-                    current: observation.source_fingerprint.source == current_source.source
-                        && observation.source_fingerprint.files == current_source.files,
-                    support: observation.support,
-                    limitations: observation.limitations,
-                    legacy_provenance: false,
-                    created_at: observation.created_at,
+                .map(|observation| {
+                    let snapshot_observation = observation
+                        .snapshot_id
+                        .and_then(|snapshot_id| {
+                            self.processing
+                                .snapshot(SnapshotQuery {
+                                    collection_id: query.collection_id,
+                                    snapshot_id,
+                                })
+                                .ok()
+                        })
+                        .map(|snapshot| snapshot.parsed_observation);
+                    ProcessingSummary {
+                        observation_id: observation.id,
+                        operation: observation.operation,
+                        source: observation.source_fingerprint.source,
+                        snapshot_id: observation.snapshot_id,
+                        snapshot_observation,
+                        result: observation.typed_result.payload,
+                        current: observation.source_fingerprint.source == current_source.source
+                            && observation.source_fingerprint.files == current_source.files,
+                        support: observation.support,
+                        limitations: observation.limitations,
+                        legacy_provenance: false,
+                        created_at: observation.created_at,
+                    }
                 })
                 .collect(),
             next_cursor: page.next_cursor,
         })
+    }
+
+    pub fn capture_processing_summaries(
+        &self,
+        actor: &Principal,
+        capture_id: CaptureId,
+        representation_id: RepresentationId,
+        after: Option<ObservationId>,
+        limit: u16,
+    ) -> Result<Page<ProcessingSummary>> {
+        let capture = self.reader.capture(capture_id)?;
+        if !capture
+            .representations
+            .iter()
+            .any(|representation| representation.id == representation_id)
+        {
+            return Err(Error::NotFound);
+        }
+        self.authorize(actor, capture.collection_id, Action::Curate)?;
+        let source = PackageScope::Representation(representation_id);
+        let source_fingerprint = self
+            .processing
+            .recorded_source(capture.collection_id, source)?;
+        self.processing_summaries(
+            actor,
+            ProcessingQuery {
+                collection_id: capture.collection_id,
+                source,
+                source_fingerprint,
+                operation: None,
+                after,
+                limit,
+            },
+        )
     }
     pub fn activity(&self, actor: &Principal, id: ItemId) -> Result<serde_json::Value> {
         let item = self.reader.item(id)?;
@@ -2880,10 +3044,23 @@ impl CollectionService {
             .processing
             .package_inventory(record.view.collection_id, PackageScope::Import(id))?;
         let source_fingerprint = self.fingerprint_inventory(&inventory)?;
+        let provider = ModuleId("org.junk.providers.local-dat".into());
+        let snapshot_id = self
+            .processing
+            .active_snapshot(record.view.collection_id, &provider)?;
+        let domain = record
+            .view
+            .association
+            .item_id
+            .map(|item| self.reader.item(item).map(|item| item.domain))
+            .transpose()?;
         let selection = RawJson::from_value(serde_json::json!({
             "import_id": id,
             "representation_id": record.view.representation_id,
             "files": record.view.files,
+            "snapshot_id": snapshot_id,
+            "system": null,
+            "domain": domain,
         }));
         let frozen = FrozenProcessingJob {
             collection_id: record.view.collection_id,
@@ -2892,7 +3069,7 @@ impl CollectionService {
             operation_version,
             source: PackageScope::Import(id),
             source_fingerprint,
-            snapshot_id: None,
+            snapshot_id,
             observation_id: ObservationId(job.0),
             selection,
             created_at: self.authentication.now(),
@@ -2986,6 +3163,11 @@ impl CollectionService {
                 collection_id: frozen.collection_id,
                 scope: frozen.source,
             },
+            frozen_snapshot_id: frozen.snapshot_id,
+            catalog_parsers: self.catalog_parsers.as_ref(),
+            jobs: self.jobs.clone(),
+            job_id: claim.id,
+            claim_token: claim.claim_token.clone(),
         };
         let analyzed = self.modules.operate(
             OperationRequest {
@@ -2997,6 +3179,12 @@ impl CollectionService {
             },
             &host,
         );
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
         let (support, typed_result, limitations) = match analyzed {
             Ok(output) => {
                 let parsed: ImportAnalysisOutput = output.value.parse()?;
@@ -3529,6 +3717,112 @@ impl CollectionService {
         )
     }
 
+    pub fn import_catalog_snapshot(
+        &self,
+        actor: &Principal,
+        command: ImportCatalogSnapshotCommand,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.require_administrator(actor)?;
+        command.validate()?;
+        if command.provider.0 != "org.junk.providers.local-dat" {
+            return Err(Error::Invalid(
+                "the configured DAT import route requires the local DAT provider".into(),
+            ));
+        }
+        let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
+        if eligibility.owner.0 != "org.junk.games" {
+            return Err(Error::Invalid(
+                "DAT catalogs can only be imported for a Games collection".into(),
+            ));
+        }
+        let job = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+        let frozen = FrozenAcquisitionJob {
+            request: ProviderRequest {
+                collection_id: command.collection_id,
+                provider: command.provider,
+                operation: OperationId::new("org.junk.providers.local-dat.acquire")?,
+                source_fingerprint: None,
+                query: RawJson::from_value(serde_json::json!({"source":command.source})),
+                maximum_response_bytes: 512 * 1024 * 1024,
+            },
+            collection_binding: eligibility.binding,
+            snapshot_id: SnapshotId(job.0),
+            created_at: self.authentication.now(),
+        };
+        self.enqueue_catalog_acquisition(actor, frozen, context)
+    }
+
+    pub fn catalog_snapshots(
+        &self,
+        actor: &Principal,
+        collection_id: CollectionId,
+        after: Option<SnapshotId>,
+        limit: u16,
+    ) -> Result<Page<CatalogSnapshotStatus>> {
+        self.require_administrator(actor)?;
+        self.authorize(actor, collection_id, Action::Curate)?;
+        self.catalog_snapshot_page(collection_id, after, limit)
+    }
+
+    pub fn curation_catalog_snapshots(
+        &self,
+        actor: &Principal,
+        collection_id: CollectionId,
+        after: Option<SnapshotId>,
+        limit: u16,
+    ) -> Result<Page<CatalogSnapshotStatus>> {
+        self.authorize(actor, collection_id, Action::Curate)?;
+        self.catalog_snapshot_page(collection_id, after, limit)
+    }
+
+    fn catalog_snapshot_page(
+        &self,
+        collection_id: CollectionId,
+        after: Option<SnapshotId>,
+        limit: u16,
+    ) -> Result<Page<CatalogSnapshotStatus>> {
+        if !(1..=200).contains(&limit) {
+            return Err(Error::Invalid("snapshot page limit must be 1..=200".into()));
+        }
+        let page = self.processing.snapshots(collection_id, after, limit)?;
+        let mut items = Vec::with_capacity(page.items.len());
+        for snapshot in page.items {
+            let active = self
+                .processing
+                .active_snapshot(collection_id, &snapshot.provider)?
+                == Some(snapshot.id);
+            items.push(CatalogSnapshotStatus { snapshot, active });
+        }
+        Ok(Page {
+            items,
+            next_cursor: page.next_cursor,
+        })
+    }
+
+    pub fn activate_catalog_snapshot(
+        &self,
+        actor: &Principal,
+        collection_id: CollectionId,
+        snapshot_id: SnapshotId,
+        context: &CommandContext,
+    ) -> Result<CatalogSnapshotStatus> {
+        self.require_administrator(actor)?;
+        self.content_write_eligibility(actor, collection_id)?;
+        let snapshot = self.processing.snapshot(SnapshotQuery {
+            collection_id,
+            snapshot_id,
+        })?;
+        let provider = snapshot.provider.clone();
+        self.execute_command(
+            actor,
+            context,
+            "catalog.snapshot.activate",
+            &(collection_id, snapshot_id),
+            |effects| effects.activate_catalog_snapshot(collection_id, &provider, snapshot_id),
+        )
+    }
+
     pub fn enqueue_processing_operation(
         &self,
         actor: &Principal,
@@ -3900,6 +4194,11 @@ impl CollectionService {
                         collection_id: frozen.collection_id,
                         scope: frozen.source,
                     },
+                    frozen_snapshot_id: frozen.snapshot_id,
+                    catalog_parsers: self.catalog_parsers.as_ref(),
+                    jobs: self.jobs.clone(),
+                    job_id: claim.id,
+                    claim_token: claim.claim_token.clone(),
                 };
                 let (module, version) = self.modules.capability_owner(&frozen.operation)?;
                 let operated = self.modules.operate(
@@ -3919,6 +4218,12 @@ impl CollectionService {
                     },
                     &host,
                 );
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)?
+                {
+                    return Err(Error::JobCancelled);
+                }
                 let (support, payload, limitations) = match operated {
                     Ok(output) => (OperationSupport::Supported, output.value, vec![]),
                     Err(ModuleError::UnavailableCapability(reason)) => (

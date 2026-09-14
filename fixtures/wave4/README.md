@@ -31,8 +31,8 @@ run only by the owning implementation child.
 
 These manifests are a seed inventory, not completed semantic acceptance tests.
 In particular, D06 separates test-supplied identity evidence from provider search
-scores, and S04's incomplete transition is a negative parser fixture. D04.1 must
-add actual NES2 header cases and independent SNES/PCE rules; D04.2 must add exact
-XML/text DAT bodies; D05 must add complete redumper/dBAR and offset oracles; D07
-must generate the encoder goldens. Those fixtures cannot be marked passed because
-the seed-byte reproduction check passes.
+scores, and S04's incomplete transition is a negative parser fixture. D04 now
+includes exact generated XML/text DAT bodies alongside the D04.1 game-format
+vectors. D05 must add complete redumper/dBAR and offset oracles, and D07 must
+generate the encoder goldens. Those fixtures cannot be marked passed because the
+seed-byte reproduction check passes.
