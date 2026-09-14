@@ -1,6 +1,10 @@
 use collector_core::*;
 use collector_modules::{games::*, music::*, *};
-use std::{cell::RefCell, collections::BTreeMap, io::Cursor};
+use std::{
+    cell::RefCell,
+    collections::BTreeMap,
+    io::{Cursor, Read, Seek, SeekFrom},
+};
 
 #[derive(Clone, Copy)]
 enum MigrationMode {
@@ -906,6 +910,9 @@ fn moved_game_and_music_result_wire_shapes_and_signed_units_are_unchanged() {
             selected_offset: Some(StereoSampleFrameOffset(-6)),
             evaluated_offset_start: StereoSampleFrameOffset(-2939),
             evaluated_offset_end: StereoSampleFrameOffset(2939),
+            v2_evaluated_offsets: vec![StereoSampleFrameOffset(-6)],
+            unavailable_leading_frames: PcmFrame(0),
+            unavailable_trailing_frames: PcmFrame(0),
             tracks: vec![AudioTrackVerification {
                 position: 1,
                 status: AudioVerificationStatus::Verified,
@@ -920,7 +927,7 @@ fn moved_game_and_music_result_wire_shapes_and_signed_units_are_unchanged() {
     }
     assert_eq!(
         serde_json::to_string(&music).unwrap(),
-        r#"{"result":"audio_verification","verification":{"status":"verified","selected_offset":-6,"evaluated_offset_start":-2939,"evaluated_offset_end":2939,"tracks":[{"position":1,"status":"verified","checksum_version":"accurate_rip_v2","confidence":12}],"limitations":[]}}"#
+        r#"{"result":"audio_verification","verification":{"status":"verified","selected_offset":-6,"evaluated_offset_start":-2939,"evaluated_offset_end":2939,"v2_evaluated_offsets":[-6],"unavailable_leading_frames":0,"unavailable_trailing_frames":0,"tracks":[{"position":1,"status":"verified","checksum_version":"accurate_rip_v2","confidence":12}],"limitations":[]}}"#
     );
     let game = GameProcessingResult::Structure {
         format: "header".into(),
@@ -930,6 +937,454 @@ fn moved_game_and_music_result_wire_shapes_and_signed_units_are_unchanged() {
         serde_json::to_string(&game).unwrap(),
         r#"{"result":"structure","format":"header","fields":{"mapper":{"type":"unsigned","value":0}}}"#
     );
+}
+
+#[test]
+fn music_layout_uses_strict_frozen_package_spans_and_exact_integer_pcm() {
+    let collection_id = CollectionId::new();
+    let representation_id = RepresentationId::new();
+    let cue_id = PackageFileId::new();
+    let first_id = PackageFileId::new();
+    let second_id = PackageFileId::new();
+    let cue = "FILE \"disc-a.bin\" BINARY\n\
+               TRACK 01 AUDIO\nINDEX 01 00:00:00\n\
+               FILE \"disc-b.bin\" BINARY\n\
+               TRACK 02 AUDIO\nINDEX 00 00:00:00\nINDEX 01 00:00:01\n";
+    let mut first = vec![0_u8; 2352];
+    first[..16].copy_from_slice(&[
+        0x00, 0x80, 0xff, 0x7f, 0xff, 0xff, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x39, 0x30, 0xc7,
+        0xcf,
+    ]);
+    let second = [vec![0x22; 2352], vec![0x33; 2352]].concat();
+    let inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: cue_id,
+                display_name: PackageFileName::new("disc/disc.cue").unwrap(),
+                bytes: ByteLength(cue.len() as u64),
+            },
+            PackageInventoryFile {
+                id: first_id,
+                display_name: PackageFileName::new("disc/disc-a.bin").unwrap(),
+                bytes: ByteLength(first.len() as u64),
+            },
+            PackageInventoryFile {
+                id: second_id,
+                display_name: PackageFileName::new("disc/disc-b.bin").unwrap(),
+                bytes: ByteLength(second.len() as u64),
+            },
+        ],
+    )
+    .unwrap();
+    let bytes = BTreeMap::from([(first_id, first), (second_id, second)]);
+    let analyzed = analyze_cue_package(cue, cue_id, &inventory).unwrap();
+    let CdProcessingResult::Layout {
+        tracks,
+        source_spans,
+        disc_ids,
+        limitations,
+    } = analyzed
+    else {
+        panic!("expected CD layout")
+    };
+    assert!(limitations.is_empty());
+    assert!(disc_ids.is_some());
+    assert_eq!(tracks[0].index_01, CdSector(0));
+    assert_eq!(tracks[0].pcm_length, Some(PcmFrame(2 * 588)));
+    assert_eq!(tracks[1].index_00, Some(CdSector(1)));
+    assert_eq!(tracks[1].index_01, CdSector(2));
+    assert_eq!(tracks[1].pcm_start, Some(PcmFrame(2 * 588)));
+    assert_eq!(source_spans.len(), 2);
+    assert_eq!(source_spans[1].source_file_id, second_id);
+    assert_eq!(source_spans[1].stored_index_00_frames, 1);
+
+    let (mut pcm, windows) = open_cue_pcm_package(cue, cue_id, &inventory, |id| {
+        bytes
+            .get(&id)
+            .cloned()
+            .map(|bytes| Box::new(Cursor::new(bytes)) as Box<dyn RepresentationReader>)
+            .ok_or(ModuleError::MissingPackageFile(id))
+    })
+    .unwrap();
+    assert_eq!(windows[0].frame_count, 2 * 588);
+    let mut extremes = [[0_i16; 2]; 4];
+    junk_libs_disc::CdPcmReader::read_frames(&mut pcm, &mut extremes).unwrap();
+    assert_eq!(
+        extremes,
+        [[i16::MIN, i16::MAX], [-1, 1], [0, 0], [12345, -12345]]
+    );
+    junk_libs_disc::CdPcmReader::seek_frame(&mut pcm, 2 * 588).unwrap();
+    let mut boundary = [[0_i16; 2]; 1];
+    junk_libs_disc::CdPcmReader::read_frames(&mut pcm, &mut boundary).unwrap();
+    assert_eq!(boundary[0], [0x3333, 0x3333]);
+}
+
+#[test]
+fn music_layout_matches_published_arver_ids_without_pcm_allocation() {
+    let tracks = vec![
+        CdTrackLayout {
+            position: 1,
+            kind: CdTrackKind::Audio,
+            index_00: None,
+            index_01: CdSector(0),
+            pcm_start: Some(PcmFrame(0)),
+            pcm_length: Some(PcmFrame(75_258 * 588)),
+        },
+        CdTrackLayout {
+            position: 2,
+            kind: CdTrackKind::Audio,
+            index_00: None,
+            index_01: CdSector(75_258),
+            pcm_start: Some(PcmFrame(75_258 * 588)),
+            pcm_length: Some(PcmFrame(54_815 * 588)),
+        },
+        CdTrackLayout {
+            position: 3,
+            kind: CdTrackKind::Audio,
+            index_00: None,
+            index_01: CdSector(130_073),
+            pcm_start: Some(PcmFrame(130_073 * 588)),
+            pcm_length: Some(PcmFrame(205_880 * 588)),
+        },
+    ];
+    let ids = calculate_cd_ids(&tracks).unwrap();
+    assert_eq!(ids.musicbrainz, "dUmct3Sk4dAt1a98qUKYKC0ZjYU-");
+    assert_eq!(ids.freedb, "19117f03");
+    assert_eq!(ids.accuraterip_id1, "00084264");
+    assert_eq!(ids.accuraterip_id2, "001cc184");
+}
+
+#[test]
+fn music_cue_fails_closed_for_parser_ambiguity_synthetic_gaps_and_mixed_mode() {
+    let collection_id = CollectionId::new();
+    let representation_id = RepresentationId::new();
+    let cue_id = PackageFileId::new();
+    let bin_id = PackageFileId::new();
+    let inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: cue_id,
+                display_name: PackageFileName::new("disc.cue").unwrap(),
+                bytes: ByteLength(1),
+            },
+            PackageInventoryFile {
+                id: bin_id,
+                display_name: PackageFileName::new("disc.bin").unwrap(),
+                bytes: ByteLength(2 * 2352),
+            },
+        ],
+    )
+    .unwrap();
+    let open = |_| Ok(Box::new(Cursor::new(vec![0_u8; 2 * 2352])) as Box<dyn RepresentationReader>);
+    let duplicate =
+        "FILE \"disc.bin\" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nINDEX 01 00:00:01\n";
+    assert!(analyze_cue_package(duplicate, cue_id, &inventory).is_err());
+    let ignored_unknown = "FILE \"disc.bin\" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nMAGIC 12\n";
+    assert!(analyze_cue_package(ignored_unknown, cue_id, &inventory).is_err());
+    let trailing_track_tokens =
+        "FILE \"disc.bin\" BINARY\nTRACK 01 AUDIO IGNORED\nINDEX 01 00:00:00\n";
+    assert!(analyze_cue_package(trailing_track_tokens, cue_id, &inventory).is_err());
+
+    let four_channel = "FILE \"disc.bin\" BINARY\nTRACK 01 AUDIO\nFLAGS 4CH\nINDEX 01 00:00:00\n";
+    assert!(open_cue_pcm_package(four_channel, cue_id, &inventory, open).is_err());
+    let alias = "FILE \"disc.bin\" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nFILE \"./disc.bin\" BINARY\nTRACK 02 AUDIO\nINDEX 01 00:00:00\n";
+    assert!(analyze_cue_package(alias, cue_id, &inventory).is_err());
+    let outside =
+        "FILE \"disc.bin\" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nINDEX 02 00:00:02\n";
+    assert!(analyze_cue_package(outside, cue_id, &inventory).is_err());
+    let synthetic = "FILE \"disc.bin\" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nPREGAP 00:00:01\nINDEX 01 00:00:01\n";
+    let CdProcessingResult::Layout {
+        source_spans,
+        disc_ids,
+        limitations,
+        ..
+    } = analyze_cue_package(synthetic, cue_id, &inventory).unwrap()
+    else {
+        panic!("expected layout")
+    };
+    assert!(disc_ids.is_none());
+    assert_eq!(source_spans[1].synthetic_pregap_frames, 1);
+    assert!(!limitations.is_empty());
+    assert!(matches!(
+        open_cue_pcm_package(synthetic, cue_id, &inventory, open),
+        Err(ModuleError::UnavailableCapability(_))
+    ));
+
+    let mixed = "FILE \"disc.bin\" BINARY\nTRACK 01 MODE1/2352\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 00:00:01\n";
+    let CdProcessingResult::Layout {
+        tracks,
+        disc_ids,
+        limitations,
+        ..
+    } = analyze_cue_package(mixed, cue_id, &inventory).unwrap()
+    else {
+        panic!("expected layout")
+    };
+    assert_eq!(tracks[0].kind, CdTrackKind::Data);
+    assert!(disc_ids.is_none());
+    assert!(limitations.iter().any(|value| value.contains("mixed-mode")));
+    assert!(matches!(
+        open_cue_pcm_package(mixed, cue_id, &inventory, open),
+        Err(ModuleError::UnavailableCapability(_))
+    ));
+}
+
+struct VirtualReader {
+    len: u64,
+    position: u64,
+    fill: u8,
+    patch_offset: u64,
+    patch: Vec<u8>,
+}
+
+impl Read for VirtualReader {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        let count = output.len().min((self.len - self.position) as usize);
+        output[..count].fill(self.fill);
+        let read_start = self.position;
+        let read_end = read_start + count as u64;
+        let patch_end = self.patch_offset + self.patch.len() as u64;
+        let overlap_start = read_start.max(self.patch_offset);
+        let overlap_end = read_end.min(patch_end);
+        if overlap_start < overlap_end {
+            let output_start = (overlap_start - read_start) as usize;
+            let patch_start = (overlap_start - self.patch_offset) as usize;
+            let overlap = (overlap_end - overlap_start) as usize;
+            output[output_start..output_start + overlap]
+                .copy_from_slice(&self.patch[patch_start..patch_start + overlap]);
+        }
+        self.position += count as u64;
+        Ok(count)
+    }
+}
+
+impl Seek for VirtualReader {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        let target = match position {
+            SeekFrom::Start(value) => i128::from(value),
+            SeekFrom::End(value) => i128::from(self.len) + i128::from(value),
+            SeekFrom::Current(value) => i128::from(self.position) + i128::from(value),
+        };
+        if !(0..=i128::from(self.len)).contains(&target) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "virtual seek out of range",
+            ));
+        }
+        self.position = target as u64;
+        Ok(self.position)
+    }
+}
+
+fn redumper_toc(first_lba: i32, leadout_lba: i32, control: u8) -> Vec<u8> {
+    let mut toc = vec![0, 18, 1, 1];
+    toc.extend_from_slice(&[0, control, 1, 0]);
+    toc.extend_from_slice(&first_lba.to_be_bytes());
+    toc.extend_from_slice(&[0, 0x10, 0xaa, 0]);
+    toc.extend_from_slice(&leadout_lba.to_be_bytes());
+    toc
+}
+
+#[test]
+fn redumper_package_keeps_signed_lead_in_and_uses_bounded_opened_sidecars() {
+    const ORIGIN_FRAMES: u64 = 45_150 * 588;
+    let collection_id = CollectionId::new();
+    let representation_id = RepresentationId::new();
+    let toc_id = PackageFileId::new();
+    let scram_id = PackageFileId::new();
+    let state_id = PackageFileId::new();
+    let subcode_id = PackageFileId::new();
+    let toc = redumper_toc(-1, 1, 0x10);
+    let state_len = ORIGIN_FRAMES + 588;
+    let scram_len = state_len * 4;
+    let subcode_len = (45_150 + 1) * 96;
+    let inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: toc_id,
+                display_name: PackageFileName::new("disc/rip.toc").unwrap(),
+                bytes: ByteLength(toc.len() as u64),
+            },
+            PackageInventoryFile {
+                id: scram_id,
+                display_name: PackageFileName::new("disc/rip.scram").unwrap(),
+                bytes: ByteLength(scram_len),
+            },
+            PackageInventoryFile {
+                id: state_id,
+                display_name: PackageFileName::new("disc/rip.state").unwrap(),
+                bytes: ByteLength(state_len),
+            },
+            PackageInventoryFile {
+                id: subcode_id,
+                display_name: PackageFileName::new("disc/rip.subcode").unwrap(),
+                bytes: ByteLength(subcode_len),
+            },
+        ],
+    )
+    .unwrap();
+    let frames = [i16::MIN, i16::MAX]
+        .into_iter()
+        .flat_map(i16::to_le_bytes)
+        .collect::<Vec<_>>();
+    let open = |id| -> ModuleResult<Box<dyn RepresentationReader>> {
+        if id == toc_id {
+            Ok(Box::new(Cursor::new(toc.clone())))
+        } else if id == scram_id {
+            Ok(Box::new(VirtualReader {
+                len: scram_len,
+                position: 0,
+                fill: 0,
+                patch_offset: (ORIGIN_FRAMES - 588) * 4,
+                patch: frames.clone(),
+            }))
+        } else if id == state_id {
+            Ok(Box::new(VirtualReader {
+                len: state_len,
+                position: 0,
+                fill: 4,
+                patch_offset: 0,
+                patch: Vec::new(),
+            }))
+        } else {
+            Err(ModuleError::MissingPackageFile(id))
+        }
+    };
+    let CdProcessingResult::Layout {
+        tracks,
+        disc_ids,
+        limitations,
+        ..
+    } = analyze_redumper_package(toc_id, &inventory, open).unwrap()
+    else {
+        panic!("expected redumper layout")
+    };
+    assert_eq!(tracks[0].index_01, CdSector(-1));
+    assert!(disc_ids.is_none());
+    assert!(limitations.iter().any(|value| value.contains("lead-in")));
+
+    let (mut pcm, windows) = open_redumper_pcm_package(toc_id, &inventory, open).unwrap();
+    assert_eq!(windows[0].frame_count, 2 * 588);
+    let mut frame = [[0_i16; 2]; 1];
+    junk_libs_disc::CdPcmReader::read_frames(&mut pcm, &mut frame).unwrap();
+    assert_eq!(frame[0], [i16::MIN, i16::MAX]);
+}
+
+#[test]
+fn redumper_package_rejects_missing_truncated_and_mixed_mode_sidecars() {
+    const ORIGIN_FRAMES: u64 = 45_150 * 588;
+    let collection_id = CollectionId::new();
+    let representation_id = RepresentationId::new();
+    let toc_id = PackageFileId::new();
+    let scram_id = PackageFileId::new();
+    let subcode_id = PackageFileId::new();
+    let toc = redumper_toc(0, 1, 0x10);
+    let inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: toc_id,
+                display_name: PackageFileName::new("rip.toc").unwrap(),
+                bytes: ByteLength(toc.len() as u64),
+            },
+            PackageInventoryFile {
+                id: scram_id,
+                display_name: PackageFileName::new("rip.scram").unwrap(),
+                bytes: ByteLength((ORIGIN_FRAMES + 588) * 4),
+            },
+            PackageInventoryFile {
+                id: subcode_id,
+                display_name: PackageFileName::new("rip.subcode").unwrap(),
+                bytes: ByteLength((45_150 + 1) * 96),
+            },
+        ],
+    )
+    .unwrap();
+    assert!(
+        analyze_redumper_package(toc_id, &inventory, |_| {
+            Ok(Box::new(Cursor::new(toc.clone())))
+        })
+        .is_err()
+    );
+
+    let mut malformed = toc.clone();
+    malformed.pop();
+    let state_id = PackageFileId::new();
+    let complete = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: toc_id,
+                display_name: PackageFileName::new("rip.toc").unwrap(),
+                bytes: ByteLength(malformed.len() as u64),
+            },
+            PackageInventoryFile {
+                id: scram_id,
+                display_name: PackageFileName::new("rip.scram").unwrap(),
+                bytes: ByteLength((ORIGIN_FRAMES + 588) * 4),
+            },
+            PackageInventoryFile {
+                id: state_id,
+                display_name: PackageFileName::new("rip.state").unwrap(),
+                bytes: ByteLength(ORIGIN_FRAMES + 588),
+            },
+            PackageInventoryFile {
+                id: subcode_id,
+                display_name: PackageFileName::new("rip.subcode").unwrap(),
+                bytes: ByteLength((45_150 + 1) * 96),
+            },
+        ],
+    )
+    .unwrap();
+    assert!(
+        analyze_redumper_package(toc_id, &complete, |_| {
+            Ok(Box::new(Cursor::new(malformed.clone())))
+        })
+        .is_err()
+    );
+
+    let mixed = redumper_toc(0, 1, 0x14);
+    let mixed_inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: toc_id,
+                display_name: PackageFileName::new("rip.toc").unwrap(),
+                bytes: ByteLength(mixed.len() as u64),
+            },
+            PackageInventoryFile {
+                id: scram_id,
+                display_name: PackageFileName::new("rip.scram").unwrap(),
+                bytes: ByteLength((ORIGIN_FRAMES + 588) * 4),
+            },
+            PackageInventoryFile {
+                id: state_id,
+                display_name: PackageFileName::new("rip.state").unwrap(),
+                bytes: ByteLength(ORIGIN_FRAMES + 588),
+            },
+            PackageInventoryFile {
+                id: subcode_id,
+                display_name: PackageFileName::new("rip.subcode").unwrap(),
+                bytes: ByteLength((45_150 + 1) * 96),
+            },
+        ],
+    )
+    .unwrap();
+    assert!(matches!(
+        analyze_redumper_package(toc_id, &mixed_inventory, |_| {
+            Ok(Box::new(Cursor::new(mixed.clone())))
+        }),
+        Err(ModuleError::UnavailableCapability(_))
+    ));
 }
 
 #[test]

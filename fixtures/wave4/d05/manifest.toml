@@ -42,7 +42,15 @@ oracle = "ARver tests/discinfo_test.py; cross-checked by existing junk-libs-disc
 minimum_stereo_sample_frames = -2939
 maximum_stereo_sample_frames = 2939
 working_buffer_bytes = 67108864
-oracle = "CUETools/ARver-derived existing junk-libs vectors; streaming implementation remains D05.1"
+oracle = "CUETools/ARver-derived existing junk-libs vectors; bounded streaming implementation reviewed in D05.1; v2 candidate coverage is explicit"
+
+[independent_offset_vectors]
+generator = "left=(disc_frame*17+3) mod 2^16; right=(disc_frame*31+7) mod 2^16; packed little-endian stereo"
+track_frames = [9000, 9000, 9000]
+sample_shifts = [-6, 6]
+arv1 = [[1960513394, 1529218892, 1955855714], [682943466, 401876668, 3776571210]]
+arv2 = [[1978588498, 1548717347, 1964573832], [700995618, 421377421, 3785280497]]
+oracle = "independently evaluated CUETools/ARver integer equations; literal vectors are asserted by junk-libs-accuraterip/tests/bounded_reader.rs"
 
 [external_owned_dump]
 environment = "JUNK_COLLECTOR_W4_CD_DUMP_ROOT"

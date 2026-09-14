@@ -1829,3 +1829,83 @@ profiles and temporary server/archive state with approved sandbox escalation.
 Both final CT.4 browser runs pass: normal HTTPS/virtual-WebAuthn and private
 LOCAL_SETUP=1, including the artist-summary assertion. They used isolated Chrome
 profiles and temporary servers with approved sandbox escalation.
+
+## D05.1 local implementation — 2026-09-14
+
+- Collector's music module now reads authorized frozen BIN/CUE and current
+  raw-redumper packages through opaque package readers. Tests cover exact signed
+  `i16` stereo samples, cross-file seeks, typed INDEX 00/01 and source spans,
+  stored versus synthetic gaps, signed lead-in, published ARver disc IDs, strict
+  structural parsing, missing/truncated sidecars, and mixed-mode refusal. The
+  result contract records the exact evaluated offset interval, selected offset,
+  and unavailable leading/trailing physical frames.
+- `junk-libs-accuraterip` has one production bounded reader implementation. Its
+  vector API delegates to that path; literal independent CUETools/ARver-equation
+  vectors cover shifts -6 and +6, cross-track borrowing, i16 packing and both CRC
+  versions. A generated 80-minute source confirms read requests remain at most
+  16,384 frames and cancellation returns an error. The declared job working
+  budget is 64 MiB. No missing samples are padded.
+- `junk-libs-disc` retains signed raw-redumper coordinates and adds exact
+  sample-addressable wrappers. Phono's real AccurateRip caller no longer builds
+  whole-disc PCM vectors. Trash Amp's existing redumper metadata consumer now
+  performs checked signed-to-TOC conversion. No D05.2 provider, HTTP, dBAR
+  acquisition, route, job publication, schema or web workflow was added.
+- Collector gates pass: `python3 scripts/check_architecture.py`;
+  `python3 scripts/check_wave4_fixtures.py` (8 manifests, 24 vector/composite
+  digests); `cargo fmt --all -- --check`; `cargo test --workspace --locked`;
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`;
+  `npm --prefix web run check`; `npm --prefix web run check:api`;
+  `npm --prefix web run build`; and `cargo build -p collector-server --locked`.
+  The full tests retain the W4.2 snapshot binding/cancellation, strict provider
+  parsing, and unavailable-module historical-read regressions.
+- Junk Libs passes format, full all-feature workspace tests, and strict all-target
+  clippy. Phono passes format, full workspace tests, and strict all-target clippy.
+  Trash Amp passes the same gates after its narrow signed-coordinate migration;
+  all of its pre-existing unrelated working-tree edits remain present. Retro Junk
+  passes format and full workspace tests without any file change, but strict
+  all-target clippy fails on 37 existing library / 45 test-target Rust 1.95 lint
+  findings (`must_use_candidate`, `too_many_lines`, `implicit_hasher`, and other
+  unrelated debt). Those failures were not changed or claimed as passing.
+- The network-gated ARver/AccurateRip tests and environment-gated owned redumper
+  dump tests were not run. `JUNK_COLLECTOR_W4_CD_DUMP_ROOT` was not supplied, so
+  real-dump and mixed-mode qualification remains external. D05.1 is stopped at
+  review; D05.2 and D05.3 remain unimplemented. No commit was made.
+
+## D05.1 review corrections — 2026-09-14
+
+The completed implementation was D05.1, despite the review request naming D05.2.
+D05.2 remains unimplemented and is the next handoff. See the
+[review](wave-4-review.md#d051-review--2026-09-14) for corrected findings.
+
+- Shared verification records its v1 interval separately from evaluated v2
+  candidates; a v2-only nonzero known match without an anchor is inconclusive,
+  not mismatched. Literal independent +6 vectors cover this regression.
+- A 451-sector generated disc covers the frame-450 boundary; optional probes
+  do not read past physical PCM. Entry cancellation is checked even with no data.
+- Shared source PCM decoding handles explicit timeline origins, bounded read
+  buffers and cross-source seeks. Collector only maps authorized package handles.
+- CUE source aliases, out-of-span indexes and four-channel flags fail closed;
+  synthetic gaps remain structural results without exact PCM/disc-ID claims.
+- `cargo test --workspace --locked`: 221 passed. The final focused module run
+  passed 28 tests after adding synthetic-gap/four-channel regression assertions.
+- Shared workspace all-feature tests: 239 passed; strict all-feature/all-target
+  Clippy passed. Phono workspace: 365 tests passed and strict Clippy passed.
+- Collector architecture/fixture checks, formatting, strict workspace Clippy,
+  TypeScript, generated API checks, web build and embedded server rebuild passed.
+  No web behavior changed, so browser smoke was not repeated for this review.
+- Review changes touch Collector, Junk Libs and Phono. The implementing agent's
+  Trash Amp coordinate conversion and its unrelated user work remain untouched.
+  Its previously recorded Retro lint failures remain external to this review;
+  no claim is made that those unrelated warnings were repaired.
+
+No owned real dump or live AccurateRip oracle was available. Synthetic vectors
+qualify the narrow reader/arithmetic behaviors, not real-disc/mastering coverage.
+No new runtime capability or network provider is exposed.
+
+D05.1 sibling checkpoints:
+- Junk Libs: `3c5213706d207ac11405e675e10af7ad4fd18ed6`.
+- Phono Junk: `8e212f4a2e261ed963ab560dea78085b4e796693`.
+- Trash Amp: `6972ef989006d17d41899f9a5f05f7ae5a43d9ae` (only the signed-coordinate metadata conversion).
+
+Collector consumes these shared libraries through local path dependencies.
+Unrelated Phono and Trash Amp working-tree files were excluded from the checkpoint.

@@ -42,7 +42,7 @@ contract for D04–D07, P05, C01, S04 and C02. **W4.0 is reviewed and corrected;
 W4.1 contracts are reviewed and corrected; W4.2 durable processing integration is
 reviewed and corrected.**
 The [collection-type refactor](collection-types-plan.md) (CT.1–CT.4) is the inserted
-prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 are reviewed and corrected locally; D05.1 is next. Authenticated descriptors, availability-aware
+prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 are reviewed and corrected locally; D05.1 is reviewed and corrected locally; D05.2 is next. Authenticated descriptors, availability-aware
 content permissions, generic owner-driven forms and valid unavailable-owner browser
 fallback coverage are present.
 The plan supplies child steps, fixed ownership,
@@ -571,7 +571,7 @@ Integrate qualified game operations through host services; ingest versioned DAT/
 
 ### D05 — Music CD structural and AccurateRip verification
 
-**Status: planned; not implemented.** Ordered children: D05.1 exact CD readers; D05.2 AccurateRip provider/policy; D05.3 workflow/review. Follow the [Wave 4 child instructions](wave-4-plan.md#d051--exact-cd-reading-and-bounded-accuraterip-input) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-14): D05.1 reviewed and corrected locally; D05.2–D05.3 not started.** Authorized frozen BIN/CUE and current raw-redumper packages now produce strict typed layouts and exact bounded integer PCM; shared AccurateRip arithmetic uses independent signed-offset vectors and a cancellation-aware reader rather than whole-disc allocation. Phono's real caller and Trash Amp's signed-redumper TOC consumer were migrated. Generated/shared gates pass; the owned redumper dump and live network oracles remain external, and Retro's full tests pass while its strict clippy gate has unrelated pre-existing Rust 1.95 lint failures. Proceed to D05.2 only, preserving its documented search-completeness constraints. Follow the [Wave 4 child instructions](wave-4-plan.md#d051--exact-cd-reading-and-bounded-accuraterip-input) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D02, A03, P02, P03. **Owner:** music handlers, verification primitives and provider adapters.
 

@@ -539,6 +539,10 @@ name = "collector-modules"
 version = "0.1.0"
 dependencies = [
  "collector-core",
+ "junk-libs-accuraterip",
+ "junk-libs-core",
+ "junk-libs-disc",
+ "junk-libs-disc-id",
  "junk-libs-game-formats",
  "serde",
  "serde_json",
@@ -1363,6 +1367,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "junk-libs-accuraterip"
+version = "0.1.0"
+dependencies = [
+ "junk-libs-core",
+ "junk-libs-disc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "junk-libs-audio"
 version = "0.1.0"
 dependencies = [
@@ -1398,6 +1411,16 @@ dependencies = [
  "junk-libs-core",
  "log",
  "md5",
+ "serde",
+ "sha1",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "junk-libs-disc-id"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
  "serde",
  "sha1",
  "thiserror 2.0.20",

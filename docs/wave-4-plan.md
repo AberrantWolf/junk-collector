@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1 next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1 reviewed and corrected locally; D05.2 next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -73,7 +73,7 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 4 | D04.1 | W4.2 | Qualified game primitive extraction | Reviewed/corrected 2026-09-13; sibling gates passed |
 | 5 | D04.2 | D04.1 | DAT snapshots and complete-match policy | Reviewed/corrected 2026-09-13; vectors pass |
 | 6 | D04.3 | D04.2 | Game jobs, curation and supported-operation matrix | Reviewed/corrected 2026-09-13; proceed to D05.1 |
-| 7 | D05.1 | W4.2 | Exact CD PCM/layout and bounded checksum readers | Review; sibling gates |
+| 7 | D05.1 | W4.2 | Exact CD PCM/layout and bounded checksum readers | Reviewed/corrected 2026-09-14; proceed to D05.2 |
 | 8 | D05.2 | D05.1 | AccurateRip acquisition and result policy | Review |
 | 9 | D05.3 | D05.2 | CD jobs, curation and fixture qualification | D05 root review |
 | 10 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Review |
@@ -493,6 +493,29 @@ D04 closes locally only when every enabled operation has its independent vector.
 fixtures; existing opened-reader CUE/redumper adapters. **Edit shared algorithms
 separately** from Collector consumers.
 
+**Reviewed immediate contract (2026-09-14, implementation checkpoint):**
+
+- `junk-libs-disc` owns the exact seekable signed-16-bit, stereo, 44,100-Hz PCM
+  reader and strict CUE/redumper layout mechanisms; `junk-libs-accuraterip` owns
+  bounded checksum/offset arithmetic over that reader. Collector maps an already
+  authorized frozen package inventory into those mechanisms and maps their output
+  into the music module's typed result. It does not expose paths or own a second
+  parser/algorithm.
+- D05.1 creates no durable record, private state, provider snapshot, route, or
+  registered runtime capability. A later existing processing job may publish the
+  validated result at the established observation commit point; cancellation is
+  cooperative through the existing host checkpoint and cannot yield a success.
+- Authorization, role/exposure filtering, retry identity, source currency and
+  historical reads remain unchanged in the application processing service. The
+  reader consumes only the exact frozen package scope; malformed, truncated,
+  synthetic-gap, mixed-mode and missing-sidecar inputs fail distinctly before a
+  whole-disc audio result can be claimed.
+- The complete local example is an authorized multi-file BIN/CUE package producing
+  typed layout and bounded checksum inputs from independent fixed vectors. The
+  denied/interrupted examples are wrong-scope package access and cancellation
+  during a long generated reader; neither produces a publishable success. D05.2
+  remains the owner of dBAR acquisition and network/result policy.
+
 1. Build a typed disc layout from declared BIN/CUE and redumper sidecars through
    package readers. Validate INDEX 00/01, track order, file spans, signed lead-in
    coordinates, stored versus synthetic gaps and data/audio classification.
@@ -518,7 +541,47 @@ INDEX/gap variants; short/truncated/missing sidecars; bounded memory and cancell
 Vector-versus-streaming equivalence is additional evidence, not the sole oracle.
 **Review:** exact coordinates and bounded arithmetic before integrating the network.
 
+**Local implementation evidence (2026-09-14; review checkpoint):** Collector now
+maps authorized frozen BIN/CUE and current raw-redumper packages to typed signed
+sector/index/gap/source-span layouts, published disc-ID primitives and exact seekable
+little-endian `i16` stereo PCM. Structural CUE directives are strict; malformed,
+truncated, missing, synthetic-gap and mixed-mode inputs fail before whole-disc audio
+success. Negative redumper lead-in coordinates remain signed. No operation, route,
+provider, network acquisition or durable publication was added.
+
+`junk-libs-disc` owns the exact frame reader and signed redumper coordinates.
+`junk-libs-accuraterip` now searches the exact physical interval through a bounded
+reader, rolling ARv1/frame-450 windows and evaluating ARv2 only on the evidence
+frontier. Its maximum read request is 16,384 frames and its stated per-job working
+budget is 64 MiB. The old vector entry point delegates to this implementation and a
+test-only prior arithmetic reference remains available for regression work. Literal
+independent positive/negative CUETools/ARver-equation vectors cover cross-track
+borrowing and both CRC versions; generated long-disc cancellation returns an error.
+
+The real Phono verification caller was migrated from whole-disc vectors to the
+bounded reader. Trash Amp received only the required checked signed-redumper-to-TOC
+conversion. Junk Libs, Phono and Trash Amp format/test/clippy gates pass. Retro's
+format and full workspace tests pass; its all-target strict clippy gate fails on
+existing Rust 1.95 lint debt unrelated to this change, so no Retro files were
+changed. The external owned redumper dump and live/network ARver gates were not run
+and remain unqualified. D05.2 has not started.
+
 ### D05.2 — AccurateRip provider and result interpretation
+
+**D05.1 review constraints (2026-09-14):** The shared verifier's inclusive interval
+is the **v1** search range. Its `v2_evaluated_sample_shifts` explicitly lists the
+candidate offsets evaluated for v2. A v2-only catalog without a v1/frame-450 anchor
+can return `IncompleteSearch`; this is inconclusive, never a mismatch or corrupt
+audio. Do not claim exhaustive v2 search from interval endpoints. Either retain
+this limitation or add independently tested bounded complete-search machinery.
+The shared `Verified` status means at least one full-track match: whole-disc success
+requires every expected track, usable database identity, and a justified offset.
+Propagate per-version search coverage into Collector's typed result. Preserve the
+short-disc frame-450 bound and cancellation checks. Package-source PCM decoding now
+lives in `junk-libs-disc::pcm::SourcePcmReader`; do not recreate it in a module.
+CUE duplicate source identities, out-of-span indexes and four-channel audio fail
+closed. Synthetic gaps remain structural observations with no exact PCM/disc-ID
+claim. See [review notes](wave-4-review.md#d051-review--2026-09-14).
 
 1. Adapt Phono's URL/response primitives into the provider crate; do not import
    its network/persistence orchestration into the music module. Store the exact
@@ -957,10 +1020,11 @@ Wave 3 final-chunk replay, interrupted cancellation and post-commit recovery cas
 ## Ready-to-send implementing-agent prompt
 
 ```text
-Implement D05.1 only. D04 and CT.1–CT.4 are reviewed and corrected locally.
-Read docs/wave-4-review.md and preserve its snapshot-integrity, strict-parser,
-cancellation and historical-read guarantees. Use independent integer PCM/offset
-vectors and bounded readers. Stop before D05.2 provider/network integration.
+Implement D05.2 only. D05.1, D04 and CT.1–CT.4 are reviewed and corrected locally.
+Read docs/wave-4-review.md and the D05.2 review constraints before coding. Preserve
+explicit v1/v2 search coverage and inconclusive outcomes; never turn incomplete
+search or one matching track into whole-disc verification. Use frozen bounded
+provider responses and local HTTP fixtures. Stop before D05.3 workflow integration.
 Stop for architectural conflicts or missing required qualification.
 Preserve the existing working-tree changes. Read decisions/pre-release-evolution.md
 alongside the required architecture/status/release documents. Inspect the immediate

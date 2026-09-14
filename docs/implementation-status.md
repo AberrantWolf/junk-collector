@@ -36,7 +36,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 - S03 advances private state to v6 with expiring targeted enrollment and separately hashed/revocable native credentials. Same-user recent browser approval, cancellation/expiry/replay protection, one-time issuance, header-independent native authentication, and native-device inventory/revocation are implemented. `collector-client` owns an injectable secure-storage port, refuses redirects/cross-origin credential delivery, validates enrolled server identity/certificate material, and completes the LAN TLS integration through real enrollment.
 - U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted.
 - Private SQLite advances through explicit migrations and stores a durable default UserId selected once from legacy first-row behavior. First-account creation sets it transactionally; later accounts do not change it.
-- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally and D05 remains outstanding.
+- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally. D05.1 is reviewed and corrected locally: authorized frozen BIN/CUE and current raw-redumper packages produce strict signed layouts, exact `i16` stereo 44.1-kHz PCM, published disc IDs where the layout permits them, and bounded cancellation-aware AccurateRip checksum/offset inputs. Mixed mode, synthetic gaps and unsupported/ambiguous sidecars cannot claim whole-disc audio. D05.2 provider/network acquisition and D05.3 workflow remain unimplemented; owned real-dump qualification remains external.
 - Separate private operational database; collection roles, private field filtering, revisioned accounts/grants, password/passkey recovery, browser-session inventory, and revocable paired native credentials.
 - Separate public/private HTTP routers and direct LAN TLS. Public curation/admin independently configured; disabled APIs and management bundles are absent.
 - WebAuthn passkey registration/login backend and browser integration when an HTTPS authentication origin is configured. Registration and passwordless login pass a Chromium virtual-authenticator end-to-end test; real password-manager/hardware acceptance remains a release gate.
@@ -248,7 +248,7 @@ matrix, exact dependency/tool selections, migration reservations, generated fixt
 recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
-D04.1–D04.3 are reviewed and corrected locally; D05.1 is next.
+D04.1–D04.3 and D05.1 are reviewed and corrected locally; D05.2 is next.
 Archive schema 4 and catalog schema 5 cover processing observations,
 streamed snapshots, metadata authority, and conversion recipes; private schema 11
 persists frozen Job input, provisional Import observations and active catalog
@@ -380,3 +380,9 @@ malformed catalog entries rather than silently omitting them, and checks job
 cancellation during package reads and catalog scans. Curator evidence reads remain
 available without an installed owner module. The catalog currently uses bounded
 per-job parsing and linear comparison; large-corpus/index performance is unqualified.
+
+D05.1 review keeps PCM source concatenation/decoding in the shared disc crate.
+The bounded AccurateRip verifier searches v1 across the declared interval and v2
+at explicitly recorded candidate offsets. Missing v2 coverage yields incomplete
+search rather than mismatch. D05.2 must retain that distinction and require every
+expected track for whole-disc success. No music runtime capability is registered yet.
