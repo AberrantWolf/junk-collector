@@ -27,6 +27,9 @@ pub const ACCURATERIP_VERIFICATION_OPERATION: &str = "org.junk.music.accuraterip
 const ACCURATERIP_PROVIDER_ID: &str = "org.junk.providers.accuraterip";
 const MAX_CUE_BYTES: u64 = 1024 * 1024;
 
+pub mod metadata;
+pub use metadata::*;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MusicItemData {
     pub artist: Option<String>,

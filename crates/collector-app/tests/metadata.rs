@@ -179,3 +179,90 @@ fn ambiguity_survives_unrelated_manual_choices_and_inventory_subtitle_is_retaine
         Err(Error::Conflict)
     ));
 }
+
+#[test]
+fn dat_metadata_uses_match_evidence_and_raw_snapshot_version_not_policy_order() {
+    use collector_modules::games::{
+        CatalogCandidate, CatalogMatchResult, CatalogMatchedUnit, dat_metadata_candidates,
+    };
+
+    let provider = ModuleId("org.junk.providers.local-dat".into());
+    let row = RawJson::from_json(
+        r#"{"record_id":"fixture:1","label":"強い DAT 名","region":"Japan","version":"Rev A","category":null,"files":[{"name":"game.bin","bytes":4,"serial":"ABC","crc32":"12345678","sha1":null,"md5":null}]}"#,
+    )
+    .unwrap();
+    let result = CatalogMatchResult::UniqueCompleteMatch {
+        candidate: CatalogCandidate {
+            provider: provider.clone(),
+            provider_record_id: "fixture:1".into(),
+            label: "強い DAT 名".into(),
+            matched_units: vec![CatalogMatchedUnit {
+                source_file_id: PackageFileId::new(),
+                track_number: None,
+                digest: Digest::new(HashAlgorithm::Crc32, "12345678").unwrap(),
+            }],
+        },
+    };
+    let first = dat_metadata_candidates(
+        provider.clone(),
+        &Digest::sha256(b"raw-a"),
+        std::slice::from_ref(&row),
+        &result,
+    )
+    .unwrap();
+    let second = dat_metadata_candidates(
+        provider,
+        &Digest::sha256(b"raw-b"),
+        std::slice::from_ref(&row),
+        &result,
+    )
+    .unwrap();
+    assert_eq!(first[0].title.value, "強い DAT 名");
+    assert_eq!(first[0].subtitle.as_ref().unwrap().value, "Japan · Rev A");
+    assert!(first[0].complete_identity);
+    assert_eq!(first[0].provider_priority, 10);
+    assert_ne!(
+        first[0].identity.provider_record_version, second[0].identity.provider_record_version,
+        "changed exact DAT bytes cannot reuse a candidate identity"
+    );
+
+    let inconsistent = CatalogMatchResult::UniqueCompleteMatch {
+        candidate: CatalogCandidate {
+            provider: ModuleId("org.junk.providers.local-dat".into()),
+            provider_record_id: "fixture:1".into(),
+            label: "Mutable label".into(),
+            matched_units: vec![CatalogMatchedUnit {
+                source_file_id: PackageFileId::new(),
+                track_number: None,
+                digest: Digest::new(HashAlgorithm::Crc32, "12345678").unwrap(),
+            }],
+        },
+    };
+    assert!(
+        dat_metadata_candidates(
+            ModuleId("org.junk.providers.local-dat".into()),
+            &Digest::sha256(b"raw-a"),
+            std::slice::from_ref(&row),
+            &inconsistent,
+        )
+        .is_err()
+    );
+
+    let musicbrainz = candidate(
+        "org.junk.providers.musicbrainz",
+        "release",
+        "English provider disagreement",
+        "en",
+        true,
+        MatchStrength::DiscLayout,
+        1,
+    );
+    let display = resolve_metadata_display(
+        &item(),
+        &MetadataAuthority::default(),
+        &[musicbrainz, first[0].clone()],
+        "en",
+    )
+    .unwrap();
+    assert_eq!(display.title.value, "強い DAT 名");
+}

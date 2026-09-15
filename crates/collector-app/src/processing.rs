@@ -174,7 +174,7 @@ pub struct ProviderResponse {
 impl ProviderResponse {
     pub fn validate(&self, maximum_response_bytes: u64) -> Result<()> {
         if maximum_response_bytes == 0
-            || maximum_response_bytes > 8 * 1024 * 1024
+            || maximum_response_bytes > 20 * 1024 * 1024
             || self.media_type.is_empty()
             || self.media_type.len() > 255
             || self.media_type.chars().any(char::is_control)
@@ -264,7 +264,8 @@ pub struct ActivateCatalogSnapshotCommand {
     pub snapshot_id: SnapshotId,
 }
 
-/// JSON/dBAR responses are capped at 8 MiB. Large catalogs use StreamingProviderPort.
+/// JSON/dBAR providers enforce an 8 MiB cap; bounded artwork may use the existing
+/// 20 MiB Asset ingress cap. Large catalogs use StreamingProviderPort directly.
 pub trait ProviderPort: Send + Sync {
     fn acquire(
         &self,
@@ -292,6 +293,10 @@ pub struct FrozenAcquisitionJob {
     pub request: ProviderRequest,
     #[serde(default = "legacy_unassigned_binding")]
     pub collection_binding: CollectionBinding,
+    /// Item-scoped enrichment binds authorization and later observation mapping
+    /// without changing collection-scoped snapshot ownership.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<collector_core::ItemId>,
     pub snapshot_id: SnapshotId,
     pub created_at: DateTime<Utc>,
 }
@@ -371,7 +376,6 @@ pub struct ParsedCatalogSnapshot {
 impl ParsedCatalogSnapshot {
     pub fn validate(&self) -> Result<()> {
         if self.observation.get().len() > MAX_PARSED_OBSERVATION_BYTES
-            || self.entries.is_empty()
             || self.entries.len() > 1_000_000
         {
             return Err(collector_core::Error::Invalid(
@@ -491,6 +495,9 @@ impl From<&collector_core::Item> for MetadataInventoryState {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataAuthorityRecord {
+    /// Current versions used for automatic resolution; history remains selectable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_candidates: Option<Vec<collector_core::MetadataCandidateIdentity>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inventory: Option<MetadataInventoryState>,
     pub collection_id: CollectionId,
@@ -516,11 +523,16 @@ impl MetadataAuthorityRecord {
         candidates: &[collector_core::MetadataCandidateObservation],
     ) -> Result<()> {
         if let Some(inventory) = &self.inventory {
+            let current = crate::metadata::current_metadata_candidates(
+                &self.authority,
+                candidates,
+                self.current_candidates.as_deref(),
+            )?;
             let expected = crate::metadata::resolve_metadata_fields(
                 &inventory.title,
                 &inventory.subtitle,
                 &self.authority,
-                candidates,
+                &current,
                 "en",
             )?;
             if self.display.as_ref() != Some(&expected) || inventory.revision.0 == 0 {

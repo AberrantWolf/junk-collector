@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally; D06.1 reviewed and corrected locally; D06.2 is next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally; D06.1 reviewed and corrected locally; D06.2 is reviewed and corrected locally**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -79,8 +79,8 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 10 | D07.1 | D05.1, W4.2 | Immutable conversion recipes and exact encoders | Reviewed/corrected 2026-09-15; proceed to D07.2 |
 | 11 | D07.2 | D07.1 | Recoverable derivative publication | Reviewed/corrected 2026-09-15; proceed to D07.3 |
 | 12 | D07.3 | D07.2 | Availability, ranged access and web controls | Reviewed/corrected 2026-09-15; bounded browser-player child reviewed and corrected locally |
-| 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Implemented locally 2026-09-15; review required |
-| 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Routine plus provider tests |
+| 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Reviewed/corrected 2026-09-15; proceed to D06.2 |
+| 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Reviewed/corrected locally 2026-09-15 |
 | 15 | D06.3 | D06.2 | Metadata review and artwork UI | D06 root review |
 | 16 | P05.1 | D06.3, D07.3 | Portable export and change inventory | Review |
 | 17 | P05.2 | P05.1 | Consistent full backup and restore | Review |
@@ -693,7 +693,8 @@ root under the music-first proposal, which has not silently replaced the serial 
 
 ### D06.1 — Durable metadata authority
 
-**Status (2026-09-15): reviewed and corrected locally; D06.2 is next.**
+**Status (2026-09-15): reviewed and corrected locally; D06.2 is reviewed and corrected
+locally.**
 
 1. Add typed common display fields (title and subtitle), owner-bound typed
    artist/platform overrides, language, artwork choice and explicit authority commands. Preserve
@@ -751,6 +752,8 @@ were added. See the dated review/validation records for qualification.
 
 ### D06.2 — Providers and artwork
 
+**Status (2026-09-15): reviewed and corrected locally; D06.3 is next.**
+
 Initial providers are MusicBrainz release/disc identity, Cover Art Archive, and
 DAT-backed game catalog titles/identifiers from D04. Do not add ScreenScraper,
 PriceCharting or another credential-requiring game service by guesswork. The
@@ -779,9 +782,55 @@ provider port permits later adapters without changing metadata authority.
 redirect/oversize/malformed bodies; private-field request inspection; stale cache;
 provider disagreement; failed art download leaves previous art usable.
 
+**Local implementation evidence (2026-09-15; awaiting review):** Module-owned
+MusicBrainz and Cover Art Archive query/observation DTOs feed adapters registered
+through the existing acquisition and catalog-parser registries. Production origins
+are fixed; loopback injection is test-only. MusicBrainz uses one server-composed
+limiter, a meaningful configured User-Agent, 15-second timeout, 8-MiB JSON bound,
+three-attempt cancellable retry/Retry-After policy, three-hop revalidated redirects,
+and 24-hour success/one-hour negative caches. CAA listing JSON uses the same JSON
+bound, while PNG/JPEG/WebP image responses use the existing 20-MiB Asset ingress
+bound and pinned CAA/archive origins. Provider requests contain only bounded
+release/disc/search or release/image identifiers.
+
+Exact acquired bytes remain immutable snapshots. MusicBrainz candidates use fixed
+provider priority and versions derived from the exact response digest plus the
+normalized record, so changed raw or normalized content cannot reuse an identity.
+DAT-backed game metadata consumes the exact D04 snapshot and its item-associated
+catalog result through module-owned DTOs rather than a second provider pipeline.
+Fresh item/provider-bound metadata observations are distinct from Job, snapshot,
+receipt and publication transaction identities. Refresh delegates to the existing
+revisioned metadata effect; it does not edit inventory or catalog rows.
+
+CAA images enter the existing authorized Asset creation effect, which retains the
+original and bounded thumbnail. A later refresh may reference only an active Asset
+of that Item and only for an observed provider record. Explicit artwork choices and
+manual/inventory text authority remain dominant. Tests use deterministic loopback
+fixtures for ambiguity/reordering, cache expiry and refresh, timeout, 429 and
+cancellable Retry-After, malformed/oversized bodies, redirect/credential/private
+target rejection, private-field request inspection, provider disagreement, exact
+raw lexical preservation, failed image decoding, restart and reindex. Live-provider
+and deployment checks were not run; MusicBrainz identity is never represented as
+audio verification. No route, metadata review UI, native client, offline cache,
+additional provider, backend migration or separate publication pipeline was added.
+
 MusicBrainz's request-rate/User-Agent policy is documented in the
 [official API guide](https://musicbrainz.org/doc/MusicBrainz_API). Recheck provider
 contracts at implementation time and record drift instead of inventing endpoints.
+
+**Review corrections (2026-09-15):** Acquisition receipts now bind submitted
+item/query inputs before freezing timestamps. Candidate versions include ranking
+and artwork inputs. Authority records retain current candidate identities separately
+from immutable selectable history, so refreshed versions win automatic resolution.
+DNS checks run in the actual HTTP resolver under timeout, with proxies disabled;
+CAA permits narrowly pinned Archive storage hosts. MusicBrainz admission spans
+request dispatch and shared Retry-After cooldowns; cache entries are bounded to
+128 keys/32 MiB and cached reads honor caller limits. HTTP status is retained;
+malformed successful responses fail, while non-JSON 404 bodies remain exact
+snapshots referenced by metadata. English language codes normalize for display.
+Regression coverage includes repeat command replay, artwork/version changes,
+current versus historical reindex, cached limits, private/mapped addresses,
+malformed success, and non-JSON no-match preservation. No metadata HTTP/UI added.
 
 ### D06.3 — Metadata review UI
 
@@ -1301,35 +1350,44 @@ validation and the next prompt together without beginning D06, C01 or native C04
 ## Ready-to-send implementation prompt
 
 ```text
-Implement D06.2 only: metadata providers and artwork. Read AGENTS.md,
+Implement D06.3 only: usable metadata review, refresh and artwork UI. Read AGENTS.md,
 docs/architecture.md, docs/implementation-status.md, docs/release-requirements.md,
 docs/decisions/pre-release-evolution.md, docs/wave-4-review.md,
-docs/handoff-backlog.md and the complete D06.2 child in docs/wave-4-plan.md.
-D06.1 is reviewed and corrected locally. Preserve unrelated work; do not commit,
-spawn agents, begin D06.3 or add a separate provider/publication pipeline.
+docs/handoff-backlog.md, the complete D06.3 child, and U05 interface-readiness guidance.
+D06.1 and D06.2 are reviewed locally. Preserve unrelated work; do not commit,
+spawn agents or start native/offline/P05 work.
 
-Follow every D06.2 provider, rate-limit, response-size, SSRF, cancellation, caching,
-artwork and fixture requirement. Use the existing acquisition registry and host
-services. Keep network/image mechanisms in adapters and resolution policy in the
-application/module layers. Never represent MusicBrainz identity as audio verification.
+Expose application services through curation-only routes and generated contracts.
+Add typed prerequisite/availability/permission and job-result DTOs where needed;
+frontends must not inspect raw provider JSON or reproduce provider/resolution policy.
+Coordinate MusicBrainz/CAA acquisition, artwork publication and metadata refresh in
+application services where orchestration is needed, using existing jobs, receipts,
+Asset effects and refresh effects. Keep acquisition optional and explicit. Failed
+or absent providers cannot block inventory, preservation or existing artwork.
 
-Use tests first for provider normalization, failures and resource/redirect bounds.
-Candidate identity includes an immutable version: derive a deterministic digest
-version when upstream has no stable version. Changed raw or normalized content must
-not reuse an existing identity. Do not vary policy priority inside a frozen candidate.
-Use fresh observation IDs for new acquisitions; an existing ID cannot change body
-or item/collection. Publication transaction IDs are separate. Artwork must be
-published as an authorized active item asset before a candidate references it.
+Give users valid defaults and identifier/source choices, configured-provider guidance,
+visible pending/success/failure states, cancellation/retry where jobs permit, and
+reopenable results. Retain alternatives and provenance; distinguish current candidates
+from selectable history, tentative identity from missing art, and metadata from
+checksum/audio verification. Support field overrides, explicit historical selection,
+manual artwork and explicit clear actions. Preserve drafts through polling/conflicts.
+Do not key state by array position, error strings or display text. Cancel obsolete
+requests and restart needed polling after reopening.
 
-Preserve manual authority, inventory corrections, selected historical candidates,
-original text, exact raw observations and unknown module fields. Use the existing
-revisioned refresh command; never update catalog rows or inventory titles directly.
-Unavailable providers/tools yield honest bounded failures without blocking basic
-preservation. Avoid new backend migrations solely for checkpoint compatibility.
+Use effective metadata in browse/search/detail with artwork beside game/CD text.
+Apply viewer redaction to effective metadata/artwork as well as raw inventory DTOs;
+never leak private asset references or raw observations. Public client reads still
+work; disabled public curation pages AND APIs remain absent. Enforce collection
+roles independently. No provider secrets, raw HTML, archive paths or executable
+unreviewed URLs in clients.
 
-Run repository checks, using COLLECTOR_TEST_FLAC=1 where flac is installed. Use
-local deterministic provider fixtures; report live-provider/deployment checks as
-unrun unless actually exercised. Update status, this child ledger, validation and
-the next prompt together. Stop after D06.2 for review; no metadata review UI,
-native client, offline cache, or additional providers in this assignment.
+Tests first for backend exposure, authorization, revisions, private-field filtering,
+current/history selection, outage preservation and refresh orchestration. Exercise
+real browser workflows with local provider fixtures and actual published assets,
+including search, overrides/clear, refresh/reopen, keyboard navigation and 390px
+layout. An assigned URL or mock UI success is not workflow qualification.
+Run all repository checks, API contract check and browser smoke; rebuild the server
+with changed embedded assets. Use COLLECTOR_TEST_FLAC=1 when available. Report live
+providers and deployment qualification as unrun unless actually exercised. Update
+status, child ledger, validation and next prompt together. Stop after D06.3 for review.
 ```

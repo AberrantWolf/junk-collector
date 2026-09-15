@@ -115,6 +115,7 @@ fn provider_acquisition_does_not_invent_a_file_source() {
             query: RawJson::from_json(r#"{"snapshot":"edition-1"}"#).unwrap(),
             maximum_response_bytes: 512 * 1024 * 1024,
         },
+        item_id: None,
         snapshot_id: SnapshotId::new(),
         created_at: Utc.with_ymd_and_hms(2026, 9, 11, 1, 2, 3).unwrap(),
     });

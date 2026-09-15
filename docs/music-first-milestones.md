@@ -27,14 +27,14 @@ independent enqueueing. U05 audits the same nonblocking rule across the applicat
 background work may limit execution concurrency, but must not prevent unrelated
 eligible submissions. Both are mandatory for web completion, not prerequisites
 for the already-reviewed early playback checkpoint. Scheduling remains unassigned;
-the current D06.2 handoff is unchanged.
+the current D06.3 handoff is unchanged.
 
 Additional user requirement (2026-09-15): [U05.1–U05.3](interface-readiness-plan.md)
 is a second mandatory web completion gate. Establish smart defaults and typed
 readiness, audit/correct every implemented screen and action, and validate full
 journeys with missing/ambiguous inputs and unavailable capabilities. Apply the
 same standard as future native/CLI interfaces land. This gate has no assigned
-implementation date and does not change the current D06.2 handoff.
+implementation date and does not change the current D06.3 handoff.
 
 User requirement (2026-09-15): early playback is not web UI completion. The
 [P04.4–P04.6 import-management follow-up](import-management-plan.md) is mandatory

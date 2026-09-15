@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, io::Read};
 
 use collector_core::{
-    ByteLength, Digest, HashAlgorithm, ModuleData, ModuleId, PackageFileId, PackageInventory,
-    RawJson,
+    ByteLength, Digest, Error, HashAlgorithm, MatchStrength, MetadataCandidateIdentity,
+    MetadataCandidateObservation, MetadataText, ModuleData, ModuleId, PackageFileId,
+    PackageInventory, RawJson,
 };
 use junk_libs_game_formats::{CopierHeader, InesVersion, QualifiedHashes};
 use serde::{Deserialize, Serialize};
@@ -237,48 +238,140 @@ struct GameImportAnalysisOutput {
     observations: Vec<RawJson>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct DatSnapshotObservation {
-    schema_version: u32,
-    system: String,
-    catalog: String,
+pub struct DatSnapshotObservation {
+    pub schema_version: u32,
+    pub system: String,
+    pub catalog: String,
     #[serde(default)]
-    document_name: String,
+    pub document_name: String,
     #[serde(default)]
-    description: String,
-    version: String,
-    byte_domain: String,
-    byte_domain_version: u32,
-    game_count: u64,
+    pub description: String,
+    pub version: String,
+    pub byte_domain: String,
+    pub byte_domain_version: u32,
+    pub game_count: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct DatCatalogEntryObservation {
-    record_id: String,
-    label: String,
+pub struct DatCatalogEntryObservation {
+    pub record_id: String,
+    pub label: String,
     #[serde(default)]
-    region: Option<String>,
+    pub region: Option<String>,
     #[serde(default)]
-    serial: Option<String>,
+    pub serial: Option<String>,
     #[serde(default)]
-    version: Option<String>,
+    pub version: Option<String>,
     #[serde(default)]
-    category: Option<String>,
-    files: Vec<DatCatalogFileObservation>,
+    pub category: Option<String>,
+    pub files: Vec<DatCatalogFileObservation>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct DatCatalogFileObservation {
-    name: String,
-    bytes: ByteLength,
+pub struct DatCatalogFileObservation {
+    pub name: String,
+    pub bytes: ByteLength,
     #[serde(default)]
-    serial: Option<String>,
-    crc32: Option<String>,
-    sha1: Option<String>,
-    md5: Option<String>,
+    pub serial: Option<String>,
+    pub crc32: Option<String>,
+    pub sha1: Option<String>,
+    pub md5: Option<String>,
+}
+
+pub const LOCAL_DAT_METADATA_PROVIDER_PRIORITY: u16 = 10;
+
+/// Materialize descriptive DAT rows selected by the qualified D04 match result.
+/// Exact catalog bytes remain in their Snapshot; the snapshot digest also enters
+/// the candidate version so changed raw input cannot reuse an old identity.
+pub fn dat_metadata_candidates(
+    provider: ModuleId,
+    snapshot_digest: &Digest,
+    entries: &[RawJson],
+    result: &CatalogMatchResult,
+) -> collector_core::Result<Vec<MetadataCandidateObservation>> {
+    provider.validate()?;
+    snapshot_digest.validate()?;
+    validate_catalog_match(result).map_err(|error| Error::Invalid(error.to_string()))?;
+    let (matches, complete_identity, strength): (&[CatalogCandidate], bool, MatchStrength) =
+        match result {
+            CatalogMatchResult::UniqueCompleteMatch { candidate } => (
+                std::slice::from_ref(candidate),
+                true,
+                MatchStrength::CompleteHashes,
+            ),
+            CatalogMatchResult::AmbiguousCompleteMatches { candidates } => {
+                (candidates, true, MatchStrength::CompleteHashes)
+            }
+            CatalogMatchResult::PartialIdentification { candidates, .. } => {
+                (candidates, false, MatchStrength::Identifier)
+            }
+            CatalogMatchResult::Inconclusive { .. } | CatalogMatchResult::NoMatch => {
+                return Ok(Vec::new());
+            }
+        };
+    let rows = entries
+        .iter()
+        .map(|raw| {
+            let row: DatCatalogEntryObservation = raw.parse()?;
+            validate_dat_entry(&row).map_err(|error| Error::Invalid(error.to_string()))?;
+            Ok((row.record_id.clone(), (row, raw)))
+        })
+        .collect::<collector_core::Result<BTreeMap<_, _>>>()?;
+    let mut candidates = Vec::with_capacity(matches.len());
+    for matched in matches {
+        if matched.provider != provider {
+            return Err(Error::Invalid(
+                "DAT metadata candidate belongs to another provider".into(),
+            ));
+        }
+        let (row, raw) = rows
+            .get(&matched.provider_record_id)
+            .ok_or_else(|| Error::Invalid("matched DAT metadata row is absent".into()))?;
+        if matched.label != row.label {
+            return Err(Error::Invalid(
+                "matched DAT metadata label disagrees with its frozen row".into(),
+            ));
+        }
+        let mut version_input = snapshot_digest.hex.as_bytes().to_vec();
+        version_input.push(0);
+        version_input.extend_from_slice(raw.get().as_bytes());
+        version_input.extend_from_slice(
+            &serde_json::to_vec(&(complete_identity, strength))
+                .map_err(|error| Error::Invalid(error.to_string()))?,
+        );
+        let version = Digest::sha256(&version_input);
+        let subtitle = [row.region.as_deref(), row.version.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        candidates.push(MetadataCandidateObservation {
+            identity: MetadataCandidateIdentity {
+                provider: provider.clone(),
+                provider_record_id: row.record_id.clone(),
+                provider_record_version: Some(format!("sha256:{}", version.hex)),
+            },
+            title: MetadataText {
+                value: row.label.clone(),
+                language: None,
+            },
+            subtitle: (!subtitle.is_empty()).then_some(MetadataText {
+                value: subtitle,
+                language: None,
+            }),
+            artwork: None,
+            complete_identity,
+            strength,
+            provider_priority: LOCAL_DAT_METADATA_PROVIDER_PRIORITY,
+            observation: (*raw).clone(),
+        });
+    }
+    candidates.sort_by(|left, right| left.identity.cmp(&right.identity));
+    Ok(candidates)
 }
 
 #[derive(Clone)]

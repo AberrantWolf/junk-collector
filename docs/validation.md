@@ -2520,3 +2520,74 @@ No HTTP route or frontend changed; browser smoke was not rerun for this backend
 child. Live MusicBrainz/CAA, real Opus encoding, owned-disc and deployment checks
 remain unrun/external. D06.1 has no new user-facing metadata panel; D06.2 providers
 and D06.3 review UI remain separate unimplemented children. No commit was made.
+
+## D06.2 metadata providers and artwork validation — 2026-09-15
+
+Implemented locally and stopped for review; no commit, agent delegation, HTTP route,
+web metadata-review surface, backend migration, sibling-repository change or
+additional provider was added. The application composes one MusicBrainz adapter
+and limiter per server plus one Cover Art Archive adapter through the existing
+streaming acquisition and catalog-parser registries. DAT-backed descriptive
+metadata consumes the frozen D04 snapshot and item-associated match result. Both
+paths delegate publication to the existing revisioned metadata refresh effect.
+
+The deterministic loopback provider suite covers generated provider-shaped ambiguous and reordered
+MusicBrainz bodies; immutable versions when either exact or normalized content
+changes; fixed provider priority; positive and negative cache hits/expiry; explicit
+refresh through the limiter; timeout bounded to three attempts; successful 429
+Retry-After and cancellation during its delay; malformed and oversized bodies;
+foreign, credential-bearing, private/link-local and excessive redirects; pinned
+CAA listing/image redirects; meaningful User-Agent delivery; and absence of
+ownership, loan, acquisition, private-note and filesystem data in requests.
+
+The archive integration executes actual local MusicBrainz and CAA adapters through
+durable Jobs, freezes exact response/image bytes, publishes a valid CAA image through
+the existing original-plus-thumbnail Item Asset effect, and only then links it to
+the matching metadata candidate. It verifies exact lexical `1e+02` raw history,
+fresh observation identity distinct from Job/snapshot/publication identities,
+manual inventory text and explicit artwork precedence, stable digest candidate
+versions, failed image decoding without displacement, and archive reindex. The D04
+workflow now also exercises exact-snapshot DAT metadata refresh, provider provenance,
+manual authority and reindex. Existing unavailable-provider Job coverage continues
+to prove preservation is not dependent on optional provider composition.
+
+Passed after implementation:
+
+- `python3 scripts/check_architecture.py` (including fixture-manifest validation).
+- `cargo fmt --all -- --check`.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace` with `/opt/homebrew/bin/flac`:
+  274 passed, one ignored user-owned CD-dump oracle, zero failures. The existing
+  long music-CD/AccurateRip workflow emitted its expected over-60-second notice
+  and passed.
+- `npm --prefix web run check` and `npm --prefix web run build`.
+- Focused provider, application resolver, MusicBrainz/CAA Asset workflow and DAT
+  refresh/reindex tests, followed by `git diff --check` after documentation updates.
+
+Live MusicBrainz/CAA requests, target-Linux/NAS/deployment, browser metadata review,
+owned-disc, real Opus and scale qualification were not run. Caches are process-local;
+their durable exact-byte record is the existing archived acquisition snapshot.
+MusicBrainz and DAT identity observations are descriptive candidate evidence, not
+audio verification. D06.3 remains unimplemented pending D06.2 review.
+
+## D06.2 review validation — 2026-09-15
+
+Reviewed and corrected acquisition receipt binding, candidate version/current-history
+semantics, connection-time DNS validation, cache limits, rate admission/cooldowns,
+and malformed/negative response handling. See `wave-4-review.md` for findings.
+
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 277 passed, 1 ignored,
+  zero failures. Final focused application metadata and archive metadata tests
+  also passed (4 and 7 respectively), including the non-JSON 404 workflow.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed.
+- `python3 scripts/check_architecture.py`, `python3 scripts/check_wave4_fixtures.py`,
+  `cargo fmt --all -- --check` and `git diff --check`: passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, and `cargo build -p collector-server --locked`: passed.
+
+The review rechecked official MusicBrainz/CAA documentation. No live provider,
+metadata browser workflow, owned-disc, Opus or external deployment qualification
+was performed. Browser smoke was not rerun: no metadata routes or frontend changed.
+The initial rerun exposed a hanging fixture on assertion failure; bounded teardown
+and blocking accepted sockets fixed its failure reporting. The final runs above
+passed. D06.3's ready-to-send implementation prompt is current. No commit made.

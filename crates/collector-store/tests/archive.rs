@@ -7,9 +7,10 @@ use collector_app::{
     ImportCatalogSnapshotCommand, ImportDeclaredFile, ImportIdentityDecision, ImportPhase,
     ImportPort, ImportRecord, ImportReviewDecision, ImportSourceKind, ImportSourceSummary,
     ImportView, JobPort, JobSpec, MediaResource, MetadataAuthorityChange, MetadataAuthorityRecord,
-    ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderPort, ProviderRequest,
-    ProviderResponse, ProviderStreamResponse, ProvisionalImportPort, ReceiptDecision,
-    RefreshMetadataCommand, ReturnLoanCommand, ReturnedPossession, ReviewImportCommand,
+    ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderArtworkLink, ProviderPort,
+    ProviderRequest, ProviderResponse, ProviderStreamResponse, ProvisionalImportPort,
+    PublishProviderArtworkCommand, ReceiptDecision, RefreshMetadataCommand,
+    RefreshProviderMetadataCommand, ReturnLoanCommand, ReturnedPossession, ReviewImportCommand,
     SaveItemCommand, SnapshotPort, SnapshotQuery, SnapshotRecord, SpecimenDetails,
     StartLoanCommand, StartProcessingCommand, StreamingProviderPort, UpdateAssetCommand,
     UpdateMetadataAuthorityCommand,
@@ -17,14 +18,15 @@ use collector_app::{
 use collector_core::*;
 use collector_modules::*;
 use collector_providers::{
-    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, LOCAL_DAT_PROVIDER_ID, LocalDatProvider,
-    LocalDatSource,
+    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, CoverArtArchiveProvider, LOCAL_DAT_PROVIDER_ID,
+    LocalDatProvider, LocalDatSource, MusicBrainzProvider,
 };
 use collector_store::{Clock, Store, UploadFile};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::{io::Write, net::TcpListener, thread, time::Duration};
 
 struct TestClock {
     seconds: std::sync::atomic::AtomicI64,
@@ -199,6 +201,62 @@ struct FixtureAccurateRipProvider {
     bytes: Vec<u8>,
     unavailable: Arc<AtomicBool>,
     no_data: Arc<AtomicBool>,
+}
+
+struct MetadataFixtureServer {
+    stop: Arc<AtomicBool>,
+    origin: String,
+    join: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for MetadataFixtureServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            join.join().unwrap();
+        }
+    }
+}
+
+fn metadata_fixture_server(replies: Vec<(&'static str, Vec<u8>)>) -> MetadataFixtureServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let join = thread::spawn(move || {
+        for (status_and_headers, body) in replies {
+            let (mut stream, _) = loop {
+                if stopped.load(Ordering::SeqCst) {
+                    return;
+                }
+                match listener.accept() {
+                    Ok(stream) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5))
+                    }
+                    Err(error) => panic!("fixture accept: {error}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = [0_u8; 8192];
+            let _ = stream.read(&mut request).unwrap();
+            let response = format!(
+                "HTTP/1.1 {status_and_headers}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        }
+    });
+    MetadataFixtureServer {
+        stop,
+        origin: format!("http://{address}"),
+        join: Some(join),
+    }
 }
 
 impl ProviderPort for FixtureAccurateRipProvider {
@@ -6353,6 +6411,37 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
         completed_operation.error
     );
 
+    let dat_metadata = service
+        .refresh_provider_metadata(
+            &actor,
+            game.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: Revision(0),
+                snapshot_id: first_snapshot,
+                source_observation_id: Some(ObservationId(operation.0)),
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(dat_metadata.observations.len(), 1);
+    assert_ne!(dat_metadata.observations[0].id.0, operation.0);
+    assert_ne!(dat_metadata.observations[0].id.0, first_snapshot.0);
+    assert_eq!(
+        dat_metadata.observations[0].candidates[0].title.value,
+        "Known Game"
+    );
+    assert!(dat_metadata.observations[0].candidates[0].complete_identity);
+    assert_eq!(
+        dat_metadata.observations[0].candidates[0].provider_priority,
+        10
+    );
+    assert_eq!(
+        dat_metadata.display.as_ref().unwrap().title.value,
+        "Unidentified game",
+        "DAT enrichment does not overwrite inventory-derived manual authority"
+    );
+
     std::fs::write(
         &dat_path,
         dat("2", "580393f5a94fb469585f5dd2a6859a4aab899f37"),
@@ -6415,6 +6504,9 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
         store.active_snapshot(collection.id, &provider_id).unwrap(),
         Some(second_snapshot)
     );
+    let rebuilt_metadata = service.metadata_view(&actor, game.id).unwrap();
+    assert_eq!(rebuilt_metadata.candidates.len(), 1);
+    assert_eq!(rebuilt_metadata.candidates[0].title.value, "Known Game");
 }
 
 #[test]
@@ -7029,6 +7121,7 @@ fn acquisition_restart_after_snapshot_commit_reuses_frozen_response() {
             query: RawJson::from_value(serde_json::json!({"catalog":"fixture"})),
             maximum_response_bytes: 1024,
         },
+        item_id: None,
         snapshot_id,
         created_at: chrono::Utc::now(),
     };
@@ -7316,6 +7409,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let invalid_authority = MetadataAuthorityRecord {
+        current_candidates: None,
         inventory: None,
         collection_id: collection.id,
         item_id: saved.id,
@@ -7394,6 +7488,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
     assert_eq!(store.recipe(sealed.id).unwrap().digest, sealed.digest);
 
     let authority = MetadataAuthorityRecord {
+        current_candidates: None,
         inventory: None,
         collection_id: collection.id,
         item_id: saved.id,
@@ -7686,6 +7781,304 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
     let rebuilt = reopened_service.metadata_view(&actor, saved.id).unwrap();
     assert_eq!(rebuilt.revision, Revision(5));
     assert_eq!(rebuilt.display.title.value, "English candidate");
+}
+
+#[test]
+fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authority() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let release_id = "00000000-0000-4000-8000-000000000001";
+    let mb_body = format!(
+        r#"{{"releases":[{{"id":"{release_id}","title":"Provider title","artist-credit":[{{"name":"Provider Artist","artist":{{"id":"00000000-0000-4000-8000-000000000002","name":"Provider Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"discs":[{{"id":"known-disc"}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000003"}},"raw-number":1e+02}}],"count":1}}"#
+    )
+    .into_bytes();
+    let mb_server = metadata_fixture_server(vec![
+        ("200 OK\r\nContent-Type: application/json", mb_body),
+        (
+            "404 Not Found\r\nContent-Type: text/html",
+            b"<html>Not found</html>".to_vec(),
+        ),
+    ]);
+    let musicbrainz = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "junk-collector-test/0.1 (test@example.invalid)",
+            &mb_server.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let valid_art = encoded.into_inner();
+    let caa_server = metadata_fixture_server(vec![
+        ("200 OK\r\nContent-Type: image/png", valid_art.clone()),
+        (
+            "200 OK\r\nContent-Type: image/png",
+            b"not an image".to_vec(),
+        ),
+    ]);
+    let cover_art = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "junk-collector-test/0.1 (test@example.invalid)",
+            &caa_server.origin,
+            &[caa_server.origin.as_str()],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
+    let service = service
+        .with_streaming_provider(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(musicbrainz.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            musicbrainz,
+        )
+        .unwrap()
+        .with_streaming_provider(
+            ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(cover_art.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(
+            ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+            cover_art,
+        )
+        .unwrap();
+
+    let mb_context = command();
+    let mb_job = service
+        .enqueue_musicbrainz_metadata_acquisition(
+            &actor,
+            saved.id,
+            collector_modules::music::MusicBrainzQuery::DiscId {
+                disc_id: "known-disc".into(),
+                refresh: true,
+            },
+            &mb_context,
+        )
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    assert_eq!(
+        service
+            .enqueue_musicbrainz_metadata_acquisition(
+                &actor,
+                saved.id,
+                collector_modules::music::MusicBrainzQuery::DiscId {
+                    disc_id: "known-disc".into(),
+                    refresh: true
+                },
+                &mb_context
+            )
+            .unwrap(),
+        mb_job
+    );
+    assert!(matches!(
+        service.enqueue_musicbrainz_metadata_acquisition(
+            &actor,
+            saved.id,
+            collector_modules::music::MusicBrainzQuery::Search {
+                query: "different".into(),
+                refresh: true
+            },
+            &mb_context
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    assert!(service.run_next_job("metadata-provider").unwrap());
+    assert_eq!(
+        service.job(&actor, mb_job).unwrap().state,
+        JobState::Completed
+    );
+
+    let art_job = service
+        .enqueue_cover_art_acquisition(
+            &actor,
+            saved.id,
+            collector_modules::music::CoverArtArchiveQuery::Image {
+                release_id: release_id.into(),
+                image_id: "12345".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("metadata-provider").unwrap());
+    let provider_art = service
+        .publish_provider_artwork(
+            &actor,
+            saved.id,
+            PublishProviderArtworkCommand {
+                snapshot_id: SnapshotId(art_job.0),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(!provider_art.deleted);
+    assert_eq!(provider_art.asset.file.digest, Digest::sha256(&valid_art));
+
+    let manual = service
+        .create_asset(
+            &actor,
+            CreateAssetCommand {
+                collection_id: collection.id,
+                subject: AssetSubject::Item { item_id: saved.id },
+                kind: AssetKind::Cover,
+                visibility: Visibility::Shared,
+                alt_text: "Manual cover".into(),
+            },
+            &valid_art,
+            &command(),
+        )
+        .unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetArtworkChoice {
+                    asset_id: manual.id,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+
+    let refreshed = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: Revision(1),
+                snapshot_id: SnapshotId(mb_job.0),
+                source_observation_id: None,
+                artwork: vec![ProviderArtworkLink {
+                    provider_record_id: release_id.into(),
+                    asset_id: provider_art.asset.id,
+                }],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        refreshed.display.as_ref().unwrap().title.value,
+        "風の歌",
+        "provider refresh cannot replace the inventory-derived manual title"
+    );
+    assert_eq!(
+        refreshed.display.as_ref().unwrap().artwork,
+        Some(manual.id),
+        "automatic provider artwork cannot replace an explicit choice"
+    );
+    assert_eq!(refreshed.observations.len(), 1);
+    assert_ne!(refreshed.observations[0].id.0, mb_job.0);
+    assert!(
+        refreshed.observations[0]
+            .raw_observation
+            .get()
+            .contains("1e+02")
+    );
+    assert_eq!(
+        refreshed.observations[0].candidates[0].artwork,
+        Some(provider_art.asset.id)
+    );
+    assert!(
+        refreshed.observations[0].candidates[0]
+            .identity
+            .provider_record_version
+            .as_deref()
+            .unwrap()
+            .starts_with("sha256:")
+    );
+
+    let bad_job = service
+        .enqueue_cover_art_acquisition(
+            &actor,
+            saved.id,
+            collector_modules::music::CoverArtArchiveQuery::Image {
+                release_id: release_id.into(),
+                image_id: "67890".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("metadata-provider").unwrap());
+    assert!(
+        service
+            .publish_provider_artwork(
+                &actor,
+                saved.id,
+                PublishProviderArtworkCommand {
+                    snapshot_id: SnapshotId(bad_job.0),
+                },
+                &command(),
+            )
+            .is_err()
+    );
+    assert_eq!(
+        service
+            .metadata_view(&actor, saved.id)
+            .unwrap()
+            .display
+            .artwork,
+        Some(manual.id),
+        "failed artwork decoding leaves the previous active artwork usable"
+    );
+
+    let missing = service
+        .enqueue_musicbrainz_metadata_acquisition(
+            &actor,
+            saved.id,
+            collector_modules::music::MusicBrainzQuery::Search {
+                query: "missing".into(),
+                refresh: true,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("metadata-provider").unwrap());
+    let no_match = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: Revision(2),
+                snapshot_id: SnapshotId(missing.0),
+                source_observation_id: None,
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        no_match.observations[0].outcome,
+        MetadataRefreshOutcome::NoMatch
+    );
+    assert_eq!(no_match.display.unwrap().artwork, Some(manual.id));
+    assert!(
+        no_match.observations[0]
+            .raw_observation
+            .get()
+            .contains(&missing.to_string())
+    );
+
+    AdministrationPort::reindex(&*store).unwrap();
+    let rebuilt = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(rebuilt.display.artwork, Some(manual.id));
+    assert_eq!(rebuilt.candidates.len(), 1);
+    assert!(
+        files_named(&root.path().join("archive"), "record.v4.json")
+            .iter()
+            .any(|path| std::fs::read_to_string(path).is_ok_and(|body| body.contains("1e+02")))
+    );
 }
 
 #[test]
@@ -8429,6 +8822,7 @@ fn historical_domain_authority_rebuilds_without_rewriting_original_records() {
         .publish_metadata_authority(
             TransactionId::new(),
             MetadataAuthorityRecord {
+                current_candidates: None,
                 inventory: None,
                 collection_id: collection.id,
                 item_id: saved.id,
@@ -8741,6 +9135,7 @@ fn ct3_queued_job_rechecks_owner_availability() {
             maximum_response_bytes: 1024,
         },
         collection_binding: collection.binding.clone(),
+        item_id: None,
         snapshot_id: SnapshotId::new(),
         created_at: chrono::Utc::now(),
     };
@@ -10055,4 +10450,91 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
             .value,
         "New subtitle"
     );
+}
+
+#[test]
+fn metadata_refresh_uses_current_versions_and_keeps_historical_selection() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let mut candidate = MetadataCandidateObservation {
+        identity: MetadataCandidateIdentity {
+            provider: ModuleId("org.example.metadata".into()),
+            provider_record_id: "release".into(),
+            provider_record_version: Some("a-old".into()),
+        },
+        title: MetadataText {
+            value: "Old title".into(),
+            language: None,
+        },
+        subtitle: None,
+        artwork: None,
+        complete_identity: false,
+        strength: MatchStrength::Name,
+        provider_priority: 10,
+        observation: RawJson::from_json("{}").unwrap(),
+    };
+    let original = candidate.identity.clone();
+    let refresh = |expected_revision, candidate| RefreshMetadataCommand {
+        expected_revision: Revision(expected_revision),
+        observation: MetadataRefreshObservation {
+            id: ObservationId::new(),
+            outcome: MetadataRefreshOutcome::Candidates,
+            candidates: vec![candidate],
+            raw_observation: RawJson::from_json("{}").unwrap(),
+            observed_at: chrono::Utc::now(),
+        },
+    };
+    service
+        .refresh_metadata(&actor, saved.id, refresh(0, candidate.clone()), &command())
+        .unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(1),
+                change: MetadataAuthorityChange::ClearFieldOverride {
+                    field: MetadataField::Title,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    candidate.identity.provider_record_version = Some("z-new".into());
+    candidate.title.value = "New title".into();
+    let new = service
+        .refresh_metadata(&actor, saved.id, refresh(2, candidate), &command())
+        .unwrap();
+    assert_eq!(
+        new.display.unwrap().title.value,
+        "New title",
+        "old hash order cannot win automatic selection"
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, saved.id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "New title"
+    );
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(3),
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: original,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    store.reindex().unwrap();
+    let historical = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(historical.display.title.value, "Old title");
+    assert_eq!(historical.candidates.len(), 2);
 }

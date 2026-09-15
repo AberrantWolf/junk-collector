@@ -97,6 +97,11 @@ public_administration = false
 [encoders]
 flac = "/usr/bin/flac"
 # opus = "/usr/bin/opusenc"
+
+# Optional MusicBrainz and Cover Art Archive enrichment. MusicBrainz requires a
+# meaningful versioned application name and a real maintainer contact.
+[providers]
+musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
 ```
 
 Administration exposure implies curation exposure; neither grants a role. Disabled management routes and JavaScript entrypoints are absent from the public router. Proxy headers never grant private status. Exposure changes currently require editing configuration and restarting.
@@ -111,6 +116,13 @@ Music derivatives are prepared only when a curator requests one. FLAC is the
 default choice and Opus is available at explicit 96/128/192-kbps presets when its
 encoder is configured. Missing tools do not block import, preservation, analysis,
 or original downloads, and neither import nor a media request starts conversion.
+
+MusicBrainz metadata and Cover Art Archive acquisition are optional. If
+`providers.musicbrainz_user_agent` is absent, preservation, imports and manual
+metadata continue normally; provider Jobs report the missing provider rather than
+inventing results. Configure a real contact before enabling it. Provider responses
+and images are bounded and archived as immutable observations; MusicBrainz identity
+is descriptive metadata and never audio verification.
 
 ## Development
 

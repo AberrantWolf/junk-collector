@@ -122,6 +122,19 @@ checks that inventory baseline under the archive writer lock. Reindex validates
 materialized display against frozen inputs and candidate history at that revision.
 Automatic ambiguity remains tentative even when unrelated manual choices exist.
 
+Authority revisions additionally retain current candidate identities for automatic
+resolution; superseded versions remain available for explicit historical selection.
+Provider-derived versions include raw/normalized content, ranking and artwork inputs.
+MusicBrainz/CAA adapters join the existing acquisition and catalog-parser registries;
+module DTOs own provider interpretation, and application services share existing Job,
+Asset and metadata-refresh effects. Acquisition receipts bind submitted item/query
+inputs before timestamps or other frozen state. Non-JSON negative responses remain
+exact snapshots referenced by metadata; malformed successful responses are failures.
+The HTTP connector validates its actual DNS answers, disables ambient proxies and
+pins HTTPS provider/storage origins. MusicBrainz has one composed admission/cooldown
+limiter and a process-local cache bounded to 128 entries/32 MiB. Automatic enrichment
+and metadata HTTP/UI remain the D06.3 child, not an implicit import side effect.
+
 TOML manifests contain schema version, entity kind, typed identities, revision and the SHA-256 of the corresponding record. Archive schema 3 uses deterministic additive sidecars over schema-1/2 history. Canonical Item records contain inventory state but no embedded Captures or Assets; standalone Capture revisions and revisioned collection-level Asset records are authoritative. Append-only Evidence has collection identity, optional Item identity, one or more exact Representation identities, and is referenced by digest from revision envelopes. Legacy payload locations are adapter-only records. Item responses remain compatibility views hydrated from these canonical rows. The module/provider envelope preserves lexical JSON, including key order, number spelling, and nulls.
 
 The A02 migration preserves every schema-1 `record.json` and manifest byte-for-byte and writes schema-2 sidecars plus typed identity/capture records. P01.3 likewise preserves all schema-1/2 bytes and adds schema-3 Item/Capture sidecars, standalone Evidence, Asset metadata revisions, legacy locators, per-Item checkpoints, and a completion marker written last. Outputs and deterministic transaction identities must match on restart; conflicting reused Evidence identities fail migration. Neither migration reconstructs private grants, so archive-only recovery has no access assignments.

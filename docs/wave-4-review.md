@@ -369,3 +369,46 @@ ambiguity with manual artwork, and restart/reindex behavior. Existing authority,
 unknown/raw history, revocation and interrupted receipt recovery tests remain.
 No providers, routes, frontend changes, sibling extraction or commit in this review.
 D06.2 is the next bounded implementation; the ready-to-send prompt was updated.
+
+## D06.2 review corrections — 2026-09-15
+
+Reviewed provider composition, shared acquisition/Asset/refresh effects, module
+interpretation, frozen snapshots, network bounds and candidate history. Corrected:
+
+- Acquisition retry receipts included newly generated timestamps. Provider commands
+  now bind submitted item/query first and share Job-spec construction without
+  nesting another independently committed command. Provider operations have separate
+  deterministic job namespaces. Changed-input replay rejects before acquisition.
+- Adding artwork or changing match strength reused an immutable candidate version.
+  Versions now cover those inputs. Current identities are retained separately from
+  historical candidates, so automatic resolution uses refreshed versions while
+  explicit historical selections survive. Application DTOs expose that distinction;
+  reindex validates the frozen current selection and materialized display.
+- HTTP DNS preflight could validate different addresses from the eventual connection,
+  and ambient proxies could bypass the check. The actual reqwest resolver validates
+  addresses under the request timeout; proxy discovery is disabled. Private/mapped
+  IPv6, link-local, shared-address space and reserved IPv4 are rejected. CAA permits
+  narrowly matched HTTPS Archive storage hosts, not arbitrary redirects/subdomains.
+- MusicBrainz caches were unbounded and cache hits ignored smaller caller limits.
+  The cache now prunes expiry and enforces 128 entries/32 MiB; negative outcomes
+  use the negative TTL even when HTTP status is 200. Admission spans dispatch and
+  response headers, and Retry-After contributes to the shared cooldown.
+- Empty/malformed successful bodies could look like no-match; successful envelopes
+  now require their collection fields. Snapshots retain HTTP status for replay.
+  Non-JSON 404 bytes remain in snapshots and metadata references them without
+  inventing JSON or failing an otherwise valid negative refresh. English ISO 639
+  codes normalize for preferred-language ranking while raw language remains retained.
+- Local HTTP fixture teardown could hang after assertions failed. The archive fixture
+  now stops boundedly and explicitly uses blocking accepted sockets on macOS.
+
+Regression coverage includes actual acquisition replay, changed-input conflicts,
+cache-limit enforcement, candidate rank/artwork versioning, current/history selection
+through reindex, denied destinations, malformed success and non-JSON negative
+refresh. Failed image decoding still leaves manual artwork usable. No metadata
+routes/UI, new provider, sibling extraction or commit was added. D06.3 is next.
+
+Reviewed the official [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API)
+and [Cover Art Archive API](https://musicbrainz.org/doc/Cover_Art_Archive/API), including
+CAA listing/image routing through Archive storage. These documentation checks are
+not live-provider or deployment qualification; deterministic local fixtures remain
+the exercised network surface.

@@ -3719,17 +3719,41 @@ impl CollectionService {
         frozen: FrozenAcquisitionJob,
         context: &CommandContext,
     ) -> Result<JobId> {
+        let id = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+        let spec = self.catalog_acquisition_spec(actor, &frozen, id)?;
+        self.execute_command(
+            actor,
+            context,
+            "catalog.acquire.enqueue",
+            &frozen,
+            |effects| effects.enqueue_job(spec),
+        )
+    }
+
+    fn catalog_acquisition_spec(
+        &self,
+        actor: &Principal,
+        frozen: &FrozenAcquisitionJob,
+        id: JobId,
+    ) -> Result<JobSpec> {
         frozen.request.validate()?;
         let eligibility = self.content_write_eligibility(actor, frozen.request.collection_id)?;
         self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
-        let id = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+        if let Some(item_id) = frozen.item_id {
+            let item = self.reader.item(item_id)?;
+            if item.deleted || item.collection_id != frozen.request.collection_id {
+                return Err(Error::Invalid(
+                    "catalog acquisition item does not belong to its collection".into(),
+                ));
+            }
+        }
         let input = FrozenJobInput::Acquisition(frozen.clone());
         input.validate()?;
         let spec = JobSpec {
             id,
             user_id: actor.user_id,
             collection_id: Some(frozen.request.collection_id),
-            item_id: None,
+            item_id: frozen.item_id,
             kind: "catalog_acquisition".into(),
             phase: "queued".into(),
             total_units: frozen.request.maximum_response_bytes,
@@ -3739,13 +3763,7 @@ impl CollectionService {
             }),
             frozen_input: Some(input),
         };
-        self.execute_command(
-            actor,
-            context,
-            "catalog.acquire.enqueue",
-            &frozen,
-            |effects| effects.enqueue_job(spec),
-        )
+        Ok(spec)
     }
 
     pub fn enqueue_accuraterip_acquisition(
@@ -3811,6 +3829,7 @@ impl CollectionService {
                 maximum_response_bytes: 8 * 1024 * 1024,
             },
             collection_binding: eligibility.binding,
+            item_id: None,
             snapshot_id: SnapshotId(job.0),
             created_at: self.authentication.now(),
         };
@@ -3847,6 +3866,7 @@ impl CollectionService {
                 maximum_response_bytes: 512 * 1024 * 1024,
             },
             collection_binding: eligibility.binding,
+            item_id: None,
             snapshot_id: SnapshotId(job.0),
             created_at: self.authentication.now(),
         };

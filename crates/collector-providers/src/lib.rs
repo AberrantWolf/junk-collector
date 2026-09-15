@@ -6,19 +6,25 @@ mod accuraterip;
 pub use accuraterip::*;
 mod conversion;
 pub use conversion::*;
+mod metadata;
+pub use metadata::*;
 
 use collector_app::{
     CatalogParserPort, ParsedCatalogSnapshot, ProcessingExecutionContext, ProviderRequest,
     ProviderStreamResponse, SnapshotRecord, StreamingProviderPort,
 };
 use collector_core::{ByteLength, Digest, Error, HashAlgorithm, RawJson, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::BTreeMap,
     fs::File,
     io::{BufReader, Read, Seek, SeekFrom},
     path::PathBuf,
+};
+
+pub use collector_modules::games::{
+    DatCatalogEntryObservation, DatCatalogFileObservation, DatSnapshotObservation,
 };
 
 pub const LOCAL_DAT_PROVIDER_ID: &str = "org.junk.providers.local-dat";
@@ -59,50 +65,6 @@ impl LocalDatSource {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DatSnapshotObservation {
-    pub schema_version: u32,
-    pub system: String,
-    pub catalog: String,
-    #[serde(default)]
-    pub document_name: String,
-    #[serde(default)]
-    pub description: String,
-    pub version: String,
-    pub byte_domain: String,
-    pub byte_domain_version: u32,
-    pub game_count: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DatCatalogEntryObservation {
-    pub record_id: String,
-    pub label: String,
-    #[serde(default)]
-    pub region: Option<String>,
-    #[serde(default)]
-    pub serial: Option<String>,
-    #[serde(default)]
-    pub version: Option<String>,
-    #[serde(default)]
-    pub category: Option<String>,
-    pub files: Vec<DatCatalogFileObservation>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DatCatalogFileObservation {
-    pub name: String,
-    pub bytes: ByteLength,
-    #[serde(default)]
-    pub serial: Option<String>,
-    pub crc32: Option<String>,
-    pub sha1: Option<String>,
-    pub md5: Option<String>,
 }
 
 #[derive(Deserialize)]

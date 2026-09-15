@@ -4,8 +4,9 @@ use collector_app::CollectionTypeAdministrationService;
 use collector_client::{Endpoint, Pairing, Route};
 use collector_core::*;
 use collector_providers::{
-    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, ConfiguredEncoder, EncoderKind,
-    LOCAL_DAT_PROVIDER_ID, LocalDatProvider, LocalDatSource, ProcessAudioConverter,
+    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, ConfiguredEncoder, CoverArtArchiveProvider,
+    EncoderKind, LOCAL_DAT_PROVIDER_ID, LocalDatProvider, LocalDatSource, MusicBrainzProvider,
+    ProcessAudioConverter,
 };
 use collector_server::{AppState, router};
 use collector_store::Store;
@@ -83,6 +84,7 @@ struct Config {
     authentication_origin: Option<String>,
     inboxes: std::collections::BTreeMap<String, PathBuf>,
     dat_sources: std::collections::BTreeMap<String, DatSourceConfig>,
+    providers: ProviderConfig,
     encoders: EncoderConfig,
     tls_names: Vec<String>,
     allowed_origins: Vec<String>,
@@ -110,6 +112,15 @@ struct EncoderConfig {
     opus: Option<PathBuf>,
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ProviderConfig {
+    /// MusicBrainz requires a versioned application name plus a maintainer contact.
+    /// When absent, metadata acquisition is honestly unavailable and preservation
+    /// remains operational.
+    musicbrainz_user_agent: Option<String>,
+}
+
 fn default_domain_version() -> u32 {
     1
 }
@@ -127,6 +138,7 @@ impl Default for Config {
             authentication_origin: None,
             inboxes: std::collections::BTreeMap::new(),
             dat_sources: std::collections::BTreeMap::new(),
+            providers: ProviderConfig::default(),
             encoders: EncoderConfig::default(),
             tls_names: vec![
                 "localhost".into(),
@@ -335,6 +347,10 @@ async fn main() -> Result<()> {
         }
         probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());
         probe_optional_encoder(EncoderKind::Opus, config.encoders.opus.as_ref());
+        if let Some(user_agent) = &config.providers.musicbrainz_user_agent {
+            MusicBrainzProvider::new(user_agent)?;
+            CoverArtArchiveProvider::new(user_agent)?;
+        }
         println!(
             "Configuration checks passed. This does not test passwords, collection grants or network reachability."
         );
@@ -495,6 +511,31 @@ async fn main() -> Result<()> {
                     Arc::new(collector_app::BoundedProviderAdapter(accuraterip.clone())),
                 )?
                 .with_catalog_parser(accuraterip_id, accuraterip)?;
+            if let Some(user_agent) = &config.providers.musicbrainz_user_agent {
+                let musicbrainz = Arc::new(MusicBrainzProvider::new(user_agent)?);
+                let musicbrainz_id =
+                    ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into());
+                state.service = state
+                    .service
+                    .clone()
+                    .with_streaming_provider(
+                        musicbrainz_id.clone(),
+                        Arc::new(collector_app::BoundedProviderAdapter(musicbrainz.clone())),
+                    )?
+                    .with_catalog_parser(musicbrainz_id, musicbrainz)?;
+
+                let cover_art = Arc::new(CoverArtArchiveProvider::new(user_agent)?);
+                let cover_art_id =
+                    ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into());
+                state.service = state
+                    .service
+                    .clone()
+                    .with_streaming_provider(
+                        cover_art_id.clone(),
+                        Arc::new(collector_app::BoundedProviderAdapter(cover_art.clone())),
+                    )?
+                    .with_catalog_parser(cover_art_id, cover_art)?;
+            }
             state.catalog_sources = Arc::new(
                 dat_provider
                     .configured_sources()
