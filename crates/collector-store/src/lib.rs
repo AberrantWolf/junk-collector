@@ -1883,7 +1883,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 5 {
+    if catalog_version > 6 {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -1976,6 +1976,26 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             CREATE INDEX IF NOT EXISTS snapshots_collection
               ON snapshots(collection_id,created_at,id);
             PRAGMA main.user_version = 5;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
+    if catalog_version <= 6 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS metadata_refreshes (
+                id TEXT PRIMARY KEY, collection_id TEXT NOT NULL, item_id TEXT NOT NULL, record TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS metadata_candidates (
+              item_id TEXT NOT NULL,
+              collection_id TEXT NOT NULL,
+              candidate_key TEXT NOT NULL,
+              record TEXT NOT NULL,
+              PRIMARY KEY(item_id,candidate_key)
+            );
+            CREATE INDEX IF NOT EXISTS metadata_candidates_collection_item
+              ON metadata_candidates(collection_id,item_id,candidate_key);
+            PRAGMA main.user_version = 6;",
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)?;

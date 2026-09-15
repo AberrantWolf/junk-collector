@@ -257,8 +257,8 @@ matrix, exact dependency/tool selections, migration reservations, generated fixt
 recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
-D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally.
-Archive schema 4 and catalog schema 5 cover processing observations,
+D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. D06.1 durable metadata authority and deterministic resolution are reviewed and corrected locally.
+Archive schema 4 and catalog schema 6 cover processing observations,
 streamed snapshots, metadata authority, and conversion recipes; private schema 11
 persists frozen Job input, provisional Import observations and active catalog
 selection. Import publication
@@ -310,7 +310,7 @@ offline-library management and the Trash Amp provider remain later tickets.
    MusicBrainz/CAA enrichment and independent real-dump verification oracles.
    D02/D03 and D04.1 complete the reusable disc/audio/game primitives locally; no
    Collector catalog verification is currently claimed.
-4. Checkpoint the reviewed browser player, then implement D06.1 metadata authority. Its actual Chrome FLAC playback/seek/transition workflow passes; other-browser, gapless/sample-accurate and deployment qualification remain unclaimed.
+4. Implement D06.2 MusicBrainz/CAA and DAT-backed metadata/artwork adapters and D06.3 review UI. D06.1 adds no live provider or browser surface. The reviewed player’s actual Chrome FLAC playback/seek/transition workflow passes; other-browser, gapless/sample-accurate and deployment qualification remain unclaimed.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
 6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.
 7. Add authenticated endpoint discovery, mDNS, automatic health checks and actual transfer failover. Extend the tested enrolled LAN trust path to automatic discovery and full native-client failover.

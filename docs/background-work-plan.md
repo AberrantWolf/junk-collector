@@ -2,7 +2,7 @@
 
 User requirement, 2026-09-15. Planned, not implemented. Required before web UI
 completion alongside [P04](import-management-plan.md) and
-[U05](interface-readiness-plan.md). Does not interrupt the current D06.1 handoff.
+[U05](interface-readiness-plan.md). Does not interrupt the current D06.2 handoff.
 
 ## Finding and ownership
 

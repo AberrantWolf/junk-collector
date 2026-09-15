@@ -2,14 +2,153 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AssetId, Error, LanguageTag, ModuleData, ModuleId, RawJson, Result};
+use crate::{
+    AssetId, Error, LanguageTag, MatchStrength, ModuleData, ModuleId, ObservationId, RawJson,
+    Result,
+};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataCandidateIdentity {
     pub provider: ModuleId,
     pub provider_record_id: String,
     pub provider_record_version: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataText {
+    pub value: String,
+    pub language: Option<LanguageTag>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataCandidateObservation {
+    pub identity: MetadataCandidateIdentity,
+    pub title: MetadataText,
+    pub subtitle: Option<MetadataText>,
+    pub artwork: Option<AssetId>,
+    /// A provider's complete identity assertion is ranked before all partial
+    /// identifier or layout evidence. It is descriptive identity evidence, not
+    /// integrity or catalog verification.
+    pub complete_identity: bool,
+    pub strength: MatchStrength,
+    /// Lower values are preferred. Policy supplies this value; array order never
+    /// participates in resolution.
+    pub provider_priority: u16,
+    #[schema(value_type = Object)]
+    pub observation: RawJson,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataRefreshOutcome {
+    Candidates,
+    NoMatch,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataRefreshObservation {
+    pub id: ObservationId,
+    pub outcome: MetadataRefreshOutcome,
+    pub candidates: Vec<MetadataCandidateObservation>,
+    #[schema(value_type = Object)]
+    pub raw_observation: RawJson,
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum MetadataValueSource {
+    Manual,
+    Candidate { identity: MetadataCandidateIdentity },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedMetadataText {
+    pub value: String,
+    pub language: Option<LanguageTag>,
+    pub source: MetadataValueSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataResolutionKind {
+    Manual,
+    Selected,
+    Automatic,
+    Tentative,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedMetadataDisplay {
+    pub title: ResolvedMetadataText,
+    pub subtitle: Option<ResolvedMetadataText>,
+    pub artwork: Option<AssetId>,
+    pub candidate: Option<MetadataCandidateIdentity>,
+    pub resolution: MetadataResolutionKind,
+}
+
+impl MetadataCandidateObservation {
+    pub fn validate(&self) -> Result<()> {
+        validate_candidate_identity(&self.identity)?;
+        validate_text(&self.title.value, false)?;
+        if let Some(subtitle) = &self.subtitle {
+            validate_text(&subtitle.value, false)?;
+        }
+        if self.observation.get().len() > 64 * 1024 {
+            return Err(Error::Invalid(
+                "metadata candidate observation is oversized".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl MetadataRefreshObservation {
+    pub fn validate(&self) -> Result<()> {
+        if self.candidates.len() > 128 || self.raw_observation.get().len() > 8 * 1024 * 1024 {
+            return Err(Error::Invalid("metadata refresh is oversized".into()));
+        }
+        if matches!(self.outcome, MetadataRefreshOutcome::Candidates) == self.candidates.is_empty()
+        {
+            return Err(Error::Invalid(
+                "metadata refresh outcome disagrees with its candidates".into(),
+            ));
+        }
+        let mut identities = BTreeSet::new();
+        for candidate in &self.candidates {
+            candidate.validate()?;
+            if !identities.insert(candidate.identity.clone()) {
+                return Err(Error::Invalid(
+                    "metadata refresh contains a duplicate candidate".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ResolvedMetadataDisplay {
+    pub fn validate(&self) -> Result<()> {
+        validate_text(&self.title.value, false)?;
+        validate_value_source(&self.title.source)?;
+        if let Some(subtitle) = &self.subtitle {
+            validate_text(&subtitle.value, false)?;
+            validate_value_source(&subtitle.source)?;
+        }
+        if let Some(candidate) = &self.candidate {
+            validate_candidate_identity(candidate)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(
@@ -98,21 +237,7 @@ impl<'de> Deserialize<'de> for MetadataAuthority {
 impl MetadataAuthority {
     pub fn validate(&self) -> Result<()> {
         if let Some(candidate) = &self.selected_candidate {
-            candidate.provider.validate()?;
-            if candidate.provider_record_id.is_empty()
-                || candidate.provider_record_id.len() > 1024
-                || candidate.provider_record_id.chars().any(char::is_control)
-                || candidate
-                    .provider_record_version
-                    .as_ref()
-                    .is_some_and(|version| {
-                        version.is_empty()
-                            || version.len() > 1024
-                            || version.chars().any(char::is_control)
-                    })
-            {
-                return Err(Error::Invalid("invalid metadata candidate identity".into()));
-            }
+            validate_candidate_identity(candidate)?;
         }
         if self.preserved_field_overrides.len() > 128
             || self
@@ -128,6 +253,7 @@ impl MetadataAuthority {
         if self.field_overrides.len() > 2
             || self.field_overrides.iter().any(|entry| {
                 !fields.insert(entry.field)
+                    || (entry.field == MetadataField::Title && entry.value.trim().is_empty())
                     || entry.value.len() > 4096
                     || entry.value.chars().any(char::is_control)
             })
@@ -155,4 +281,38 @@ impl MetadataAuthority {
         }
         Ok(())
     }
+}
+
+fn validate_candidate_identity(candidate: &MetadataCandidateIdentity) -> Result<()> {
+    candidate.provider.validate()?;
+    if candidate.provider_record_id.is_empty()
+        || candidate.provider_record_id.len() > 1024
+        || candidate.provider_record_id.chars().any(char::is_control)
+        || candidate
+            .provider_record_version
+            .as_ref()
+            .is_some_and(|version| {
+                version.is_empty() || version.len() > 1024 || version.chars().any(char::is_control)
+            })
+    {
+        return Err(Error::Invalid("invalid metadata candidate identity".into()));
+    }
+    Ok(())
+}
+
+fn validate_value_source(source: &MetadataValueSource) -> Result<()> {
+    match source {
+        MetadataValueSource::Manual => Ok(()),
+        MetadataValueSource::Candidate { identity } => validate_candidate_identity(identity),
+    }
+}
+
+fn validate_text(value: &str, empty_allowed: bool) -> Result<()> {
+    if (!empty_allowed && value.trim().is_empty())
+        || value.len() > 4096
+        || value.chars().any(char::is_control)
+    {
+        return Err(Error::Invalid("invalid metadata display text".into()));
+    }
+    Ok(())
 }

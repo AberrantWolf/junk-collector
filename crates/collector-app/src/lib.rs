@@ -3,6 +3,8 @@ mod collection_types;
 pub use collection_types::*;
 mod derivatives;
 pub use derivatives::*;
+mod metadata;
+pub use metadata::*;
 mod processing;
 pub mod security;
 
@@ -780,6 +782,7 @@ pub trait CommandEffects:
     + AccessPort
     + JobPort
     + ProvisionalImportPort
+    + ProcessingPort
 {
 }
 impl<T> CommandEffects for T where
@@ -792,6 +795,7 @@ impl<T> CommandEffects for T where
         + AccessPort
         + JobPort
         + ProvisionalImportPort
+        + ProcessingPort
 {
 }
 

@@ -469,24 +469,94 @@ pub struct AcquireAccurateRipCommand {
     pub structure_observation_id: ObservationId,
 }
 
+/// Inventory fields against which this authority revision was resolved.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataInventoryState {
+    pub revision: collector_core::Revision,
+    pub title: String,
+    pub subtitle: String,
+}
+
+impl From<&collector_core::Item> for MetadataInventoryState {
+    fn from(item: &collector_core::Item) -> Self {
+        Self {
+            revision: item.revision,
+            title: item.title.clone(),
+            subtitle: item.subtitle.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataAuthorityRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<MetadataInventoryState>,
     pub collection_id: CollectionId,
     pub item_id: collector_core::ItemId,
     pub revision: collector_core::Revision,
     pub authority: collector_core::MetadataAuthority,
+    /// A refresh appends observations in the same durable revision that records
+    /// the resulting display. Authority-only changes leave this empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<collector_core::MetadataRefreshObservation>,
+    /// Old W4 contract-only records did not materialize a display. D06.1 writes
+    /// this for every application-produced revision while retaining those bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<collector_core::ResolvedMetadataDisplay>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl MetadataAuthorityRecord {
+    /// Check the materialized projection against its frozen inventory inputs and
+    /// the candidate history available at this revision, including during reindex.
+    pub fn validate_display(
+        &self,
+        candidates: &[collector_core::MetadataCandidateObservation],
+    ) -> Result<()> {
+        if let Some(inventory) = &self.inventory {
+            let expected = crate::metadata::resolve_metadata_fields(
+                &inventory.title,
+                &inventory.subtitle,
+                &self.authority,
+                candidates,
+                "en",
+            )?;
+            if self.display.as_ref() != Some(&expected) || inventory.revision.0 == 0 {
+                return Err(collector_core::Error::Invalid(
+                    "metadata display disagrees with its frozen inputs".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.revision.0 == 0 {
             return Err(collector_core::Error::Invalid(
                 "metadata authority revision is required".into(),
             ));
         }
-        self.authority.validate()
+        self.authority.validate()?;
+        if self.observations.len() > 2 {
+            return Err(collector_core::Error::Invalid(
+                "a metadata revision contains too many observations".into(),
+            ));
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for observation in &self.observations {
+            observation.validate()?;
+            if !ids.insert(observation.id) {
+                return Err(collector_core::Error::Invalid(
+                    "a metadata revision contains a duplicate observation".into(),
+                ));
+            }
+        }
+        if let Some(display) = &self.display {
+            display.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -554,4 +624,14 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         transaction: collector_core::TransactionId,
         record: MetadataAuthorityRecord,
     ) -> Result<()>;
+    fn metadata_authority(
+        &self,
+        collection: CollectionId,
+        item: collector_core::ItemId,
+    ) -> Result<Option<MetadataAuthorityRecord>>;
+    fn metadata_candidates(
+        &self,
+        collection: CollectionId,
+        item: collector_core::ItemId,
+    ) -> Result<Vec<collector_core::MetadataCandidateObservation>>;
 }

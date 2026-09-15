@@ -339,3 +339,33 @@ No commit or sibling edit was made. D07.3 plus this player is a useful backup
 checkpoint before the ready-to-send D06.1 metadata-authority handoff. Other-browser,
 real Opus, physical-output, gapless/sample-accurate, deployment and scale claims
 remain outside this local qualification.
+
+## D06.1 review corrections — 2026-09-15
+
+Reviewed the typed metadata contracts, resolver, command receipts, archive
+publication and reindex. Corrected the following before handing off providers:
+
+- A repeated provider/record/version could replace previously selected content.
+  Candidates now retain immutable content; changed versions must have new IDs.
+  Both publication and reindex reject contradictory observations. Observation IDs
+  are subject-bound and distinct from transaction/receipt identities.
+- Inventory edits after the first authority revision could leave displayed text
+  stale. Records now freeze inventory inputs; application reads/commands recognize
+  subsequent manual corrections, while publication checks the inventory revision
+  under the writer lock. Unchanged fields preserve explicit overrides and clears.
+- Manual artwork/subtitle/domain choices could hide automatically ambiguous
+  identity. Automatic ambiguity remains tentative; missing candidate subtitle
+  falls back to inventory text when no candidate exists.
+- Refresh artwork references now require an active asset belonging to the item;
+  deleted items reject metadata mutations. Legacy selected record IDs only select
+  a candidate when the provider match is unambiguous.
+- Materialized display is checked against frozen inventory and candidate inputs
+  before publication and during reindex. Effective reads no longer return a stale
+  materialized record or independently reread authority.
+
+Added resolver and archive regressions covering contradictory candidate/observation
+identity, forged display, stale inventory publication, later inventory corrections,
+ambiguity with manual artwork, and restart/reindex behavior. Existing authority,
+unknown/raw history, revocation and interrupted receipt recovery tests remain.
+No providers, routes, frontend changes, sibling extraction or commit in this review.
+D06.2 is the next bounded implementation; the ready-to-send prompt was updated.

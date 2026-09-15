@@ -283,6 +283,14 @@ impl Store {
             relative(&self.archive, &collection)?,
             revision.0
         );
+        if let Some(result) = &self.command_result {
+            self.prepare_command(
+                "archive",
+                &format!("{destination_relative}/record.v4.json"),
+                &Digest::sha256(&record_bytes).hex,
+                result,
+            )?;
+        }
         let payload_relative = payload.as_ref().map(|_| {
             format!(
                 "{}/{directory}/{id}/payload/source.bin",
@@ -405,7 +413,15 @@ impl Store {
         let mut observations = Vec::new();
         let mut snapshots = Vec::new();
         let mut recipes = Vec::new();
-        let mut authorities = Vec::new();
+        let mut authorities = std::collections::BTreeMap::new();
+        let mut refreshes = std::collections::BTreeMap::new();
+        let mut metadata_candidates = std::collections::BTreeMap::<
+            (CollectionId, collector_core::ItemId),
+            std::collections::BTreeMap<
+                collector_core::MetadataCandidateIdentity,
+                collector_core::MetadataCandidateObservation,
+            >,
+        >::new();
         for collection_dir in directories(&self.archive.join("collections"))? {
             let collection: Collection = toml::from_str(
                 &fs::read_to_string(collection_dir.join("collection.toml")).map_err(storage)?,
@@ -437,7 +453,7 @@ impl Store {
                 record.validate()?;
                 recipes.push((collection.id, record));
             }
-            for revision in latest_v4(&collection_dir.join("metadata_authorities"))? {
+            for revision in all_v4(&collection_dir.join("metadata_authorities"))? {
                 let record: MetadataAuthorityRecord =
                     read_v4(&revision, collection.id, "metadata_authority")?;
                 record.validate()?;
@@ -446,10 +462,39 @@ impl Store {
                         "metadata authority collection mismatch".into(),
                     ));
                 }
-                authorities.push(record);
+                for observation in &record.observations {
+                    let value = (record.collection_id, record.item_id, observation.clone());
+                    if let Some(old) = refreshes.insert(observation.id, value.clone())
+                        && old != value
+                    {
+                        return Err(Error::Conflict);
+                    }
+                    for candidate in &observation.candidates {
+                        let candidates = metadata_candidates
+                            .entry((record.collection_id, record.item_id))
+                            .or_default();
+                        if let Some(old) = candidates.get(&candidate.identity)
+                            && old != candidate
+                        {
+                            return Err(Error::Conflict);
+                        }
+                        candidates.insert(candidate.identity.clone(), candidate.clone());
+                        if candidates.len() > 4096 {
+                            return Err(Error::Invalid(
+                                "metadata candidate history exceeds its bound".into(),
+                            ));
+                        }
+                    }
+                }
+                let candidates = metadata_candidates
+                    .get(&(record.collection_id, record.item_id))
+                    .map(|values| values.values().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                record.validate_display(&candidates)?;
+                authorities.insert(record.item_id, record);
             }
         }
-        tx.execute_batch("DELETE FROM processing_observations; DELETE FROM snapshots; DELETE FROM conversion_recipes; DELETE FROM metadata_authorities;")
+        tx.execute_batch("DELETE FROM processing_observations; DELETE FROM snapshots; DELETE FROM conversion_recipes; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM metadata_refreshes;")
             .map_err(storage)?;
         for record in observations {
             project_processing(tx, &record)?;
@@ -478,7 +523,24 @@ impl Store {
             )
             .map_err(storage)?;
         }
-        for record in authorities {
+        for ((collection, item), candidates) in metadata_candidates {
+            for candidate in candidates.into_values() {
+                project_metadata_candidate(tx, collection, item, &candidate)?;
+            }
+        }
+        for (collection, item, observation) in refreshes.into_values() {
+            tx.execute(
+                "INSERT INTO metadata_refreshes(id,collection_id,item_id,record) VALUES(?,?,?,?)",
+                params![
+                    observation.id.to_string(),
+                    collection.to_string(),
+                    item.to_string(),
+                    serde_json::to_string(&observation).map_err(storage)?
+                ],
+            )
+            .map_err(storage)?;
+        }
+        for record in authorities.into_values() {
             tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?)",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
         }
         Ok(())
@@ -497,6 +559,20 @@ fn latest_v4(root: &Path) -> Result<Vec<PathBuf>> {
         if let Some(latest) = values.pop() {
             result.push(latest);
         }
+    }
+    Ok(result)
+}
+
+fn all_v4(root: &Path) -> Result<Vec<PathBuf>> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    for entity in directories(root)? {
+        let revisions = entity.join("revisions");
+        let mut values = directories(&revisions)?;
+        values.sort();
+        result.extend(values);
     }
     Ok(result)
 }
@@ -564,6 +640,27 @@ fn project_processing(
         "INSERT INTO processing_observations(id,collection_id,source_scope,source_id,operation,created_at,record) VALUES(?,?,?,?,?,?,?)",
         params![record.observation.id.to_string(),record.observation.collection_id.to_string(),scope,id,record.observation.operation.to_string(),record.observation.created_at.timestamp(),serde_json::to_string(record).map_err(storage)?],
     ).map_err(storage)?;
+    Ok(())
+}
+
+fn project_metadata_candidate(
+    tx: &rusqlite::Transaction<'_>,
+    collection: CollectionId,
+    item: collector_core::ItemId,
+    candidate: &collector_core::MetadataCandidateObservation,
+) -> Result<()> {
+    let key = serde_json::to_string(&candidate.identity).map_err(storage)?;
+    tx.execute(
+        "INSERT INTO metadata_candidates(item_id,collection_id,candidate_key,record) VALUES(?,?,?,?)
+         ON CONFLICT(item_id,candidate_key) DO UPDATE SET record=excluded.record",
+        params![
+            item.to_string(),
+            collection.to_string(),
+            key,
+            serde_json::to_string(candidate).map_err(storage)?
+        ],
+    )
+    .map_err(storage)?;
     Ok(())
 }
 
@@ -1031,8 +1128,47 @@ impl ProcessingPort for Store {
         if record.revision.0 != current.saturating_add(1) {
             return Err(Error::Conflict);
         }
+        let item = self.item(record.item_id)?;
+        if item.deleted
+            || record.inventory.as_ref().is_some_and(|baseline| {
+                baseline.revision != item.revision
+                    || baseline.title != item.title
+                    || baseline.subtitle != item.subtitle
+            })
+        {
+            return Err(Error::Conflict);
+        }
+        let mut candidates = self.metadata_candidates(record.collection_id, record.item_id)?;
+        collector_app::merge_metadata_candidates(
+            &mut candidates,
+            record
+                .observations
+                .iter()
+                .flat_map(|observation| &observation.candidates),
+        )?;
+        record.validate_display(&candidates)?;
+        for observation in &record.observations {
+            let existing: Option<(String, String, String)> = lock(&self.db)?
+                .query_row(
+                    "SELECT collection_id,item_id,record FROM metadata_refreshes WHERE id=?",
+                    [observation.id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(storage)?;
+            if let Some((collection, item, raw)) = existing {
+                let old: collector_core::MetadataRefreshObservation =
+                    serde_json::from_str(&raw).map_err(storage)?;
+                if collection != record.collection_id.to_string()
+                    || item != record.item_id.to_string()
+                    || old != *observation
+                {
+                    return Err(Error::Conflict);
+                }
+            }
+        }
         let mut never = || Ok(false);
-        self.publish_v4(
+        self.with_command_result(&record)?.publish_v4(
             V4Target {
                 transaction_id: transaction,
                 collection_id: record.collection_id,
@@ -1044,7 +1180,57 @@ impl ProcessingPort for Store {
             None,
             &mut never,
         )?;
-        lock(&self.db)?.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,record=excluded.record",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        for observation in &record.observations {
+            tx.execute("INSERT OR IGNORE INTO metadata_refreshes(id,collection_id,item_id,record) VALUES(?,?,?,?)", params![observation.id.to_string(),record.collection_id.to_string(),record.item_id.to_string(),serde_json::to_string(observation).map_err(storage)?]).map_err(storage)?;
+            for candidate in &observation.candidates {
+                project_metadata_candidate(&tx, record.collection_id, record.item_id, candidate)?;
+            }
+        }
+        tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,record=excluded.record",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
+        tx.commit().map_err(storage)?;
         finish_v3_publication(self, transaction)
+    }
+
+    fn metadata_authority(
+        &self,
+        collection: CollectionId,
+        item: collector_core::ItemId,
+    ) -> Result<Option<MetadataAuthorityRecord>> {
+        let record = lock(&self.db)?
+            .query_row(
+                "SELECT record FROM metadata_authorities WHERE id=? AND collection_id=?",
+                params![item.to_string(), collection.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        record
+            .map(|value| serde_json::from_str(&value).map_err(storage))
+            .transpose()
+    }
+
+    fn metadata_candidates(
+        &self,
+        collection: CollectionId,
+        item: collector_core::ItemId,
+    ) -> Result<Vec<collector_core::MetadataCandidateObservation>> {
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "SELECT record FROM metadata_candidates WHERE collection_id=? AND item_id=? ORDER BY candidate_key LIMIT 4097",
+            )
+            .map_err(storage)?;
+        let rows = statement
+            .query_map(params![collection.to_string(), item.to_string()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(storage)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(|value| serde_json::from_str(&value).map_err(storage))
+            .collect()
     }
 }

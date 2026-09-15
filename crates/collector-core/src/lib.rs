@@ -136,7 +136,9 @@ impl<'de> Deserialize<'de> for Digest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, utoipa::ToSchema,
+)]
 #[serde(transparent)]
 pub struct ModuleId(pub String);
 impl ModuleId {

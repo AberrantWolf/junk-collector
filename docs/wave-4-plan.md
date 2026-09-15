@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally; D06.1 reviewed and corrected locally; D06.2 is next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -79,7 +79,7 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 10 | D07.1 | D05.1, W4.2 | Immutable conversion recipes and exact encoders | Reviewed/corrected 2026-09-15; proceed to D07.2 |
 | 11 | D07.2 | D07.1 | Recoverable derivative publication | Reviewed/corrected 2026-09-15; proceed to D07.3 |
 | 12 | D07.3 | D07.2 | Availability, ranged access and web controls | Reviewed/corrected 2026-09-15; bounded browser-player child reviewed and corrected locally |
-| 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Review |
+| 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Implemented locally 2026-09-15; review required |
 | 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Routine plus provider tests |
 | 15 | D06.3 | D06.2 | Metadata review and artwork UI | D06 root review |
 | 16 | P05.1 | D06.3, D07.3 | Portable export and change inventory | Review |
@@ -693,6 +693,8 @@ root under the music-first proposal, which has not silently replaced the serial 
 
 ### D06.1 — Durable metadata authority
 
+**Status (2026-09-15): reviewed and corrected locally; D06.2 is next.**
+
 1. Add typed common display fields (title and subtitle), owner-bound typed
    artist/platform overrides, language, artwork choice and explicit authority commands. Preserve
    existing string-key overrides/unknown values as legacy envelopes rather than
@@ -715,6 +717,37 @@ root under the music-first proposal, which has not silently replaced the serial 
 survives disappearance/provider outage; Japanese strong match beats English name
 match; ambiguous matches yield a marked tentative display; stale authority update
 conflicts; unknown override fields and raw lexical JSON survive archive-only export.
+
+**Local implementation evidence (2026-09-15; awaiting review):** Core now owns
+bounded typed candidate observations, stable provider-record/version identity,
+language-bearing title/subtitle values and explicit materialized resolution state.
+The application resolver ranks complete identity before identifier/layout strength,
+then English preference, provider priority and a stable identity tie-break; equal
+policy ranks remain tentative. Typed field overrides, explicit selection, artwork
+choice and owner-validated domain overrides use focused revisioned commands.
+Existing inventory title/subtitle values seed manual authority on first use, while
+legacy string-key fields remain preserved envelopes.
+
+Each refresh writes its lossless observation and recomputed display in one existing
+schema-4 MetadataAuthority revision without modifying manual authority. Receipt
+claims bind the submitted observation/change before reading the mutable authority
+revision, and schema-4 publication prepares command recovery against the actual
+record commit. Catalog schema 6 materializes stable candidates; archive-only reindex
+scans every authority revision to rebuild their history and projects the newest
+authority/display. Tests cover evidence-before-language ranking, deterministic
+reordering, ambiguity, manual precedence, selection across outage, stale conflict,
+same-key replay, revoked replay authorization, raw lexical/unknown preservation,
+reindex and restart. No live provider, HTTP route or web UI was added; D06.2 and
+D06.3 remain unimplemented.
+
+**Review corrections (2026-09-15):** Candidate versions and observation identities
+are immutable, including during reindex. Contradictory refreshes fail before archive
+publication. Inventory baselines preserve later manual edits and provide writer-lock
+CAS; effective application reads recompute display, and reindex validates frozen
+display inputs. Automatic ambiguity survives unrelated manual choices. Refresh
+artwork must belong to an active asset of the item, and deleted items reject writes.
+Ambiguous legacy record IDs do not arbitrarily select a provider. No routes or UI
+were added. See the dated review/validation records for qualification.
 
 ### D06.2 — Providers and artwork
 
@@ -1268,46 +1301,35 @@ validation and the next prompt together without beginning D06, C01 or native C04
 ## Ready-to-send implementation prompt
 
 ```text
-Implement D06.1 only: durable metadata authority and deterministic resolution.
-Read AGENTS.md, docs/architecture.md, docs/implementation-status.md,
-docs/release-requirements.md, docs/decisions/pre-release-evolution.md,
-docs/wave-4-review.md, docs/handoff-backlog.md and D06.1 in docs/wave-4-plan.md.
-D07.3 and the bounded browser player are reviewed locally; preserve their work
-and unrelated changes. Do not commit or spawn agents.
+Implement D06.2 only: metadata providers and artwork. Read AGENTS.md,
+docs/architecture.md, docs/implementation-status.md, docs/release-requirements.md,
+docs/decisions/pre-release-evolution.md, docs/wave-4-review.md,
+docs/handoff-backlog.md and the complete D06.2 child in docs/wave-4-plan.md.
+D06.1 is reviewed and corrected locally. Preserve unrelated work; do not commit,
+spawn agents, begin D06.3 or add a separate provider/publication pipeline.
 
-Start by mapping existing MetadataAuthority, processing observation/snapshot,
-module-owned override and projection contracts. Extend their owners rather than
-creating a second metadata engine, provider registry, persistence path or generic
-string-key field model. Keep common title/subtitle authority typed, artist/platform
-fields owner-bound, raw observations lossless and unknown historical fields retained.
-Do not add compatibility wrappers or migrations solely for checkpoint stability;
-preserve actual archive data and recovery guarantees.
+Follow every D06.2 provider, rate-limit, response-size, SSRF, cancellation, caching,
+artwork and fixture requirement. Use the existing acquisition registry and host
+services. Keep network/image mechanisms in adapters and resolution policy in the
+application/module layers. Never represent MusicBrainz identity as audio verification.
 
-Use tests first for resolver policy: existing manual inventory titles survive
-refresh; field overrides outrank explicit candidate selection, which outranks
-automatic resolution. Complete identity evidence precedes identifier/layout strength,
-language preference, provider priority and deterministic provider-ID tie-breaking.
-Japanese strong identity must beat an English name-only match. Ambiguity stays
-visibly tentative. Retain alternatives and original-language text; candidate
-identity must survive provider reordering, disappearance and outages.
+Use tests first for provider normalization, failures and resource/redirect bounds.
+Candidate identity includes an immutable version: derive a deterministic digest
+version when upstream has no stable version. Changed raw or normalized content must
+not reuse an existing identity. Do not vary policy priority inside a frozen candidate.
+Use fresh observation IDs for new acquisitions; an existing ID cannot change body
+or item/collection. Publication transaction IDs are separate. Artwork must be
+published as an authorized active item asset before a candidate references it.
 
-Add focused revisioned authority update/clear commands and a materialized display
-projection through the existing application and archive mechanisms. Refresh appends
-observations and recomputes effective display; it never overwrites manual authority.
-Receipts bind submitted input before state-dependent resolution. Test stale revisions,
-replay, restart/reindex, raw JSON/unknown-field preservation and current authorization.
-Use the existing portable archive round-trip facilities; full export implementation
-is P05, not a hidden prerequisite for this child. Keep playable Capture/recipe/media
-identities and viewer-safe availability intact when metadata changes.
+Preserve manual authority, inventory corrections, selected historical candidates,
+original text, exact raw observations and unknown module fields. Use the existing
+revisioned refresh command; never update catalog rows or inventory titles directly.
+Unavailable providers/tools yield honest bounded failures without blocking basic
+preservation. Avoid new backend migrations solely for checkpoint compatibility.
 
-No new live provider adapters or scraping in D06.1: MusicBrainz/CAA/network controls
-belong to D06.2, the dedicated review UI to D06.3. Do not broaden into C01, native
-playback, offline caching or a persistent browser queue. Keep identity observations,
-integrity, catalog verification and conversion validation distinct in code and text.
-
-Run affected and required repository checks, using COLLECTOR_TEST_FLAC=1 when
-flac is installed. If contracts or UI change, regenerate contracts, rebuild embedded
-assets/server and run both isolated browser smoke modes, preserving actual playback
-and preparation acceptance. Update status, child ledger, validation and the next
-prompt together. Stop after D06.1 for review; report external qualification honestly.
+Run repository checks, using COLLECTOR_TEST_FLAC=1 where flac is installed. Use
+local deterministic provider fixtures; report live-provider/deployment checks as
+unrun unless actually exercised. Update status, this child ledger, validation and
+the next prompt together. Stop after D06.2 for review; no metadata review UI,
+native client, offline cache, or additional providers in this assignment.
 ```

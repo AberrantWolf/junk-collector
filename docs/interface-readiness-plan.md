@@ -4,7 +4,7 @@ User requirement, 2026-09-15. Planned, not implemented. Required alongside
 [P04.4–P04.6](import-management-plan.md) before declaring the web UI complete.
 Applies to every implemented web surface and to acceptance of future web, native
 and CLI interfaces. It does not require implementing all future clients now or
-change the current D06.1 handoff.
+change the current D06.2 handoff.
 
 ## Standard for every action
 

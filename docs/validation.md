@@ -2457,3 +2457,66 @@ and the scrolled close-button bounds. The playback reload assertion now waits
 for the actual player state rather than interpreting the new loading status as
 a completed availability response. The private-local variant was not rerun for
 these corrections. The initial sandboxed Chrome launch was unavailable.
+
+## D06.1 durable metadata authority validation — 2026-09-15
+
+Implemented locally and ready for review; no commit or sibling-repository change.
+The core/application/store path now provides bounded typed title/subtitle candidate
+observations, stable provider-record/version identity, explicit authority changes,
+evidence-first deterministic resolution and a materialized display. Existing
+inventory titles seed manual authority. A refresh appends lossless observations in
+the same schema-4 authority revision as the recomputed display without changing
+manual authority. Catalog projection schema 6 rebuilds candidate history by reading
+every authority revision while retaining the newest authority/display record.
+
+Permanent tests cover field-override/selection/automatic precedence, complete
+identity before language, deterministic provider priority and identity tie-breaking,
+Japanese strong identity over an English name match, tentative equal-rank results,
+selection through disappearance/outage, stale revision conflict, same-key replay,
+changed-input conflict, current authorization after revocation, restart/reindex,
+revision-commit interruption recovery, and lexical raw/unknown field preservation.
+Existing module tests continue to validate owner-bound typed game platform and
+music artist overrides.
+
+Passed after implementation:
+
+- `python3 scripts/check_architecture.py` and
+  `python3 scripts/check_wave4_fixtures.py` (8 manifests, 24 vector/composite
+  digests; semantic oracles remain separate).
+- `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings`.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 264 passed, with the
+  existing user-owned CD dump oracle as the sole ignored test. The long
+  AccurateRip workflow emitted its expected notice and passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, `cargo build -p collector-server --locked`, and
+  `git diff --check`.
+
+D06.1 adds no HTTP route, web asset, live provider, or configured network access,
+so browser smoke and live-provider checks are not applicable to this child. D06.2
+MusicBrainz/CAA and DAT-backed metadata/artwork adapters and D06.3 review UI remain
+unimplemented. Provider correctness/rate behavior, remote artwork, owned-disc,
+other-browser, Linux/NAS/deployment and scale qualification remain unrun or in
+their recorded later gates.
+
+## D06.1 review validation — 2026-09-15
+
+The metadata authority review corrected mutable candidate/observation identities,
+stale display after inventory edits, hidden ambiguity and missing publication
+checks; details are in `wave-4-review.md`.
+
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 266 passed, 1 ignored,
+  zero failures. Focused final metadata runs also passed: 3 application resolver
+  tests and 5 archive tests, including forged-display rejection and inventory CAS.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed.
+- `cargo fmt --all -- --check`, `git diff --check`,
+  `python3 scripts/check_architecture.py` and
+  `python3 scripts/check_wave4_fixtures.py`: passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api` and
+  `npm --prefix web run build`: passed. Rebuilt the embedded-assets binary with
+  `cargo build -p collector-server --locked`.
+
+No HTTP route or frontend changed; browser smoke was not rerun for this backend
+child. Live MusicBrainz/CAA, real Opus encoding, owned-disc and deployment checks
+remain unrun/external. D06.1 has no new user-facing metadata panel; D06.2 providers
+and D06.3 review UI remain separate unimplemented children. No commit was made.

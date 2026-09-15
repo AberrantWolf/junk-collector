@@ -1,7 +1,7 @@
 # Import history and cleanup — P04 completion follow-up
 
 User requirement, 2026-09-15. Planned, not implemented. Required before calling
-the web curation UI complete; it need not interrupt the current D06.1 handoff.
+the web curation UI complete; it need not interrupt the current D06.2 handoff.
 P04.1–P04.3 remain historically validated but do not satisfy this added gate.
 See the [backlog](handoff-backlog.md#p04--inbox-import-review-and-job-ui) and
 [music-first milestones](music-first-milestones.md).

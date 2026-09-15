@@ -6,12 +6,13 @@ use collector_app::{
     DisposeSpecimenCommand, FrozenAcquisitionJob, IdempotencyPort, ImportCandidate,
     ImportCatalogSnapshotCommand, ImportDeclaredFile, ImportIdentityDecision, ImportPhase,
     ImportPort, ImportRecord, ImportReviewDecision, ImportSourceKind, ImportSourceSummary,
-    ImportView, JobPort, JobSpec, MediaResource, MetadataAuthorityRecord,
+    ImportView, JobPort, JobSpec, MediaResource, MetadataAuthorityChange, MetadataAuthorityRecord,
     ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderPort, ProviderRequest,
     ProviderResponse, ProviderStreamResponse, ProvisionalImportPort, ReceiptDecision,
-    ReturnLoanCommand, ReturnedPossession, ReviewImportCommand, SaveItemCommand, SnapshotPort,
-    SnapshotQuery, SnapshotRecord, SpecimenDetails, StartLoanCommand, StartProcessingCommand,
-    StreamingProviderPort, UpdateAssetCommand,
+    RefreshMetadataCommand, ReturnLoanCommand, ReturnedPossession, ReviewImportCommand,
+    SaveItemCommand, SnapshotPort, SnapshotQuery, SnapshotRecord, SpecimenDetails,
+    StartLoanCommand, StartProcessingCommand, StreamingProviderPort, UpdateAssetCommand,
+    UpdateMetadataAuthorityCommand,
 };
 use collector_core::*;
 use collector_modules::*;
@@ -1605,7 +1606,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        5
+        6
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -7315,6 +7316,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let invalid_authority = MetadataAuthorityRecord {
+        inventory: None,
         collection_id: collection.id,
         item_id: saved.id,
         revision: Revision(1),
@@ -7333,6 +7335,8 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
             ],
             ..Default::default()
         },
+        observations: vec![],
+        display: None,
         updated_at: chrono::Utc::now(),
     };
     assert!(matches!(
@@ -7390,10 +7394,19 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
     assert_eq!(store.recipe(sealed.id).unwrap().digest, sealed.digest);
 
     let authority = MetadataAuthorityRecord {
+        inventory: None,
         collection_id: collection.id,
         item_id: saved.id,
         revision: Revision(1),
-        authority: MetadataAuthority::default(),
+        authority: MetadataAuthority {
+            retained_unknown_fields: std::collections::BTreeMap::from([(
+                "future-authority".into(),
+                RawJson::from_json(r#"{"ordered":[2,1],"number":1e+02}"#).unwrap(),
+            )]),
+            ..Default::default()
+        },
+        observations: vec![],
+        display: None,
         updated_at: chrono::Utc::now(),
     };
     store
@@ -7414,6 +7427,315 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
         ))
         .unwrap(),
         1
+    );
+    let encoded: String = db
+        .query_row("SELECT record FROM metadata_authorities", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let rebuilt: MetadataAuthorityRecord = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        rebuilt.authority.retained_unknown_fields["future-authority"].get(),
+        r#"{"ordered":[2,1],"number":1e+02}"#
+    );
+}
+
+#[test]
+fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_raw_history() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let japanese = MetadataCandidateObservation {
+        identity: MetadataCandidateIdentity {
+            provider: ModuleId("org.example.musicbrainz".into()),
+            provider_record_id: "release-ja".into(),
+            provider_record_version: Some("2026-09-15".into()),
+        },
+        title: MetadataText {
+            value: "強い候補".into(),
+            language: Some(LanguageTag::new("ja").unwrap()),
+        },
+        subtitle: None,
+        artwork: None,
+        complete_identity: true,
+        strength: MatchStrength::Identifier,
+        provider_priority: 20,
+        observation: RawJson::from_json(r#"{"unknown":null,"number":1e+02}"#).unwrap(),
+    };
+    let english = MetadataCandidateObservation {
+        identity: MetadataCandidateIdentity {
+            provider: ModuleId("org.example.names".into()),
+            provider_record_id: "name-en".into(),
+            provider_record_version: None,
+        },
+        title: MetadataText {
+            value: "English candidate".into(),
+            language: Some(LanguageTag::new("en").unwrap()),
+        },
+        subtitle: None,
+        artwork: None,
+        complete_identity: false,
+        strength: MatchStrength::Name,
+        provider_priority: 1,
+        observation: RawJson::from_json(r#"{"provider_extra":[2,1]}"#).unwrap(),
+    };
+    let refresh = RefreshMetadataCommand {
+        expected_revision: Revision(0),
+        observation: MetadataRefreshObservation {
+            id: ObservationId::new(),
+            outcome: MetadataRefreshOutcome::Candidates,
+            candidates: vec![english.clone(), japanese.clone()],
+            raw_observation: RawJson::from_json(
+                r#"{"response":{"unknown":null,"number":1e+02},"ordered":[2,1]}"#,
+            )
+            .unwrap(),
+            observed_at: chrono::Utc::now(),
+        },
+    };
+    let first = service
+        .refresh_metadata(&actor, saved.id, refresh, &command())
+        .unwrap();
+    assert_eq!(
+        first.display.as_ref().unwrap().title.value,
+        "風の歌",
+        "the existing inventory title becomes manual authority"
+    );
+
+    let mut altered = japanese.clone();
+    altered.title.value = "Silently replaced".into();
+    assert!(matches!(
+        service.refresh_metadata(
+            &actor,
+            saved.id,
+            RefreshMetadataCommand {
+                expected_revision: Revision(1),
+                observation: MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates: vec![altered],
+                    raw_observation: RawJson::from_json("{}").unwrap(),
+                    observed_at: chrono::Utc::now(),
+                }
+            },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+
+    let cleared = service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(1),
+                change: MetadataAuthorityChange::ClearFieldOverride {
+                    field: MetadataField::Title,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(cleared.display.as_ref().unwrap().title.value, "強い候補");
+
+    let selected = service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(2),
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: english.identity.clone(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        selected.display.as_ref().unwrap().title.value,
+        "English candidate"
+    );
+    assert!(matches!(
+        service.update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(2),
+                change: MetadataAuthorityChange::ClearSelectedCandidate,
+            },
+            &command(),
+        ),
+        Err(Error::Conflict)
+    ));
+
+    let outage_context = command();
+    let outage = RefreshMetadataCommand {
+        expected_revision: Revision(3),
+        observation: MetadataRefreshObservation {
+            id: ObservationId::new(),
+            outcome: MetadataRefreshOutcome::Unavailable,
+            candidates: vec![],
+            raw_observation: RawJson::from_json(r#"{"error":"offline","unknown":{"kept":true}}"#)
+                .unwrap(),
+            observed_at: chrono::Utc::now(),
+        },
+    };
+    let after_outage = service
+        .refresh_metadata(&actor, saved.id, outage.clone(), &outage_context)
+        .unwrap();
+    let replayed = service
+        .refresh_metadata(&actor, saved.id, outage, &outage_context)
+        .unwrap();
+    assert_eq!(replayed.revision, after_outage.revision);
+    assert_eq!(
+        replayed.display.as_ref().unwrap().title.value,
+        "English candidate",
+        "a selected historical candidate survives a provider outage"
+    );
+    let changed_replay = RefreshMetadataCommand {
+        expected_revision: Revision(3),
+        observation: MetadataRefreshObservation {
+            id: ObservationId::new(),
+            outcome: MetadataRefreshOutcome::Unavailable,
+            candidates: vec![],
+            raw_observation: RawJson::from_json(r#"{"error":"different"}"#).unwrap(),
+            observed_at: chrono::Utc::now(),
+        },
+    };
+    let changed_replay =
+        service.refresh_metadata(&actor, saved.id, changed_replay, &outage_context);
+    assert!(
+        matches!(changed_replay, Err(Error::IdempotencyConflict)),
+        "changed replay returned {changed_replay:?}"
+    );
+
+    let curator_user = store
+        .create_user("metadata-curator", "another long password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, curator_user, Role::Curator).unwrap();
+    let curator = Principal {
+        user_id: curator_user,
+        administrator: false,
+        device_id: None,
+    };
+    let curator_context = command();
+    let curator_update = UpdateMetadataAuthorityCommand {
+        expected_revision: Revision(4),
+        change: MetadataAuthorityChange::SetFieldOverride {
+            field: MetadataField::Subtitle,
+            value: "Curator note".into(),
+            language: Some(LanguageTag::new("en").unwrap()),
+        },
+    };
+    service
+        .update_metadata_authority(&curator, saved.id, curator_update.clone(), &curator_context)
+        .unwrap();
+    AccessPort::set_grant(&*store, collection.id, curator_user, Revision(1), None).unwrap();
+    assert!(matches!(
+        service.update_metadata_authority(&curator, saved.id, curator_update, &curator_context,),
+        Err(Error::Forbidden)
+    ));
+
+    AdministrationPort::reindex(&*store).unwrap();
+    let rebuilt = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(rebuilt.revision, Revision(5));
+    assert_eq!(rebuilt.candidates.len(), 2);
+    assert_eq!(rebuilt.display.title.value, "English candidate");
+    assert_eq!(
+        rebuilt
+            .candidates
+            .iter()
+            .find(|candidate| candidate.identity == japanese.identity)
+            .unwrap()
+            .observation
+            .get(),
+        r#"{"unknown":null,"number":1e+02}"#
+    );
+
+    let authority_files = files_named(&root.path().join("archive"), "record.v4.json");
+    assert!(authority_files.iter().any(|path| {
+        std::fs::read_to_string(path).is_ok_and(|body| {
+            body.contains(r#""number":1e+02"#) && body.contains(r#""ordered":[2,1]"#)
+        })
+    }));
+
+    let stranger = Principal {
+        user_id: store
+            .create_user("metadata-stranger", "another long password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.update_metadata_authority(
+            &stranger,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(5),
+                change: MetadataAuthorityChange::ClearSelectedCandidate,
+            },
+            &command(),
+        ),
+        Err(Error::Forbidden)
+    ));
+
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    drop(service);
+    drop(store);
+    let reopened = Arc::new(Store::open(archive, state).unwrap());
+    let reopened_service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    let rebuilt = reopened_service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(rebuilt.revision, Revision(5));
+    assert_eq!(rebuilt.display.title.value, "English candidate");
+}
+
+#[test]
+fn metadata_refresh_receipt_recovers_after_revision_commit_before_projection() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    drop(service);
+    drop(store);
+
+    let faulted = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::RevisionCommitted,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(faulted.clone(), Arc::new(Registry::builtins()));
+    let context = command();
+    let request = RefreshMetadataCommand {
+        expected_revision: Revision(0),
+        observation: MetadataRefreshObservation {
+            id: ObservationId::new(),
+            outcome: MetadataRefreshOutcome::NoMatch,
+            candidates: vec![],
+            raw_observation: RawJson::from_json(r#"{"outage":false,"extra":null}"#).unwrap(),
+            observed_at: chrono::Utc::now(),
+        },
+    };
+    assert!(matches!(
+        service.refresh_metadata(&actor, saved.id, request.clone(), &context),
+        Err(Error::Unavailable(_))
+    ));
+    drop(service);
+    drop(faulted);
+
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    let recovered = service
+        .refresh_metadata(&actor, saved.id, request, &context)
+        .unwrap();
+    assert_eq!(recovered.revision, Revision(1));
+    assert_eq!(recovered.observations.len(), 1);
+    assert_eq!(
+        service.metadata_view(&actor, saved.id).unwrap().revision,
+        Revision(1)
     );
 }
 
@@ -8107,10 +8429,13 @@ fn historical_domain_authority_rebuilds_without_rewriting_original_records() {
         .publish_metadata_authority(
             TransactionId::new(),
             MetadataAuthorityRecord {
+                inventory: None,
                 collection_id: collection.id,
                 item_id: saved.id,
                 revision: Revision(1),
                 authority: MetadataAuthority::default(),
+                observations: vec![],
+                display: None,
                 updated_at: chrono::Utc::now(),
             },
         )
@@ -9640,4 +9965,94 @@ fn derivative_recovery_and_reindex_reject_recipe_presentation_disagreement() {
             "{field}: {error}"
         );
     }
+}
+
+#[test]
+fn metadata_inventory_edits_and_observation_identity_are_preserved() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let observation = MetadataRefreshObservation {
+        id: ObservationId::new(),
+        outcome: MetadataRefreshOutcome::NoMatch,
+        candidates: vec![],
+        raw_observation: RawJson::from_json("{}").unwrap(),
+        observed_at: chrono::Utc::now(),
+    };
+    let first = service
+        .refresh_metadata(
+            &actor,
+            saved.id,
+            RefreshMetadataCommand {
+                expected_revision: Revision(0),
+                observation: observation.clone(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut forged = first.clone();
+    forged.revision = Revision(2);
+    forged.display.as_mut().unwrap().title.value = "Forged display".into();
+    assert!(matches!(
+        store.publish_metadata_authority(TransactionId::new(), forged),
+        Err(Error::Invalid(_))
+    ));
+    let mut changed = observation.clone();
+    changed.raw_observation = RawJson::from_json("{\"changed\":true}").unwrap();
+    assert!(matches!(
+        service.refresh_metadata(
+            &actor,
+            saved.id,
+            RefreshMetadataCommand {
+                expected_revision: Revision(1),
+                observation: changed
+            },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+    let mut edited = saved.clone();
+    edited.title = "Later manual correction".into();
+    edited.subtitle = "New subtitle".into();
+    save_inventory(&service, &actor, edited, saved.revision).unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, saved.id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "Later manual correction"
+    );
+    let mut stale = first;
+    stale.revision = Revision(2);
+    assert!(matches!(
+        store.publish_metadata_authority(TransactionId::new(), stale),
+        Err(Error::Conflict)
+    ));
+    let refreshed = service
+        .refresh_metadata(
+            &actor,
+            saved.id,
+            RefreshMetadataCommand {
+                expected_revision: Revision(1),
+                observation,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        refreshed.display.unwrap().title.value,
+        "Later manual correction"
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, saved.id)
+            .unwrap()
+            .display
+            .subtitle
+            .unwrap()
+            .value,
+        "New subtitle"
+    );
 }
