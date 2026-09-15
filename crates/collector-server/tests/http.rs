@@ -256,6 +256,7 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
                 );
             }
             let response = app
+                .clone()
                 .oneshot(
                     Request::builder()
                         .method("POST")
@@ -272,6 +273,35 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
             assert_eq!(
                 response.status(),
                 if admin {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::NOT_FOUND
+                }
+            );
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!(
+                            "/api/v1/items/{}/captures/{}/music-tracks/1/prepare",
+                            ItemId::new(),
+                            CaptureId::new()
+                        ))
+                        .header("x-forwarded-for", "127.0.0.1")
+                        .header("forwarded", "for=127.0.0.1")
+                        .header("origin", "https://collector.example")
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(
+                            "{{\"source_representation_id\":\"{}\",\"profile\":{{\"codec\":\"flac\"}}}}",
+                            RepresentationId::new()
+                        )))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if curation || admin {
                     StatusCode::UNAUTHORIZED
                 } else {
                     StatusCode::NOT_FOUND
@@ -1630,14 +1660,655 @@ fn range_boundaries() {
 }
 
 #[tokio::test]
+async fn music_derivative_http_availability_preparation_ranges_revocation_and_restart() {
+    if std::env::var_os("COLLECTOR_TEST_FLAC").is_none() {
+        return;
+    }
+    let (root, mut state) = state();
+    state.exposure.public_curation = true;
+    let store = state.store.clone();
+    let owner = store
+        .create_user("derivative-owner", "a long derivative owner password", true)
+        .unwrap();
+    let viewer = store
+        .create_user(
+            "derivative-viewer",
+            "a long derivative viewer password",
+            false,
+        )
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("HTTP derivatives"),
+            &command(),
+        )
+        .unwrap();
+    collector_app::AccessPort::set_grant(
+        store.as_ref(),
+        collection.id,
+        viewer,
+        Revision(0),
+        Some(Role::Viewer),
+    )
+    .unwrap();
+    let item = Item {
+        id: ItemId::new(),
+        collection_id: collection.id,
+        revision: Revision(0),
+        title: "HTTP derivative disc".into(),
+        subtitle: "Range fixture".into(),
+        identity_link: ItemIdentityLink::None,
+        domain: ModuleData {
+            module: ModuleId("org.junk.music".into()),
+            schema_version: 1,
+            payload: RawJson::from_value(serde_json::json!({
+                "tracks":[{"position":1,"title":"","start":0,"length":2352}]
+            })),
+        },
+        identity: IdentityState::Unidentified,
+        translations: vec![],
+        identifiers: vec![],
+        specimens: vec![],
+        wishlist: false,
+        captures: vec![],
+        assets: vec![],
+        metadata: MetadataState::default(),
+        deleted: false,
+        updated_at: chrono::Utc::now(),
+    };
+    let item = state
+        .service
+        .save_item(&actor, item.id, item.into(), Revision(0), &command())
+        .unwrap();
+    let other_collection = state
+        .service
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Other HTTP collection"),
+            &command(),
+        )
+        .unwrap();
+    let other_item_id = ItemId::new();
+    state
+        .service
+        .save_item(
+            &actor,
+            other_item_id,
+            Item {
+                id: other_item_id,
+                collection_id: other_collection.id,
+                revision: Revision(0),
+                title: "Other collection item".into(),
+                subtitle: String::new(),
+                identity_link: ItemIdentityLink::None,
+                domain: ModuleData {
+                    module: ModuleId("org.junk.music".into()),
+                    schema_version: 1,
+                    payload: RawJson::from_value(serde_json::json!({})),
+                },
+                identity: IdentityState::Unidentified,
+                translations: vec![],
+                identifiers: vec![],
+                specimens: vec![],
+                wishlist: false,
+                captures: vec![],
+                assets: vec![],
+                metadata: MetadataState::default(),
+                deleted: false,
+                updated_at: chrono::Utc::now(),
+            }
+            .into(),
+            Revision(0),
+            &command(),
+        )
+        .unwrap();
+    let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+    let pcm = (0..4 * 588)
+        .flat_map(|frame| {
+            let left = (frame as i16).wrapping_mul(17).to_le_bytes();
+            let right = (frame as i16).wrapping_mul(-13).to_le_bytes();
+            [left[0], left[1], right[0], right[1]]
+        })
+        .collect::<Vec<_>>();
+    let created = state
+        .service
+        .create_provisional_import(
+            &actor,
+            collector_app::CreateImportCommand {
+                collection_id: collection.id,
+                source: collector_app::ImportSourceSummary {
+                    kind: collector_app::ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "http-derivative".into(),
+                },
+                files: vec![
+                    collector_app::UploadFile {
+                        name: "disc.cue".into(),
+                        bytes: ByteLength(cue.len() as u64),
+                        sha256: None,
+                    },
+                    collector_app::UploadFile {
+                        name: "disc.bin".into(),
+                        bytes: ByteLength(pcm.len() as u64),
+                        sha256: None,
+                    },
+                ],
+                association: CaptureAssociation {
+                    item_id: Some(item.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(item.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .stage_provisional_import_chunk(&actor, created.id, 0, 0, cue)
+        .unwrap();
+    state
+        .service
+        .stage_provisional_import_chunk(&actor, created.id, 1, 0, &pcm)
+        .unwrap();
+    state
+        .service
+        .enqueue_import_analysis(
+            &actor,
+            created.id,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .run_next_job("http-derivative-analysis")
+        .unwrap();
+    let analyzed = state
+        .service
+        .provisional_import(&actor, created.id)
+        .unwrap();
+    let reviewed = state
+        .service
+        .review_provisional_import(
+            &actor,
+            created.id,
+            collector_app::ReviewImportCommand {
+                expected_revision: analyzed.revision,
+                identity: collector_app::ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation {
+                    item_id: Some(item.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(item.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    state
+        .service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    state
+        .service
+        .run_next_job("http-derivative-publication")
+        .unwrap();
+    let published = state
+        .service
+        .provisional_import(&actor, created.id)
+        .unwrap();
+    let tool = collector_providers::ConfiguredEncoder::probe(
+        collector_providers::EncoderKind::Flac,
+        "flac",
+    )
+    .expect("COLLECTOR_TEST_FLAC requires flac");
+    state.service = state.service.clone().with_audio_converter(Arc::new(
+        collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap(),
+    ));
+    let service = state.service.clone();
+    let (owner_token, _) = store.issue_session(owner, "owner browser").unwrap();
+    let (viewer_token, _) = store.issue_session(viewer, "viewer browser").unwrap();
+    let mut without_encoder = state.clone();
+    without_encoder.service = without_encoder
+        .service
+        .clone()
+        .with_audio_converter(Arc::new(
+            collector_providers::ProcessAudioConverter::default(),
+        ));
+    let without_encoder = router(without_encoder);
+    let app = router(state);
+    let availability_path = format!("/api/v1/items/{}/music-tracks", item.id);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&availability_path)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let availability: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(availability.as_array().unwrap().len(), 4);
+    assert_eq!(availability[0]["title"], "Track 01");
+    assert_eq!(availability[0]["start_frame"], 0);
+    assert_eq!(availability[0]["frame_count"], 2352);
+    assert_eq!(availability[0]["state"]["status"], "unavailable");
+    assert_eq!(
+        availability[0]["can_prepare"], false,
+        "viewer cannot prepare"
+    );
+    let owner_rows = service.music_track_availability(&actor, item.id).unwrap();
+    assert!(owner_rows[0].can_prepare);
+    assert!(!owner_rows[1].can_prepare, "missing Opus tool");
+    assert!(
+        availability[1]["state"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Opus encoder is not configured")
+    );
+    assert!(availability[0].get("selection").is_none());
+    assert!(availability[0].get("job_id").is_none());
+
+    let prepare_path = format!(
+        "/api/v1/items/{}/captures/{}/music-tracks/1/prepare",
+        item.id, published.capture_id
+    );
+    let prepare_body = serde_json::json!({
+        "source_representation_id": published.representation_id,
+        "profile":{"codec":"flac"}
+    })
+    .to_string();
+    let missing_opus = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&prepare_path)
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("idempotency-key", "missing-http-opus")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "source_representation_id": published.representation_id,
+                        "profile":{"codec":"opus","bitrate_kbps":96}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing_opus.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let cross_collection_prepare = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/items/{other_item_id}/captures/{}/music-tracks/1/prepare",
+                    published.capture_id
+                ))
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("idempotency-key", "cross-collection-prepare")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "source_representation_id": published.representation_id,
+                        "profile":{"codec":"flac"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cross_collection_prepare.status(), StatusCode::NOT_FOUND);
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&prepare_path)
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .header("idempotency-key", "viewer-cannot-prepare")
+                .header("content-type", "application/json")
+                .body(Body::from(prepare_body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let accepted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&prepare_path)
+                .header("origin", "https://collector.example")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("idempotency-key", "prepare-http-flac")
+                .header("content-type", "application/json")
+                .body(Body::from(prepare_body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    let accepted_bytes = axum::body::to_bytes(accepted.into_body(), 4096)
+        .await
+        .unwrap();
+    // A lost response can be retried after tools are removed/reconfigured. The
+    // receipt must bind HTTP input, not the newly resolved tool report.
+    for (body, status) in [
+        (prepare_body.clone(), StatusCode::ACCEPTED),
+        (
+            serde_json::json!({"source_representation_id": published.representation_id,
+            "profile": {"codec":"opus", "bitrate_kbps":96}})
+            .to_string(),
+            StatusCode::CONFLICT,
+        ),
+    ] {
+        let replay = without_encoder
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&prepare_path)
+                    .header("origin", "https://collector.example")
+                    .header("authorization", format!("Bearer {owner_token}"))
+                    .header("idempotency-key", "prepare-http-flac")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.status(), status);
+        if status == StatusCode::ACCEPTED {
+            assert_eq!(
+                axum::body::to_bytes(replay.into_body(), 4096)
+                    .await
+                    .unwrap(),
+                accepted_bytes
+            );
+        }
+    }
+    drop(without_encoder);
+    let preparing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&availability_path)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let preparing: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(preparing.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(preparing[0]["state"]["status"], "preparing");
+    service.run_next_job("http-real-flac").unwrap();
+    let available = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&availability_path)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let available: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(available.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(available[0]["state"]["status"], "available");
+    assert_eq!(available[0]["state"]["media_type"], "audio/flac");
+    let representation = available[0]["state"]["representation_id"].as_str().unwrap();
+    let length = available[0]["state"]["length"].as_u64().unwrap();
+    let digest = available[0]["state"]["digest"]["hex"].as_str().unwrap();
+    let media_path = format!(
+        "/api/v1/items/{}/representations/{representation}/0",
+        item.id
+    );
+    let full = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(full.status(), StatusCode::OK);
+    assert_eq!(full.headers()["content-length"], length.to_string());
+    assert_eq!(full.headers()["etag"], format!("\"{digest}\""));
+    let full_bytes = axum::body::to_bytes(full.into_body(), length as usize)
+        .await
+        .unwrap();
+    assert_eq!(&full_bytes[..4], b"fLaC");
+    assert_eq!(Digest::sha256(&full_bytes).hex, digest);
+    let original_path = format!(
+        "/api/v1/items/{}/representations/{}/1",
+        item.id, published.representation_id
+    );
+    let original = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&original_path)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .header("range", "bytes=4-11")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(original.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(original.headers()["content-length"], "8");
+    assert_eq!(
+        original.headers()["etag"],
+        format!("\"{}\"", Digest::sha256(&pcm).hex)
+    );
+    assert_eq!(
+        axum::body::to_bytes(original.into_body(), 8)
+            .await
+            .unwrap()
+            .as_ref(),
+        &pcm[4..12]
+    );
+    let cross_collection = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/items/{other_item_id}/representations/{representation}/0"
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cross_collection.status(), StatusCode::NOT_FOUND);
+    for (range, if_range, expected_status, expected_length) in [
+        ("bytes=0-3", None, StatusCode::PARTIAL_CONTENT, 4),
+        ("bytes=-4", None, StatusCode::PARTIAL_CONTENT, 4),
+        ("bytes=4-", None, StatusCode::PARTIAL_CONTENT, length - 4),
+        (
+            "bytes=0-3",
+            Some(format!("\"{digest}\"")),
+            StatusCode::PARTIAL_CONTENT,
+            4,
+        ),
+        (
+            "bytes=0-3",
+            Some("\"stale\"".into()),
+            StatusCode::OK,
+            length,
+        ),
+        (
+            "bytes=0-3",
+            Some(format!("W/\"{digest}\"")),
+            StatusCode::OK,
+            length,
+        ),
+    ] {
+        let mut request = Request::builder()
+            .uri(&media_path)
+            .header("authorization", format!("Bearer {viewer_token}"))
+            .header("range", range);
+        if let Some(if_range) = if_range {
+            request = request.header("if-range", if_range);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected_status, "{range}");
+        assert_eq!(
+            response.headers()["content-length"],
+            expected_length.to_string(),
+            "{range}"
+        );
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), length as usize)
+                .await
+                .unwrap()
+                .len() as u64,
+            expected_length,
+            "{range}"
+        );
+    }
+    let unsatisfiable = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .header("range", format!("bytes={length}-"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unsatisfiable.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(
+        unsatisfiable.headers()["content-range"],
+        format!("bytes */{length}")
+    );
+
+    collector_app::AccessPort::set_grant(store.as_ref(), collection.id, viewer, Revision(1), None)
+        .unwrap();
+    let revoked = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), StatusCode::FORBIDDEN);
+
+    drop(app);
+    drop(service);
+    drop(store);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let mut registry = collector_modules::Registry::default();
+    registry.register(Box::new(AbsentFixtureModule)).unwrap();
+    let restarted = AppState::new_with_registry(
+        reopened.clone(),
+        Pairing {
+            server_id: reopened.server_id().unwrap(),
+            certificate_pem: String::new(),
+            certificate_sha256: String::new(),
+            endpoints: vec![],
+        },
+        Arc::new(registry),
+    );
+    let restarted = router(restarted);
+    let retained = restarted
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&availability_path)
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retained.status(), StatusCode::OK);
+    let retained: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(retained.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(retained[0]["state"]["status"], "available");
+    assert!(
+        retained
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["can_prepare"] == false)
+    );
+    let retained_media = restarted
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retained_media.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 79);
+    assert_eq!(paths.len(), 81);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
         "/api/v1/items/{id}/specimens/{specimen_id}/components",
+        "/api/v1/items/{id}/music-tracks",
+        "/api/v1/items/{item}/captures/{capture}/music-tracks/{track}/prepare",
         "/api/v1/items/{id}/specimens/{specimen_id}/components/{component_id}",
         "/api/v1/items/{id}/specimens/{specimen_id}/loans",
         "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return",

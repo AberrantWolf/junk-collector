@@ -9,7 +9,7 @@ type Association=components['schemas']['CaptureAssociation'];
 type Props={item:Item;busy:boolean;setBusy:(value:boolean)=>void;onPublished:(item:Item)=>void;onError:(error:unknown)=>void};
 
 const terminal=new Set<JobView['state']>(['completed','failed','cancelled']);
-const phaseLabel:Record<ImportView['phase'],string>={staging:'Staging package',analyzing:'Ready for review',awaiting_review:'Review recorded',publishing:'Publishing capture',published:'Capture published',cancelled:'Import cancelled'};
+const phaseLabel:Record<ImportView['phase'],string>={staging:'Uploading files',analyzing:'Upload complete · analysis needed',awaiting_review:'Analysis complete · review needed',publishing:'Publishing capture',published:'Capture published',cancelled:'Import cancelled'};
 
 function fileName(file:File){return file.webkitRelativePath||file.name;}
 function packageName(files:File[]){const first=files[0]&&fileName(files[0]);return first?.includes('/')?first.split('/')[0]:'Browser package';}
@@ -111,7 +111,7 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
   if(!record)return;setBusy(true);setJob(undefined);
   try{
    const accepted=await api<{job_id:string}>(`/imports/${record.id}/analysis`,{method:'POST',body:JSON.stringify({module:item.domain.module})});
-   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));onPublished(await api<Item>(`/items/${item.id}`));
+   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));
   }catch(error){onError(error);}finally{setBusy(false);}
  }
  function association():Association{
@@ -138,7 +138,7 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
  }
 
  const canStage=source==='browser'?files.length>0:!!label&&!!inboxPackage;
- return <section className="import-workspace" aria-labelledby="import-heading">
+ return <section data-unsaved={(!record&&files.length>0)||editingReview||(record?.phase==='awaiting_review'&&!record.review&&(identity!=='unidentified'||!attach||!!specimen||!!component||!!carrier))} className="import-workspace" aria-labelledby="import-heading">
   <div className="section-heading"><div><h3 id="import-heading">Capture accession</h3><p className="muted">Stage original package bytes, inspect the record, then choose what—if anything—they belong to.</p></div>{record&&<button disabled={busy} onClick={reset}>Stage another package</button>}</div>
   {!record&&<form aria-label="Stage package" onSubmit={event=>{event.preventDefault();void stage();}}>
    <fieldset className="source-choice"><legend>Package source</legend><label><input type="radio" name="import-source" checked={source==='browser'} onChange={()=>setSource('browser')}/> This browser</label><label><input type="radio" name="import-source" checked={source==='inbox'} onChange={()=>setSource('inbox')}/> Configured inbox</label></fieldset>
@@ -147,7 +147,10 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
    <button className="primary" disabled={busy||!canStage}>Stage package</button>
   </form>}
   {record&&<div className="import-docket">
-   <header><div><span className="docket-phase">{phaseLabel[record.phase]}</span><strong className="docket-title">{record.source.package_name}</strong></div><span>{percent(done,total)}%</span></header>
+   <header><div><span className="docket-phase">{record.phase==='awaiting_review'&&record.review?'Review saved · publication needed':phaseLabel[record.phase]}</span><strong className="docket-title">{record.source.package_name}</strong></div><span>Upload {percent(done,total)}%</span></header>
+   {record.phase==='analyzing'&&<p className="notice">Your files are uploaded, but are not attached to the album yet. Choose Review import to analyze the package.</p>}
+   {record.phase==='awaiting_review'&&!record.review&&<p className="notice">Analysis is complete. Confirm the album attachment and save your review below, then choose Publish capture. Tracks become available for preparation after publication.</p>}
+   {record.phase==='awaiting_review'&&record.review&&<p className="notice">Your review is saved. Choose Publish capture to preserve this package and attach it to the selected album.</p>}
    <progress max={Math.max(total,1)} value={total?done:1} aria-label="Package staging progress"/><p className="muted" role="status" aria-live="polite">{checkingFiles?'Checking selected files against retained bytes':job?`${job.phase}: ${percent(job.completed_units,job.total_units)}%`:`${done.toLocaleString()} of ${total.toLocaleString()} bytes staged`}</p>
    <h4>Package inventory</h4><div className="package-files" role="list">{record.files.map(file=><div role="listitem" key={file.name}><span>{file.name}</span><small>{file.received_bytes.toLocaleString()} / {file.bytes.toLocaleString()} bytes · {file.digest?'SHA-256 recorded':'digest pending'}</small></div>)}</div>
    {record.limitations.length>0&&<div className="import-limitations"><h4>Analysis limitations</h4><ul>{record.limitations.map(value=><li key={value}>{value}</li>)}</ul></div>}
@@ -162,7 +165,7 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
     <fieldset><legend>Identity</legend><label><input type="radio" name="identity" value="unidentified" checked={identity==='unidentified'} onChange={event=>setIdentity(event.target.value)}/> Keep unidentified</label>{candidates.map(candidate=><label key={candidate.key}><input type="radio" name="identity" value={candidate.key} checked={identity===candidate.key} onChange={event=>setIdentity(event.target.value)}/> {candidate.label}</label>)}</fieldset>
     <fieldset><legend>Physical association</legend><label><input type="radio" name="attachment" checked={attach} onChange={()=>setAttach(true)}/> Attach to {item.title}</label><label><input type="radio" name="attachment" checked={!attach} onChange={()=>setAttach(false)}/> Leave capture unattached</label></fieldset>
     {attach&&item.specimens.length>0&&<div className="form-grid"><label>Physical copy<select value={specimen} onChange={event=>{setSpecimen(event.target.value);setComponent('');setCarrier('');}}><option value="">Item only</option>{item.specimens.map(value=><option key={value.id} value={value.id}>{value.label}</option>)}</select></label>{selectedSpecimen&&<label>Part<select value={component} onChange={event=>{setComponent(event.target.value);setCarrier('');}}><option value="">Copy only</option>{selectedSpecimen.components.map(value=><option key={value.id} value={value.id}>{value.position}. {value.label}</option>)}</select></label>}{selectedComponent?.carrier&&<label>Carrier<select value={carrier} onChange={event=>setCarrier(event.target.value)}><option value="">Part only</option><option value={selectedComponent.carrier.id}>{selectedComponent.carrier.label}</option></select></label>}</div>}
-    <button className="primary" disabled={busy}>Review import</button>
+    <button className="primary" disabled={busy}>Save review</button>
    </form>}
    {record.phase==='awaiting_review'&&record.review&&!conflict&&!editingReview&&<div className="review-decision"><p><strong>Review saved.</strong> {record.review.identity.identity==='unidentified'?'No catalog identity was asserted.':'A candidate was selected for this capture.'}</p><button disabled={busy} onClick={()=>void editReview()}>Edit review</button><button className="primary" disabled={busy} onClick={()=>void publish()}>Publish capture</button></div>}
    {record.phase==='published'&&<p className="notice" role="status">Capture published. The original package and integrity evidence are now in the archive.</p>}

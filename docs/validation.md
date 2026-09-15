@@ -2256,3 +2256,204 @@ separately in Junk Libs as `d6d7d18` (Extract shared FLAC PCM and Ogg Opus
 derivative validation). Collector includes the reviewed recipes, optional encoder
 adapter, recoverable publication and D07.3 handoff. Earlier no-commit notes above
 record the state at review time.
+
+## D07.3 local implementation — 2026-09-15
+
+D07.3 is implemented locally and stopped for D07 root review. No commit or agent
+delegation was used. The application contract exposes ordered, viewer-safe
+track/profile state and immutable published media facts; private Job information,
+raw Evidence and archive locators remain internal. Server-owned optional encoder
+configuration supplies probed complete version reports to the reviewed frozen Job
+path. Preparation stays explicit and curation-only, one output per track. Missing
+tools do not affect preservation or original/published reads, and import/media GET
+never initiates conversion.
+
+Passed before the final full-gate rerun:
+
+- `COLLECTOR_TEST_FLAC=1 cargo test -p collector-server --test http -- --nocapture`
+  — 26 HTTP tests. The D07.3 case uses real `flac 1.5.0`, completes a frozen
+  preparation Job, independently validates output against source PCM, reloads the
+  published row after restart without the music module/tool, and covers viewer,
+  curator, cross-collection, exposure, missing-tool and revoked-grant behavior.
+- The same HTTP case checks strong digest ETags and exact full, partial, suffix,
+  open-ended, unsatisfiable, stale If-Range and weak If-Range results for original
+  and derivative bytes, including actual response lengths.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, and `cargo build -p collector-server --locked`.
+- OpenAPI was regenerated and reports 81 paths; TypeScript contracts and embedded
+  curation assets were rebuilt.
+
+Both `npm --prefix web run test:smoke` attempts, including the retry against a
+rebuilt embedded-assets server, stopped before application navigation:
+Google Chrome aborted during Playwright launch (`SIGABRT`; cleanup then reported
+`kill EPERM`). The retry did start the test server and confirm its FLAC 1.5.0
+probe, but Google Chrome 153.0.8010.37 never opened a page. The actual web
+preparation workflow is therefore unqualified in this environment rather than
+reported as passed.
+
+Real `opusenc`, owned-disc/mastering/redumper, Linux/NAS/deployment and scale
+qualification remain unrun. D07.3 does not claim actual browser playback, seeking,
+gapless behavior or track transitions; those belong to the next bounded browser
+player child even when its media URL can be downloaded successfully.
+
+Final repository gates passed:
+
+- `python3 scripts/check_architecture.py` and
+  `python3 scripts/check_wave4_fixtures.py` (8 manifests, 24 vector/composite
+  digests; semantic oracles remain separate).
+- `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`; all executable tests
+  passed. The existing private owned-disc oracle was the sole ignored test. The
+  existing AccurateRip workflow exceeded the harness's 60-second notice and then
+  passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api`, and
+  `npm --prefix web run build`, followed by
+  `cargo build -p collector-server --locked`.
+- `git diff --check` after documentation and generated-asset updates.
+
+## D07.3 review validation — 2026-09-15
+
+Reviewed and corrected locally; no commit or sibling edit. The HTTP regression
+now replays an accepted preparation request with the encoder removed, returning
+the original Job, and rejects a changed profile under the same command key. It
+checks typed preparation permissions for viewers, curators, missing tools and
+retained output without its module. Existing real-FLAC, restart, range and access
+checks remain enabled.
+
+Passed:
+
+- `COLLECTOR_TEST_FLAC=1 cargo test -p collector-server --test http music_derivative_http --locked`.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 260 passed, one ignored
+  external owned-disc oracle; no failures.
+- `python3 scripts/check_architecture.py`, `python3 scripts/check_wave4_fixtures.py`,
+  `cargo fmt --all -- --check`, and `git diff --check`.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, and `cargo build -p collector-server --locked`.
+- Both `npm --prefix web run test:smoke` and
+  `LOCAL_SETUP=1 npm --prefix web run test:smoke` passed with isolated temporary
+  server/profile data in Google Chrome 153.0.8010.37. Chrome was launched outside
+  the filesystem sandbox; this resolves the earlier sandbox launch limitation.
+  Both runs exercised actual FLAC preparation and download, ranged reads, styles
+  present in served CSS, artwork retention, and visible failure feedback. The UI
+  failure test injects a 503 response; subsequent preparation uses real FLAC.
+
+The generated contracts include `can_prepare`; clients no longer parse reason
+text as a capability. The new polling effects abort obsolete reads and clear
+obsolete timers; reopened availability follows already-preparing jobs. The server
+binary was rebuilt after web assets and the final CLI guidance update.
+
+This qualifies preparation/download behavior only. Actual media-element playback,
+seeking and track transitions remain the next browser-player child's acceptance.
+Real opusenc, owned-disc, Linux/NAS/deployment and scale tests remain unrun.
+
+## Bounded browser-player child implementation — 2026-09-15
+
+Implemented locally and stopped for review; no commit, agent delegation, backend
+player, queue protocol, route or storage change was added by this child. The client
+bundle mounts a small HTML media-element player beside the existing Item artwork
+and text. It consumes D07.3's ordered availability rows and same-origin media URLs
+directly, groups queues by Capture and source Representation, and selects one
+decodable representation per track with FLAC preferred. Profile variants remain
+download/preparation choices rather than duplicate queue tracks. The curation
+bundle retains explicit durable preparation and typed `can_prepare` behavior.
+
+Actual browser qualification passed on macOS 26.6.2 in Google Chrome
+153.0.8010.37. `HTMLMediaElement.canPlayType("audio/flac")` returned `probably`,
+and Chrome actually decoded the generated files: the element reached a playing
+state and its media time advanced. The two-track fixture uses real `flac 1.5.0`
+outputs prepared as two separate durable curator Jobs. A separate Viewer account
+then exercised stable pause, resumed time progression, an approximate 1.5-second
+seek, next/previous changes to the expected immutable Representation IDs, and a
+natural `ended` event after seeking near the real track end that began track 2.
+Reload reconstructed a stopped Track 01 queue, closing details removed the media
+element, and current grant removal cleared playback state and showed an explicit
+access error. This is browser media-element qualification, not physical audio-
+device output, gapless playback or sample-accurate seeking.
+
+Both real browser modes passed outside the filesystem sandbox:
+
+- `npm --prefix web run test:smoke` — generated and prepared two real FLAC tracks,
+  retained the D05 structure/AccurateRip and D07.3 curation workflow, then exercised
+  viewer playback, mobile layout, refresh, close cleanup and revocation. The viewer
+  did not load `curation.js` and had no preparation action.
+- `LOCAL_SETUP=1 npm --prefix web run test:smoke` — repeated the same playback
+  assertions from the public client-only origin with curation and administration
+  exposure disabled, after signing in through the private setup origin.
+
+Repository gates passed after the implementation:
+
+- `python3 scripts/check_architecture.py` and
+  `python3 scripts/check_wave4_fixtures.py` (8 manifests, 24 vector/composite
+  digests; semantic oracles remain separate).
+- `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked` — 260 passed, with the
+  existing user-owned disc oracle as the sole ignored test. The AccurateRip
+  workflow emitted its expected over-60-second notice and passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, `cargo build -p collector-server --locked`, and
+  `git diff --check`. The final server rebuild embeds the player stylesheet and
+  client bundle.
+
+Chrome's positive FLAC result does not qualify other browsers. `opusenc` is not
+installed, so real Opus encoding/playback remains unrun. Owned-disc, physical
+audio output, gapless/sample-accurate playback, Linux/NAS/deployment, live-provider
+and scale qualification remain unrun. D06, C01 and native C04 were not started.
+
+## Bounded browser-player review validation — 2026-09-15
+
+Reviewed and corrected locally; no commit or sibling changes. Passed:
+
+- `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, followed by `cargo build -p collector-server --locked`.
+- `python3 scripts/check_architecture.py`, `python3 scripts/check_wave4_fixtures.py`,
+  `cargo fmt --all -- --check`, and `git diff --check`.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 260 passed, one ignored
+  external owned-disc oracle; the existing long AccurateRip workflow passed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- `npm --prefix web run test:smoke` and
+  `LOCAL_SETUP=1 npm --prefix web run test:smoke`, outside the filesystem sandbox
+  with isolated temporary servers and Chrome profiles.
+
+Google Chrome 153.0.8010.37 reported `audio/flac=probably` and actually decoded
+real FLAC files with advancing media time. Both browser modes passed viewer
+play/pause/resume, approximate seek, immutable next/previous selection, natural
+ended advance, clean reload and client-only playback without curation.js. New
+regressions passed delayed obsolete play-promise rejection, closing during playback
+with a retained detached-element paused/source assertion, session-cookie loss
+while active, reauthentication and grant revocation. Existing preparation, error,
+range, artwork and mobile checks remain intact.
+
+The local-setup run additionally exercised the final added unsupported-codec
+simulation (disabled Play and usable FLAC downloads), then restored the browser's
+real codec support. It also played retained FLAC after changing the archived owner
+to an unavailable module. These browser-controller simulations do not substitute
+for the separately observed real decoding/playback checks.
+
+Physical audio-device output, other browsers, real Opus, gapless/sample-accurate
+playback, owned-disc, Linux/NAS/deployment and scale qualification remain unrun.
+
+## 2026-09-15 — Album import and dialog usability corrections
+
+Corrected misleading import phase labels and removed the publication callback
+from analysis completion. Review submission now says Save review. Music preparation
+appears near the editor top; empty/loading states explain the next action. Track
+availability refreshes on Capture revisions independently of the Item revision.
+Dialogs guard drafts on close/Escape, contain and restore focus, and keep close
+controls visible when scrolling. Administration documents the current TOML-only
+FLAC/Ogg Opus configuration; automatic metadata lookup and browser-based encoder
+settings writes remain unimplemented.
+
+Passed: architecture checker, Rust formatting, workspace tests (one ignored
+external oracle), workspace/all-target Clippy with warnings denied, TypeScript
+check, web build, rebuilt embedded Rust server, and git diff whitespace check.
+The normal Chrome smoke suite passed outside the sandbox using its temporary
+server/profile, including real FLAC playback, immediate post-publication track
+refresh, rejecting and accepting draft discard, top-dialog-only Escape dismissal,
+and the scrolled close-button bounds. The playback reload assertion now waits
+for the actual player state rather than interpreting the new loading status as
+a completed availability response. The private-local variant was not rerun for
+these corrections. The initial sandboxed Chrome launch was unavailable.

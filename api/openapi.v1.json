@@ -2472,6 +2472,42 @@
         }
       }
     },
+    "/api/v1/items/{id}/music-tracks": {
+      "get": {
+        "operationId": "music_track_availability",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MusicTrackAvailability"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/representations/{representation}/{index}": {
       "get": {
         "operationId": "media",
@@ -3094,6 +3130,83 @@
             }
           },
           "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item}/captures/{capture}/music-tracks/{track}/prepare": {
+      "post": {
+        "operationId": "prepare_music_track",
+        "parameters": [
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "capture",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          {
+            "name": "track",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareMusicTrack"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         }
@@ -6016,6 +6129,129 @@
           }
         }
       },
+      "MusicTrackAvailability": {
+        "type": "object",
+        "required": [
+          "capture_id",
+          "source_representation_id",
+          "track_position",
+          "start_frame",
+          "frame_count",
+          "title",
+          "profile",
+          "state",
+          "can_prepare"
+        ],
+        "properties": {
+          "can_prepare": {
+            "type": "boolean",
+            "description": "Current actor, module, source and encoder permit explicit preparation."
+          },
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "frame_count": {
+            "$ref": "#/components/schemas/PcmFrame",
+            "description": "Exact track-local integer stereo PCM frame count."
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
+          "source_representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "start_frame": {
+            "$ref": "#/components/schemas/PcmFrame",
+            "description": "Exact coordinate in the source's integer stereo PCM timeline."
+          },
+          "state": {
+            "$ref": "#/components/schemas/MusicTrackAvailabilityState"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MusicTrackAvailabilityState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "preparing"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "status"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "representation_id",
+              "file_id",
+              "file_index",
+              "length",
+              "media_type",
+              "digest",
+              "status"
+            ],
+            "properties": {
+              "digest": {
+                "$ref": "#/components/schemas/Digest"
+              },
+              "file_id": {
+                "$ref": "#/components/schemas/PackageFileId"
+              },
+              "file_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "length": {
+                "$ref": "#/components/schemas/ByteLength"
+              },
+              "media_type": {
+                "type": "string"
+              },
+              "representation_id": {
+                "$ref": "#/components/schemas/RepresentationId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "NativeCredentialId": {
         "type": "string",
         "format": "uuid"
@@ -6267,6 +6503,10 @@
             }
           }
         ]
+      },
+      "PackageFileId": {
+        "type": "string",
+        "format": "uuid"
       },
       "PackageScope": {
         "oneOf": [
@@ -6721,6 +6961,11 @@
           }
         }
       },
+      "PcmFrame": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
+      },
       "Possession": {
         "type": "string",
         "enum": [
@@ -6729,6 +6974,22 @@
           "elsewhere",
           "unknown"
         ]
+      },
+      "PrepareMusicTrack": {
+        "type": "object",
+        "required": [
+          "source_representation_id",
+          "profile"
+        ],
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
+          "source_representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          }
+        },
+        "additionalProperties": false
       },
       "PresentationBadge": {
         "type": "object",

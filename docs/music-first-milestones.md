@@ -2,7 +2,7 @@
 
 Planning assessment, 2026-09-14. This is a proposed scheduling change, not evidence
 of implemented playback or authorization to skip acceptance gates. D05.3 was reviewed on 2026-09-15. D07 now precedes D06 in the active Wave 4
-ledger; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally. The later native-client acceleration remains proposed;
+ledger; D07.1 and D07.2 are reviewed and corrected locally, D07.3 is reviewed and corrected locally, and its bounded browser-player child is reviewed and corrected locally. The later native-client acceleration remains proposed;
 settle its bounded children before changing those assignments.
 
 ## Finding
@@ -20,6 +20,29 @@ for otherwise structurally supported audio playback. Unsupported PCM/layout
 semantics remain a valid reason to refuse conversion.
 
 ## Recommended milestones and checkpoints
+
+Additional user requirement (2026-09-15):
+[D07.4–D07.5](background-work-plan.md) adds whole-album FLAC preparation and
+independent enqueueing. U05 audits the same nonblocking rule across the application:
+background work may limit execution concurrency, but must not prevent unrelated
+eligible submissions. Both are mandatory for web completion, not prerequisites
+for the already-reviewed early playback checkpoint. Scheduling remains unassigned;
+the current D06.1 handoff is unchanged.
+
+Additional user requirement (2026-09-15): [U05.1–U05.3](interface-readiness-plan.md)
+is a second mandatory web completion gate. Establish smart defaults and typed
+readiness, audit/correct every implemented screen and action, and validate full
+journeys with missing/ambiguous inputs and unavailable capabilities. Apply the
+same standard as future native/CLI interfaces land. This gate has no assigned
+implementation date and does not change the current D06.1 handoff.
+
+User requirement (2026-09-15): early playback is not web UI completion. The
+[P04.4–P04.6 import-management follow-up](import-management-plan.md) is mandatory
+before declaring web curation complete: identifiable imports and attempt history,
+discard/reclamation of erroneous staged packages, and history cleanup. Schedule
+this as a web completion checkpoint after the early browser-player milestone;
+it can follow current feature work and does not replace the D06.1 handoff or block
+independent native-client development. Its implementation date remains unassigned.
 
 | Order | Scope | User-verifiable result | Required review/backup checkpoint |
 |---|---|---|---|
@@ -52,10 +75,10 @@ never mark all of D07 complete with its lossy path absent.
 This is an early usable surface, not C04 native-playback acceptance. It needs no
 new backend player, session queue protocol or streaming/transcoding endpoint.
 
-- Application services expose authorized ordered track descriptors bound to
+- Application services now expose authorized ordered track descriptors bound to
   immutable published representation/file IDs, exact frame counts, media type,
-  availability and safe display fields. D07 must settle this consumer contract
-  before encoder implementation. C01 subsequently consumes the same read DTOs;
+  availability and safe display fields. D07.3 settled this consumer contract.
+  C01 subsequently consumes the same read DTOs;
   do not invent a parallel browser-only model or expose archive paths.
 - Use the existing authenticated same-origin media route, with D07's corrected
   Range/If-Range, ETag and authorization behavior. Never place credentials in URLs.

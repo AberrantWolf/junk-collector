@@ -1,6 +1,9 @@
-import React,{useEffect,useRef,useState} from 'react';
+import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage} from './runtime';
 import {createRoot} from 'react-dom/client';
 import type {components} from './generated/api';
+import MusicTracks from './music-tracks';
+
+export {default,useState,useEffect,useRef,ApiRequestError,isApiRequestError,requestErrorMessage,api} from './runtime';
 
 type Collection=components['schemas']['PresentedCollection'];
 type Features=components['schemas']['FeaturesResponse'];
@@ -8,41 +11,6 @@ type Item=components['schemas']['PresentedItem'];
 type Page=components['schemas']['Page_PresentedItem'];
 type Principal=components['schemas']['Principal'];
 type CollectionType=components['schemas']['ModuleDescriptor'];
-
-export {React as default,useState,useEffect,useRef};
-
-export class ApiRequestError extends Error{
- readonly status:number;
- readonly code:string;
- constructor(status:number,code:string,message:string){super(message);this.name='ApiRequestError';this.status=status;this.code=code;}
-}
-
-export function isApiRequestError(error:unknown):error is ApiRequestError{
- return error instanceof ApiRequestError;
-}
-
-export function requestErrorMessage(error:unknown,forbiddenMessage?:string):string{
- if(isApiRequestError(error)&&error.code==='forbidden'&&forbiddenMessage)return forbiddenMessage;
- if(error instanceof Error)return error.message;
- return 'The request could not be completed.';
-}
-
-export async function api<T=unknown>(path:string,init:RequestInit={}):Promise<T>{
- const method=(init.method||'GET').toUpperCase();
- const needsCommandKey=!['GET','HEAD','OPTIONS'].includes(method)&&!path.startsWith('/auth/')&&!/^\/uploads\/[^/]+\/files\//.test(path);
- const headers=new Headers(init.headers);
- if(init.body&&typeof init.body==='string'&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');
- if(needsCommandKey&&!headers.has('Idempotency-Key'))headers.set('Idempotency-Key',crypto.randomUUID());
- const request:RequestInit={credentials:'same-origin',...init,headers};
- let response:Response;
- try{response=await fetch(`/api/v1${path}`,request);}catch(error){if(!needsCommandKey)throw error;response=await fetch(`/api/v1${path}`,request);}
- if(!response.ok){
-  let code=`http_${response.status}`;let message=`Request failed (${response.status})`;
-  try{const body=await response.json() as {error?:{code?:string;message?:string}};code=body.error?.code||code;message=body.error?.message||message;}catch{}
-  throw new ApiRequestError(response.status,code,message);
- }
- return response.status===204?undefined as T:response.json();
-}
 
 async function usePasskey(username:string):Promise<Principal>{
  const started=await api<{ceremony_id:string;options:{publicKey:PublicKeyCredentialRequestOptionsJSON}}>('/auth/passkeys/login/start',{method:'POST',body:JSON.stringify({username})});
@@ -69,6 +37,7 @@ function Artwork({item,large=false}:{item:Item;large?:boolean}){
 function App(){
  const [features,setFeatures]=useState<Features>();const [actor,setActor]=useState<Principal>();const [ready,setReady]=useState(false);
  const [collections,setCollections]=useState<Collection[]>([]);const [collectionTypes,setCollectionTypes]=useState<CollectionType[]>([]);const [collection,setCollection]=useState('');const [search,setSearch]=useState('');const [items,setItems]=useState<Item[]>([]);const [cursor,setCursor]=useState<string|null>(null);const [selected,setSelected]=useState<Item>();const [error,setError]=useState('');const [loginMessage,setLoginMessage]=useState('');const [notice,setNotice]=useState('');const [busy,setBusy]=useState(false);const [refresh,setRefresh]=useState(0);
+ useEffect(()=>{function escape(event:KeyboardEvent){if(event.key==='Escape'&&!document.querySelector('[role="dialog"]'))setSelected(undefined);}document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape);},[]);
  const [management,setManagement]=useState<React.ReactNode>(null);const generation=useRef(0);
 
  function clearSession(message:string){
@@ -139,7 +108,7 @@ function Detail({item,curation,accessManagement,onEdit,onClose,onSessionExpired}
  const [evidence,setEvidence]=useState<{id:string;kind:string;outcome:string}[]>([]);const [error,setError]=useState('');
  useEffect(()=>{setEvidence([]);setError('');api<typeof evidence>(`/items/${item.id}/evidence`).then(setEvidence).catch(e=>{if(isApiRequestError(e)&&e.code==='unauthenticated')onSessionExpired();else setError(requestErrorMessage(e));});},[item.id,item.revision]);
  const presentation=item.presentation;
- return <aside className="detail" aria-label={`${item.title} details`}><button className="close" onClick={onClose} aria-label="Close details">×</button><Artwork item={item} large/><h2>{item.title}</h2><p>{item.subtitle}</p><dl><dt>Physical copies</dt><dd>{item.specimens.length}</dd><dt>Captures</dt><dd>{item.captures.length}</dd><dt>Identity</dt><dd>{item.identity}</dd></dl>{curation?<button onClick={onEdit}>Edit / attach files</button>:accessManagement&&<button onClick={onEdit}>Manage collection access</button>}{presentation&&<section aria-label="Module details"><h3>Module details</h3>{presentation.fields.map(field=><p key={field.label}><strong>{field.label}:</strong> {field.value}</p>)}{presentation.badges.map(badge=><span className={`identity ${badge.tone}`} key={badge.label}>{badge.label}</span>)}{presentation.limitations.map(value=><p className="muted" key={value}>{value}</p>)}{!presentation.available&&presentation.values.map(value=><details key={value.label}><summary>{value.label}</summary><pre>{JSON.stringify(value.value,null,2)}</pre></details>)}</section>}<h3>Evidence</h3>{!evidence.length?<p className="muted">No verification evidence recorded.</p>:evidence.map(e=><p className="evidence" key={e.id}><span>{e.kind.replaceAll('_',' ')}</span><strong>{e.outcome}</strong></p>)}{error&&<p role="alert" className="error">{error}</p>}<h3>Stored files</h3>{item.captures.flatMap(c=>c.representations).flatMap(r=>r.files.map((f,i)=>{const url=`/api/v1/items/${item.id}/representations/${r.id}/${i}`;return <div className="stored-file" key={`${r.id}/${i}`}><a href={url} download={f.name}>{f.name}</a><small>{(f.bytes/1048576).toFixed(1)} MiB · Original</small>{/\.(flac|mp3|wav|opus|ogg)$/i.test(f.name)&&<audio controls preload="none" src={url}/>}</div>;}))}</aside>;
+ return <aside className="detail" aria-label={`${item.title} details`}><button className="close" onClick={onClose} aria-label="Close details">×</button><Artwork item={item} large/><h2>{item.title}</h2><p>{item.subtitle}</p><dl><dt>Physical copies</dt><dd>{item.specimens.length}</dd><dt>Captures</dt><dd>{item.captures.length}</dd><dt>Identity</dt><dd>{item.identity}</dd></dl>{curation?<button onClick={onEdit}>Edit / attach files</button>:accessManagement&&<button onClick={onEdit}>Manage collection access</button>}<MusicTracks key={item.id} item={item} canPrepare={false} onSessionExpired={onSessionExpired}/>{presentation&&<section aria-label="Module details"><h3>Module details</h3>{presentation.fields.map(field=><p key={field.label}><strong>{field.label}:</strong> {field.value}</p>)}{presentation.badges.map(badge=><span className={`identity ${badge.tone}`} key={badge.label}>{badge.label}</span>)}{presentation.limitations.map(value=><p className="muted" key={value}>{value}</p>)}{!presentation.available&&presentation.values.map(value=><details key={value.label}><summary>{value.label}</summary><pre>{JSON.stringify(value.value,null,2)}</pre></details>)}</section>}<h3>Evidence</h3>{!evidence.length?<p className="muted">No verification evidence recorded.</p>:evidence.map(e=><p className="evidence" key={e.id}><span>{e.kind.replaceAll('_',' ')}</span><strong>{e.outcome}</strong></p>)}{error&&<p role="alert" className="error">{error}</p>}<h3>Stored files</h3>{item.captures.flatMap(c=>c.representations).flatMap(r=>r.files.map((f,i)=>{const url=`/api/v1/items/${item.id}/representations/${r.id}/${i}`;return <div className="stored-file" key={`${r.id}/${i}`}><a href={url} download={f.name}>{f.name}</a><small>{(f.bytes/1048576).toFixed(1)} MiB · {r.role==='preservation_master'?'Original':r.role==='lossless_derivative'?'Lossless copy':'Lossy copy'}</small>{r.role==='preservation_master'&&/\.(flac|mp3|wav|opus|ogg)$/i.test(f.name)&&<audio controls preload="none" src={url}/>}</div>;}))}</aside>;
 }
 
 createRoot(document.getElementById('root')!).render(<App/>);

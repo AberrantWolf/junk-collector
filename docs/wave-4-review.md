@@ -207,3 +207,135 @@ availability, curation-only preparation, HTTP range tests and actual web workflo
 checks. Browser queue/playback qualification remains the following bounded child.
 No commit was made during this review. The D07.1 shared-library extraction also
 remains uncommitted and should be checkpointed separately from Collector.
+
+## D07.3 implementation handoff — 2026-09-15 (review pending)
+
+D07.3 is implemented locally without changing the reviewed D07.1/D07.2 recipe,
+encoder or publication contracts. One application read DTO now projects ordered
+source Representation, track position, exact integer PCM start/count, safe title,
+profile and preparing/unavailable/available state. Available rows carry immutable
+Representation/package-file identity, length, media type and digest. Private Job
+identity/diagnostics, raw Evidence and archive paths are absent. Retained published
+recipes keep their authorized rows readable after restart when the music module
+and encoder are unavailable.
+
+The server owns optional `[encoders]` configuration and probes each configured
+binary for its complete version report. Client input selects only a fixed profile.
+The client router exposes availability and the existing authorized opaque media
+reader; the curation router alone exposes explicit one-track preparation through
+existing receipts and Jobs. Disabled public curation keeps this command absent
+despite forwarded headers. Import and media GET do not convert. The web curation
+surface defaults to FLAC, offers explicit Opus 96/128/192 choices, explains absent
+tools, polls durable progress and refreshes published availability.
+
+Actual HTTP tests cover viewer reads, curator-only preparation, cross-collection
+denial, private/public exposure, missing Opus, real FLAC completion and independent
+source-PCM validation, restart reads without module/tool, revocation, strong digest
+ETags and exact full/partial/suffix/open-ended/unsatisfiable/stale-or-weak If-Range
+responses for originals and derivatives. OpenAPI/TypeScript contracts and embedded
+web assets were regenerated. This is an implementation handoff, not D07 root
+acceptance. Real `opusenc`, owned-disc and deployment qualification remain unrun.
+Browser playback, seek and automatic/explicit track transitions belong wholly to
+the next bounded player child; a successful browser fetch is not that acceptance.
+
+
+## D07.3 review corrections — 2026-09-15
+
+Reviewed and corrected locally. Fixed HTTP preparation replay after encoder
+configuration changes: the receipt now binds the submitted item/Capture/track/
+profile request before source selection or encoder resolution. Both preparation
+entrypoints share the frozen-job effect, without nested receipts. HTTP regression
+coverage replays the accepted request with no configured tool and rejects changed
+input under the same key. Deleted-item preparation is rejected before tool work.
+
+Availability now carries a typed `can_prepare` flag combining actor permission,
+module/schema support, readable source and configured encoder. The UI no longer
+searches English reason text to discover behavior. Unsupported/missing modules
+cannot advertise preparation through retained recipes. Read-time music parsing
+is owner-gated; missing Collector recipes on imported derivatives do not break
+all track availability. Each retained recipe is loaded once per request rather
+than repeatedly inside the track/profile search.
+
+Fixed the unserved generated stylesheet by including music styles in the existing
+served CSS build. Replaced the unbounded component polling loop with cleaned-up
+request/timer effects. Availability resumes polling for already-running jobs after
+reopening; completed outputs refresh, failed preparation stays visible, and a
+manual refresh can recover a transient read failure. Removed internal PCM frame
+coordinates from the user flow while retaining them in the typed API contract.
+
+The isolated Chrome smoke workflow passed outside the filesystem sandbox,
+including actual FLAC preparation/download, byte ranges, stylesheet application
+and persistent error display. Earlier sandboxed Chrome launch failures remain a
+historical environment result, not an outstanding UI acceptance gap. No sibling
+code was changed and no commit was made. Actual browser playback/seek/queue
+qualification belongs to the next bounded browser-player child; it is not inferred
+from successful downloads. Root D07 local implementation is reviewed; external
+opusenc, owned-disc, deployment and scale qualification remain outstanding.
+
+## Bounded browser-player implementation handoff — 2026-09-15 (review pending)
+
+The bounded child is implemented locally on top of the reviewed D07.3 contract.
+It adds no Rust service, route, media endpoint, conversion trigger or persistent
+queue state. A shared web runtime lets the client bundle mount the existing music
+availability component directly; the management build still externalizes that
+runtime and retains its curation-only preparation controls. Styles remain composed
+through `web/build.mjs` into the served `app.css`.
+
+The viewer player derives its in-memory queue only from authorized ordered
+availability rows. It groups by Capture and source Representation, retains each
+track's profile rows together, prefers an actually browser-decodable FLAC, and
+uses the immutable available Representation/file media URL. It provides play,
+pause, approximate seek, previous/next, current state and natural ended advance.
+Unavailable codec and media failures provide download/open guidance. Availability,
+Job and preparation effects abort their requests and timers on replacement or
+unmount; closing an Item also pauses, clears and reloads the media element so an
+obsolete ranged request cannot continue. Typed `can_prepare` remains the only
+preparation eligibility signal.
+
+The real two-track browser workflow passed in Google Chrome 153.0.8010.37 with
+`audio/flac=probably` and actual decoded media-time progression. It used two real
+`flac 1.5.0` derivative Jobs and a Viewer account, not a URL assignment or download
+as a playback proxy. Pause/resume, a 1.5-second seek, immutable next/previous IDs,
+natural ended advance, clean reload, mobile layout, close cleanup and grant
+revocation passed. The local-setup run repeated playback from the client-only
+origin with curation exposure disabled and no `curation.js` load. Existing D05 and
+D07.3 curation preparation/error/download checks remain in the same workflow.
+
+This is an implementation handoff, not self-review. Real opusenc, owned-disc,
+physical audio output, other-browser, gapless/sample-accurate, deployment and
+scale qualification remain unrun. Review this child before beginning D06.1; C01
+and native C04 were not started.
+
+## Bounded browser-player review corrections — 2026-09-15
+
+Reviewed the client/runtime integration, Capture/source grouping, profile selection,
+media events and request lifetimes. The player consumes existing authorized DTOs
+and opaque media routes without changing backend publication, policy or queue
+contracts. Native/shared playback services remain separate from this temporary
+browser presentation state.
+
+Fixed ref-detachment cleanup: passive-effect cleanup can observe an already-cleared
+React ref. The stable audio ref callback now pauses the actual old element,
+removes its source and releases pending media work. Item identity keys prevent
+playback state crossing item changes. Tests retain the detached element and check
+its paused/source state after closing during real playback and after session loss;
+DOM disappearance alone is no longer treated as sufficient evidence.
+
+Added generation fencing for delayed play rejections after switching tracks,
+pausing or unmounting. Stale pause/ended events cannot overwrite a newer load.
+Refreshed availability invalidates mismatched loaded media and out-of-range
+selection, and missing-item responses clear stale playback. Aborted API mutations
+are not needlessly retried. Corrected stored-file labels to distinguish originals
+and derivatives; derivative inline controls no longer duplicate the disc player.
+
+Browser regressions cover real viewer playback, natural ended advance, rapid
+switching with an injected obsolete play rejection, active close, actual session
+loss, grant revocation, unsupported-codec download guidance and retained playback
+without the module. The fault injection tests exercise controller behavior; real
+FLAC decoding/time progression remains a separate requirement. See the dated
+validation entry for the exact commands and outcomes.
+
+No commit or sibling edit was made. D07.3 plus this player is a useful backup
+checkpoint before the ready-to-send D06.1 metadata-authority handoff. Other-browser,
+real Opus, physical-output, gapless/sample-accurate, deployment and scale claims
+remain outside this local qualification.

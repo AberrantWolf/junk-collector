@@ -4,8 +4,8 @@ use collector_app::CollectionTypeAdministrationService;
 use collector_client::{Endpoint, Pairing, Route};
 use collector_core::*;
 use collector_providers::{
-    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, LOCAL_DAT_PROVIDER_ID, LocalDatProvider,
-    LocalDatSource,
+    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, ConfiguredEncoder, EncoderKind,
+    LOCAL_DAT_PROVIDER_ID, LocalDatProvider, LocalDatSource, ProcessAudioConverter,
 };
 use collector_server::{AppState, router};
 use collector_store::Store;
@@ -83,6 +83,7 @@ struct Config {
     authentication_origin: Option<String>,
     inboxes: std::collections::BTreeMap<String, PathBuf>,
     dat_sources: std::collections::BTreeMap<String, DatSourceConfig>,
+    encoders: EncoderConfig,
     tls_names: Vec<String>,
     allowed_origins: Vec<String>,
     endpoints: Vec<String>,
@@ -97,6 +98,16 @@ struct DatSourceConfig {
     byte_domain: String,
     #[serde(default = "default_domain_version")]
     byte_domain_version: u32,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct EncoderConfig {
+    /// Optional path or executable name for the FLAC encoder. No derivative is
+    /// generated unless a curator explicitly requests it.
+    flac: Option<PathBuf>,
+    /// Optional path or executable name for opusenc.
+    opus: Option<PathBuf>,
 }
 
 fn default_domain_version() -> u32 {
@@ -116,6 +127,7 @@ impl Default for Config {
             authentication_origin: None,
             inboxes: std::collections::BTreeMap::new(),
             dat_sources: std::collections::BTreeMap::new(),
+            encoders: EncoderConfig::default(),
             tls_names: vec![
                 "localhost".into(),
                 "junk-collector.local".into(),
@@ -154,6 +166,9 @@ fn instructions(config: &Config, path: &std::path::Path) {
         "Configuration: {}. Changes require a server restart.",
         path.display()
     );
+    println!(
+        "Optional explicit music preparation: set values in `[encoders]` (create that section if absent): `flac = \"/path/to/flac\"` and/or `opus = \"/path/to/opusenc\"`. Tools are probed at server start; imports and original downloads do not require them."
+    );
     if !config.allowed_origins.contains(&local_origin(config)) {
         println!(
             "WARNING: Local management origin is not allowed. Stop the server and run setup to repair it."
@@ -162,6 +177,45 @@ fn instructions(config: &Config, path: &std::path::Path) {
     println!(
         "Use localhost exactly for local browser access. Remote browsers require trusted HTTPS and its exact allowed_origins entry. Local HTTP onboarding is Chromium-tested; other browsers may require trusted HTTPS. Never publish the private listener through a public tunnel.\n"
     );
+}
+
+fn probe_optional_encoder(
+    kind: EncoderKind,
+    configured: Option<&PathBuf>,
+) -> Option<ConfiguredEncoder> {
+    let Some(path) = configured else {
+        println!(
+            "Optional {} encoder: not configured",
+            match kind {
+                EncoderKind::Flac => "FLAC",
+                EncoderKind::Opus => "Opus",
+            }
+        );
+        return None;
+    };
+    match ConfiguredEncoder::probe(kind, path) {
+        Ok(tool) => {
+            println!(
+                "Optional {} encoder available: {}",
+                match kind {
+                    EncoderKind::Flac => "FLAC",
+                    EncoderKind::Opus => "Opus",
+                },
+                tool.version()
+            );
+            Some(tool)
+        }
+        Err(error) => {
+            eprintln!(
+                "WARNING: optional {} encoder is unavailable: {error}. Preservation and original reads remain available.",
+                match kind {
+                    EncoderKind::Flac => "FLAC",
+                    EncoderKind::Opus => "Opus",
+                }
+            );
+            None
+        }
+    }
 }
 fn password() -> Result<String> {
     use std::io::{IsTerminal, Read};
@@ -279,6 +333,8 @@ async fn main() -> Result<()> {
         {
             bail!("Account state or TLS identity missing. Run setup.");
         }
+        probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());
+        probe_optional_encoder(EncoderKind::Opus, config.encoders.opus.as_ref());
         println!(
             "Configuration checks passed. This does not test passwords, collection grants or network reachability."
         );
@@ -388,6 +444,12 @@ async fn main() -> Result<()> {
             state.default_username = default_username;
             state.exposure = config.exposure;
             state.inboxes = Arc::new(config.inboxes.clone());
+            let flac = probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());
+            let opus = probe_optional_encoder(EncoderKind::Opus, config.encoders.opus.as_ref());
+            state.service = state
+                .service
+                .clone()
+                .with_audio_converter(Arc::new(ProcessAudioConverter::new(flac, opus)?));
             let dat_sources = config
                 .dat_sources
                 .iter()

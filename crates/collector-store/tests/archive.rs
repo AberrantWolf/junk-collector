@@ -8705,6 +8705,20 @@ impl DerivativeFixtureEncoder {
     }
 }
 impl collector_app::AudioConversionPort for DerivativeFixtureEncoder {
+    fn configured_availability(
+        &self,
+        profile: &ConversionProfile,
+    ) -> collector_app::EncoderAvailability {
+        collector_app::EncoderAvailability::Available {
+            encoder: match profile {
+                ConversionProfile::Flac => "flac",
+                ConversionProfile::Opus { .. } => "opusenc",
+            }
+            .into(),
+            version: self.version.lock().unwrap().clone(),
+        }
+    }
+
     fn availability(&self, recipe: &ConversionRecipe) -> collector_app::EncoderAvailability {
         if recipe.encoder_version == *self.version.lock().unwrap() {
             collector_app::EncoderAvailability::Available {

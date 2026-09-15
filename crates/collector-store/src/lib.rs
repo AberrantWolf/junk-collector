@@ -15,9 +15,10 @@ use collector_app::{
     AccessPort, AccountView, AdministrationPort, AssetState, AuthenticatedPrincipal,
     AuthenticationPort, Catalog, CollectionTypeAuthorityFact, CollectionTypePendingReference,
     CollectionTypePort, CollectionTypeSnapshot, ContentPort, CreateAssetCommand, CredentialKind,
-    EnrollmentPort, EnrollmentStart, EnrollmentView, GrantView, IdempotencyPort, ImportPort,
-    JobClaim, JobPort, JobRecord, JobSpec, MediaResource, MetadataAuthorityRecord,
-    NativeCredentialIssue, NativeDeviceView, ReceiptDecision, SessionView, StoredPasskey,
+    EnrollmentPort, EnrollmentStart, EnrollmentView, FrozenDerivativeJob, GrantView,
+    IdempotencyPort, ImportPort, JobClaim, JobPort, JobRecord, JobSpec, MediaResource,
+    MetadataAuthorityRecord, NativeCredentialIssue, NativeDeviceView, ReceiptDecision, SessionView,
+    StoredPasskey,
 };
 pub use collector_app::{Upload, UploadFile};
 use collector_core::*;
@@ -983,6 +984,11 @@ impl ContentPort for Store {
         let (path, file) = self.representation_path(item, representation, index)?;
         let reader = File::open(&path).map_err(storage)?;
         let length = reader.metadata().map_err(storage)?.len();
+        if length != file.bytes.0 {
+            return Err(Error::Storage(
+                "stored representation length disagrees with its immutable record".into(),
+            ));
+        }
         let media_type = match path
             .extension()
             .and_then(|value| value.to_str())
@@ -1185,6 +1191,10 @@ impl JobPort for Store {
 
     fn retry_failed_job(&self, id: JobId, user: UserId) -> Result<JobId> {
         self.retry_failed_job_record(id, user)
+    }
+
+    fn active_derivative_jobs(&self, capture: CaptureId) -> Result<Vec<FrozenDerivativeJob>> {
+        self.active_derivative_job_records(capture)
     }
 }
 

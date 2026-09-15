@@ -1,5 +1,5 @@
 use super::*;
-use collector_app::{JobClaim, JobRecord, JobSpec, ProvisionalImportPort};
+use collector_app::{FrozenJobInput, JobClaim, JobRecord, JobSpec, ProvisionalImportPort};
 use rusqlite::TransactionBehavior;
 
 type StoredJobIdentity = (String, String, Option<String>, Option<String>, String);
@@ -67,6 +67,39 @@ fn parse_job_record(row: StoredJobRecord) -> Result<JobRecord> {
 }
 
 impl Store {
+    pub(crate) fn active_derivative_job_records(
+        &self,
+        capture: CaptureId,
+    ) -> Result<Vec<collector_app::FrozenDerivativeJob>> {
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "SELECT p.frozen_input
+                 FROM private.processing_jobs p
+                 JOIN private.jobs j ON j.id=p.job_id
+                 WHERE j.kind='music_derivative'
+                   AND j.state IN ('queued','running','cancel_requested')
+                   AND json_extract(j.request,'$.capture_id')=?
+                 ORDER BY j.created_at,j.id LIMIT 1000",
+            )
+            .map_err(storage)?;
+        let rows = statement
+            .query_map([capture.to_string()], |row| row.get::<_, String>(0))
+            .map_err(storage)?;
+        let mut active = Vec::new();
+        for value in rows {
+            let input: FrozenJobInput =
+                serde_json::from_str(&value.map_err(storage)?).map_err(storage)?;
+            if let FrozenJobInput::Derivative(job) = input
+                && job.capture_id == capture
+            {
+                job.validate()?;
+                active.push(job);
+            }
+        }
+        Ok(active)
+    }
+
     pub(crate) fn reconcile_job_publications(&self) -> Result<()> {
         let candidates = {
             let db = lock(&self.db)?;

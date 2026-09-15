@@ -852,6 +852,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/music-tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["music_track_availability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/representations/{representation}/{index}": {
         parameters: {
             query?: never;
@@ -990,6 +1006,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{item}/captures/{capture}/music-tracks/{track}/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["prepare_music_track"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1846,6 +1878,38 @@ export interface components {
             /** Format: int64 */
             minor_units: number;
         };
+        MusicTrackAvailability: {
+            /** @description Current actor, module, source and encoder permit explicit preparation. */
+            can_prepare: boolean;
+            capture_id: components["schemas"]["CaptureId"];
+            /** @description Exact track-local integer stereo PCM frame count. */
+            frame_count: components["schemas"]["PcmFrame"];
+            profile: components["schemas"]["ConversionProfile"];
+            source_representation_id: components["schemas"]["RepresentationId"];
+            /** @description Exact coordinate in the source's integer stereo PCM timeline. */
+            start_frame: components["schemas"]["PcmFrame"];
+            state: components["schemas"]["MusicTrackAvailabilityState"];
+            title: string;
+            /** Format: int32 */
+            track_position: number;
+        };
+        MusicTrackAvailabilityState: {
+            /** @enum {string} */
+            status: "preparing";
+        } | {
+            reason: string;
+            /** @enum {string} */
+            status: "unavailable";
+        } | {
+            digest: components["schemas"]["Digest"];
+            file_id: components["schemas"]["PackageFileId"];
+            file_index: number;
+            length: components["schemas"]["ByteLength"];
+            media_type: string;
+            representation_id: components["schemas"]["RepresentationId"];
+            /** @enum {string} */
+            status: "available";
+        };
         /** Format: uuid */
         NativeCredentialId: string;
         NativeDeviceView: {
@@ -1909,6 +1973,8 @@ export interface components {
             /** @enum {string} */
             state: "disposed";
         };
+        /** Format: uuid */
+        PackageFileId: string;
         PackageScope: {
             id: components["schemas"]["ImportId"];
             /** @enum {string} */
@@ -2009,8 +2075,14 @@ export interface components {
             label: string;
             revision: components["schemas"]["Revision"];
         };
+        /** Format: int64 */
+        PcmFrame: number;
         /** @enum {string} */
         Possession: "present" | "lent" | "elsewhere" | "unknown";
+        PrepareMusicTrack: {
+            profile: components["schemas"]["ConversionProfile"];
+            source_representation_id: components["schemas"]["RepresentationId"];
+        };
         PresentationBadge: {
             label: string;
             tone: components["schemas"]["BadgeTone"];
@@ -4497,6 +4569,39 @@ export interface operations {
             };
         };
     };
+    music_track_availability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicTrackAvailability"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     media: {
         parameters: {
             query?: never;
@@ -4977,6 +5082,65 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    prepare_music_track: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                item: components["schemas"]["ItemId"];
+                capture: components["schemas"]["CaptureId"];
+                track: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrepareMusicTrack"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

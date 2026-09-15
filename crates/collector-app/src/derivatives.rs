@@ -107,6 +107,19 @@ pub struct ConversionValidation {
 /// source currency and publication stay in application services; the adapter
 /// receives only a sealed recipe, an authorized integer PCM reader and scratch.
 pub trait AudioConversionPort: Send + Sync {
+    /// Probe the currently configured server-owned tool for a readable preset.
+    /// The returned complete report is authoritative recipe input; clients never
+    /// supply executable paths or version claims.
+    fn configured_availability(&self, profile: &ConversionProfile) -> EncoderAvailability {
+        let encoder = match profile {
+            ConversionProfile::Flac => "flac",
+            ConversionProfile::Opus { .. } => "opusenc",
+        };
+        EncoderAvailability::Unavailable {
+            reason: format!("configured {encoder} tool is unavailable"),
+        }
+    }
+
     fn availability(&self, recipe: &ConversionRecipe) -> EncoderAvailability;
 
     fn convert(
@@ -233,6 +246,46 @@ use collector_core::{
     CaptureId, CollectionBinding, CollectionId, JobId, PackageScope, RepresentationId,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareMusicTrack {
+    pub source_representation_id: RepresentationId,
+    pub profile: ConversionProfile,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MusicTrackAvailabilityState {
+    Preparing,
+    Unavailable {
+        reason: String,
+    },
+    Available {
+        representation_id: RepresentationId,
+        file_id: collector_core::PackageFileId,
+        file_index: usize,
+        length: ByteLength,
+        media_type: String,
+        digest: Digest,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MusicTrackAvailability {
+    pub capture_id: CaptureId,
+    pub source_representation_id: RepresentationId,
+    pub track_position: u16,
+    /// Exact coordinate in the source's integer stereo PCM timeline.
+    pub start_frame: PcmFrame,
+    /// Exact track-local integer stereo PCM frame count.
+    pub frame_count: PcmFrame,
+    pub title: String,
+    pub profile: ConversionProfile,
+    pub state: MusicTrackAvailabilityState,
+    /// Current actor, module, source and encoder permit explicit preparation.
+    pub can_prepare: bool,
+}
 
 /// One request always means one independently playable track file.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -422,72 +475,388 @@ impl CollectionService {
             "music.derivative.prepare",
             &(capture_id, &command),
             |effects| {
-                let source = PackageScope::Representation(command.representation_id);
-                let fingerprint = self
-                    .processing
-                    .recorded_source(capture.collection_id, source)?;
-                let host = ConversionHost {
-                    port: self.processing.as_ref(),
-                    access: collector_modules::PackageAccess {
-                        collection_id: capture.collection_id,
-                        scope: source,
-                    },
-                    claim: None,
-                };
-                let pcm = collector_modules::music::open_conversion_pcm_selection(
-                    &host,
-                    host.access,
-                    &command.selection,
-                )?;
-                let mut recipe = build_music_conversion_recipe(
-                    RecipeId::new(),
-                    fingerprint,
-                    &pcm.tracks,
-                    &[command.track_position],
-                    command.profile.clone(),
-                    command.encoder_version.clone(),
-                )?;
-                // Identity excludes requester/key, so separate requests converge at publication.
-                let identity = derivative_identity(capture_id, &recipe.digest);
-                recipe.id = RecipeId(identity);
-                let converter = self
-                    .audio_converter
-                    .as_ref()
-                    .ok_or_else(|| Error::Unavailable("audio encoder is not configured".into()))?;
-                if let EncoderAvailability::Unavailable { reason } = converter.availability(&recipe)
-                {
-                    return Err(Error::Unavailable(reason));
-                }
-                let frozen = FrozenDerivativeJob {
-                    capture_id,
-                    collection_id: capture.collection_id,
-                    collection_binding: eligibility.binding.clone(),
-                    selection: command.selection.clone(),
-                    recipe,
-                    representation_id: RepresentationId(identity),
-                    created_at: self.authentication.now(),
-                };
-                frozen.validate()?;
+                let frozen =
+                    self.freeze_music_derivative(&capture, eligibility.binding.clone(), &command)?;
                 let id = crate::deterministic_job_id(
                     actor.user_id,
                     "music.derivative.prepare",
                     context.key(),
                 );
-                effects.enqueue_job(JobSpec {
-                    id,
-                    user_id: actor.user_id,
-                    collection_id: Some(capture.collection_id),
-                    item_id: None,
-                    kind: "music_derivative".into(),
-                    phase: "queued".into(),
-                    total_units: frozen.recipe.tracks[0].length.0,
-                    request: serde_json::json!({
-                        "capture_id": capture_id,
-                        "representation_id": frozen.representation_id,
-                    }),
-                    frozen_input: Some(FrozenJobInput::Derivative(frozen)),
-                })
+                Self::enqueue_derivative(effects, actor.user_id, id, frozen)
             },
+        )
+    }
+
+    fn freeze_music_derivative(
+        &self,
+        capture: &collector_core::Capture,
+        binding: CollectionBinding,
+        command: &PrepareMusicDerivative,
+    ) -> Result<FrozenDerivativeJob> {
+        let capture_id = capture.id;
+        let source = PackageScope::Representation(command.representation_id);
+        let fingerprint = self
+            .processing
+            .recorded_source(capture.collection_id, source)?;
+        let host = ConversionHost {
+            port: self.processing.as_ref(),
+            access: collector_modules::PackageAccess {
+                collection_id: capture.collection_id,
+                scope: source,
+            },
+            claim: None,
+        };
+        let pcm = collector_modules::music::open_conversion_pcm_selection(
+            &host,
+            host.access,
+            &command.selection,
+        )?;
+        let mut recipe = build_music_conversion_recipe(
+            RecipeId::new(),
+            fingerprint,
+            &pcm.tracks,
+            &[command.track_position],
+            command.profile.clone(),
+            command.encoder_version.clone(),
+        )?;
+        // Identity excludes requester/key, so separate requests converge at publication.
+        let identity = derivative_identity(capture_id, &recipe.digest);
+        recipe.id = RecipeId(identity);
+        let converter = self
+            .audio_converter
+            .as_ref()
+            .ok_or_else(|| Error::Unavailable("audio encoder is not configured".into()))?;
+        if let EncoderAvailability::Unavailable { reason } = converter.availability(&recipe) {
+            return Err(Error::Unavailable(reason));
+        }
+        let frozen = FrozenDerivativeJob {
+            capture_id,
+            collection_id: capture.collection_id,
+            collection_binding: binding,
+            selection: command.selection.clone(),
+            recipe,
+            representation_id: RepresentationId(identity),
+            created_at: self.authentication.now(),
+        };
+        frozen.validate()?;
+        Ok(frozen)
+    }
+
+    fn enqueue_derivative(
+        effects: &dyn crate::CommandEffects,
+        user: collector_core::UserId,
+        id: JobId,
+        frozen: FrozenDerivativeJob,
+    ) -> Result<JobId> {
+        effects.enqueue_job(JobSpec {
+            id,
+            user_id: user,
+            collection_id: Some(frozen.collection_id),
+            item_id: None,
+            kind: "music_derivative".into(),
+            phase: "queued".into(),
+            total_units: frozen.recipe.tracks[0].length.0,
+            request: serde_json::json!({
+                "capture_id": frozen.capture_id,
+                "representation_id": frozen.representation_id,
+            }),
+            frozen_input: Some(FrozenJobInput::Derivative(frozen)),
+        })
+    }
+
+    /// Prepare one track using only server-owned encoder configuration and the
+    /// music module's package detection. This is the command used by HTTP clients.
+    pub fn prepare_configured_music_track(
+        &self,
+        actor: &Principal,
+        item_id: collector_core::ItemId,
+        capture_id: CaptureId,
+        command: PrepareMusicTrack,
+        track_position: u16,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, crate::Action::Curate)?;
+        if item.deleted {
+            return Err(Error::NotFound);
+        }
+        let capture = self.reader.capture(capture_id)?;
+        if capture.collection_id != item.collection_id
+            || capture.association.item_id != Some(item_id)
+            || !capture.representations.iter().any(|representation| {
+                representation.id == command.source_representation_id
+                    && matches!(
+                        representation.role,
+                        collector_core::RepresentationRole::PreservationMaster
+                    )
+            })
+        {
+            return Err(Error::NotFound);
+        }
+        let eligibility = self.content_write_eligibility_for_job(
+            actor.user_id,
+            Some(item.collection_id),
+            Some(item_id),
+        )?;
+        if eligibility.owner.0 != "org.junk.music" {
+            return Err(Error::Invalid("music collection required".into()));
+        }
+        // The receipt binds the client request, not derived tool or source state.
+        // Resolve those only on the first execution; never nest command receipts.
+        self.execute_command(
+            actor,
+            context,
+            "music.track.prepare",
+            &(item_id, capture_id, track_position, &command),
+            |effects| {
+                let selection = self.detect_music_selection(
+                    capture.collection_id,
+                    command.source_representation_id,
+                )?;
+                let version = match self.encoder_availability(&command.profile) {
+                    EncoderAvailability::Available { version, .. } => version,
+                    EncoderAvailability::Unavailable { reason } => {
+                        return Err(Error::Unavailable(reason));
+                    }
+                };
+                let frozen = self.freeze_music_derivative(
+                    &capture,
+                    eligibility.binding.clone(),
+                    &PrepareMusicDerivative {
+                        representation_id: command.source_representation_id,
+                        selection,
+                        track_position,
+                        profile: command.profile.clone(),
+                        encoder_version: version,
+                    },
+                )?;
+                let id = crate::deterministic_job_id(
+                    actor.user_id,
+                    "music.track.prepare",
+                    context.key(),
+                );
+                Self::enqueue_derivative(effects, actor.user_id, id, frozen)
+            },
+        )
+    }
+
+    /// Ordered, viewer-safe track/profile availability. Published outputs are
+    /// described from immutable Capture/recipe records even when the music module
+    /// or current encoder is absent.
+    pub fn music_track_availability(
+        &self,
+        actor: &Principal,
+        item_id: collector_core::ItemId,
+    ) -> Result<Vec<MusicTrackAvailability>> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, crate::Action::Browse)?;
+        if item.deleted {
+            return Err(Error::NotFound);
+        }
+        let music_owner = item.domain.module.0 == "org.junk.music";
+        let readable_music_schema = music_owner
+            && self.modules.has_module(&item.domain.module)
+            && self.modules.inspect(&item.domain).is_ok();
+        let writable_music = music_owner
+            && self
+                .content_write_eligibility_for_job(
+                    actor.user_id,
+                    Some(item.collection_id),
+                    Some(item_id),
+                )
+                .is_ok();
+        let titles = item
+            .domain
+            .payload
+            .parse::<collector_modules::music::MusicItemData>()
+            .ok()
+            .filter(|_| readable_music_schema)
+            .map(|music| music.tracks)
+            .unwrap_or_default();
+        let title_for = |position: u16| {
+            titles
+                .iter()
+                .find(|track| track.position == position)
+                .map(|track| track.title.trim())
+                .filter(|title| {
+                    !title.is_empty() && title.len() <= 512 && !title.chars().any(char::is_control)
+                })
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("Track {position:02}"))
+        };
+        let profiles = [
+            ConversionProfile::Flac,
+            ConversionProfile::Opus { bitrate_kbps: 96 },
+            ConversionProfile::Opus { bitrate_kbps: 128 },
+            ConversionProfile::Opus { bitrate_kbps: 192 },
+        ];
+        let mut rows = Vec::new();
+        for capture in item
+            .captures
+            .iter()
+            .filter(|capture| capture.association.item_id == Some(item_id))
+        {
+            let active = self.jobs.active_derivative_jobs(capture.id)?;
+            for source in capture.representations.iter().filter(|representation| {
+                matches!(
+                    representation.role,
+                    collector_core::RepresentationRole::PreservationMaster
+                )
+            }) {
+                let mut tracks = Vec::<ConversionTrack>::new();
+                let mut source_readable = false;
+                if readable_music_schema
+                    && let Ok(selection) =
+                        self.detect_music_selection(capture.collection_id, source.id)
+                {
+                    let host = ConversionHost {
+                        port: self.processing.as_ref(),
+                        access: collector_modules::PackageAccess {
+                            collection_id: capture.collection_id,
+                            scope: PackageScope::Representation(source.id),
+                        },
+                        claim: None,
+                    };
+                    if let Ok(pcm) = collector_modules::music::open_conversion_pcm_selection(
+                        &host,
+                        host.access,
+                        &selection,
+                    ) {
+                        source_readable = true;
+                        tracks.extend(pcm.tracks.into_iter().map(|track| ConversionTrack {
+                            position: track.position,
+                            start: PcmFrame(track.start_frame),
+                            length: PcmFrame(track.frame_count),
+                        }));
+                    }
+                }
+                let mut retained = Vec::new();
+                for representation in capture.representations.iter().filter(|representation| {
+                    representation.source == Some(source.id) && representation.profile.is_some()
+                }) {
+                    let recipe = match self.processing.recipe(RecipeId(representation.id.0)) {
+                        Ok(recipe) => recipe,
+                        // Imported derivatives need not have Collector-generated recipes.
+                        Err(Error::NotFound) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    if recipe.tracks.len() == 1
+                        && !tracks
+                            .iter()
+                            .any(|track| track.position == recipe.tracks[0].position)
+                    {
+                        tracks.push(recipe.tracks[0].clone());
+                    }
+                    retained.push((representation, recipe));
+                }
+                tracks.sort_by_key(|track| track.position);
+                tracks.dedup_by_key(|track| track.position);
+                for track in tracks {
+                    for profile in profiles.iter().cloned() {
+                        let published = retained
+                            .iter()
+                            .find(|(representation, recipe)| {
+                                representation.profile.as_ref() == Some(&profile)
+                                    && recipe.tracks.as_slice() == [track.clone()]
+                            })
+                            .map(|(representation, _)| *representation);
+                        let encoder_ready = matches!(
+                            self.encoder_availability(&profile),
+                            EncoderAvailability::Available { .. }
+                        );
+                        let state = if let Some(representation) = published {
+                            let file = representation.files.first().ok_or_else(|| {
+                                Error::Storage("published derivative has no file".into())
+                            })?;
+                            let inventory = self.processing.package_inventory(
+                                capture.collection_id,
+                                PackageScope::Representation(representation.id),
+                            )?;
+                            let member = inventory.files.first().ok_or_else(|| {
+                                Error::Storage("published derivative inventory is empty".into())
+                            })?;
+                            MusicTrackAvailabilityState::Available {
+                                representation_id: representation.id,
+                                file_id: member.id,
+                                file_index: 0,
+                                length: file.bytes,
+                                media_type: match profile {
+                                    ConversionProfile::Flac => "audio/flac",
+                                    ConversionProfile::Opus { .. } => "audio/ogg; codecs=opus",
+                                }
+                                .into(),
+                                digest: file.digest.clone(),
+                            }
+                        } else if active.iter().any(|job| {
+                            job.recipe.source_fingerprint.source
+                                == PackageScope::Representation(source.id)
+                                && job.recipe.tracks.as_slice() == [track.clone()]
+                                && profile_for_recipe(&job.recipe) == profile
+                        }) {
+                            MusicTrackAvailabilityState::Preparing
+                        } else {
+                            let reason = if !source_readable {
+                                "The source layout or its music module is unavailable for preparation.".into()
+                            } else {
+                                match self.encoder_availability(&profile) {
+                                    EncoderAvailability::Available { .. } => {
+                                        "This track has not been prepared in this format.".into()
+                                    }
+                                    EncoderAvailability::Unavailable { reason } => reason,
+                                }
+                            };
+                            MusicTrackAvailabilityState::Unavailable { reason }
+                        };
+                        rows.push(MusicTrackAvailability {
+                            capture_id: capture.id,
+                            source_representation_id: source.id,
+                            track_position: track.position,
+                            start_frame: track.start,
+                            frame_count: track.length,
+                            title: title_for(track.position),
+                            profile,
+                            can_prepare: writable_music
+                                && source_readable
+                                && encoder_ready
+                                && matches!(state, MusicTrackAvailabilityState::Unavailable { .. }),
+                            state,
+                        });
+                    }
+                }
+            }
+        }
+        rows.sort_by_key(|row| {
+            (
+                row.capture_id,
+                row.source_representation_id,
+                row.track_position,
+                profile_order(&row.profile),
+            )
+        });
+        Ok(rows)
+    }
+
+    fn detect_music_selection(
+        &self,
+        collection_id: CollectionId,
+        source: RepresentationId,
+    ) -> Result<collector_modules::music::CdPackageSelection> {
+        let inventory = self
+            .processing
+            .package_inventory(collection_id, PackageScope::Representation(source))?;
+        collector_modules::music::detect_package(&inventory).map_err(Into::into)
+    }
+
+    fn encoder_availability(&self, profile: &ConversionProfile) -> EncoderAvailability {
+        self.audio_converter.as_ref().map_or_else(
+            || EncoderAvailability::Unavailable {
+                reason: match profile {
+                    ConversionProfile::Flac => "FLAC encoder is not configured.",
+                    ConversionProfile::Opus { .. } => "Opus encoder is not configured.",
+                }
+                .into(),
+            },
+            |converter| converter.configured_availability(profile),
         )
     }
 
@@ -603,6 +972,23 @@ impl CollectionService {
             &mut || checkpoint(),
         )?;
         Ok(output)
+    }
+}
+
+fn profile_for_recipe(recipe: &ConversionRecipe) -> ConversionProfile {
+    match recipe.settings {
+        ConversionSettings::Flac { .. } => ConversionProfile::Flac,
+        ConversionSettings::Opus { bitrate_kbps, .. } => ConversionProfile::Opus { bitrate_kbps },
+    }
+}
+
+fn profile_order(profile: &ConversionProfile) -> u8 {
+    match profile {
+        ConversionProfile::Flac => 0,
+        ConversionProfile::Opus { bitrate_kbps: 96 } => 1,
+        ConversionProfile::Opus { bitrate_kbps: 128 } => 2,
+        ConversionProfile::Opus { bitrate_kbps: 192 } => 3,
+        ConversionProfile::Opus { .. } => 4,
     }
 }
 

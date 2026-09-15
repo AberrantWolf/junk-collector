@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -78,7 +78,7 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 9 | D05.3 | D05.2 | CD jobs, curation and fixture qualification | Reviewed/corrected 2026-09-15; proceed to D07.1 |
 | 10 | D07.1 | D05.1, W4.2 | Immutable conversion recipes and exact encoders | Reviewed/corrected 2026-09-15; proceed to D07.2 |
 | 11 | D07.2 | D07.1 | Recoverable derivative publication | Reviewed/corrected 2026-09-15; proceed to D07.3 |
-| 12 | D07.3 | D07.2 | Availability, ranged access and web controls | D07 root review |
+| 12 | D07.3 | D07.2 | Availability, ranged access and web controls | Reviewed/corrected 2026-09-15; bounded browser-player child reviewed and corrected locally |
 | 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Review |
 | 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Routine plus provider tests |
 | 15 | D06.3 | D06.2 | Metadata review and artwork UI | D06 root review |
@@ -888,6 +888,8 @@ No client response lists partial output. Do not take the writer lock while encod
 
 ### D07.3 — Availability and media
 
+**Status (2026-09-15): reviewed and corrected locally.**
+
 Expose recipe/output availability and enqueue commands through services; add web
 buttons for FLAC default or an explicit smaller Opus copy. Return the immutable
 representation/file identity, content length, media type and digest, with a strong
@@ -895,6 +897,36 @@ ETag derived from actual immutable content. Implement Range/If-Range correctly
 for originals and derivatives before C02 relies on them. Verify viewer download
 permissions, current grant revocation, disabled curation APIs, byte ranges and
 FLAC source equality through HTTP. Native offline management remains C05.
+
+**Implemented contract:** the application returns ordered per-track/per-profile
+rows containing source Representation, exact integer start/count coordinates,
+safe stored-title fallback, profile and only preparing/unavailable/available
+state. Available rows add immutable Representation/package-file identity, length,
+media type and digest. Archive locators, raw Evidence and Job identity/diagnostics
+do not cross the viewer DTO. Published recipes reconstruct their rows even if the
+music module or current encoder is missing. The server probes optional configured
+`flac`/`opusenc` executables and supplies the full report to the existing frozen
+preparation command; HTTP inputs cannot select a tool or claim its version.
+
+The client router exposes authorized availability and the existing opaque media
+reader. The curation router alone exposes explicit one-track preparation using
+normal receipts and Jobs. Public curation configuration determines whether that
+command exists; forwarded headers do not. The curation UI defaults visually to
+FLAC, offers explicit Opus 96/128/192 choices, explains missing tools, follows Job
+progress and refreshes after completion. It adds no automatic import/GET work,
+disc concatenation, streaming/transcoding API or browser playback claim.
+
+Actual HTTP coverage includes viewer reads, curator-only preparation,
+cross-collection denial, hidden public curation, missing tools, completion/reload,
+restart reads without module/tool, real FLAC bytes and source-PCM equality. Strong
+digest ETags and exact full, partial, suffix, open-ended, unsatisfiable, stale and
+weak If-Range responses are checked for originals and derivatives, including
+actual lengths and current grant revocation. The generated OpenAPI/TypeScript
+contracts and embedded web assets are rebuilt. Real `opusenc`, owned-disc and
+deployment qualification remain unrun. The following bounded browser-player
+child now implements real play/pause/seek/track-transition acceptance locally and
+is reviewed and corrected locally. It consumes this DTO and media route without changing the
+D07.3 service, receipt, encoder or publication contracts.
 
 ### P05.1 — Portable export and changes
 
@@ -1180,56 +1212,102 @@ performance claim is made for 100,000 items/one million records in this wave;
 P06/R02 own that measurement. Preserve all earlier acceptance tests, especially
 Wave 3 final-chunk replay, interrupted cancellation and post-commit recovery cases.
 
+## Completed browser-player implementation prompt (historical)
+
+```text
+Implement the bounded web browser-player child after D07.3 only. Read AGENTS.md,
+docs/architecture.md,
+docs/implementation-status.md, docs/release-requirements.md,
+docs/decisions/pre-release-evolution.md, docs/music-first-milestones.md,
+docs/wave-4-review.md, D07.1–D07.3 in docs/wave-4-plan.md and the "Small web
+playback child after D07.3" section of docs/music-first-milestones.md. D07.1 and
+D07.2 are committed checkpoints; D07.3 is reviewed and corrected locally. Preserve those services,
+routes and unrelated sibling edits. Do not commit or spawn agents.
+
+Use D07.3's shared authorized ordered availability DTO and same-origin media URL.
+Use the typed can_prepare field for preparation eligibility; never inspect error
+or display strings to determine capabilities. Preserve the command's receipt over
+client inputs, with mutable encoder/source resolution only on first execution.
+Mount viewer playback from the client bundle, without importing the curation
+bundle or requiring curation exposure. Retained output must remain accessible
+when its module is absent. Group the disc queue by Capture and source identity;
+do not concatenate different captures or flatten profile variants into duplicate
+tracks. Cancel obsolete UI requests/pollers when changing items or closing UI,
+resume availability refresh for existing jobs, and keep errors visible.
+Ensure styles are actually included in served assets, following web/build.mjs.
+Do not add a browser-only track model, backend player, session queue protocol,
+streaming/transcoding endpoint, credential-bearing URL or conversion on media GET.
+Keep conversion as the existing explicit durable curator command. A viewer can
+play already-published permitted output but cannot prepare it. Current revocation,
+expired sessions, unavailable formats and playback failures must remain honest.
+
+Add a small in-memory ordered disc queue beside the existing artwork and text:
+play/pause, seek, next/previous, current-track state and automatic advance after a
+track ends. Prefer an available FLAC representation; if the target browser cannot
+decode it, show useful download/open guidance rather than claiming playback.
+Preserve track-number/title fallbacks and useful artwork placeholders. Do not add
+persistent favorites, cross-device queues, offline cache, sample-accurate/gapless
+claims or DSP parity; those remain native/offline milestones.
+
+Exercise the real web workflow with actual generated derivatives and a viewer
+account. Prove the media element actually begins playback, pause/resume changes
+state, a nontrivial seek succeeds, next/previous selects the correct immutable
+track, ended advances to the following track, refresh reconstructs a clean queue,
+and revoked access or session expiry produces an honest failure. A click, assigned
+URL, successful fetch/download or synthetic DOM event alone is not playback or
+transition qualification. Keep the existing D07.3 preparation workflow covered
+on the curation surface and rebuild the server after embedded asset changes.
+
+Run repository checks with COLLECTOR_TEST_FLAC=1 where flac is installed. Record
+the exact browser/version and codec outcome. Report real opusenc, owned-disc,
+gapless/sample-accurate playback and deployment qualification as unrun unless they
+were actually exercised. Stop after this bounded browser child; update status,
+validation and the next prompt together without beginning D06, C01 or native C04.
+```
+
 ## Ready-to-send implementation prompt
 
 ```text
-Implement D07.3 only. Read AGENTS.md, docs/architecture.md,
-docs/implementation-status.md, docs/release-requirements.md,
-docs/decisions/pre-release-evolution.md, docs/music-first-milestones.md,
-docs/wave-4-review.md and D07.1–D07.3 in docs/wave-4-plan.md.
-D07.1 and D07.2 are reviewed checkpoints. Preserve their implementation and
-unrelated sibling edits. Do not commit or spawn agents.
+Implement D06.1 only: durable metadata authority and deterministic resolution.
+Read AGENTS.md, docs/architecture.md, docs/implementation-status.md,
+docs/release-requirements.md, docs/decisions/pre-release-evolution.md,
+docs/wave-4-review.md, docs/handoff-backlog.md and D06.1 in docs/wave-4-plan.md.
+D07.3 and the bounded browser player are reviewed locally; preserve their work
+and unrelated changes. Do not commit or spawn agents.
 
-First settle the shared application read contract for ordered track availability:
-source representation, track position and integer frame coordinates, safe title
-fallback, profile, preparing/unavailable/available state, immutable published
-representation/file identity, length, media type and digest. Keep archive paths,
-private job details and raw evidence out of viewer DTOs. A missing module/tool
-must not prevent authorized reads of already-published outputs. Use the existing
-service, frozen jobs, publication and encoder adapter; do not add another scheduler
-or conversion implementation. Prepare one output per track, never a concatenated
-disc labeled as separate track files.
+Start by mapping existing MetadataAuthority, processing observation/snapshot,
+module-owned override and projection contracts. Extend their owners rather than
+creating a second metadata engine, provider registry, persistence path or generic
+string-key field model. Keep common title/subtitle authority typed, artist/platform
+fields owner-bound, raw observations lossless and unknown historical fields retained.
+Do not add compatibility wrappers or migrations solely for checkpoint stability;
+preserve actual archive data and recovery guarantees.
 
-Compose optional encoder configuration in the server, with useful CLI/help and
-sample-config instructions. The server probes the configured executable and
-supplies its full version report to the application command; browsers do not
-choose executable paths or authoritative version reports. Missing encoders leave
-basic preservation and original reads operational. Never convert on import or
-media GET. Keep the parallel derivative library opt-in.
+Use tests first for resolver policy: existing manual inventory titles survive
+refresh; field overrides outrank explicit candidate selection, which outranks
+automatic resolution. Complete identity evidence precedes identifier/layout strength,
+language preference, provider priority and deterministic provider-ID tie-breaking.
+Japanese strong identity must beat an English name-only match. Ambiguity stays
+visibly tentative. Retain alternatives and original-language text; candidate
+identity must survive provider reordering, disappearance and outages.
 
-Expose authorized availability/read routes on the client surface and explicit
-prepare commands on the curation surface. Reuse existing authentication, command
-receipts, structured errors and jobs. Viewers may read permitted published media
-but cannot request conversion. Disabled public curation must hide its backing
-commands, regardless of forwarded headers. Add web preparation buttons with FLAC
-default, explicit smaller Opus choices, unavailable-tool guidance, job progress
-and refresh after completion. Retain artwork beside text and useful placeholders.
+Add focused revisioned authority update/clear commands and a materialized display
+projection through the existing application and archive mechanisms. Refresh appends
+observations and recomputes effective display; it never overwrites manual authority.
+Receipts bind submitted input before state-dependent resolution. Test stale revisions,
+replay, restart/reindex, raw JSON/unknown-field preservation and current authorization.
+Use the existing portable archive round-trip facilities; full export implementation
+is P05, not a hidden prerequisite for this child. Keep playable Capture/recipe/media
+identities and viewer-safe availability intact when metadata changes.
 
-Use existing opaque readers to implement strong content ETags, Range and If-Range
-for originals and derivatives. Test full/partial/suffix/open-ended/unsatisfiable
-ranges, stale and weak If-Range, actual response lengths and current revocation.
-Do not leak credentials in URLs or create a parallel streaming/transcoding API.
-Regenerate OpenAPI/TypeScript contracts after route changes.
+No new live provider adapters or scraping in D06.1: MusicBrainz/CAA/network controls
+belong to D06.2, the dedicated review UI to D06.3. Do not broaden into C01, native
+playback, offline caching or a persistent browser queue. Keep identity observations,
+integrity, catalog verification and conversion validation distinct in code and text.
 
-Validate via actual HTTP: viewer reads, curator-only preparation, cross-collection
-denial, private curation exposure, missing tools, preparation completion/reload,
-retained outputs after restart, and real FLAC bytes matching source PCM. Exercise
-the actual web preparation workflow and rebuild the server after embedded assets.
-Run repository checks with COLLECTOR_TEST_FLAC=1 where flac is installed. Report
-unrun opusenc/owned-disc/deployment qualification honestly.
-
-Stop after D07.3 and update status, child ledger, validation and next prompt
-together. The subsequent bounded browser-player child owns disc queue controls
-and real playback/seek/track-transition qualification; do not silently claim that
-milestone from successful downloads or a URL assigned to an audio element.
+Run affected and required repository checks, using COLLECTOR_TEST_FLAC=1 when
+flac is installed. If contracts or UI change, regenerate contracts, rebuild embedded
+assets/server and run both isolated browser smoke modes, preserving actual playback
+and preparation acceptance. Update status, child ledger, validation and the next
+prompt together. Stop after D06.1 for review; report external qualification honestly.
 ```

@@ -19,6 +19,12 @@ capability. See the [integration acceptance trace](wave-3-review.md).
 
 ## Live ledger
 
+2026-09-15 scope addition: this completed ledger records original acceptance.
+The required [P04.4–P04.6 follow-up ledger](import-management-plan.md#child-ledger)
+now owns import/attempt observability and cleanup before web UI completion. All
+three new children are planned; this does not rewrite historical validation or
+change the current Wave 4 assignment.
+
 | Child | State | Repositories/commits | Result and evidence | Explicitly not yet implemented |
 |---|---|---|---|---|
 | P02.1 durable job repository | implemented | Junk Collector `29ee3ca` | Private schema v8 stores typed job ownership, targets, state/phase, progress, attempts, timestamps, safe diagnostics, bounded request/result bodies, and future claim fields. The private-v2 fixture and current uploads migrate without lost Job IDs or history. Architecture, fmt, 96 Rust tests, and clippy pass. | Claims, leases, scheduler execution, cancellation/retry controls, and new job routes remain P02.2-P02.4. |

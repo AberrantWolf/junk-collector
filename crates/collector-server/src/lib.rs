@@ -14,10 +14,10 @@ use collector_app::{
     ComponentDetails, CreateAssetCommand, CreateCollectionCommand, CreateImportCommand,
     DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView,
     ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary, ImportView, JobView,
-    MediaResource, NativeDeviceView, PasskeyView, PresentedAsset, PresentedCollection,
-    PresentedEvidence, PresentedItem, ProcessingSummary, ReturnLoanCommand, ReviewImportCommand,
-    SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails, StartLoanCommand,
-    StartProcessingCommand, UpdateAssetCommand,
+    MediaResource, MusicTrackAvailability, NativeDeviceView, PasskeyView, PrepareMusicTrack,
+    PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem, ProcessingSummary,
+    ReturnLoanCommand, ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView,
+    SpecimenDetails, StartLoanCommand, StartProcessingCommand, UpdateAssetCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -489,6 +489,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(asset_metadata))
         .routes(routes!(asset_original))
         .routes(routes!(asset_thumbnail))
+        .routes(routes!(music_track_availability))
         .routes(routes!(media))
 }
 
@@ -526,6 +527,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(job))
         .routes(routes!(cancel_job))
         .routes(routes!(retry_job))
+        .routes(routes!(prepare_music_track))
         .routes(routes!(create_asset).layer(DefaultBodyLimit::max(20 * 1024 * 1024)))
         .routes(routes!(update_asset, tombstone_asset))
         .routes(routes!(chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)))
@@ -1678,6 +1680,40 @@ async fn media(
     .await?;
     file_response(resource, headers).await
 }
+
+#[utoipa::path(get, path = "/api/v1/items/{id}/music-tracks", params(("id" = ItemId, Path)), responses((status = 200, body = Vec<MusicTrackAvailability>), (status = 403), (status = 404)))]
+async fn music_track_availability(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<Json<Vec<MusicTrackAvailability>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.music_track_availability(&actor, id)).await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{item}/captures/{capture}/music-tracks/{track}/prepare", params(("item" = ItemId, Path), ("capture" = CaptureId, Path), ("track" = u16, Path), ("Idempotency-Key" = String, Header)), request_body = PrepareMusicTrack, responses((status = 202, body = serde_json::Value), (status = 400), (status = 403), (status = 404), (status = 409), (status = 503)))]
+async fn prepare_music_track(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((item, capture, track)): Path<(ItemId, CaptureId, u16)>,
+    Json(command): Json<PrepareMusicTrack>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .prepare_configured_music_track(&actor, item, capture, command, track, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id": job_id})),
+    )
+        .into_response())
+}
 pub fn parse_range(value: &str, length: u64) -> Option<(u64, u64)> {
     if length == 0 {
         return None;
@@ -1773,11 +1809,14 @@ async fn file_response(resource: MediaResource, headers: HeaderMap) -> ApiResult
         .header(header::ETAG, &etag);
     let count = if let Some(range) = range {
         let Some((start, end)) = parse_range(range, length) else {
-            return Ok((
-                StatusCode::RANGE_NOT_SATISFIABLE,
-                [(header::CONTENT_RANGE, format!("bytes */{length}"))],
-            )
-                .into_response());
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header(header::CONTENT_RANGE, format!("bytes */{length}"))
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(header::ETAG, etag)
+                .header(header::CONTENT_LENGTH, 0)
+                .body(Body::empty())
+                .map_err(|error| Error::Storage(error.to_string()).into());
         };
         reader = blocking(move || {
             reader

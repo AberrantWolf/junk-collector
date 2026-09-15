@@ -1772,7 +1772,10 @@ fn verify_selection(
     Ok(CdProcessingResult::AudioVerification { verification })
 }
 
-fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSelection> {
+/// Detect the one supported CD package anchor without opening any archive path.
+/// Application read/command services use this to present and prepare the same
+/// music-owned track mapping as processing jobs.
+pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSelection> {
     let anchors = inventory
         .files
         .iter()

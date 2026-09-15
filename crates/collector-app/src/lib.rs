@@ -526,6 +526,10 @@ pub trait JobPort: Send + Sync {
         limit: u16,
     ) -> Result<Page<JobRecord>>;
     fn retry_failed_job(&self, id: JobId, user: UserId) -> Result<JobId>;
+    /// Active derivative inputs are private mechanism records. Application code
+    /// reduces them to a viewer-safe preparing state after collection access is
+    /// authorized; job identity, submitter and diagnostics never cross the DTO.
+    fn active_derivative_jobs(&self, capture: CaptureId) -> Result<Vec<FrozenDerivativeJob>>;
 }
 
 pub trait AdministrationPort: Send + Sync {

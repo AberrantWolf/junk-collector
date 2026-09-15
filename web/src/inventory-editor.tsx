@@ -86,7 +86,7 @@ export default function InventoryEditor({item,busy,setBusy,onSaved,onError}:Prop
   if(await mutate(`/items/${item.id}/specimens/${specimenId}/dispose`,{method:'POST',body:JSON.stringify({expected_revision:item.revision,command:{date:value.date,reason:value.reason,possession:value.possession}})}))setDisposalDraft(undefined);
  }
 
- return <section className="inventory-editor" aria-labelledby="physical-inventory-title">
+ return <section data-unsaved={!!editingSpecimen||!!partDraft||!!loanDraft||!!returnDraft||!!disposalDraft} className="inventory-editor" aria-labelledby="physical-inventory-title">
   <div className="section-heading"><div><p className="eyebrow">Copy-level records</p><h3 id="physical-inventory-title">Physical inventory</h3></div><button disabled={busy||!!editingSpecimen} onClick={()=>editCopy()}>Add physical copy</button></div>
   {!item.specimens.length&&!editingSpecimen&&<p className="muted">No physical copies recorded. This item can remain wishlist-only.</p>}
   {conflict&&<div className="notice conflict" role="alert"><strong>Revision conflict</strong><p>Your draft is still here. The server is now at revision {conflict.revision}; this form started from revision {item.revision}.</p><div className="button-row"><button onClick={reloadServer}>Reload and discard draft</button><button className="primary" onClick={reapplyDraft}>Keep draft on revision {conflict.revision}</button></div></div>}

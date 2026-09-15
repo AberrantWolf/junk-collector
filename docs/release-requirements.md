@@ -58,6 +58,29 @@ Authenticated clients obtain bounded collection-type descriptors and server-comp
 
 ## Release acceptance
 
+- User clarification (2026-09-15): explicitly prepare an entire album as separate
+  FLAC tracks, including selected associated discs, using durable batch submission
+  and existing per-track jobs. Independent work remains queueable while earlier
+  jobs run throughout the application; only real dependencies/conflicts or explicit
+  admission limits block it. Verify partial outcomes, duplicate prevention, retry,
+  cancellation and restart. [D07.4–D07.5 and U05](background-work-plan.md) own this
+  web completion requirement; bounded execution is compatible with queued work.
+
+- User clarification (2026-09-15): every interface needs useful valid defaults,
+  eligible choices, up-front prerequisite guidance and clear outcomes/recovery.
+  Audit all implemented screens/actions and resolve findings before claiming web
+  UI completion, not only user-reported examples. Apply the same acceptance
+  standard to future interfaces. [U05](interface-readiness-plan.md) owns this gate;
+  analysis must choose valid CUE/TOC anchors and identify missing package members
+  before execution while preserving basic import without optional analysis.
+
+- User clarification (2026-09-15): web curation is incomplete without identifiable
+  import and per-attempt history, actionable outcomes, reopening older imports,
+  and cleanup of erroneous imports. Discard unpublished staging with explicit
+  byte-reclamation results; dismiss/restore terminal history and correct mistaken
+  published associations while preserving originals/evidence. Acceptance belongs
+  to [P04.4–P04.6](import-management-plan.md).
+
 - Recover interrupted publication and catalog rebuild without losing originals, manual overrides, loans or evidence; retain unknown module data and directory-independent IDs.
 - Exercise duplicate specimens, multi-disc editions, unidentified captures, wishlist-only inventory, lending and disposal.
 - Validate normalized hashes, track structure, AccurateRip offsets and FLAC PCM against independent vectors and real-dump oracles.

@@ -18,6 +18,15 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 
 ## Implemented
 
+- 2026-09-15 workflow corrections to P04/U01/D07: upload, analysis, review and
+  publication have distinct labels and next steps; analysis no longer announces
+  publication. Music preparation appears at the top of the editor, and absent
+  tracks show guidance. Track availability follows Capture revisions, including
+  publication without an Item revision change. Management dialogs keep their close button visible,
+  handle Escape with draft-discard confirmation, contain keyboard focus and
+  restore focus on close. Administration explains encoder setup; browser-based
+  encoder settings writes and automatic MusicBrainz/artwork lookup remain absent.
+
 - Six-crate Rust workspace with a typed collection graph, compiled-module registry, application authorization boundary and a schema-2 third-module contract test.
 - Foundation types now include collection-owned Work/Edition records, exclusive Item identity links, ordered specimen Components with optional data-bearing Carriers, collection-level Capture associations, typed asset subjects, language/currency/coordinate validation, canonical digests, and graph/representation validation.
 - Archive schema 2 and a migration-only durable checkpoint preserve schema-1 records unchanged while emitting typed Work, Edition, Item, and Capture revisions, deterministic Components, explicit legacy payload locators, and rebuildable Works/Editions/Captures/Components projections. A committed synthetic baseline fixture covers two revisions, duplicate copies, two discs, legacy case/booklet carriers, files/assets, evidence, manual metadata, and lexically ordered unknown JSON.
@@ -36,7 +45,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 - S03 advances private state to v6 with expiring targeted enrollment and separately hashed/revocable native credentials. Same-user recent browser approval, cancellation/expiry/replay protection, one-time issuance, header-independent native authentication, and native-device inventory/revocation are implemented. `collector-client` owns an injectable secure-storage port, refuses redirects/cross-origin credential delivery, validates enrolled server identity/certificate material, and completes the LAN TLS integration through real enrollment.
 - U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted.
 - Private SQLite advances through explicit migrations and stores a durable default UserId selected once from legacy first-row behavior. First-account creation sets it transactionally; later accounts do not change it.
-- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally. D05.1 is reviewed and corrected locally: authorized frozen BIN/CUE and current raw-redumper packages produce strict signed layouts, exact `i16` stereo 44.1-kHz PCM, published disc IDs where the layout permits them, and bounded cancellation-aware AccurateRip checksum/offset inputs. Mixed mode, synthetic gaps and unsupported/ambiguous sidecars cannot claim whole-disc audio. D05.2 is reviewed and corrected locally: the provider adapter freezes bounded exact dBAR/no-data observations for checked offline replay, and music-owned policy retains explicit per-track v1/v2 coverage while requiring every expected track and a justified unique offset for whole-disc verification. D05.3 is reviewed and corrected locally: music Import analysis, committed structure jobs, shared-verifier AccurateRip jobs, archived snapshots, history and web curation use the existing registry/job/publication paths. Synthetic workflow tests cover outage, retry, cancellation, exact snapshot-byte rejection, no-data, refresh and reindex. D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally. Immutable fixed-profile recipes consume music-owned exact track ranges; the optional bounded process adapter validates FLAC by independently decoding every integer PCM frame and inspects Opus delay/padding; D07.2 attaches these validated outputs through the Capture journal. FLAC 1.5.0 is locally qualified; `opusenc`, live-provider, owned real-dump and external mastering qualification remain unavailable/external.
+- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally. D05.1 is reviewed and corrected locally: authorized frozen BIN/CUE and current raw-redumper packages produce strict signed layouts, exact `i16` stereo 44.1-kHz PCM, published disc IDs where the layout permits them, and bounded cancellation-aware AccurateRip checksum/offset inputs. Mixed mode, synthetic gaps and unsupported/ambiguous sidecars cannot claim whole-disc audio. D05.2 is reviewed and corrected locally: the provider adapter freezes bounded exact dBAR/no-data observations for checked offline replay, and music-owned policy retains explicit per-track v1/v2 coverage while requiring every expected track and a justified unique offset for whole-disc verification. D05.3 is reviewed and corrected locally: music Import analysis, committed structure jobs, shared-verifier AccurateRip jobs, archived snapshots, history and web curation use the existing registry/job/publication paths. Synthetic workflow tests cover outage, retry, cancellation, exact snapshot-byte rejection, no-data, refresh and reindex. D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. Immutable fixed-profile recipes consume music-owned exact track ranges; the optional bounded process adapter validates FLAC by independently decoding every integer PCM frame and inspects Opus delay/padding; single-track outputs publish through the Capture journal and appear through a viewer-safe availability/read contract with strong ETag and Range behavior. Server-owned optional encoder configuration and curation-only explicit preparation leave import and original reads independent of tools. The bounded browser-player child is implemented locally over that shared DTO: viewer playback is grouped by Capture/source, prefers a decodable FLAC, and provides in-memory play/pause/seek/next/previous/ended transitions with honest codec/access failures. Google Chrome 153.0.8010.37 actually decoded and played generated FLAC; the child is reviewed and corrected locally. `opusenc`, live-provider, owned real-dump, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external.
 - Separate private operational database; collection roles, private field filtering, revisioned accounts/grants, password/passkey recovery, browser-session inventory, and revocable paired native credentials.
 - Separate public/private HTTP routers and direct LAN TLS. Public curation/admin independently configured; disabled APIs and management bundles are absent.
 - WebAuthn passkey registration/login backend and browser integration when an HTTPS authentication origin is configured. Registration and passwordless login pass a Chromium virtual-authenticator end-to-end test; real password-manager/hardware acceptance remains a release gate.
@@ -248,7 +257,7 @@ matrix, exact dependency/tool selections, migration reservations, generated fixt
 recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
-D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally.
+D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally.
 Archive schema 4 and catalog schema 5 cover processing observations,
 streamed snapshots, metadata authority, and conversion recipes; private schema 11
 persists frozen Job input, provisional Import observations and active catalog
@@ -272,6 +281,26 @@ offline-library management and the Trash Amp provider remain later tickets.
 
 ## Required before the planned first release
 
+- **Album/background-queue gate, added 2026-09-15:**
+  [D07.4–D07.5](background-work-plan.md) are planned. Current FLAC jobs execute
+  asynchronously, but the music component disables other preparation controls
+  while its one tracked job runs. Whole-album submission and independent enqueueing
+  remain missing. U05 must audit all interfaces for unnecessary background-work
+  blocking before web completion; execution concurrency stays server-bounded.
+
+- **Interface readiness gate, added 2026-09-15:** [U05.1–U05.3](interface-readiness-plan.md)
+  remain planned. Analysis currently offers all package files and defaults to
+  file 0/BIN-CUE. Valid operation-specific defaults, eligible inputs and up-front
+  missing-prerequisite guidance are required, followed by an audit and fixes
+  across every implemented interface before web UI completion.
+
+- **Web UI completion gate, added 2026-09-15:** P04.4–P04.6 are planned and
+  unimplemented. Identifiable import/attempt history, reopening older imports,
+  discarding erroneous unpublished imports with staging reclamation, and
+  dismissible/restorable history are required. See the
+  [import-management plan](import-management-plan.md). Earlier P04-complete
+  statements describe the original P04.1–P04.3 acceptance only.
+
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
 2. Complete independent accessibility/security review for the locally implemented
    P04 workspace and Job controls. The legacy upload and administrator inbox routes
@@ -281,7 +310,7 @@ offline-library management and the Trash Amp provider remain later tickets.
    MusicBrainz/CAA enrichment and independent real-dump verification oracles.
    D02/D03 and D04.1 complete the reusable disc/audio/game primitives locally; no
    Collector catalog verification is currently claimed.
-4. Implement D07.3 availability and ranged media routes over the reviewed D07.2 publication service. Browser preview currently only plays already-playable original formats.
+4. Checkpoint the reviewed browser player, then implement D06.1 metadata authority. Its actual Chrome FLAC playback/seek/transition workflow passes; other-browser, gapless/sample-accurate and deployment qualification remain unclaimed.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
 6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.
 7. Add authenticated endpoint discovery, mDNS, automatic health checks and actual transfer failover. Extend the tested enrolled LAN trust path to automatic discovery and full native-client failover.
@@ -429,5 +458,13 @@ committed recovery finishes the original output without an encoder or a new acce
 check. Encoder versions and exact source/track ranges determine output identity.
 Concurrent requests converge; current Capture associations and existing Item edits
 survive publication. Reindex checks stored derivative bytes against validation
-evidence. D07.2 is reviewed; D07.3 availability/media/routes remain unimplemented.
-Import, inventory, verification and media GET still do not request conversion.
+evidence. D07.3 adds an authorized ordered track/profile availability DTO, client
+media reads, curation-only preparation, server-owned optional encoder probing,
+generated API contracts and web preparation/progress controls. Published output
+remains readable after restart without its module or tool. Strong content ETags
+and full, partial, suffix, open-ended, unsatisfiable and If-Range behavior are
+exercised through HTTP. Import, inventory, verification and media GET still do
+not request conversion. The following bounded browser child is now implemented
+locally and is reviewed. It uses these rows directly for Capture/source-scoped
+in-memory queues and actual viewer FLAC playback without adding a backend player
+or conversion-on-read path.

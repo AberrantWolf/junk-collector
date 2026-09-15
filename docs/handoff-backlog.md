@@ -46,7 +46,7 @@ contract for D04–D07, P05, C01, S04 and C02. **W4.0 is reviewed and corrected;
 W4.1 contracts are reviewed and corrected; W4.2 durable processing integration is
 reviewed and corrected.**
 The [collection-type refactor](collection-types-plan.md) (CT.1–CT.4) is the inserted
-prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally. Authenticated descriptors, availability-aware
+prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1–D07.2 are reviewed and corrected locally; D07.3 is reviewed and corrected locally. Authenticated descriptors, availability-aware
 content permissions, generic owner-driven forms and valid unavailable-owner browser
 fallback coverage are present.
 The plan supplies child steps, fixed ownership,
@@ -155,6 +155,16 @@ Planned children (complete in order): [A04.1 DTO firewall/read services](wave-2-
 **Status (2026-09-10): complete; included in Wave 2.** Explicit command-scoped adapters commit private effect/results in one SQLite transaction or prepare the exact response against an immutable filesystem publication marker. Private schema v7 adds command outcomes; startup settles committed responses before accepting writes, repairs upload bookkeeping, and removes completed artwork scratch. A real subprocess matrix terminates after effects across 19 mutation families and additionally at early archive commit points; every committed command replays the exact response and rejects changed payloads. Prepared partial files and interrupted journal replacements recover without weakening committed-byte checks.
 
 ## Onboarding, inventory and management
+
+### U05 — Guided interfaces and readiness review
+
+**Status (2026-09-15): planned; required before web UI completion.** U05.1 adds
+typed readiness and smart analysis defaults; U05.2 audits and corrects every
+implemented interface; U05.3 validates complete journeys and negative cases.
+See the [interface readiness plan](interface-readiness-plan.md) for contracts,
+coverage and acceptance. Application/module services own eligibility; all clients
+consume it. This complements P04 import history/cleanup and applies to future
+interface acceptance too. It does not replace the current D06.1 assignment.
 
 ### U01 — Explain local setup and denied operations in the WebUI
 
@@ -437,6 +447,17 @@ filesystem termination behavior remain externally unqualified.
 
 ### P04 — Inbox, import-review and job UI
 
+**Current scope (2026-09-15): reopened for required web UI completion work.**
+P04.1–P04.3 passed their original acceptance; P04.4 identifiable import/attempt
+history, P04.5 cleanup, and P04.6 completion review remain planned. See the
+[import management follow-up](import-management-plan.md) for ownership, acceptance,
+and the future assignment. This gate does not change the current D06.1 handoff.
+
+2026-09-15 usability correction: distinguish uploaded/analyzed/reviewed/published
+states, identify the next action, and avoid announcing publication after analysis.
+The editor exposes music preparation near its top and protects drafts on Escape
+or close. This does not advance D06 or implement browser-writable encoder settings.
+
 **Routine · Dependencies:** P02, P03, U02. **Owner:** web curation/administration through application APIs.
 
 **Status (2026-09-11): complete locally, including validated review fixes.** Interrupted browser packages can be reselected after refresh and resumed under the same Import identity. Retained prefixes are compared before appending; this currently retransfers those bytes for comparison and is not a bandwidth-optimized resume protocol. Saved reviews can be reopened after publication failures, and temporary restore failures retain the saved Import ID. Both normal and private-local browser suites cover the changes, including lost final responses and same-name/same-size source mismatches.
@@ -599,7 +620,13 @@ Persist candidate alternatives/raw responses; rank strong identity before langua
 
 ### D07 — FLAC/Opus derivative jobs
 
-**Status (2026-09-15): D07.1 reviewed and corrected locally; D07.2 reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles now bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc and external mastering qualification remain unavailable/external. D07.2 single-track publication/jobs, immutable recipe and validation evidence, cancellation and restart recovery are reviewed and corrected locally. D07.3 availability/media are not implemented. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
+**Added scope (2026-09-15): D07.4–D07.5 planned and required for web completion.**
+Whole-album FLAC preparation and independently queued encodes are defined in the
+[background-work plan](background-work-plan.md). D07.1–D07.3 validation covers
+per-track behavior, not this batch/nonblocking requirement. P02 owns queue bounds;
+U05 applies the rule to all interfaces. The current D06.1 handoff is unchanged.
+
+**Status (2026-09-15): D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. D07.2 publishes one track per job through the existing Capture journal. D07.3 adds viewer-safe ordered availability, server-owned optional encoder probing, curation-only preparation, strong ETag/ranged reads and web preparation/progress controls. The browser child consumes that DTO on the client surface, keeps Capture/source queues distinct, and has actual Google Chrome 153.0.8010.37 FLAC play/pause/seek/transition qualification. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external. The bounded child is reviewed; proceed to D06.1. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D03, D05, P02, A04. **Owner:** audio transforms, application derivative jobs, store representations.
 

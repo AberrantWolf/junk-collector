@@ -37,8 +37,20 @@ Cancellation wins until the final gated revision rename. Committed recovery uses
 retained bytes/evidence without re-encoding or re-authorizing; current Capture
 associations and Item edits survive. Reindex validates derivative references and
 stored payload identity, without claiming a fresh codec or catalog verification.
-These application/storage services currently have no derivative routes or web
-controls; import and media reads never request conversion automatically.
+The viewer-safe ordered availability contract carries source Representation,
+track position and integer PCM coordinates, safe title, profile and only
+preparing/unavailable/available state, plus a typed actor-specific preparation
+permission. UI behavior never depends on human-readable reason text. Preparation
+receipts bind the submitted request before resolving mutable tool configuration.
+Published state adds immutable
+Representation/package-file identity, length, media type and digest; archive
+paths, raw evidence and private Job details remain server-side. The client router
+serves this contract and existing opaque media readers with strong content ETags
+and byte ranges. Only the curation router can enqueue preparation. Server-owned
+optional encoder configuration supplies the probed full version report; browser
+inputs cannot name tools or version claims. Published outputs remain readable
+when the module or tool later disappears. Import and media reads never request
+conversion automatically.
 
 Collection reads cross `CollectionReadPort`, whose methods receive durable identities and queries rather than a Principal. `CollectionService` owns grant checks, role redaction, and conversion into explicit collection/item/evidence response types. Viewer JSON structurally omits acquisition, private notes, loans, metadata observations/overrides, detailed Evidence fields, and raw module envelopes; unavailable modules retain a safe non-executable notice without their raw generic value. Capture DTOs never expose archive locators. Owner and curator DTOs retain permitted curation detail, and every authorized collection/item response carries server-computed effective permissions. `CollectionService` is constructed from narrow ports; the combined `Catalog` trait remains only as an internal Store compatibility adapter while callers use the policy-owned service families.
 
@@ -119,6 +131,15 @@ Native pairing carries server ID, local certificate and its SHA-256 fingerprint.
 Passkeys use one configured HTTPS authentication origin and standard WebAuthn. Challenges are bounded, server-side, expiring and single-use. Registration is bound to the authenticated user and ceremonies retain the original credential record/revision, and counter updates compare-and-swap that verified snapshot together with session issuance. Reloading a newer record after verification is forbidden; zero-counter passkeys retain the WebAuthn library’s verification semantics. Credential IDs are unique across accounts. CLI setup explicitly allowlists the private listener’s localhost browser origin; it does not change public exposure or trust forwarded headers. Browser sessions are HttpOnly, Secure and SameSite; browser ceremonies and cookie mutations require an exact normalized Origin. Native enrollment start/complete are the narrow unauthenticated bootstrap exception: they grant no authority before same-user, recently-authenticated browser approval and authenticate completion with a stored-hash high-entropy secret. The issued 30-day native credential is returned once, stored only as a hash server-side, and selected only by successful native-credential lookup—never by a caller header. Single-user presentation hides account selection; it is not anonymous access.
 
 ## Clients and shared audio
+
+The bounded browser player lives in the client bundle and consumes authorized
+availability rows and opaque media URLs. Its short-lived disc selection is grouped
+by Capture/source and chooses one representation per track. HTML media seconds
+are a presentation projection; this adds no reusable native queue, DSP engine,
+server player or persisted activity. The component owns and releases its media
+element at ref detachment, fences superseded play promises, and discards obsolete
+playback when availability changes. Native queue/PCM services remain separate
+shared-library work. Client playback never requires the curation bundle or surface.
 
 Artwork is part of browsing data, not a decorative optional gallery: games and CDs show cover thumbnails next to text, including search and offline snapshots. Unidentified/tentative identity is distinct from missing artwork.
 

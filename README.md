@@ -92,9 +92,25 @@ authentication_origin = "https://collector.example.net"
 [exposure]
 public_curation = false
 public_administration = false
+
+# Optional. Paths or executable names are probed at server startup and by doctor.
+[encoders]
+flac = "/usr/bin/flac"
+# opus = "/usr/bin/opusenc"
 ```
 
 Administration exposure implies curation exposure; neither grants a role. Disabled management routes and JavaScript entrypoints are absent from the public router. Proxy headers never grant private status. Exposure changes currently require editing configuration and restarting.
+
+Edit the existing `[encoders]` section (or create it if absent), set the path to
+your installed tool, then restart the server. Open a CD item’s editor and use
+**Music preparation → Prepare FLAC**; the completed track becomes a download link.
+Close the editor to use the **Disc player** in item details. Viewers can play
+prepared tracks without curation access; playback currently stops when details close.
+
+Music derivatives are prepared only when a curator requests one. FLAC is the
+default choice and Opus is available at explicit 96/128/192-kbps presets when its
+encoder is configured. Missing tools do not block import, preservation, analysis,
+or original downloads, and neither import nor a media request starts conversion.
 
 ## Development
 

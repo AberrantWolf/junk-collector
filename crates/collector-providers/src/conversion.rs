@@ -143,6 +143,33 @@ impl ProcessAudioConverter {
 }
 
 impl AudioConversionPort for ProcessAudioConverter {
+    fn configured_availability(
+        &self,
+        profile: &collector_core::ConversionProfile,
+    ) -> EncoderAvailability {
+        let tool = match profile {
+            collector_core::ConversionProfile::Flac => self.flac.as_ref(),
+            collector_core::ConversionProfile::Opus { .. } => self.opus.as_ref(),
+        };
+        match tool {
+            Some(tool) => EncoderAvailability::Available {
+                encoder: tool.kind.executable_name().into(),
+                version: tool.version.clone(),
+            },
+            None => EncoderAvailability::Unavailable {
+                reason: match profile {
+                    collector_core::ConversionProfile::Flac => {
+                        "FLAC encoder is not configured. Add encoders.flac to collector.toml and restart."
+                    }
+                    collector_core::ConversionProfile::Opus { .. } => {
+                        "Opus encoder is not configured. Add encoders.opus to collector.toml and restart."
+                    }
+                }
+                .into(),
+            },
+        }
+    }
+
     fn availability(&self, recipe: &ConversionRecipe) -> EncoderAvailability {
         if let Err(error) = recipe.validate() {
             return EncoderAvailability::Unavailable {

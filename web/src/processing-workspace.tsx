@@ -1,6 +1,7 @@
 import React,{useEffect,useState,api} from '@collector/runtime';
 import type {components} from './generated/api';
 
+
 type Item=components['schemas']['PresentedItem'];
 type Capture=components['schemas']['PresentedCapture'];
 type Representation=components['schemas']['Representation'];
@@ -116,10 +117,14 @@ function RepresentationOperations({item,capture,representation,capabilities,snap
  </div>;
 }
 
-export default function ProcessingWorkspace({item,busy,setBusy,onError}:Props){
+function ProcessingAnalysisWorkspace({item,busy,setBusy,onError}:Props){
  const [snapshots,setSnapshots]=useState<SnapshotStatus[]>([]);const capabilities=item.presentation.capabilities.filter(value=>value.id.startsWith(`${item.domain.module}.`));const music=item.domain.module==='org.junk.music';
  async function loadSnapshots(){const page=await api<SnapshotPage>(`/collections/${item.collection_id}/catalog-snapshots?limit=100`);setSnapshots(page.items.filter(value=>music?value.snapshot.provider==='org.junk.providers.accuraterip':value.snapshot.provider==='org.junk.providers.local-dat'));}
  useEffect(()=>{if(!['org.junk.games','org.junk.music'].includes(item.domain.module)||item.captures.length===0)return;loadSnapshots().catch(onError);},[item.collection_id,item.domain.module,item.captures.length]);
  if(!['org.junk.games','org.junk.music'].includes(item.domain.module)||item.captures.length===0)return null;
  return <section className="import-workspace" aria-labelledby="processing-heading"><div className="section-heading"><div><h3 id="processing-heading">{music?'Music CD analysis':'Game package analysis'}</h3><p className="muted">{music?'Record structure separately, then optionally fetch and verify against an immutable AccurateRip response. Provider failure never blocks preservation.':'Run explicit, versioned operations against preserved package bytes. Results remain tied to the exact source and catalog snapshot.'}</p></div></div>{capabilities.map(value=><p className="muted" key={value.id}>{operations[value.id]||value.label}: {value.availability.state==='available'?'Available':`Unavailable — ${value.availability.limitation}`}</p>)}{item.captures.flatMap(capture=>capture.representations.map(representation=><RepresentationOperations key={representation.id} item={item} capture={capture} representation={representation} capabilities={capabilities} snapshots={snapshots} busy={busy} setBusy={setBusy} onError={onError} onSnapshotsChanged={loadSnapshots}/>))}</section>;
+}
+
+export default function ProcessingWorkspace(props:Props){
+ return <ProcessingAnalysisWorkspace {...props}/>;
 }
