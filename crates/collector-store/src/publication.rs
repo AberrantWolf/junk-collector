@@ -316,6 +316,17 @@ impl<'a> PublicationJournalStore<'a> {
 
     pub(crate) fn abort(&self, transaction_id: TransactionId) -> Result<()> {
         let journal = self.read(&self.journal_path(transaction_id))?;
+        // Check the commit marker before deleting *any* payload. A rename may
+        // have committed even if advancing the journal failed afterward.
+        for artifact in &journal.artifacts {
+            if artifact.kind == ArtifactKind::Revision
+                && self.resolve(&artifact.published_path)?.exists()
+            {
+                return Err(Error::Storage(
+                    "cannot abort committed revision bytes".into(),
+                ));
+            }
+        }
         for artifact in &journal.artifacts {
             let published = self.resolve(&artifact.published_path)?;
             if published.exists() {

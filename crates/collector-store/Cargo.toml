@@ -24,6 +24,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 tempfile.workspace = true
 
 [dev-dependencies]
+junk-libs-disc.workspace = true
 collector-modules.workspace = true
 collector-providers.workspace = true
 anyhow.workspace = true

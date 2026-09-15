@@ -72,6 +72,26 @@ pub struct CdPackageSelection {
     pub anchor_file_index: usize,
 }
 
+/// Music-owned mapping from one supported package timeline to independently
+/// addressable derivative tracks. Coordinates are stereo PCM frames in the
+/// returned reader, not CD sectors or AccurateRip sample offsets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConversionPcmTrack {
+    pub position: u16,
+    pub start_frame: u64,
+    pub frame_count: u64,
+    /// Stored audio before this track's INDEX 01 which this mapping retains.
+    /// D05's later INDEX 00 spans belong to the preceding track; only track 1
+    /// can therefore have a nonzero leading count here (HTOA).
+    pub leading_hidden_frames: u64,
+}
+
+pub struct ConversionPcmSource {
+    pub reader: Box<dyn junk_libs_disc::CdPcmReader + Send>,
+    pub tracks: Vec<ConversionPcmTrack>,
+    pub total_frames: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AccurateRipSelection {
@@ -1029,8 +1049,20 @@ pub fn open_cue_pcm_package(
     cue_text: &str,
     cue_file_id: PackageFileId,
     inventory: &PackageInventory,
-    mut open_file: impl FnMut(PackageFileId) -> ModuleResult<Box<dyn crate::RepresentationReader>>,
+    open_file: impl FnMut(PackageFileId) -> ModuleResult<Box<dyn crate::RepresentationReader>>,
 ) -> ModuleResult<(PackageCdPcmReader, Vec<DiscPcmTrack>)> {
+    let (reader, tracks, _) =
+        open_cue_pcm_package_with_origin(cue_text, cue_file_id, inventory, open_file, false)?;
+    Ok((reader, tracks))
+}
+
+fn open_cue_pcm_package_with_origin(
+    cue_text: &str,
+    cue_file_id: PackageFileId,
+    inventory: &PackageInventory,
+    mut open_file: impl FnMut(PackageFileId) -> ModuleResult<Box<dyn crate::RepresentationReader>>,
+    retain_htoa: bool,
+) -> ModuleResult<(PackageCdPcmReader, Vec<DiscPcmTrack>, u64)> {
     let prepared = prepare_cue(cue_text, cue_file_id, inventory)?;
     let CdProcessingResult::Layout {
         tracks,
@@ -1067,12 +1099,31 @@ pub fn open_cue_pcm_package(
             reader: Box::new(DiscReaderAdapter(reader)),
         });
     }
-    let absolute_start_frame = prepared.first_index_01_absolute_sector * 588;
+    let stored_start_sector = prepared
+        .resolved
+        .files
+        .first()
+        .map(|file| u64::from(file.file_start_disc_sector))
+        .ok_or_else(|| ModuleError::FailedOperation("CUE has no source files".into()))?;
+    let htoa_frames = if retain_htoa {
+        prepared
+            .first_index_01_absolute_sector
+            .checked_sub(stored_start_sector)
+            .and_then(|sectors| sectors.checked_mul(588))
+            .ok_or_else(|| ModuleError::FailedOperation("CUE HTOA range overflow".into()))?
+    } else {
+        0
+    };
+    let absolute_start_frame = prepared
+        .first_index_01_absolute_sector
+        .checked_mul(588)
+        .and_then(|start| start.checked_sub(htoa_frames))
+        .ok_or_else(|| ModuleError::FailedOperation("CUE PCM origin overflow".into()))?;
     let absolute_end_frame = prepared.leadout_absolute_sector * 588;
     let frames = absolute_end_frame
         .checked_sub(absolute_start_frame)
         .ok_or_else(|| ModuleError::FailedOperation("CD PCM range underflow".into()))?;
-    let windows = tracks
+    let mut windows = tracks
         .iter()
         .map(|track| {
             Ok(DiscPcmTrack {
@@ -1082,7 +1133,9 @@ pub fn open_cue_pcm_package(
                     .ok_or_else(|| {
                         ModuleError::UnavailableCapability("track has no exact PCM range".into())
                     })?
-                    .0,
+                    .0
+                    .checked_add(htoa_frames)
+                    .ok_or_else(|| ModuleError::FailedOperation("track start overflow".into()))?,
                 frame_count: track
                     .pcm_length
                     .ok_or_else(|| {
@@ -1092,11 +1145,32 @@ pub fn open_cue_pcm_package(
             })
         })
         .collect::<ModuleResult<Vec<_>>>()?;
+    if let Some(first) = windows.first_mut() {
+        first.start_frame = 0;
+        first.frame_count = first
+            .frame_count
+            .checked_add(htoa_frames)
+            .ok_or_else(|| ModuleError::FailedOperation("track HTOA span overflow".into()))?;
+    }
     Ok((
         PackageCdPcmReader::new(sources, absolute_start_frame, frames)
             .map_err(module_disc_error)?,
         windows,
+        htoa_frames,
     ))
+}
+
+/// Reader-based CUE conversion entry point used by the application host after it
+/// has authorized and frozen the package inventory.
+pub fn open_cue_conversion_pcm_package(
+    cue_text: &str,
+    cue_file_id: PackageFileId,
+    inventory: &PackageInventory,
+    open_file: impl FnMut(PackageFileId) -> ModuleResult<Box<dyn crate::RepresentationReader>>,
+) -> ModuleResult<ConversionPcmSource> {
+    let (reader, windows, htoa_frames) =
+        open_cue_pcm_package_with_origin(cue_text, cue_file_id, inventory, open_file, true)?;
+    conversion_pcm_source(Box::new(reader), windows, htoa_frames)
 }
 
 const REDUMPER_ORIGIN_FRAMES: i64 = 45_150 * 588;
@@ -1470,6 +1544,72 @@ fn open_pcm_selection(
         }
     };
     Ok((reader, tracks, layout))
+}
+
+/// Open the exact PCM and music-owned track ranges used by derivative recipes.
+/// This is deliberately independent of AccurateRip acquisition/results: a
+/// structurally supported package remains convertible after no-data, mismatch or
+/// provider outage.
+pub fn open_conversion_pcm_selection(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    selection: &CdPackageSelection,
+) -> ModuleResult<ConversionPcmSource> {
+    let inventory = host.package_inventory(access)?;
+    match selection.package_kind {
+        CdPackageKind::Cue => {
+            let (id, cue) = read_cue(host, access, &inventory, selection.anchor_file_index)?;
+            open_cue_conversion_pcm_package(&cue, id, &inventory, |file| {
+                host.package_file(access, file)
+            })
+        }
+        CdPackageKind::Redumper => {
+            let file = anchor_file(&inventory, selection.anchor_file_index)?;
+            let (reader, windows) = open_redumper_pcm_package(file.id, &inventory, |member| {
+                host.package_file(access, member)
+            })?;
+            conversion_pcm_source(Box::new(reader), windows, 0)
+        }
+    }
+}
+
+fn conversion_pcm_source(
+    reader: Box<dyn junk_libs_disc::CdPcmReader + Send>,
+    windows: Vec<DiscPcmTrack>,
+    htoa_frames: u64,
+) -> ModuleResult<ConversionPcmSource> {
+    let total_frames = reader.total_frames();
+    let mut expected_start = 0_u64;
+    let tracks = windows
+        .into_iter()
+        .enumerate()
+        .map(|(index, track)| {
+            if track.start_frame != expected_start || track.frame_count == 0 {
+                return Err(ModuleError::FailedOperation(
+                    "music conversion track ranges are not contiguous and nonempty".into(),
+                ));
+            }
+            expected_start = expected_start
+                .checked_add(track.frame_count)
+                .ok_or_else(|| ModuleError::FailedOperation("track range overflow".into()))?;
+            Ok(ConversionPcmTrack {
+                position: u16::from(track.position),
+                start_frame: track.start_frame,
+                frame_count: track.frame_count,
+                leading_hidden_frames: if index == 0 { htoa_frames } else { 0 },
+            })
+        })
+        .collect::<ModuleResult<Vec<_>>>()?;
+    if expected_start != total_frames {
+        return Err(ModuleError::FailedOperation(
+            "music conversion track ranges do not cover the exact PCM timeline".into(),
+        ));
+    }
+    Ok(ConversionPcmSource {
+        reader,
+        tracks,
+        total_frames,
+    })
 }
 
 fn parse_hex_id(value: &str, label: &str) -> ModuleResult<u32> {

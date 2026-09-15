@@ -73,7 +73,7 @@ impl Store {
             let mut statement = db
                 .prepare(
                     "SELECT id,kind,item_id,request,state FROM private.jobs
-                     WHERE state IN ('running','cancel_requested')",
+                     WHERE state IN ('running','cancel_requested') OR (kind='music_derivative' AND state='failed')",
                 )
                 .map_err(storage)?;
             statement
@@ -154,6 +154,17 @@ impl Store {
                             .unwrap_or(false)
                         })
                     })
+            } else if kind == "music_derivative" {
+                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+                let capture: CaptureId =
+                    serde_json::from_value(request["capture_id"].clone()).map_err(storage)?;
+                let representation: RepresentationId =
+                    serde_json::from_value(request["representation_id"].clone())
+                        .map_err(storage)?;
+                self.capture(capture)?
+                    .representations
+                    .iter()
+                    .any(|r| r.id == representation)
             } else if kind == "processing_operation" {
                 let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
                 request
@@ -176,8 +187,8 @@ impl Store {
                 lock(&self.db)?
                     .execute(
                         "UPDATE private.jobs SET state='running',phase='revision_committed',
-                           cancellation_requested=0 WHERE id=?",
-                        [id],
+                           cancellation_requested=0,claim_token=COALESCE(claim_token,?) WHERE id=?",
+                        params![TransactionId::new().to_string(), id],
                     )
                     .map_err(storage)?;
             } else if state == "cancel_requested" {
@@ -775,6 +786,7 @@ impl Store {
                     | "import_publication"
                     | "catalog_acquisition"
                     | "processing_operation"
+                    | "music_derivative"
             )
         {
             return Err(Error::Conflict);

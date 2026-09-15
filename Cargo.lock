@@ -493,6 +493,7 @@ dependencies = [
  "collector-modules",
  "hex",
  "junk-libs-audio",
+ "junk-libs-disc",
  "serde",
  "serde_json",
  "sha2",
@@ -563,7 +564,11 @@ dependencies = [
  "hex",
  "httpdate",
  "junk-libs-accuraterip",
+ "junk-libs-audio",
+ "junk-libs-core",
  "junk-libs-dat",
+ "junk-libs-disc",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",
@@ -623,6 +628,7 @@ dependencies = [
  "fs2",
  "hex",
  "image",
+ "junk-libs-disc",
  "rand 0.8.8",
  "rusqlite",
  "serde",
@@ -1386,6 +1392,8 @@ dependencies = [
 name = "junk-libs-audio"
 version = "0.1.0"
 dependencies = [
+ "claxon",
+ "junk-libs-disc",
  "thiserror 2.0.20",
 ]
 

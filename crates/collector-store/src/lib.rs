@@ -2,6 +2,7 @@
 mod archive_v3;
 mod auth;
 mod commands;
+mod derivatives;
 mod files;
 mod jobs;
 mod migration;
@@ -263,6 +264,7 @@ impl Store {
             _archive_lock: Arc::new(archive_lock),
             _private_lock: Arc::new(private_lock),
         };
+        store.cleanup_derivative_scratch()?;
         store.reindex()?;
         store.recover_private_publications()?;
         store.reconcile_job_publications()?;
@@ -601,6 +603,7 @@ impl Store {
             project(&tx, &record, &relative(&self.archive, &path)?)?;
         }
         self.project_v4_records(&tx)?;
+        self.validate_derivative_projection(&tx)?;
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
         Ok(())
@@ -2145,6 +2148,10 @@ impl CollectionTypePort for Store {
                     .map(|input| match input {
                         collector_app::FrozenJobInput::Processing(job) => job.operation,
                         collector_app::FrozenJobInput::Acquisition(job) => job.request.operation,
+                        collector_app::FrozenJobInput::Derivative(_) => {
+                            collector_core::OperationId::new("org.junk.music.derivative")
+                                .expect("static operation")
+                        }
                     });
                 if module.is_some()
                     || operation.is_some()
@@ -3444,6 +3451,29 @@ fn publish_v3_revision_with_payloads<T: Serialize>(
     evidence: Vec<archive_v3::EvidenceReferenceV3>,
     payloads: Vec<V3PayloadPublication>,
 ) -> Result<TransactionId> {
+    publish_v3_revision_controlled(
+        store,
+        target,
+        value,
+        evidence,
+        payloads,
+        TransactionId::new(),
+        None,
+        &mut || Ok(()),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_v3_revision_controlled<T: Serialize>(
+    store: &Store,
+    target: V3RevisionTarget<'_>,
+    value: T,
+    evidence: Vec<archive_v3::EvidenceReferenceV3>,
+    payloads: Vec<V3PayloadPublication>,
+    transaction_id: TransactionId,
+    derivative_job: Option<JobId>,
+    checkpoint: &mut dyn FnMut() -> Result<()>,
+) -> Result<TransactionId> {
     let V3RevisionTarget {
         collection,
         directory_kind,
@@ -3452,7 +3482,7 @@ fn publish_v3_revision_with_payloads<T: Serialize>(
         expected,
         revision,
     } = target;
-    let transaction_id = TransactionId::new();
+    checkpoint()?;
     let envelope = archive_v3::RevisionEnvelopeV3::new(transaction_id, value, evidence);
     let record_bytes = serde_json::to_vec_pretty(&envelope).map_err(storage)?;
     let manifest = V3TypedManifest {
@@ -3527,11 +3557,8 @@ fn publish_v3_revision_with_payloads<T: Serialize>(
         fs::create_dir(&payload_stage).map_err(storage)?;
         for (index, payload) in payloads.iter().enumerate() {
             let target = payload_stage.join(index.to_string());
-            fs::copy(&payload.source, &target).map_err(storage)?;
-            File::open(&target)
-                .and_then(|file| file.sync_all())
-                .map_err(storage)?;
-            if Digest::sha256(&fs::read(&target).map_err(storage)?).hex != payload.sha256 {
+            copy_publication_file(&payload.source, &target, checkpoint)?;
+            if hash_publication_file(&target, checkpoint)?.hex != payload.sha256 {
                 return Err(Error::Storage(
                     "staged Asset payload digest mismatch".into(),
                 ));
@@ -3546,7 +3573,9 @@ fn publish_v3_revision_with_payloads<T: Serialize>(
     store
         .publication_fault
         .check(PublicationFaultPoint::BytesStaged)?;
+    checkpoint()?;
     for (index, payload) in payloads.iter().enumerate() {
+        checkpoint()?;
         let staged = stage.join("payloads").join(index.to_string());
         let published = store.archive.join(&payload.published_path);
         let parent = published
@@ -3554,7 +3583,7 @@ fn publish_v3_revision_with_payloads<T: Serialize>(
             .ok_or_else(|| Error::Storage("Asset payload has no parent".into()))?;
         fs::create_dir_all(parent).map_err(storage)?;
         if published.exists() {
-            if Digest::sha256(&fs::read(&published).map_err(storage)?).hex != payload.sha256 {
+            if hash_publication_file(&published, checkpoint)?.hex != payload.sha256 {
                 return Err(Error::Storage(
                     "published Asset payload conflicts with retry".into(),
                 ));
@@ -3578,6 +3607,12 @@ fn publish_v3_revision_with_payloads<T: Serialize>(
         .publication_fault
         .check(PublicationFaultPoint::PayloadPublished)?;
 
+    let _publication_gate = if derivative_job.is_some() {
+        Some(lock(&store.job_publication_gate)?)
+    } else {
+        None
+    };
+    checkpoint()?;
     let destination = store.archive.join(&destination_relative);
     let revisions = destination
         .parent()
@@ -3608,6 +3643,10 @@ fn publish_v3_revision_with_payloads<T: Serialize>(
         transaction_id,
         publication::PublicationPhase::RevisionCommitted,
     )?;
+    if let Some(job) = derivative_job {
+        lock(&store.db)?.execute("UPDATE private.jobs SET phase='revision_committed',cancellation_requested=0 WHERE id=? AND kind='music_derivative'", [job.to_string()]).map_err(storage)?;
+    }
+    drop(_publication_gate);
     store
         .publication_fault
         .check(PublicationFaultPoint::RevisionCommitted)?;
@@ -3824,4 +3863,47 @@ fn slug(value: &str) -> String {
     } else {
         text
     }
+}
+
+fn copy_publication_file(
+    source: &Path,
+    target: &Path,
+    checkpoint: &mut dyn FnMut() -> Result<()>,
+) -> Result<()> {
+    use std::io::Read;
+    let mut source = File::open(source).map_err(storage)?;
+    let mut target = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(target)
+        .map_err(storage)?;
+    let mut buffer = vec![0; 1024 * 1024];
+    loop {
+        checkpoint()?;
+        let count = source.read(&mut buffer).map_err(storage)?;
+        if count == 0 {
+            break;
+        }
+        target.write_all(&buffer[..count]).map_err(storage)?;
+    }
+    target.sync_all().map_err(storage)
+}
+fn hash_publication_file(
+    path: &Path,
+    checkpoint: &mut dyn FnMut() -> Result<()>,
+) -> Result<Digest> {
+    use sha2::Digest as _;
+    use std::io::Read;
+    let mut reader = File::open(path).map_err(storage)?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = vec![0; 1024 * 1024];
+    loop {
+        checkpoint()?;
+        let count = reader.read(&mut buffer).map_err(storage)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Digest::new(HashAlgorithm::Sha256, hex::encode(hasher.finalize()))
 }

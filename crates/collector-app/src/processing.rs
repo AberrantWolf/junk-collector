@@ -301,11 +301,13 @@ pub struct FrozenAcquisitionJob {
 pub enum FrozenJobInput {
     Processing(FrozenProcessingJob),
     Acquisition(FrozenAcquisitionJob),
+    Derivative(crate::FrozenDerivativeJob),
 }
 impl FrozenJobInput {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Processing(job) => job.validate(),
+            Self::Derivative(job) => job.validate(),
             Self::Acquisition(job) => {
                 job.collection_binding.validate()?;
                 if !matches!(job.collection_binding, CollectionBinding::Assigned { .. }) {
@@ -491,6 +493,16 @@ impl MetadataAuthorityRecord {
 /// Mechanism-only persistence and package access. Authorization and currency
 /// policy remain in CollectionService.
 pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
+    fn conversion_scratch(&self) -> Result<Box<dyn crate::ConversionScratch>>;
+    fn derivative_committed(&self, frozen: &crate::FrozenDerivativeJob) -> Result<bool>;
+    fn publish_derivative(
+        &self,
+        claim: &crate::JobClaim,
+        frozen: &crate::FrozenDerivativeJob,
+        validation: &crate::ConversionValidation,
+        scratch: &mut dyn crate::ConversionScratch,
+        checkpoint: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()>;
     fn package_inventory(
         &self,
         collection: CollectionId,

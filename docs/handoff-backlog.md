@@ -46,7 +46,7 @@ contract for D04–D07, P05, C01, S04 and C02. **W4.0 is reviewed and corrected;
 W4.1 contracts are reviewed and corrected; W4.2 durable processing integration is
 reviewed and corrected.**
 The [collection-type refactor](collection-types-plan.md) (CT.1–CT.4) is the inserted
-prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is next. Authenticated descriptors, availability-aware
+prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally. Authenticated descriptors, availability-aware
 content permissions, generic owner-driven forms and valid unavailable-owner browser
 fallback coverage are present.
 The plan supplies child steps, fixed ownership,
@@ -575,7 +575,7 @@ Integrate qualified game operations through host services; ingest versioned DAT/
 
 ### D05 — Music CD structural and AccurateRip verification
 
-**Status (2026-09-15): D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is next.** Authorized frozen BIN/CUE and current raw-redumper packages produce strict typed layouts and exact bounded integer PCM. Registered music Import/structure/verification operations now use the existing durable jobs, snapshot and observation publication, reindex and web curation paths. Synthetic BIN/CUE and supported raw-redumper packages verify through the actual shared readers; an unsupported signed-coordinate redumper package remains structural-only without blocking preservation. Tests cover exact archived-byte rejection, outage/retry, cancellation, no-data, refresh and historical evidence. Live AccurateRip, owned redumper, real mixed-mode, and D05 external qualification remain unqualified. D07.1 is next under the music-first order; D07 now precedes D06. Follow the [Wave 4 child instructions](wave-4-plan.md#d051--exact-cd-reading-and-bounded-accuraterip-input) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-15): D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally.** Authorized frozen BIN/CUE and current raw-redumper packages produce strict typed layouts and exact bounded integer PCM. Registered music Import/structure/verification operations now use the existing durable jobs, snapshot and observation publication, reindex and web curation paths. Synthetic BIN/CUE and supported raw-redumper packages verify through the actual shared readers; an unsupported signed-coordinate redumper package remains structural-only without blocking preservation. Tests cover exact archived-byte rejection, outage/retry, cancellation, no-data, refresh and historical evidence. Live AccurateRip, owned redumper, real mixed-mode, and D05 external qualification remain unqualified. Follow the [Wave 4 child instructions](wave-4-plan.md#d051--exact-cd-reading-and-bounded-accuraterip-input) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D02, A03, P02, P03. **Owner:** music handlers, verification primitives and provider adapters.
 
@@ -599,7 +599,7 @@ Persist candidate alternatives/raw responses; rank strong identity before langua
 
 ### D07 — FLAC/Opus derivative jobs
 
-**Status: planned; not implemented.** Ordered children: D07.1 exact recipes/conversion; D07.2 publication; D07.3 availability/media. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-15): D07.1 reviewed and corrected locally; D07.2 reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles now bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc and external mastering qualification remain unavailable/external. D07.2 single-track publication/jobs, immutable recipe and validation evidence, cancellation and restart recovery are reviewed and corrected locally. D07.3 availability/media are not implemented. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D03, D05, P02, A04. **Owner:** audio transforms, application derivative jobs, store representations.
 

@@ -10,12 +10,14 @@ length = 16
 sha256 = "890bb45096e8a0b0189c42a1905eb76e0e31a6005fcd5ad8184f25e12cfc02d3"
 sample_format = "signed little-endian i16 stereo 44100 Hz"
 expected = "FLAC decode reproduces all four frames exactly"
+flac_1_5_0_sha256 = "edb1aed9e9366afa9a5734a62cca23b40701a4d698633084ab54b394ce677588"
 
 [flac]
 tool = "flac"
 version = "1.5.0"
 level = 5
-status = "selected for D07.1 golden generation"
+status = "D07.1 local golden generated and independently decoded"
+arguments = ["--stdout", "--silent", "--force-raw-format", "--endian=little", "--sign=signed", "--channels=2", "--bps=16", "--sample-rate=44100", "--compression-level-5", "--input-size=16", "-"]
 
 [opus]
 tool = "opusenc"
@@ -23,4 +25,4 @@ version = "unselected"
 bitrates_kbps = [96, 128, 192]
 frame_milliseconds = 20
 sample_rate = 48000
-status = "unavailable at W4.0; pin observed tool version before enabling"
+status = "D07.1 adapter and metadata validation implemented; encoder unavailable locally"

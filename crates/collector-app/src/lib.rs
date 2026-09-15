@@ -1,6 +1,8 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
 mod collection_types;
 pub use collection_types::*;
+mod derivatives;
+pub use derivatives::*;
 mod processing;
 pub mod security;
 
@@ -859,6 +861,7 @@ pub struct CollectionService {
     idempotency: Arc<dyn IdempotencyPort>,
     jobs: Arc<dyn JobPort>,
     processing: Arc<dyn ProcessingPort>,
+    audio_converter: Option<Arc<dyn AudioConversionPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
     modules: Arc<Registry>,
@@ -1531,6 +1534,7 @@ impl CollectionService {
             idempotency,
             jobs,
             processing,
+            audio_converter: None,
             streaming_providers: Arc::new(Default::default()),
             catalog_parsers: Arc::new(Default::default()),
             modules,
@@ -3280,9 +3284,17 @@ impl CollectionService {
     }
 
     fn fingerprint_inventory(&self, inventory: &PackageInventory) -> Result<SourceFingerprint> {
+        self.fingerprint_inventory_checked(inventory, &mut || Ok(()))
+    }
+    fn fingerprint_inventory_checked(
+        &self,
+        inventory: &PackageInventory,
+        checkpoint: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<SourceFingerprint> {
         inventory.validate()?;
         let mut files = Vec::with_capacity(inventory.files.len());
         for file in &inventory.files {
+            checkpoint()?;
             let mut reader =
                 self.processing
                     .package_file(inventory.collection_id, inventory.scope, file.id)?;
@@ -3290,6 +3302,7 @@ impl CollectionService {
             let mut hasher = sha2::Sha256::new();
             let mut buffer = vec![0; 1024 * 1024];
             loop {
+                checkpoint()?;
                 let read = reader
                     .read(&mut buffer)
                     .map_err(|error| Error::Storage(error.to_string()))?;
@@ -4230,6 +4243,7 @@ impl CollectionService {
                 )?;
                 Ok(serde_json::json!({"snapshot_id":frozen.snapshot_id}))
             })(),
+            "music_derivative" => self.run_music_derivative(&claim),
             "processing_operation" => (|| {
                 let frozen = match claim.frozen_input.clone() {
                     Some(FrozenJobInput::Processing(value)) => value,
@@ -4383,6 +4397,12 @@ impl CollectionService {
                 self.jobs.cancel_claimed_job(claim.id, &claim.claim_token)?
             }
             Err(error) => {
+                if claim.kind == "music_derivative"
+                    && self.jobs.job_record(claim.id, claim.user_id)?.phase == "revision_committed"
+                {
+                    // Keep committed work recoverable; it must never become a fresh encoding attempt.
+                    return Err(error);
+                }
                 if claim.kind == "preservation_import" {
                     let _ = self.imports.fail_upload(claim.id, &error.to_string());
                 }
@@ -4446,6 +4466,7 @@ impl CollectionService {
                 | "import_publication"
                 | "catalog_acquisition"
                 | "processing_operation"
+                | "music_derivative"
         ) {
             self.content_write_eligibility_for_job(actor.user_id, job.collection_id, job.item_id)?;
         }
@@ -4457,6 +4478,7 @@ impl CollectionService {
                 | "import_analysis"
                 | "import_publication"
                 | "catalog_acquisition"
+                | "music_derivative"
                 | "processing_operation" => effects.retry_failed_job(id, actor.user_id),
                 _ => Err(Error::Unavailable("this job kind cannot be retried".into())),
             }

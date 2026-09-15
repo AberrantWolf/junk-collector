@@ -2056,3 +2056,203 @@ browser runs used approved execution with isolated temporary server/browser stat
 The private real-dump oracle, live AccurateRip, Linux/NAS and physical-device
 qualification remain unrun. No sibling file or user archive was changed; no commit
 was made. D07.1 is next, with optional explicit FLAC preparation.
+
+## D07.1 local implementation — 2026-09-15
+
+D07.1 is implemented locally and stopped for review. Before implementation, the
+Wave 4 plan recorded the producer/consumer contract: the music module owns one
+exact seekable integer PCM timeline and ordered track ranges; application code
+maps readable presets to immutable recipes and owns future authorization/jobs; the
+provider adapter owns optional processes and receives only an authorized reader
+plus an already-opened scratch handle. D07.2 will own durable publication/recovery,
+and D07.3 will own authorized availability/media descriptors. No placeholder route,
+registered conversion Job, representation publication, web playback or metadata
+provider was added.
+
+- `ConversionProfile::Flac` seals level 5, `flac`, its exact probed version and
+  unchanged signed little-endian 16-bit stereo 44,100-Hz input/output. Opus accepts
+  only 96/128/192 kbps, 20-ms frames, `opusenc`, the same CD-DA input and an
+  explicit 48-kHz stereo decoded format. Source fingerprint and selected ordered
+  ranges remain in the canonical recipe digest.
+- The D05 CUE reader now has a conversion view which starts at the first stored
+  audio byte. Stored HTOA is prepended to track 1; later stored INDEX 00 audio stays
+  on the preceding track through the existing INDEX-01-to-next-INDEX-01 span.
+  Exact ranges are nonempty, contiguous and cover the timeline once. Synthetic
+  gaps, mixed mode, four-channel flags, missing ranges and ambiguous package
+  members continue to fail before conversion. Redumper retains its validated
+  signed first-track-to-lead-out range.
+- The process adapter passes arguments directly, uses 16,384-frame PCM chunks,
+  caps diagnostics at 64 KiB, caps encoded output from the checked source size
+  (with an 8-GiB absolute ceiling), caps Ogg packets at 1 MiB, and uses an explicit
+  six-hour process ceiling. Cancellation kills/reaps the child; every post-start
+  failure clears only the supplied scratch handle. No package name, selected
+  archive root or shell command reaches a child.
+- Local `/opt/homebrew/bin/flac` reported 1.5.0. The generated four-frame extreme/
+  impulse vector encoded with the manifest's exact arguments to SHA-256
+  `edb1aed9e9366afa9a5734a62cca23b40701a4d698633084ab54b394ce677588`.
+  Claxon 0.4.3 independently decoded the result and compared every channel sample,
+  exact frame length and format against a separately seeked D05-style integer
+  reader. A nonzero selected range, internal short reads and EOF are exercised.
+- `opusenc` is absent. The profile is therefore unavailable rather than simulated.
+  A synthetic independently constructed Ogg Opus vector checks stereo OpusHead,
+  the fixed 20-ms packet duration, 48-kHz source-duration conversion, 312-frame
+  pre-skip and 320-frame end padding. No encoded Opus golden is claimed.
+- Focused tests also cover unsupported recipe values, wrong encoder identity or
+  version, absent tools, out-of-range selection, direct process failure,
+  cancellation and partial-scratch cleanup. AccurateRip input/result is absent
+  from the recipe/conversion API, so no-data, mismatch or outage cannot gate a
+  supported conversion; no conversion result is described as AccurateRip evidence.
+
+Passed exactly: `python3 scripts/check_architecture.py`; `cargo fmt --all --
+--check`; `cargo clippy --workspace --all-targets -- -D warnings`; and
+`DEVELOPER_DIR=/Library/Developer/CommandLineTools
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk cargo test --workspace`
+(245 passed, 0 failed, 1 ignored private D05 oracle). The Command Line Tools
+environment avoids the default Xcode installation's unaccepted-license linker
+failure without changing system configuration. `npm --prefix web run check` and
+`npm --prefix web run build` also passed; no web asset changed, so smoke was not
+applicable. The installed FLAC version and golden digest were independently
+reproduced from the manifest input with `flac --version` and the exact direct
+encoder arguments.
+
+**External/unavailable:** `opusenc` and therefore a real Opus golden; an owned CD/
+redumper package; alternate mastering/offset and external FLAC oracles; real
+mixed-mode/unsupported-layout corpus checks; target Linux/NAS process behavior;
+and later publication, recovery, HTTP range, browser decoding/playback and device
+qualification were not available or are outside D07.1. Masters and existing
+archives were not modified. No sibling checkout was changed and no commit was made.
+
+## D07.1 review — 2026-09-15
+
+Extracted integer FLAC comparison and strict generated Ogg Opus inspection to
+`junk-libs-audio`'s optional `derivative-validation` feature. Collector retains
+process mechanics, recipe policy and cancellation mapping. Source-reader overrun,
+validation cancellation and final hashing checks fail closed; failed output workers
+terminate the isolated process group and discard scratch. Encoder identity now
+retains bounded full version reports, including reported library versions.
+
+The independently generated shared `silence-588.opus` fixture uses FFmpeg 8.1.2 /
+libopus and contains 960 coded frames, final granule 952, pre-skip 312, playable
+frames 640 and end padding 8. This replaces the malformed synthetic container and
+incorrect 320-frame padding expectation. CRC, EOF, stream continuity/EOS and
+malformed-header checks are bounded. It is an Ogg/timing oracle, not an opusenc
+golden or a claim of lossy PCM equality. See RFC 7845 and the links in the review.
+
+Focused conversion tests passed, including real FLAC 1.5.0 PCM equality, a disk
+write failure with a still-running encoder, and cancellation during the second
+(source validation) pass. Junk Libs audio all-feature tests and all-target Clippy
+passed. Trash Amp `amp-core` and `amp-audio` tests passed with `--locked`; its
+unrelated working-tree changes were preserved. The extraction changes only the
+Junk Libs audio manifest, module export, validation module and generated fixtures.
+
+No real opusenc, owned dump, Linux/NAS or playback qualification is claimed. No
+publication/API/UI was added, so browser smoke is not applicable. Builds use
+DEVELOPER_DIR=/Library/Developer/CommandLineTools to avoid the selected Xcode
+installation's license issue without altering system configuration. No commit
+was made; the shared extraction must be checkpointed separately from Collector.
+
+Collector review gates also passed: full workspace tests, warning-free all-target
+Clippy, formatting, architecture/document links, fixture reproduction, TypeScript
+checking, generated API comparison, web build and rebuilt server. The final
+focused conversion suite passed after the version-report/explicit-argument changes.
+
+## D07.2 — explicit derivative publication (2026-09-15; review pending)
+
+Implemented and tested locally, not a completed D07 root review. No commits or
+agent delegation were used. Existing D07.1 and unrelated local changes were
+retained; this child did not edit sibling Junk Libs.
+
+Workflow: import a synthetic two-track BIN/CUE through the real provisional
+Import service, preserve HTOA on track 1 and later stored INDEX 00 on the preceding
+track, explicitly request each track, independently validate real FLAC, publish
+separate immutable recipes/outputs and validation Evidence, associate/edit an
+existing Item, read the stored files and reindex. No AccurateRip result is a
+prerequisite. Jobs use existing receipts, leases, cancellation and Capture
+revision publication. Real encoding and validation happen outside the writer lock.
+
+Executed checks:
+
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: passed, 257 tests;
+  one existing ignored test. This includes the real FLAC publication opt-in and
+  existing independent decoder/process-validation regressions.
+- `COLLECTOR_TEST_FLAC=1 cargo test -p collector-store --test archive derivative_
+  --no-fail-fast`: passed, 11 harness cases (including the subprocess helper).
+- `cargo test -p collector-store --test archive derivative_ --locked`: passed,
+  11 harness cases after the recovery/missing-module and validation refinements.
+  Without `COLLECTOR_TEST_FLAC`, the real-tool opt-in body is intentionally unrun;
+  explicit unavailable/missing/version-changed adapter paths are tested.
+- `cargo test -p collector-app validation_envelope_distinguishes_opus --locked`:
+  passed. A structural Opus envelope cannot claim lossless PCM equality or use
+  the CD input-frame count as its decoded 48-kHz duration.
+- `cargo test -p collector-store --test archive
+  derivative_publication_failures_restart --locked`: passed after the final
+  recovery correction. A committed archive recovers even when a returned error
+  left the private job failed with its claim token cleared.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `python3 scripts/check_architecture.py`, `cargo fmt --all -- --check`, and
+  `git diff --check`: passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api`, and
+  `npm --prefix web run build`: passed. OpenAPI/TypeScript contracts are unchanged.
+- `cargo build -p collector-server`: passed after the web build.
+
+Fault coverage includes two simultaneous encoders for one recipe converging on
+one Capture output; request replay; separate track identities; changed source
+records and actual source bytes; changed encoder reports with frozen retry;
+failed validation; corrupted scratch; queued and post-encode cancellation;
+revoked authorization; failure and cancellation at Prepared, BytesStaged,
+PayloadPublished, RevisionCommitted, ProjectionApplied and Completed; actual
+child-process termination at those same phases; restart after commit without a
+tool, grant or installed music module; preserved Item edits; and corrupt published
+bytes rejected by reindex/reopen. The publication tests use clearly labeled fake
+encoder bytes for deterministic faults; they do not qualify codecs. The enabled
+real FLAC test uses `flac 1.5.0` plus shared independent integer PCM validation.
+
+The initial link attempt hit the selected Xcode installation's unaccepted license.
+The installed Command Line Tools successfully ran focused tests. After the user
+accepted Xcode's agreement and installed updates, subsequent checks used the
+default toolchain successfully; no license or global toolchain setting was changed
+by this task.
+
+Limits: `opusenc` is absent, so real opusenc conversion/publication remains unrun.
+Existing FFmpeg/libopus fixtures qualify structural/duration inspection only, not
+lossy PCM equality. Owned-disc, real mastering/redumper conversion, Linux/NAS,
+large-library and live-provider qualification remain unrun. No new routes or web
+controls were added, so D07.3 browser playback and derivative-specific transport
+qualification remain pending; browser smoke was not rerun for this service/storage
+child. No automatic conversion on import or media GET is implemented. Stop for
+D07.2 review; the plan's ready-to-send prompt requests review, not D07.3 implementation.
+
+## D07.2 review validation — 2026-09-15
+
+Reviewed and corrected locally; no commit made. The new regression checks a
+retained Capture with contradictory format, derivative role or profile despite
+unchanged payload/validation digests. Completed-job recovery and reindex both
+reject each case without invoking the encoder again. Rebuild, recovery and
+concurrent convergence now share the retained-record consistency check.
+
+Passed on the default macOS toolchain:
+
+- `COLLECTOR_TEST_FLAC=1 cargo test -p collector-store --test archive derivative_ --locked`
+  — 12 tests, including the subprocess helper, real FLAC, publication fault/kill
+  matrices, cancellation, concurrency and the new contradictory-record cases.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked` — 259 passed, one ignored
+  external real-dump oracle. The existing AccurateRip workflow test completed
+  successfully after exceeding the test runner's 60-second notice threshold.
+- `python3 scripts/check_architecture.py`, `python3 scripts/check_wave4_fixtures.py`,
+  `cargo fmt --all -- --check` and `git diff --check`.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`.
+- `npm --prefix web run check`, `npm --prefix web run check:api`,
+  `npm --prefix web run build`, then `cargo build -p collector-server --locked`.
+
+No route or UI behavior changed, so browser smoke was not rerun. No sibling code
+was changed in this review; D07.1's shared-library extraction remains uncommitted.
+Real opusenc, owned-disc, NAS/Linux and scale qualification remain unrun. This
+review does not claim new browser playback or catalog verification acceptance.
+
+## D07.1–D07.2 checkpoint — 2026-09-15
+
+User authorized the reviewed checkpoint. Shared audio validation is committed
+separately in Junk Libs as `d6d7d18` (Extract shared FLAC PCM and Ogg Opus
+derivative validation). Collector includes the reviewed recipes, optional encoder
+adapter, recoverable publication and D07.3 handoff. Earlier no-commit notes above
+record the state at review time.

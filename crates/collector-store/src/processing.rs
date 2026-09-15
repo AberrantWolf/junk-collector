@@ -12,14 +12,14 @@ const STREAM_CHUNK: usize = 1024 * 1024;
 const SNAPSHOT_LIMIT: u64 = 512 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
-struct ManifestV4 {
-    schema_version: u32,
-    entity_type: String,
-    entity_id: String,
-    collection_id: CollectionId,
-    revision: Revision,
-    record_sha256: String,
-    transaction_id: TransactionId,
+pub(crate) struct ManifestV4 {
+    pub(crate) schema_version: u32,
+    pub(crate) entity_type: String,
+    pub(crate) entity_id: String,
+    pub(crate) collection_id: CollectionId,
+    pub(crate) revision: Revision,
+    pub(crate) record_sha256: String,
+    pub(crate) transaction_id: TransactionId,
 }
 
 struct V4Target<'a> {
@@ -501,7 +501,7 @@ fn latest_v4(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(result)
 }
 
-fn read_v4<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_v4<T: serde::de::DeserializeOwned>(
     path: &Path,
     collection: CollectionId,
     kind: &str,
@@ -727,6 +727,23 @@ impl SnapshotPort for Store {
 }
 
 impl ProcessingPort for Store {
+    fn conversion_scratch(&self) -> Result<Box<dyn collector_app::ConversionScratch>> {
+        crate::derivatives::scratch(self)
+    }
+    fn derivative_committed(&self, frozen: &collector_app::FrozenDerivativeJob) -> Result<bool> {
+        self.derivative_is_committed(frozen)
+    }
+    fn publish_derivative(
+        &self,
+        claim: &JobClaim,
+        frozen: &collector_app::FrozenDerivativeJob,
+        validation: &collector_app::ConversionValidation,
+        scratch: &mut dyn collector_app::ConversionScratch,
+        checkpoint: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        self.publish_music_derivative(claim, frozen, validation, scratch, checkpoint)
+    }
+
     fn package_inventory(
         &self,
         collection: CollectionId,

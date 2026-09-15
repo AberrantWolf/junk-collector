@@ -130,3 +130,80 @@ Corrected architecture and user-workflow findings:
 D07.1 is the next bounded implementation ticket for optional playback derivatives.
 D05 does not implement music playback or qualify owned dumps/live AccurateRip.
 See the dated validation entry for executed checks and environment limitations.
+
+## D07.1 review — 2026-09-15
+
+Corrected the following before derivative publication:
+
+- Integer FLAC comparison and Opus inspection lived inside the Collector provider.
+  Extracted these reader-only algorithms into the optional `derivative-validation`
+  feature of `junk-libs-audio`. Collector retains configured subprocess handling
+  and recipe/preservation policy. The filesystem scratch implementation belongs
+  in the D07.2 storage adapter, not application services.
+- Cancellation was only observed while waiting for the child. Validation and
+  final hashing now checkpoint too, and cancellation discards output. A regression
+  cancels on the independent validation pass rather than before spawning.
+- Failed writer/output/diagnostic workers could leave the parent waiting for the
+  six-hour process timeout. Worker failures now terminate the child promptly;
+  isolated Unix process groups also prevent descendants retaining pipes. Timeouts
+  cannot become successful conversion results. A disk-write-failure fixture uses
+  a child that continues running to prove prompt termination.
+- The Opus fixture was not a valid Ogg stream and double-counted pre-skip in end
+  padding. Replaced it with independently generated FFmpeg 8.1.2/libopus output:
+  588 CD frames produce 640 output frames, pre-skip 312, and end padding 8 (not
+  320). Inspection rejects bad CRCs, truncated headers/bodies, missing EOS,
+  inconsistent stream sequence/serial/continuation/granules and unsupported
+  OpusHead fields. This is structural/duration validation, not lossy PCM equality.
+  The timing rules follow [RFC 7845](https://www.rfc-editor.org/rfc/rfc7845.html#section-4).
+- Encoder identity now retains the bounded complete version report, including
+  reported codec-library versions, instead of discarding everything after a
+  numeric version token. Opus raw endianness/VBR/complexity/loss assumptions are
+  explicit, following [opusenc's options](https://opus-codec.org/docs/opus-tools/opusenc.html).
+
+D07.2 must publish validated derivatives through the existing recovery protocol,
+with an adapter-owned scratch handle and a final cancellation/authorization check.
+The optional FLAC library remains opt-in. No publication or playback is added by
+this checkpoint; real opusenc and owned-disc qualification remain outstanding.
+
+
+## D07.2 implementation handoff — 2026-09-15 (review pending)
+
+D07.2 is implemented locally, not yet reviewed. It adds explicit per-track frozen
+jobs and atomic Capture publication of output, recipe and validation Evidence.
+Tests exercise synthetic BIN/CUE ownership, concurrent encoders, replay, source
+and tool changes, failed validation, cancellation/failure and process kills at
+all six journal phases, no-tool/no-grant committed recovery, Item edits and
+reindex corruption rejection. The shared journal abort now preflights revision
+markers before deleting any dependent payload, including a rename preceding its
+journal-phase update. Recovery also recognizes committed derivatives whose private
+job checkpoint lagged as failed with no claim token. See the dated validation
+entry for commands and outcomes.
+
+Review this boundary before D07.3. There are no new routes or browser controls,
+no automatic FLAC generation, and no conversion on media GET. Real opusenc,
+owned-disc, live-provider and external mastering/deployment qualification remain
+unrun; structural Opus inspection is not lossless PCM equality.
+
+## D07.2 review corrections — 2026-09-15
+
+Reviewed the application command/frozen job, scratch adapter, Capture publication,
+startup reconciliation and journal abort paths. Encoding and independent codec
+validation remain outside the archive writer lock. Publication appends to current
+Capture state and uses the existing journal; no new scheduler, route or migration
+was required. The agent's phase-fault, process-kill and real-FLAC tests were rerun.
+
+Fixed a retained-record consistency gap: valid output bytes and a valid validation
+envelope were sufficient even when a Capture advertised a different format, role
+or profile. One Store cross-record validator now serves rebuild, completed-job
+recovery and concurrent-output convergence. It also checks the explicit recipe
+reference and Evidence identity. A regression exercises contradictory format,
+lossless/lossy role and profile with unchanged output bytes; both job recovery and
+reindex reject them without re-encoding. Expanded the densely written preparation
+command into ordinary formatted steps for maintainability.
+
+D07.2 is reviewed and corrected locally. D07.3 is next; its ready-to-send prompt
+now specifies server-owned encoder probing/configuration, viewer-safe ordered
+availability, curation-only preparation, HTTP range tests and actual web workflow
+checks. Browser queue/playback qualification remains the following bounded child.
+No commit was made during this review. The D07.1 shared-library extraction also
+remains uncommitted and should be checkpointed separately from Collector.

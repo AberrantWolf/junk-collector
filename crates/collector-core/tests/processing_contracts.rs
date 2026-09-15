@@ -295,6 +295,12 @@ fn conversion_recipe_rejects_unrelated_digest() {
     changed.output_format.sample_rate = 48000;
     assert!(changed.seal().is_err(), "FLAC cannot silently resample");
     changed = sealed.clone();
+    changed.encoder = "another-flac".into();
+    assert!(
+        changed.seal().is_err(),
+        "the encoder identity is fixed by profile"
+    );
+    changed = sealed.clone();
     changed.tracks.push(changed.tracks[0].clone());
     assert!(changed.seal().is_err(), "duplicate/overlapping tracks");
     changed = sealed.clone();
@@ -304,6 +310,62 @@ fn conversion_recipe_rejects_unrelated_digest() {
         changed.digest, sealed.digest,
         "record ID is not recipe content"
     );
+}
+
+#[test]
+fn conversion_recipes_accept_only_the_settled_flac_and_opus_profiles() {
+    use collector_core::*;
+
+    let source = SourceFingerprint::calculate(
+        PackageScope::Representation(RepresentationId::new()),
+        vec![PackageFileFingerprint {
+            id: PackageFileId::new(),
+            bytes: ByteLength(588 * 4),
+            sha256: Digest::sha256(b"source"),
+        }],
+        None,
+        BTreeMap::new(),
+    )
+    .unwrap();
+    let base = ConversionRecipe {
+        id: RecipeId::new(),
+        version: 1,
+        settings: ConversionSettings::Opus {
+            bitrate_kbps: 128,
+            frame_milliseconds: 20,
+        },
+        source_fingerprint: source,
+        tracks: vec![ConversionTrack {
+            position: 1,
+            start: PcmFrame(0),
+            length: PcmFrame(588),
+        }],
+        encoder: "opusenc".into(),
+        encoder_version: "0.2".into(),
+        input_format: PcmSampleFormat::CDDA_I16_LE_STEREO,
+        output_format: PcmSampleFormat::OPUS_DECODED_I16_STEREO,
+        digest: Digest::sha256(b"unsealed"),
+    };
+    base.clone().seal().unwrap();
+    for bitrate_kbps in [96, 192] {
+        let mut recipe = base.clone();
+        recipe.settings = ConversionSettings::Opus {
+            bitrate_kbps,
+            frame_milliseconds: 20,
+        };
+        recipe.seal().unwrap();
+    }
+    for bitrate_kbps in [64, 256] {
+        let mut recipe = base.clone();
+        recipe.settings = ConversionSettings::Opus {
+            bitrate_kbps,
+            frame_milliseconds: 20,
+        };
+        assert!(recipe.seal().is_err());
+    }
+    let mut wrong_rate = base;
+    wrong_rate.input_format.sample_rate = 48_000;
+    assert!(wrong_rate.seal().is_err());
 }
 
 #[test]

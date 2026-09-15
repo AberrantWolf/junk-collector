@@ -4,6 +4,8 @@
 
 mod accuraterip;
 pub use accuraterip::*;
+mod conversion;
+pub use conversion::*;
 
 use collector_app::{
     CatalogParserPort, ParsedCatalogSnapshot, ProcessingExecutionContext, ProviderRequest,

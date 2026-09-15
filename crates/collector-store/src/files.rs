@@ -971,7 +971,18 @@ impl Store {
             )
             .optional()
             .map_err(storage)?;
-        let root = if let Some((legacy_item_id, relative_path)) = legacy_locator {
+        // New derivatives of migrated masters use the canonical Capture path.
+        // Existing legacy representations retain their original locator.
+        let canonical_derivative: bool = lock(&self.db)?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM conversion_recipes WHERE id=? AND collection_id=?)",
+                params![representation.to_string(), item.collection_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        let root = if let Some((legacy_item_id, relative_path)) =
+            legacy_locator.filter(|_| !canonical_derivative)
+        {
             if relative_path != "files" {
                 return Err(Error::Invalid("unsupported legacy payload locator".into()));
             }

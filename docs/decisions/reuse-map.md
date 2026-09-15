@@ -220,8 +220,8 @@ registration.
 | AccurateRip dBAR acquisition | frozen typed disc query -> bounded raw response plus parsed snapshot | provider adapter, `reqwest` 0.12.28 | recorded dBAR response/local HTTP fixture; live opt-in only | D05.2 implemented locally with exact-byte offline replay; live provider unqualified |
 | Metadata resolution | portable candidates/authority -> effective typed display fields/artwork selection | app resolver | D06 generated multilingual bytes plus separate identity-evidence inputs; full provider and unknown-field history tests remain D06 | planned D06.1 |
 | MusicBrainz/CAA/DAT metadata | frozen identifiers/search -> bounded raw response, candidates and Asset input | provider adapter, reqwest/rustls, shared limiter | recorded responses/local HTTPS fixture; live opt-in | planned D06.2; never audio verification |
-| FLAC level 5 | exact i16 stereo 44.1-kHz reader -> immutable FLAC recipe/output plus decoded-PCM validation | configured `flac` 1.5.0 | D07 extreme PCM recipe and later encoded golden; generated | planned D07.1 |
-| Opus 96/128/192 kbps | exact source PCM -> immutable 48-kHz stereo music-mode Opus recipe/output | configured version-pinned `opusenc` | D07 PCM recipe; golden blocked on absent tool | unavailable at baseline |
+| FLAC level 5 | exact i16 stereo 44.1-kHz reader -> immutable FLAC recipe/output plus decoded-PCM validation | configured `flac` 1.5.0 | D07 extreme PCM recipe plus encoded SHA-256 `edb1aed9e9366afa9a5734a62cca23b40701a4d698633084ab54b394ce677588`; generated and independently decoded with Claxon 0.4.3 | D07.1 locally qualified; publication remains D07.2 |
+| Opus 96/128/192 kbps | exact source PCM -> immutable 48-kHz stereo music-mode Opus recipe/output | configured version-pinned `opusenc` | D07 PCM recipe and synthetic Ogg duration/pre-skip/padding vector; encoder golden blocked on absent tool | D07.1 adapter implemented, unavailable in this environment |
 | Portable export/change inventory | frozen archive revisions -> verified directory bundle/inventory digest | Store/app export ports | P05 unknown lexical JSON and failure recipes; generated | planned P05.1 |
 | Full backup/restore | stopped archive/private/config/scratch -> validated restoration or independent clone | SQLite backup API, both process locks | P05 temporary-root matrix | planned P05.2 |
 | Persistent native connection | enrollment/trust observations -> client DB v1 plus secure secret reference | SQLite; macOS Keychain adapter | C01 single-route seed; C01.1 must add two-server/two-profile cases; opt-in `JUNK_COLLECTOR_W4_KEYCHAIN_TEST=1` | planned C01.1; Keychain external |
@@ -242,3 +242,9 @@ D06 candidate strength comes from separate test-supplied identity evidence, neve
 provider search score; the incomplete S04 transition must fail complete parsing.
 The Opus version and other named external/semantic gates remain open for their
 owning children. They do not block W4.1 contract work.
+
+D07.1 review extraction (2026-09-15): integer FLAC comparison and strict generated
+Ogg Opus inspection live in `junk-libs-audio` behind `derivative-validation`.
+Collector owns encoder process lifecycle; the shared feature accepts readers and
+cooperative checkpoints, without Collector types or filesystem paths. The shared
+FFmpeg/libopus fixture qualifies timing/container inspection, not opusenc output.

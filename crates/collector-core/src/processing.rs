@@ -625,7 +625,7 @@ pub enum ConversionSettings {
 impl ConversionSettings {
     fn validate(&self) -> Result<()> {
         match self {
-            Self::Flac { level: 0..=8 } => Ok(()),
+            Self::Flac { level: 5 } => Ok(()),
             Self::Opus {
                 bitrate_kbps: 96 | 128 | 192,
                 frame_milliseconds: 20,
@@ -646,6 +646,22 @@ pub struct PcmSampleFormat {
 }
 
 impl PcmSampleFormat {
+    pub const CDDA_I16_LE_STEREO: Self = Self {
+        sample_rate: 44_100,
+        channels: 2,
+        bits_per_sample: 16,
+        signed: true,
+        little_endian: true,
+    };
+
+    pub const OPUS_DECODED_I16_STEREO: Self = Self {
+        sample_rate: 48_000,
+        channels: 2,
+        bits_per_sample: 16,
+        signed: true,
+        little_endian: true,
+    };
+
     pub fn validate(&self) -> Result<()> {
         if self.sample_rate == 0
             || self.channels == 0
@@ -738,16 +754,22 @@ impl ConversionRecipe {
         self.input_format.validate()?;
         self.output_format.validate()?;
         match &self.settings {
-            ConversionSettings::Flac { .. } if self.input_format != self.output_format => {
+            ConversionSettings::Flac { .. }
+                if self.encoder != "flac"
+                    || self.input_format != PcmSampleFormat::CDDA_I16_LE_STEREO
+                    || self.output_format != PcmSampleFormat::CDDA_I16_LE_STEREO =>
+            {
                 return Err(Error::Invalid(
-                    "lossless recipe must preserve source PCM format".into(),
+                    "FLAC recipe must use flac with unchanged CD-DA integer PCM".into(),
                 ));
             }
             ConversionSettings::Opus { .. }
-                if self.output_format.sample_rate != 48000 || self.output_format.channels != 2 =>
+                if self.encoder != "opusenc"
+                    || self.input_format != PcmSampleFormat::CDDA_I16_LE_STEREO
+                    || self.output_format != PcmSampleFormat::OPUS_DECODED_I16_STEREO =>
             {
                 return Err(Error::Invalid(
-                    "Opus music recipe requires 48-kHz stereo output".into(),
+                    "Opus recipe must use opusenc from CD-DA PCM to 48-kHz stereo".into(),
                 ));
             }
             _ => {}

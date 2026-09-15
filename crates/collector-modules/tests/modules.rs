@@ -1047,6 +1047,66 @@ fn music_layout_uses_strict_frozen_package_spans_and_exact_integer_pcm() {
 }
 
 #[test]
+fn music_conversion_owns_htoa_and_later_stored_pregap_exactly_once() {
+    let collection_id = CollectionId::new();
+    let representation_id = RepresentationId::new();
+    let cue_id = PackageFileId::new();
+    let bin_id = PackageFileId::new();
+    let cue = "FILE \"disc.bin\" BINARY\n\
+               TRACK 01 AUDIO\nINDEX 00 00:00:00\nINDEX 01 00:00:01\n\
+               TRACK 02 AUDIO\nINDEX 00 00:00:02\nINDEX 01 00:00:03\n";
+    let bin = (0_u8..4)
+        .flat_map(|sector| vec![sector; 2352])
+        .collect::<Vec<_>>();
+    let inventory = PackageInventory::new(
+        collection_id,
+        PackageScope::Representation(representation_id),
+        vec![
+            PackageInventoryFile {
+                id: cue_id,
+                display_name: PackageFileName::new("disc.cue").unwrap(),
+                bytes: ByteLength(cue.len() as u64),
+            },
+            PackageInventoryFile {
+                id: bin_id,
+                display_name: PackageFileName::new("disc.bin").unwrap(),
+                bytes: ByteLength(bin.len() as u64),
+            },
+        ],
+    )
+    .unwrap();
+    let mut source = open_cue_conversion_pcm_package(cue, cue_id, &inventory, |id| {
+        (id == bin_id)
+            .then(|| Box::new(Cursor::new(bin.clone())) as Box<dyn RepresentationReader>)
+            .ok_or(ModuleError::MissingPackageFile(id))
+    })
+    .unwrap();
+    assert_eq!(source.total_frames, 4 * 588);
+    assert_eq!(source.tracks.len(), 2);
+    assert_eq!(source.tracks[0].start_frame, 0);
+    assert_eq!(source.tracks[0].leading_hidden_frames, 588);
+    assert_eq!(source.tracks[0].frame_count, 3 * 588);
+    assert_eq!(source.tracks[1].start_frame, 3 * 588);
+    assert_eq!(source.tracks[1].leading_hidden_frames, 0);
+    assert_eq!(source.tracks[1].frame_count, 588);
+
+    let mut frame = [[0_i16; 2]; 1];
+    source.reader.seek_frame(0).unwrap();
+    source.reader.read_frames(&mut frame).unwrap();
+    assert_eq!(frame[0], [0, 0], "HTOA is the first retained PCM frame");
+    source.reader.seek_frame(2 * 588).unwrap();
+    source.reader.read_frames(&mut frame).unwrap();
+    assert_eq!(
+        frame[0],
+        [0x0202, 0x0202],
+        "track 2 pregap stays on track 1"
+    );
+    source.reader.seek_frame(3 * 588).unwrap();
+    source.reader.read_frames(&mut frame).unwrap();
+    assert_eq!(frame[0], [0x0303, 0x0303]);
+}
+
+#[test]
 fn music_layout_matches_published_arver_ids_without_pcm_allocation() {
     let tracks = vec![
         CdTrackLayout {

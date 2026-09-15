@@ -7361,8 +7361,8 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
             start: PcmFrame(0),
             length: PcmFrame(2),
         }],
-        encoder: "fixture".into(),
-        encoder_version: "1".into(),
+        encoder: "flac".into(),
+        encoder_version: "1.5.0".into(),
         input_format: PcmSampleFormat {
             sample_rate: 44100,
             channels: 2,
@@ -8605,4 +8605,1025 @@ fn ct4_domain_patch_receipts_bind_original_request_not_resolved_payload() {
         ),
         Err(Error::IdempotencyConflict)
     ));
+}
+
+fn derivative_import(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+) -> ImportView {
+    // Track 1 owns stored HTOA plus track 2's stored INDEX 00: 3 sectors.
+    // Track 2 owns the final two sectors. No AccurateRip evidence is requested.
+    let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 00 00:00:00\n INDEX 01 00:00:01\n TRACK 02 AUDIO\n INDEX 00 00:00:02\n INDEX 01 00:00:03\n";
+    let pcm: Vec<u8> = (0..5 * 588)
+        .flat_map(|i| [i as u8, 0x80, 0xff, 0x7f])
+        .collect();
+    let created = service
+        .create_provisional_import(
+            actor,
+            CreateImportCommand {
+                collection_id: collection,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "derivative-fixture".into(),
+                },
+                files: vec![
+                    UploadFile {
+                        name: "disc.cue".into(),
+                        bytes: ByteLength(cue.len() as u64),
+                        sha256: None,
+                    },
+                    UploadFile {
+                        name: "disc.bin".into(),
+                        bytes: ByteLength(pcm.len() as u64),
+                        sha256: None,
+                    },
+                ],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(actor, created.id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(actor, created.id, 1, 0, &pcm)
+        .unwrap();
+    service
+        .enqueue_import_analysis(
+            actor,
+            created.id,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    service.run_next_job("derivative-import-analysis").unwrap();
+    let analyzed = service.provisional_import(actor, created.id).unwrap();
+    let reviewed = service
+        .review_provisional_import(
+            actor,
+            created.id,
+            ReviewImportCommand {
+                expected_revision: analyzed.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .enqueue_import_publication(actor, reviewed.id, &command())
+        .unwrap();
+    service
+        .run_next_job("derivative-import-publication")
+        .unwrap();
+    let published = service.provisional_import(actor, created.id).unwrap();
+    assert_eq!(published.phase, ImportPhase::Published);
+    published
+}
+
+// Explicit test adapter: its bytes are not a real codec. It tests publication,
+// never codec qualification; the enabled real-FLAC test below uses the process port.
+struct DerivativeFixtureEncoder {
+    version: std::sync::Mutex<String>,
+    calls: std::sync::atomic::AtomicUsize,
+    after_encode: std::sync::Mutex<Option<Box<dyn Fn() + Send>>>,
+    broken: AtomicBool,
+}
+impl DerivativeFixtureEncoder {
+    fn new() -> Self {
+        Self {
+            calls: 0.into(),
+            version: std::sync::Mutex::new("fixture encoder 1".into()),
+            after_encode: Default::default(),
+            broken: AtomicBool::new(false),
+        }
+    }
+}
+impl collector_app::AudioConversionPort for DerivativeFixtureEncoder {
+    fn availability(&self, recipe: &ConversionRecipe) -> collector_app::EncoderAvailability {
+        if recipe.encoder_version == *self.version.lock().unwrap() {
+            collector_app::EncoderAvailability::Available {
+                encoder: recipe.encoder.clone(),
+                version: recipe.encoder_version.clone(),
+            }
+        } else {
+            collector_app::EncoderAvailability::Unavailable {
+                reason: "fixture encoder version changed".into(),
+            }
+        }
+    }
+    fn convert(
+        &self,
+        recipe: &ConversionRecipe,
+        _: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+        scratch: &mut dyn collector_app::ConversionScratch,
+        _: &mut dyn ProcessingExecutionContext,
+    ) -> Result<collector_app::ConversionValidation> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if let collector_app::EncoderAvailability::Unavailable { reason } =
+            self.availability(recipe)
+        {
+            return Err(Error::Unavailable(reason));
+        }
+        scratch.write_all(b"fixture output").unwrap();
+        if let Some(hook) = self.after_encode.lock().unwrap().take() {
+            hook();
+        }
+        Ok(collector_app::ConversionValidation {
+            media_type: "audio/flac".into(),
+            bytes: ByteLength(14),
+            digest: Digest::sha256(b"fixture output"),
+            decoded_format: recipe.output_format.clone(),
+            decoded_frames: recipe.tracks[0].length.0,
+            lossless_pcm_equal: !self.broken.load(Ordering::SeqCst),
+            encoder_delay_frames: 0,
+            end_padding_frames: 0,
+        })
+    }
+}
+fn derivative_command(import: &ImportView, position: u16) -> collector_app::PrepareMusicDerivative {
+    collector_app::PrepareMusicDerivative {
+        representation_id: import.representation_id,
+        selection: music::CdPackageSelection {
+            package_kind: music::CdPackageKind::Cue,
+            anchor_file_index: 0,
+        },
+        track_position: position,
+        profile: ConversionProfile::Flac,
+        encoder_version: "fixture encoder 1".into(),
+    }
+}
+
+#[test]
+fn derivative_jobs_converge_replay_keep_track_ownership_and_survive_item_edits_reindex() {
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let service = Arc::new(service.with_audio_converter(encoder.clone()));
+    let key = command();
+    let first = service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &key,
+        )
+        .unwrap();
+    assert_eq!(
+        first,
+        service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &key
+            )
+            .unwrap()
+    );
+    let duplicate = service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    let second = service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 2),
+            &command(),
+        )
+        .unwrap();
+    std::thread::scope(|scope| {
+        for _ in 0..3 {
+            let service = &service;
+            scope.spawn(move || service.run_next_job("derivative-worker").unwrap());
+        }
+    });
+    while service.run_next_job("derivative-worker").unwrap() {}
+    for job in [first, duplicate, second] {
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    }
+    let capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    assert_eq!(capture.representations.len(), 3);
+    assert_eq!(capture.revision, Revision(3));
+    for representation in &capture.representations[1..] {
+        assert_eq!(representation.files.len(), 1);
+        let recipe = store.recipe(RecipeId(representation.id.0)).unwrap();
+        assert_eq!(recipe.tracks.len(), 1);
+        assert_eq!(
+            recipe.tracks[0].length.0,
+            if recipe.tracks[0].position == 1 {
+                3 * 588
+            } else {
+                2 * 588
+            }
+        );
+        assert_eq!(
+            recipe.tracks[0].start.0,
+            if recipe.tracks[0].position == 1 {
+                0
+            } else {
+                3 * 588
+            }
+        );
+    }
+    let draft = item(collection.id);
+    let saved = service
+        .save_item(
+            &actor,
+            draft.id,
+            SaveItemCommand::from(draft),
+            Revision(0),
+            &command(),
+        )
+        .unwrap();
+    let mut associated = capture.clone();
+    associated.association.item_id = Some(saved.id);
+    Catalog::save_capture(store.as_ref(), associated, capture.revision).unwrap();
+    let mut edit = Catalog::item(store.as_ref(), saved.id).unwrap();
+    edit.title = "Manual edit survives".into();
+    let rev = edit.revision;
+    service
+        .save_item(
+            &actor,
+            edit.id,
+            SaveItemCommand::from(edit),
+            rev,
+            &command(),
+        )
+        .unwrap();
+    store.reindex().unwrap();
+    let edited = Catalog::item(store.as_ref(), saved.id).unwrap();
+    assert_eq!(edited.title, "Manual edit survives");
+    assert_eq!(edited.captures[0].representations.len(), 3);
+    for r in &edited.captures[0].representations[1..] {
+        assert_eq!(
+            resource_bytes(ContentPort::representation(store.as_ref(), saved.id, r.id, 0).unwrap()),
+            b"fixture output"
+        );
+    }
+    let disabled = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert_eq!(
+        disabled
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &key
+            )
+            .unwrap(),
+        first
+    );
+    assert!(matches!(
+        disabled.prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command()
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        service.prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 2),
+            &key
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+}
+
+#[test]
+fn derivative_failed_validation_cancellation_and_revoked_authority_cannot_publish() {
+    for mode in ["validation", "cancel", "revoke", "source"] {
+        let (_root, store, actor, service, collection) = setup();
+        let imported = derivative_import(&service, &actor, collection.id);
+        let encoder = Arc::new(DerivativeFixtureEncoder::new());
+        let service = service.with_audio_converter(encoder.clone());
+        let job = service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &command(),
+            )
+            .unwrap();
+        match mode {
+            "validation" => encoder.broken.store(true, Ordering::SeqCst),
+            "cancel" => {
+                let store = store.clone();
+                let user = actor.user_id;
+                *encoder.after_encode.lock().unwrap() = Some(Box::new(move || {
+                    store.request_job_cancellation(job, user).unwrap()
+                }));
+            }
+            "revoke" => {
+                let other = store
+                    .create_user("other-owner", "a long test password", false)
+                    .unwrap();
+                Catalog::grant(store.as_ref(), collection.id, other, Role::Owner).unwrap();
+                let store = store.clone();
+                let user = actor.user_id;
+                *encoder.after_encode.lock().unwrap() = Some(Box::new(move || {
+                    Catalog::grant(store.as_ref(), collection.id, user, Role::Viewer).unwrap()
+                }));
+            }
+            "source" => {
+                let store = store.clone();
+                *encoder.after_encode.lock().unwrap() = Some(Box::new(move || {
+                    let mut capture =
+                        Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+                    let rev = capture.revision;
+                    capture.representations[0].files[1].digest =
+                        Digest::sha256(b"changed source record");
+                    Catalog::save_capture(store.as_ref(), capture, rev).unwrap();
+                }));
+            }
+            _ => unreachable!(),
+        }
+        service.run_next_job("derivative-denial").unwrap();
+        assert_eq!(
+            Catalog::capture(store.as_ref(), imported.capture_id)
+                .unwrap()
+                .representations
+                .len(),
+            1,
+            "{mode}"
+        );
+        assert_eq!(
+            service.job(&actor, job).unwrap().state,
+            if mode == "cancel" {
+                JobState::Cancelled
+            } else {
+                JobState::Failed
+            }
+        );
+        if mode == "validation" {
+            encoder.broken.store(false, Ordering::SeqCst);
+            service.retry_job(&actor, job, &command()).unwrap();
+            service.run_next_job("derivative-retry").unwrap();
+            assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+        }
+    }
+}
+
+fn derivative_phases() -> [collector_store::PublicationFaultPoint; 6] {
+    use collector_store::PublicationFaultPoint::*;
+    [
+        Prepared,
+        BytesStaged,
+        PayloadPublished,
+        RevisionCommitted,
+        ProjectionApplied,
+        Completed,
+    ]
+}
+
+#[test]
+fn derivative_publication_failures_restart_without_reencoding_committed_output() {
+    for (index, point) in derivative_phases().into_iter().enumerate() {
+        let (root, store, actor, service, collection) = setup();
+        let imported = derivative_import(&service, &actor, collection.id);
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let encoder = Arc::new(DerivativeFixtureEncoder::new());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_audio_converter(encoder.clone());
+        let job = service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &command(),
+            )
+            .unwrap();
+        let result = service.run_next_job("derivative-fault");
+        if index < 3 {
+            result.unwrap();
+            assert_eq!(service.job(&actor, job).unwrap().state, JobState::Failed);
+        } else {
+            assert!(result.is_err(), "{point:?}");
+        }
+        assert_eq!(encoder.calls.load(Ordering::SeqCst), 1);
+        drop(service);
+        drop(store);
+        if index == 3 {
+            // Model a returned I/O error after the Capture rename but before the
+            // private job checkpoint caught up. Archive bytes remain authoritative.
+            let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+            db.execute(
+                "UPDATE jobs SET state='failed',phase='failed',claim_token=NULL,worker_instance=NULL,lease_expires=NULL WHERE id=?",
+                [job.to_string()],
+            )
+            .unwrap();
+        }
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(
+            store.clone(),
+            Arc::new(if index < 3 {
+                Registry::builtins()
+            } else {
+                Registry::default()
+            }),
+        );
+        if index < 3 {
+            assert_eq!(
+                Catalog::capture(store.as_ref(), imported.capture_id)
+                    .unwrap()
+                    .representations
+                    .len(),
+                1,
+                "{point:?}"
+            );
+            let service = service.with_audio_converter(encoder.clone());
+            service.retry_job(&actor, job, &command()).unwrap();
+            service.run_next_job("derivative-retry-fault").unwrap();
+            assert_eq!(
+                service.job(&actor, job).unwrap().state,
+                JobState::Completed,
+                "{point:?}"
+            );
+            assert_eq!(encoder.calls.load(Ordering::SeqCst), 2);
+        } else {
+            let other = store
+                .create_user("other-owner", "a long test password", false)
+                .unwrap();
+            Catalog::grant(store.as_ref(), collection.id, other, Role::Owner).unwrap();
+            Catalog::grant(store.as_ref(), collection.id, actor.user_id, Role::Viewer).unwrap();
+            assert!(
+                service
+                    .run_next_job("derivative-recover-no-tool-no-grant")
+                    .unwrap(),
+                "{point:?}"
+            );
+            assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+            assert_eq!(encoder.calls.load(Ordering::SeqCst), 1);
+        }
+        store.reindex().unwrap();
+        assert_eq!(
+            Catalog::capture(store.as_ref(), imported.capture_id)
+                .unwrap()
+                .representations
+                .len(),
+            2
+        );
+    }
+}
+
+struct PauseDerivativePhase {
+    point: collector_store::PublicationFaultPoint,
+    reached: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+impl collector_store::PublicationFaultInjector for PauseDerivativePhase {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == self.point
+            && let Some(sender) = self.reached.lock().unwrap().take()
+        {
+            sender.send(()).unwrap();
+            self.resume
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(15))
+                .unwrap();
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn derivative_cancellation_at_every_publication_phase_is_atomic() {
+    for (index, point) in derivative_phases().into_iter().enumerate() {
+        let (root, store, actor, service, collection) = setup();
+        let imported = derivative_import(&service, &actor, collection.id);
+        drop(service);
+        drop(store);
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(PauseDerivativePhase {
+                    point,
+                    reached: std::sync::Mutex::new(Some(reached_tx)),
+                    resume: std::sync::Mutex::new(resume_rx),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = Arc::new(
+            CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+                .with_audio_converter(Arc::new(DerivativeFixtureEncoder::new())),
+        );
+        let job = service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &command(),
+            )
+            .unwrap();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(|| service.run_next_job("derivative-cancel-phase"));
+            reached_rx
+                .recv_timeout(std::time::Duration::from_secs(15))
+                .unwrap();
+            let cancel = store.request_job_cancellation(job, actor.user_id);
+            if index < 3 {
+                cancel.unwrap();
+            } else {
+                assert!(matches!(cancel, Err(Error::CancellationTooLate)));
+            }
+            resume_tx.send(()).unwrap();
+            worker.join().unwrap().unwrap();
+        });
+        assert_eq!(
+            service.job(&actor, job).unwrap().state,
+            if index < 3 {
+                JobState::Cancelled
+            } else {
+                JobState::Completed
+            },
+            "{point:?}"
+        );
+        drop(service);
+        drop(store);
+        let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        assert_eq!(
+            Catalog::capture(&store, imported.capture_id)
+                .unwrap()
+                .representations
+                .len(),
+            if index < 3 { 1 } else { 2 },
+            "{point:?}"
+        );
+    }
+}
+
+#[test]
+fn derivative_real_flac_publication_uses_independent_pcm_validation() {
+    if std::env::var_os("COLLECTOR_TEST_FLAC").is_none() {
+        return;
+    }
+    let tool = collector_providers::ConfiguredEncoder::probe(
+        collector_providers::EncoderKind::Flac,
+        "flac",
+    )
+    .expect("COLLECTOR_TEST_FLAC requires real flac");
+    let version = tool.version().to_string();
+    let converter = collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap();
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let service = service.with_audio_converter(Arc::new(converter));
+    for position in [1, 2] {
+        let mut request = derivative_command(&imported, position);
+        request.encoder_version = version.clone();
+        let job = service
+            .prepare_music_derivative(&actor, imported.capture_id, request, &command())
+            .unwrap();
+        service.run_next_job("real-flac-publication").unwrap();
+        assert_eq!(
+            service.job(&actor, job).unwrap().state,
+            JobState::Completed,
+            "{:?}",
+            service.job(&actor, job).unwrap()
+        );
+    }
+    store.reindex().unwrap();
+    let capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    assert_eq!(capture.representations.len(), 3);
+    for r in &capture.representations[1..] {
+        let recipe = store.recipe(RecipeId(r.id.0)).unwrap();
+        assert_eq!(recipe.encoder_version, version);
+        let inventory = store
+            .package_inventory(collection.id, PackageScope::Representation(r.id))
+            .unwrap();
+        let mut reader = store
+            .package_file(collection.id, inventory.scope, inventory.files[0].id)
+            .unwrap();
+        let mut magic = [0; 4];
+        reader.read_exact(&mut magic).unwrap();
+        assert_eq!(&magic, b"fLaC");
+    }
+}
+
+#[test]
+fn derivative_queued_cancellation_changed_encoder_source_bytes_and_corrupt_scratch_fail_closed() {
+    for mode in [
+        "queued_cancel",
+        "missing_encoder",
+        "changed_encoder",
+        "source_bytes",
+        "scratch_bytes",
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let imported = derivative_import(&service, &actor, collection.id);
+        let encoder = Arc::new(DerivativeFixtureEncoder::new());
+        let configured = service.with_audio_converter(encoder.clone());
+        let job = configured
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &command(),
+            )
+            .unwrap();
+        let service = match mode {
+            "queued_cancel" => {
+                store.request_job_cancellation(job, actor.user_id).unwrap();
+                configured
+            }
+            "missing_encoder" => {
+                CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            }
+            "changed_encoder" => configured.with_audio_converter(Arc::new(
+                collector_providers::ProcessAudioConverter::default(),
+            )),
+            "source_bytes" => {
+                let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+                    .path();
+                let path = collection_path.join(format!(
+                    "captures/{}/payload/{}/disc.bin",
+                    imported.capture_id, imported.representation_id
+                ));
+                let mut data = std::fs::read(&path).unwrap();
+                data[0] ^= 1;
+                std::fs::write(path, data).unwrap();
+                configured
+            }
+            "scratch_bytes" => configured.with_audio_converter(Arc::new(CorruptDerivativeEncoder)),
+            _ => unreachable!(),
+        };
+        service.run_next_job("derivative-preflight").unwrap();
+        assert_eq!(
+            Catalog::capture(store.as_ref(), imported.capture_id)
+                .unwrap()
+                .representations
+                .len(),
+            1
+        );
+        assert_eq!(
+            service.job(&actor, job).unwrap().state,
+            if mode == "queued_cancel" {
+                JobState::Cancelled
+            } else {
+                JobState::Failed
+            },
+            "{mode}"
+        );
+        assert_eq!(encoder.calls.load(Ordering::SeqCst), 0, "{mode}");
+    }
+}
+
+struct CorruptDerivativeEncoder;
+impl collector_app::AudioConversionPort for CorruptDerivativeEncoder {
+    fn availability(&self, recipe: &ConversionRecipe) -> collector_app::EncoderAvailability {
+        DerivativeFixtureEncoder::new().availability(recipe)
+    }
+    fn convert(
+        &self,
+        recipe: &ConversionRecipe,
+        source: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+        scratch: &mut dyn collector_app::ConversionScratch,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<collector_app::ConversionValidation> {
+        let validation =
+            DerivativeFixtureEncoder::new().convert(recipe, source, scratch, execution)?;
+        scratch.rewind().unwrap();
+        scratch.write_all(b"bad").unwrap();
+        Ok(validation)
+    }
+}
+
+#[test]
+fn derivative_reindex_rejects_corrupt_published_bytes_and_preserves_master() {
+    let (root, store, actor, service, collection) = setup();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let job = service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    service.run_next_job("derivative-corruption").unwrap();
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let master = collection_path.join(format!(
+        "captures/{}/payload/{}/disc.bin",
+        imported.capture_id, imported.representation_id
+    ));
+    let preserved = std::fs::read(&master).unwrap();
+    let r = &capture.representations[1];
+    std::fs::write(
+        collection_path.join(format!(
+            "captures/{}/payload/{}/{}",
+            capture.id, r.id, r.files[0].name
+        )),
+        b"broken output!",
+    )
+    .unwrap();
+    assert!(store.reindex().is_err());
+    assert_eq!(std::fs::read(master).unwrap(), preserved);
+    drop(service);
+    drop(store);
+    assert!(Store::open(root.path().join("archive"), root.path().join("state")).is_err());
+}
+
+#[test]
+fn subprocess_derivative_worker() {
+    let Ok(root) = std::env::var("D072_CHILD_ROOT") else {
+        return;
+    };
+    let point = parse_publication_point(&std::env::var("D072_CHILD_POINT").unwrap());
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            Path::new(&root).join("archive"),
+            Path::new(&root).join("state"),
+            Arc::new(BlockAtPublicationPoint(point)),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store, Arc::new(Registry::builtins()))
+        .with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let _ = service.run_next_job("derivative-child");
+    panic!("child derivative unexpectedly returned");
+}
+
+#[test]
+fn derivative_sigkill_at_each_publication_phase_recovers_original_identity() {
+    use std::io::BufRead as _;
+    for (index, point) in derivative_phases().into_iter().enumerate() {
+        let (root, store, actor, service, collection) = setup();
+        let imported = derivative_import(&service, &actor, collection.id);
+        let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+        let job = service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &command(),
+            )
+            .unwrap();
+        drop(service);
+        drop(store);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "subprocess_derivative_worker", "--nocapture"])
+            .env("D072_CHILD_ROOT", root.path())
+            .env("D072_CHILD_POINT", format!("{point:?}"))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+        loop {
+            let mut line = String::new();
+            assert_ne!(
+                output.read_line(&mut line).unwrap(),
+                0,
+                "child exited before {point:?}"
+            );
+            if line.contains("P01_PHASE:") {
+                break;
+            }
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let encoder = Arc::new(DerivativeFixtureEncoder::new());
+        let service = if index < 3 {
+            service.with_audio_converter(encoder.clone())
+        } else {
+            service
+        };
+        service.run_next_job("derivative-parent-recovery").unwrap();
+        assert_eq!(
+            service.job(&actor, job).unwrap().state,
+            JobState::Completed,
+            "{point:?}"
+        );
+        assert_eq!(encoder.calls.load(Ordering::SeqCst), usize::from(index < 3));
+        assert_eq!(
+            Catalog::capture(store.as_ref(), imported.capture_id)
+                .unwrap()
+                .representations
+                .len(),
+            2
+        );
+    }
+}
+
+struct ConcurrentDerivativeEncoder(std::sync::Barrier);
+impl collector_app::AudioConversionPort for ConcurrentDerivativeEncoder {
+    fn availability(&self, recipe: &ConversionRecipe) -> collector_app::EncoderAvailability {
+        DerivativeFixtureEncoder::new().availability(recipe)
+    }
+    fn convert(
+        &self,
+        recipe: &ConversionRecipe,
+        source: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+        scratch: &mut dyn collector_app::ConversionScratch,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<collector_app::ConversionValidation> {
+        self.0.wait();
+        DerivativeFixtureEncoder::new().convert(recipe, source, scratch, execution)
+    }
+}
+
+#[test]
+fn derivative_simultaneous_encoders_converge_on_one_output_and_recipe() {
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let user = store
+        .create_user("second-curator", "a long test password", false)
+        .unwrap();
+    Catalog::grant(store.as_ref(), collection.id, user, Role::Curator).unwrap();
+    let other = Principal {
+        user_id: user,
+        administrator: false,
+        device_id: None,
+    };
+    let service = Arc::new(
+        service.with_audio_converter(Arc::new(ConcurrentDerivativeEncoder(
+            std::sync::Barrier::new(2),
+        ))),
+    );
+    let first = service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    let second = service
+        .prepare_music_derivative(
+            &other,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    std::thread::scope(|scope| {
+        for _ in 0..2 {
+            let service = &service;
+            scope.spawn(move || service.run_next_job("same-server-instance").unwrap());
+        }
+    });
+    assert_eq!(
+        service.job(&actor, first).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        service.job(&other, second).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        Catalog::capture(store.as_ref(), imported.capture_id)
+            .unwrap()
+            .representations
+            .len(),
+        2
+    );
+    store.reindex().unwrap();
+}
+
+#[test]
+fn derivative_encoder_version_changes_require_a_new_recipe_and_frozen_jobs_do_not_upgrade() {
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let service = service.with_audio_converter(encoder.clone());
+    let old = service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    *encoder.version.lock().unwrap() = "fixture encoder 2".into();
+    service.run_next_job("changed-encoder").unwrap();
+    assert_eq!(service.job(&actor, old).unwrap().state, JobState::Failed);
+    assert_eq!(
+        Catalog::capture(store.as_ref(), imported.capture_id)
+            .unwrap()
+            .representations
+            .len(),
+        1
+    );
+    let mut next = derivative_command(&imported, 1);
+    next.encoder_version = "fixture encoder 2".into();
+    let new = service
+        .prepare_music_derivative(&actor, imported.capture_id, next, &command())
+        .unwrap();
+    service.run_next_job("new-encoder-recipe").unwrap();
+    assert_eq!(service.job(&actor, new).unwrap().state, JobState::Completed);
+    *encoder.version.lock().unwrap() = "fixture encoder 1".into();
+    service.retry_job(&actor, old, &command()).unwrap();
+    service.run_next_job("original-encoder-retry").unwrap();
+    assert_eq!(service.job(&actor, old).unwrap().state, JobState::Completed);
+    let capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    assert_eq!(capture.representations.len(), 3);
+    assert_ne!(capture.representations[1].id, capture.representations[2].id);
+    assert_ne!(
+        store
+            .recipe(RecipeId(capture.representations[1].id.0))
+            .unwrap()
+            .digest,
+        store
+            .recipe(RecipeId(capture.representations[2].id.0))
+            .unwrap()
+            .digest
+    );
+}
+
+#[test]
+fn derivative_recovery_and_reindex_reject_recipe_presentation_disagreement() {
+    for field in ["format", "role", "profile"] {
+        let (_root, store, actor, service, collection) = setup();
+        let imported = derivative_import(&service, &actor, collection.id);
+        let encoder = Arc::new(DerivativeFixtureEncoder::new());
+        let service = service.with_audio_converter(encoder.clone());
+        service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &command(),
+            )
+            .unwrap();
+        service.run_next_job("original-derivative").unwrap();
+        let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+        let expected = capture.revision;
+        // Simulate a structurally valid but contradictory retained Capture. Its
+        // file digest and validation envelope still match the original output.
+        match field {
+            "format" => capture.representations[1].format = "opus".into(),
+            "role" => capture.representations[1].role = RepresentationRole::LossyDerivative,
+            "profile" => {
+                capture.representations[1].profile =
+                    Some(ConversionProfile::Opus { bitrate_kbps: 96 })
+            }
+            _ => unreachable!(),
+        }
+        Catalog::save_capture(store.as_ref(), capture, expected).unwrap();
+        let retry = service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, 1),
+                &command(),
+            )
+            .unwrap();
+        service.run_next_job("retained-derivative-check").unwrap();
+        assert_eq!(
+            service.job(&actor, retry).unwrap().state,
+            JobState::Failed,
+            "{field}"
+        );
+        assert_eq!(encoder.calls.load(Ordering::SeqCst), 1);
+        let error = store.reindex().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("inconsistent archived derivative evidence"),
+            "{field}: {error}"
+        );
+    }
 }

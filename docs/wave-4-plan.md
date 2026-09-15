@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1 is next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -76,8 +76,8 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 7 | D05.1 | W4.2 | Exact CD PCM/layout and bounded checksum readers | Reviewed/corrected 2026-09-14; proceed to D05.2 |
 | 8 | D05.2 | D05.1 | AccurateRip acquisition and result policy | Reviewed/corrected 2026-09-14; proceed to D05.3 |
 | 9 | D05.3 | D05.2 | CD jobs, curation and fixture qualification | Reviewed/corrected 2026-09-15; proceed to D07.1 |
-| 10 | D07.1 | D05.1, W4.2 | Immutable conversion recipes and exact encoders | Review; sibling gates if changed |
-| 11 | D07.2 | D07.1 | Recoverable derivative publication | Review |
+| 10 | D07.1 | D05.1, W4.2 | Immutable conversion recipes and exact encoders | Reviewed/corrected 2026-09-15; proceed to D07.2 |
+| 11 | D07.2 | D07.1 | Recoverable derivative publication | Reviewed/corrected 2026-09-15; proceed to D07.3 |
 | 12 | D07.3 | D07.2 | Availability, ranged access and web controls | D07 root review |
 | 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Review |
 | 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Routine plus provider tests |
@@ -762,6 +762,10 @@ Do not render raw provider HTML or include unreviewed URLs as executable content
 
 ### D07.1 — Recipes and exact conversion
 
+**Status (2026-09-15): reviewed and corrected locally; D07.2 is reviewed and corrected locally.** The
+settled contract and implementation below add no publication, route, registered
+conversion Job or playback capability at the D07.1 checkpoint. D07.2 status is below.
+
 **User decision (2026-09-14):** Maintaining a parallel server-side FLAC library
 is optional. Initially prepare derivatives only on explicit request; importing,
 tracking and verifying masters must work without generating FLAC. FLAC-first means
@@ -770,6 +774,43 @@ opt-in maintenance policy must use the same jobs and representations. Disabling
 automatic preparation must not implicitly delete existing derivatives or masters.
 When no playable representation exists, show preparation as an optional action;
 do not promise direct raw-dump playback or silently transcode on a media GET.
+
+**Settled producer/consumer contract (2026-09-15, before implementation):** The
+music module is the sole owner of the ordered CD-to-track mapping. For supported
+CUE packages, the exact PCM timeline starts at the first stored audio byte: stored
+HTOA before track 1 is prepended to track 1, and a later stored `INDEX 00` remains
+owned by the preceding track through the existing D05 `INDEX 01`-to-next-`INDEX
+01` span. Synthetic `PREGAP`/`POSTGAP`, mixed-mode/four-channel layouts, missing
+physical ranges and ambiguous package members are not convertible. Supported
+redumper audio uses its validated signed first-track-to-lead-out timeline and the
+same next-`INDEX 01` ownership. The module returns a bounded seekable integer
+`i16` stereo 44,100-Hz reader plus ordered, nonempty track ranges; it does not
+spawn tools, authorize users, schedule jobs or publish representations.
+
+Application code owns future explicit-request authorization, frozen Job identity,
+source-currency checks and cancellation and calls a mechanism-only conversion
+port. The provider adapter receives only the sealed recipe, the already-authorized
+PCM reader and an already-opened scratch handle. It directly spawns the configured
+binary, streams bounded chunks through pipes, caps diagnostics/output, kills and
+reaps on cancellation, and returns typed validation—not a published media identity.
+The immutable recipe digest binds the source fingerprint, exact ordered track
+ranges, fixed codec settings, encoder name/version and input/output PCM formats.
+FLAC means level 5 and unchanged signed little-endian 16-bit stereo 44,100-Hz PCM.
+Opus means 96/128/192 kbps, 20-ms frames, stereo music mode, input declared as
+44,100-Hz integer PCM and an explicit 48-kHz decoded timeline; pre-skip and final
+padding are measured from the Ogg Opus result. A missing or version-mismatched tool
+is unavailable, never a successful no-op.
+
+D07.2 persists one recipe/validation result and immutable representation per
+source fingerprint plus recipe and track selection, using stable retry identities;
+D07.3 will expose authorized ordered descriptors containing track position,
+track-local frame count, immutable representation/file identity, media type,
+content length/digest, availability and safe display fallback. Those consumers
+must use these music-owned ranges and must not reinterpret pregaps or expose archive
+paths. These are planned consumers only: D07.1 adds no route, publication, media
+descriptor or placeholder endpoint. A supported layout remains convertible when
+AccurateRip reports no data, mismatch or outage because catalog verification is
+neither an input to this contract nor a conversion authorization gate.
 
 1. Keep existing `ConversionProfile::Flac` / `Opus { bitrate_kbps }` API readable.
    Introduce immutable `RecipeId` behind those user presets; a preset is not enough
@@ -798,6 +839,40 @@ Do not invent a full shared encoder framework: mechanism adapters belong outside
 core/modules; reusable decode/PCM work belongs in Junk Libs with sibling checks.
 
 ### D07.2 — Derivative publication
+
+**Status (2026-09-15): reviewed and corrected locally; proceed to D07.3.**
+
+**Implemented contract:** `CollectionService::prepare_music_derivative` accepts one
+source Representation, music package selection, track position, preset and full
+configured encoder version report. The application resolves music-owned ranges,
+seals a recipe and freezes it in the existing job store. Requests use command
+receipts; separate requests have private JobIds but converge on content-derived
+RecipeId/RepresentationId identities. One job produces exactly one track file.
+No HTTP endpoint, automatic import hook, media-GET conversion or second scheduler
+is added. The host composes an optional `AudioConversionPort`; absent/mismatched
+tools return unavailable.
+
+Store owns anonymous encoder scratch and known per-attempt publication spools.
+Encoding, shared codec validation and scratch digest/length checking happen outside
+the archive writer lock. A checked Capture revision appends the representation;
+its journal publishes output, schema-4 recipe and schema-3 validation Evidence
+before the Capture revision rename. The final cancellation gate and current
+application authorization/source-record check precede that rename. Capture edits
+are merged from current storage under the writer lock; Item records are not
+rewritten. Pre-commit cancellation/failure removes only journal-owned artifacts;
+post-commit recovery projects the original records and bytes, independently of
+current tools, grants and module registration, including a lagging failed private
+job checkpoint. Startup cleans known disposable
+attempt spools after journal recovery. Existing migrated master locators remain
+intact; new derivatives use canonical Capture payload paths.
+
+The executable workflow imports a synthetic two-track BIN/CUE with HTOA and a
+stored later pregap, explicitly prepares separate tracks, edits/associates an Item,
+and reindexes. Tests include concurrent encoders, command replay, changed source
+and encoder, invalid validation/scratch, queued/encoded/phase cancellation, denied
+authority, failures and actual process kills across all six journal phases. Real
+FLAC is an explicit enabled test; Opus structural validation remains distinct from
+PCM equality, and real opusenc/owned-disc qualification is unrun.
 
 Create one immutable derivative representation per source fingerprint/recipe/track
 selection. A retry has the same IDs; a different source or recipe has new IDs.
@@ -1108,27 +1183,53 @@ Wave 3 final-chunk replay, interrupted cancellation and post-commit recovery cas
 ## Ready-to-send implementation prompt
 
 ```text
-Implement D07.1 only, following its acceptance criteria in docs/wave-4-plan.md.
-Read AGENTS.md, architecture/status/release requirements, pre-release evolution,
-the D05 review and docs/music-first-milestones.md first. D05 is reviewed locally;
-owned-disc and external mastering qualification remain unverified.
+Implement D07.3 only. Read AGENTS.md, docs/architecture.md,
+docs/implementation-status.md, docs/release-requirements.md,
+docs/decisions/pre-release-evolution.md, docs/music-first-milestones.md,
+docs/wave-4-review.md and D07.1–D07.3 in docs/wave-4-plan.md.
+D07.1 and D07.2 are reviewed checkpoints. Preserve their implementation and
+unrelated sibling edits. Do not commit or spawn agents.
 
-Settle immutable conversion recipes and exact track/PCM ownership before coding.
-Reuse D05 package readers and shared integer PCM algorithms. Keep optional encoder
-processes in mechanism adapters, authorization/jobs in application services and
-track semantics in the music module. Use bounded pipes/readers, explicit tool
-versions/settings, cancellable subprocesses and independently decoded FLAC PCM
-comparison. Do not confuse conversion validation with AccurateRip verification.
+First settle the shared application read contract for ordered track availability:
+source representation, track position and integer frame coordinates, safe title
+fallback, profile, preparing/unavailable/available state, immutable published
+representation/file identity, length, media type and digest. Keep archive paths,
+private job details and raw evidence out of viewer DTOs. A missing module/tool
+must not prevent authorized reads of already-published outputs. Use the existing
+service, frozen jobs, publication and encoder adapter; do not add another scheduler
+or conversion implementation. Prepare one output per track, never a concatenated
+disc labeled as separate track files.
 
-FLAC preparation is optional and explicit. Import, inventory and verification do
-not depend on it. Preserve masters and HTOA/pregap semantics; unsupported layouts
-must fail clearly. Verification no-data/mismatch/outage must not independently
-block conversion of supported audio. Follow the specified FLAC and Opus profiles;
-missing tools remain unavailable rather than simulated success.
+Compose optional encoder configuration in the server, with useful CLI/help and
+sample-config instructions. The server probes the configured executable and
+supplies its full version report to the application command; browsers do not
+choose executable paths or authoritative version reports. Missing encoders leave
+basic preservation and original reads operational. Never convert on import or
+media GET. Keep the parallel derivative library opt-in.
 
-Plan the immediate D07.2/D07.3 track-descriptor consumer contract without creating
-placeholder endpoints. Do not implement publication, web playback, metadata
-providers or unrelated roots here. Update the ledger/status/validation and report
-exact checks and missing external qualification. Stop for D07.1 review. Preserve
-unrelated changes; do not commit or spawn other agents.
+Expose authorized availability/read routes on the client surface and explicit
+prepare commands on the curation surface. Reuse existing authentication, command
+receipts, structured errors and jobs. Viewers may read permitted published media
+but cannot request conversion. Disabled public curation must hide its backing
+commands, regardless of forwarded headers. Add web preparation buttons with FLAC
+default, explicit smaller Opus choices, unavailable-tool guidance, job progress
+and refresh after completion. Retain artwork beside text and useful placeholders.
+
+Use existing opaque readers to implement strong content ETags, Range and If-Range
+for originals and derivatives. Test full/partial/suffix/open-ended/unsatisfiable
+ranges, stale and weak If-Range, actual response lengths and current revocation.
+Do not leak credentials in URLs or create a parallel streaming/transcoding API.
+Regenerate OpenAPI/TypeScript contracts after route changes.
+
+Validate via actual HTTP: viewer reads, curator-only preparation, cross-collection
+denial, private curation exposure, missing tools, preparation completion/reload,
+retained outputs after restart, and real FLAC bytes matching source PCM. Exercise
+the actual web preparation workflow and rebuild the server after embedded assets.
+Run repository checks with COLLECTOR_TEST_FLAC=1 where flac is installed. Report
+unrun opusenc/owned-disc/deployment qualification honestly.
+
+Stop after D07.3 and update status, child ledger, validation and next prompt
+together. The subsequent bounded browser-player child owns disc queue controls
+and real playback/seek/track-transition qualification; do not silently claim that
+milestone from successful downloads or a URL assigned to an audio element.
 ```

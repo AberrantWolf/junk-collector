@@ -868,7 +868,7 @@ pub struct Representation {
     pub source: Option<RepresentationId>,
     pub profile: Option<ConversionProfile>,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RepresentationRole {
     PreservationMaster,

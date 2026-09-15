@@ -2,7 +2,7 @@
 
 Planning assessment, 2026-09-14. This is a proposed scheduling change, not evidence
 of implemented playback or authorization to skip acceptance gates. D05.3 was reviewed on 2026-09-15. D07 now precedes D06 in the active Wave 4
-ledger, with D07.1 next. The later native-client acceleration remains proposed;
+ledger; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally. The later native-client acceleration remains proposed;
 settle its bounded children before changing those assignments.
 
 ## Finding
