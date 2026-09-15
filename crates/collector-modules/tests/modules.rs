@@ -908,16 +908,41 @@ fn moved_game_and_music_result_wire_shapes_and_signed_units_are_unchanged() {
         verification: AudioVerificationResult {
             status: AudioVerificationStatus::Verified,
             selected_offset: Some(StereoSampleFrameOffset(-6)),
-            evaluated_offset_start: StereoSampleFrameOffset(-2939),
-            evaluated_offset_end: StereoSampleFrameOffset(2939),
-            v2_evaluated_offsets: vec![StereoSampleFrameOffset(-6)],
-            unavailable_leading_frames: PcmFrame(0),
-            unavailable_trailing_frames: PcmFrame(0),
+            ambiguous_offsets: vec![],
+            algorithm_version: 1,
+            database: AccurateRipDatabaseIdentity {
+                track_count: 1,
+                accuraterip_id1: 0x0008_4264,
+                accuraterip_id2: 0x001c_c184,
+                cddb_id: 0x1911_7f03,
+            },
+            database_response_count: 1,
+            database_response_digest: Digest::sha256(b"dbar"),
+            input_digests: vec![Digest::sha256(b"disc")],
             tracks: vec![AudioTrackVerification {
                 position: 1,
+                computed_offset: StereoSampleFrameOffset(-6),
                 status: AudioVerificationStatus::Verified,
-                checksum_version: Some(AudioChecksumVersion::AccurateRipV2),
-                confidence: Some(12),
+                checksums: vec![
+                    AudioChecksumEvidence {
+                        version: AudioChecksumVersion::AccurateRipV1,
+                        checksum: Digest::new(HashAlgorithm::AccurateRipV1, "11111111").unwrap(),
+                        confidence: None,
+                    },
+                    AudioChecksumEvidence {
+                        version: AudioChecksumVersion::AccurateRipV2,
+                        checksum: Digest::new(HashAlgorithm::AccurateRipV2, "22222222").unwrap(),
+                        confidence: Some(12),
+                    },
+                ],
+                coverage: AudioSearchCoverage {
+                    v1_evaluated_offset_start: StereoSampleFrameOffset(-2939),
+                    v1_evaluated_offset_end: StereoSampleFrameOffset(2939),
+                    v2_evaluated_offsets: vec![StereoSampleFrameOffset(-6)],
+                    unavailable_leading_frames: PcmFrame(0),
+                    unavailable_trailing_frames: PcmFrame(0),
+                },
+                limitations: vec![],
             }],
             limitations: vec![],
         },
@@ -927,7 +952,7 @@ fn moved_game_and_music_result_wire_shapes_and_signed_units_are_unchanged() {
     }
     assert_eq!(
         serde_json::to_string(&music).unwrap(),
-        r#"{"result":"audio_verification","verification":{"status":"verified","selected_offset":-6,"evaluated_offset_start":-2939,"evaluated_offset_end":2939,"v2_evaluated_offsets":[-6],"unavailable_leading_frames":0,"unavailable_trailing_frames":0,"tracks":[{"position":1,"status":"verified","checksum_version":"accurate_rip_v2","confidence":12}],"limitations":[]}}"#
+        r#"{"result":"audio_verification","verification":{"status":"verified","selected_offset":-6,"ambiguous_offsets":[],"algorithm_version":1,"database":{"track_count":1,"accuraterip_id1":541284,"accuraterip_id2":1884548,"cddb_id":420577027},"database_response_count":1,"database_response_digest":{"algorithm":"sha256","hex":"358e476bed9321d75b77c6b8b80da0dafe5df90a810ba14ed9494f0dd3e290a8"},"input_digests":[{"algorithm":"sha256","hex":"6bf99799d0ef91be6c25a22943f74caaf655814b216ee8cb52ef61223d4f2d06"}],"tracks":[{"position":1,"status":"verified","computed_offset":-6,"checksums":[{"version":"accurate_rip_v1","checksum":{"algorithm":"accurate_rip_v1","hex":"11111111"},"confidence":null},{"version":"accurate_rip_v2","checksum":{"algorithm":"accurate_rip_v2","hex":"22222222"},"confidence":12}],"coverage":{"v1_evaluated_offset_start":-2939,"v1_evaluated_offset_end":2939,"v2_evaluated_offsets":[-6],"unavailable_leading_frames":0,"unavailable_trailing_frames":0},"limitations":[]}],"limitations":[]}}"#
     );
     let game = GameProcessingResult::Structure {
         format: "header".into(),

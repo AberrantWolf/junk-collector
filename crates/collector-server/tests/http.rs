@@ -588,7 +588,7 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
         .unwrap();
     assert_eq!(analyzed.phase, collector_app::ImportPhase::AwaitingReview);
     assert!(analyzed.candidates.is_empty());
-    assert!(analyzed.limitations[0].contains("D04/D05"));
+    assert!(analyzed.limitations[0].contains("CUE or redumper TOC anchor"));
     let response = app
         .clone()
         .oneshot(
@@ -1633,7 +1633,7 @@ fn range_boundaries() {
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 78);
+    assert_eq!(paths.len(), 79);
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -1645,6 +1645,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/imports",
         "/api/v1/imports/{id}",
         "/api/v1/captures/{id}/operations",
+        "/api/v1/captures/{id}/accuraterip-snapshots",
         "/api/v1/collections/{id}/catalog-snapshots",
         "/api/v1/admin/catalog-sources",
         "/api/v1/admin/collections/{id}/catalog-snapshots",

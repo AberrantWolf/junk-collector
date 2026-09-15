@@ -13,7 +13,7 @@ ALLOWED = {
     "collector-api-types": {"collector-core"},
     "collector-modules": {"collector-core"},
     "collector-app": {"collector-core", "collector-modules", "collector-api-types"},
-    "collector-providers": {"collector-core", "collector-api-types", "collector-app"},
+    "collector-providers": {"collector-core", "collector-api-types", "collector-app", "collector-modules"},
     "collector-store": {"collector-core", "collector-app"},
     "collector-client": {"collector-core", "collector-api-types"},
     "collector-server": {"collector-core", "collector-api-types", "collector-modules", "collector-app", "collector-providers", "collector-store", "collector-client"},

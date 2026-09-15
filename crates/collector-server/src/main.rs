@@ -3,7 +3,10 @@ use clap::{Parser, Subcommand};
 use collector_app::CollectionTypeAdministrationService;
 use collector_client::{Endpoint, Pairing, Route};
 use collector_core::*;
-use collector_providers::{LOCAL_DAT_PROVIDER_ID, LocalDatProvider, LocalDatSource};
+use collector_providers::{
+    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, LOCAL_DAT_PROVIDER_ID, LocalDatProvider,
+    LocalDatSource,
+};
 use collector_server::{AppState, router};
 use collector_store::Store;
 use serde::{Deserialize, Serialize};
@@ -408,6 +411,28 @@ async fn main() -> Result<()> {
                 .clone()
                 .with_streaming_provider(provider_id.clone(), dat_provider.clone())?
                 .with_catalog_parser(provider_id, dat_provider.clone())?;
+            #[cfg(debug_assertions)]
+            let accuraterip =
+                if let Ok(origin) = std::env::var("JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN") {
+                    Arc::new(AccurateRipProvider::with_test_origin(
+                        "junk-collector-test/0.1",
+                        &origin,
+                        std::time::Duration::from_secs(5),
+                    )?)
+                } else {
+                    Arc::new(AccurateRipProvider::new("junk-collector/0.1")?)
+                };
+            #[cfg(not(debug_assertions))]
+            let accuraterip = Arc::new(AccurateRipProvider::new("junk-collector/0.1")?);
+            let accuraterip_id = ModuleId(ACCURATERIP_PROVIDER_ID.into());
+            state.service = state
+                .service
+                .clone()
+                .with_streaming_provider(
+                    accuraterip_id.clone(),
+                    Arc::new(collector_app::BoundedProviderAdapter(accuraterip.clone())),
+                )?
+                .with_catalog_parser(accuraterip_id, accuraterip)?;
             state.catalog_sources = Arc::new(
                 dat_provider
                     .configured_sources()

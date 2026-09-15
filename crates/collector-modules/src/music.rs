@@ -1,19 +1,31 @@
-use std::io::SeekFrom;
+pub mod catalog;
+use catalog::{DbarOutcome, DbarSnapshotObservation, ParsedDbarSnapshot};
+use std::io::{Read, SeekFrom};
 
 use collector_core::{
-    ByteLength, CdSector, CdTrackKind, CdTrackLayout, ModuleData, PackageFileId, PackageInventory,
-    PcmFrame, RawJson, SampleFrame, StereoSampleFrameOffset,
+    ByteLength, CdSector, CdTrackKind, CdTrackLayout, Digest, HashAlgorithm, ModuleData,
+    PackageFileId, PackageInventory, PcmFrame, RawJson, SampleFrame, StereoSampleFrameOffset,
 };
-use junk_libs_accuraterip::DiscPcmTrack;
+use junk_libs_accuraterip::{
+    BoundedDiscReader, DbarFile, DbarResponse, DiscPcmTrack, ExpectedChecksum,
+    TrackVerificationStatus, VerificationOptions, VerificationStatus, VerificationSummary,
+    verify_with_offset_reader,
+};
 use junk_libs_disc::TrackKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CapabilityId, CollectionModule, DomainFieldDescriptor, DomainFieldKind, ModuleDescriptor,
-    ModuleError, ModulePresentation, ModuleResult, OperationOutput, OperationRequest, PatchValue,
+    Availability, Capability, CapabilityId, CollectionModule, DomainFieldDescriptor,
+    DomainFieldKind, ModuleDescriptor, ModuleError, ModulePresentation, ModuleResult,
+    OperationEntity, OperationOutput, OperationRequest, OperationScope, PackageAccess, PatchValue,
     apply_patch_value, basic_presentation, descriptor, module_data_from_raw_object,
     raw_domain_object,
 };
+
+pub const CD_STRUCTURE_OPERATION: &str = "org.junk.music.cd-structure";
+pub const ACCURATERIP_VERIFICATION_OPERATION: &str = "org.junk.music.accuraterip-verification";
+const ACCURATERIP_PROVIDER_ID: &str = "org.junk.providers.accuraterip";
+const MAX_CUE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MusicItemData {
@@ -48,6 +60,52 @@ pub struct MusicMetadataOverrides {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum CdPackageKind {
+    Cue,
+    Redumper,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CdPackageSelection {
+    pub package_kind: CdPackageKind,
+    pub anchor_file_index: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccurateRipSelection {
+    pub package_kind: CdPackageKind,
+    pub anchor_file_index: usize,
+    pub snapshot_id: collector_core::SnapshotId,
+    #[serde(default = "default_maximum_offset")]
+    pub maximum_offset: i32,
+}
+
+fn default_maximum_offset() -> i32 {
+    junk_libs_accuraterip::DEFAULT_MAX_SAMPLE_SHIFT
+}
+
+#[derive(Deserialize)]
+struct MusicImportAnalysisInput {
+    #[serde(rename = "import_id")]
+    _import_id: collector_core::ImportId,
+    #[serde(rename = "representation_id")]
+    _representation_id: collector_core::RepresentationId,
+    #[serde(rename = "files")]
+    _files: Vec<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MusicImportAnalysisOutput {
+    candidates: Vec<serde_json::Value>,
+    limitations: Vec<String>,
+    observations: Vec<RawJson>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum AudioVerificationStatus {
     Verified,
     IncompleteSearch,
@@ -67,11 +125,42 @@ pub enum AudioChecksumVersion {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
+pub struct AudioChecksumEvidence {
+    pub version: AudioChecksumVersion,
+    pub checksum: Digest,
+    pub confidence: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AudioSearchCoverage {
+    /// Inclusive v1 search range; v2 candidate evaluation is listed separately.
+    pub v1_evaluated_offset_start: StereoSampleFrameOffset,
+    pub v1_evaluated_offset_end: StereoSampleFrameOffset,
+    pub v2_evaluated_offsets: Vec<StereoSampleFrameOffset>,
+    pub unavailable_leading_frames: PcmFrame,
+    pub unavailable_trailing_frames: PcmFrame,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AudioTrackVerification {
     pub position: u8,
     pub status: AudioVerificationStatus,
-    pub checksum_version: Option<AudioChecksumVersion>,
-    pub confidence: Option<u32>,
+    /// Offset at which both recorded checksums were computed, even without a disc-wide selection.
+    pub computed_offset: StereoSampleFrameOffset,
+    pub checksums: Vec<AudioChecksumEvidence>,
+    pub coverage: AudioSearchCoverage,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccurateRipDatabaseIdentity {
+    pub track_count: u8,
+    pub accuraterip_id1: u32,
+    pub accuraterip_id2: u32,
+    pub cddb_id: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -79,12 +168,12 @@ pub struct AudioTrackVerification {
 pub struct AudioVerificationResult {
     pub status: AudioVerificationStatus,
     pub selected_offset: Option<StereoSampleFrameOffset>,
-    /// Inclusive v1 search range; v2 candidate evaluation is listed separately.
-    pub evaluated_offset_start: StereoSampleFrameOffset,
-    pub evaluated_offset_end: StereoSampleFrameOffset,
-    pub v2_evaluated_offsets: Vec<StereoSampleFrameOffset>,
-    pub unavailable_leading_frames: PcmFrame,
-    pub unavailable_trailing_frames: PcmFrame,
+    pub ambiguous_offsets: Vec<StereoSampleFrameOffset>,
+    pub algorithm_version: u32,
+    pub database: AccurateRipDatabaseIdentity,
+    pub database_response_count: u32,
+    pub database_response_digest: Digest,
+    pub input_digests: Vec<Digest>,
     pub tracks: Vec<AudioTrackVerification>,
     pub limitations: Vec<String>,
 }
@@ -112,43 +201,106 @@ pub struct CdSourceSpan {
 
 impl AudioVerificationResult {
     pub fn validate(&self) -> collector_core::Result<()> {
-        if self.evaluated_offset_start.0 > self.evaluated_offset_end.0
-            || self.selected_offset.is_some_and(|offset| {
-                offset.0 < self.evaluated_offset_start.0 || offset.0 > self.evaluated_offset_end.0
+        self.database_response_digest.validate()?;
+        if self.algorithm_version != 1
+            || !(1..=99).contains(&self.database.track_count)
+            || self.database_response_digest.algorithm != HashAlgorithm::Sha256
+            || (self.status == AudioVerificationStatus::Verified
+                && self.database_response_count == 0)
+            || self.input_digests.is_empty()
+            || self.input_digests.len() > 4096
+            || self.input_digests.iter().any(|digest| {
+                digest.validate().is_err() || digest.algorithm != HashAlgorithm::Sha256
             })
-            || self.v2_evaluated_offsets.len() > 5879
+            || (matches!(
+                self.status,
+                AudioVerificationStatus::Verified
+                    | AudioVerificationStatus::IncompleteSearch
+                    | AudioVerificationStatus::Mismatched
+                    | AudioVerificationStatus::AmbiguousOffsets
+            ) && (self.database_response_count == 0
+                || self.tracks.len() != usize::from(self.database.track_count)))
+            || (self.status == AudioVerificationStatus::NoData
+                && (self.database_response_count != 0 || !self.tracks.is_empty()))
+            || self.ambiguous_offsets.len() > 5879
             || self
-                .v2_evaluated_offsets
+                .ambiguous_offsets
                 .windows(2)
                 .any(|pair| pair[0].0 >= pair[1].0)
-            || self.v2_evaluated_offsets.iter().any(|offset| {
-                offset.0 < self.evaluated_offset_start.0 || offset.0 > self.evaluated_offset_end.0
-            })
-            || self.tracks.len() > 99
         {
             return Err(collector_core::Error::Invalid(
                 "invalid audio verification bounds".into(),
             ));
         }
         let mut previous = 0;
-        for track in &self.tracks {
-            if track.position <= previous || track.position > 99 {
+        for (index, track) in self.tracks.iter().enumerate() {
+            if track.position <= previous
+                || track.position > 99
+                || usize::from(track.position) != index + 1
+            {
                 return Err(collector_core::Error::Invalid(
                     "audio tracks must have unique ordered positions".into(),
                 ));
             }
             previous = track.position;
-            if track.status == AudioVerificationStatus::Verified
-                && (track.checksum_version.is_none()
-                    || track.confidence.is_none_or(|value| value == 0))
+            validate_search_coverage(&track.coverage)?;
+            if !track
+                .coverage
+                .v2_evaluated_offsets
+                .contains(&track.computed_offset)
+                || (track.status == AudioVerificationStatus::Mismatched
+                    && !complete_audio_search(&track.coverage))
+                || (self.status == AudioVerificationStatus::Mismatched
+                    && !complete_audio_search(&track.coverage))
+                || (self.status == AudioVerificationStatus::Verified
+                    && self.selected_offset != Some(track.computed_offset))
             {
                 return Err(collector_core::Error::Invalid(
-                    "verified track needs checksum version and positive confidence".into(),
+                    "checksum offset or outcome disagrees with search coverage".into(),
                 ));
             }
+            if track.checksums.len() != 2
+                || track.checksums[0].version != AudioChecksumVersion::AccurateRipV1
+                || track.checksums[1].version != AudioChecksumVersion::AccurateRipV2
+            {
+                return Err(collector_core::Error::Invalid(
+                    "audio tracks require ordered v1 and v2 checksums".into(),
+                ));
+            }
+            for checksum in &track.checksums {
+                checksum.checksum.validate()?;
+                let expected = match checksum.version {
+                    AudioChecksumVersion::AccurateRipV1 => HashAlgorithm::AccurateRipV1,
+                    AudioChecksumVersion::AccurateRipV2 => HashAlgorithm::AccurateRipV2,
+                };
+                if checksum.checksum.algorithm != expected
+                    || checksum
+                        .confidence
+                        .is_some_and(|confidence| confidence == 0 || confidence > 255)
+                {
+                    return Err(collector_core::Error::Invalid(
+                        "invalid audio checksum evidence".into(),
+                    ));
+                }
+            }
+            let has_match = track
+                .checksums
+                .iter()
+                .any(|checksum| checksum.confidence.is_some());
+            if (track.status == AudioVerificationStatus::Verified && !has_match)
+                || (!matches!(
+                    track.status,
+                    AudioVerificationStatus::Verified | AudioVerificationStatus::AmbiguousOffsets
+                ) && has_match)
+            {
+                return Err(collector_core::Error::Invalid(
+                    "track status does not match its full-checksum evidence".into(),
+                ));
+            }
+            validate_limitations(&track.limitations)?;
         }
         if self.status == AudioVerificationStatus::Verified
-            && (self.tracks.is_empty()
+            && (self.tracks.len() != usize::from(self.database.track_count)
                 || self.selected_offset.is_none()
                 || self
                     .tracks
@@ -159,18 +311,310 @@ impl AudioVerificationResult {
                 "whole-disc verification requires every track and a selected offset".into(),
             ));
         }
-        if self.limitations.len() > 128
-            || self
-                .limitations
-                .iter()
-                .any(|value| value.len() > 4096 || value.chars().any(char::is_control))
-        {
+        if self.selected_offset.is_some_and(|offset| {
+            self.tracks.iter().any(|track| {
+                offset.0 < track.coverage.v1_evaluated_offset_start.0
+                    || offset.0 > track.coverage.v1_evaluated_offset_end.0
+            })
+        }) || self.ambiguous_offsets.iter().any(|offset| {
+            self.tracks.iter().any(|track| {
+                offset.0 < track.coverage.v1_evaluated_offset_start.0
+                    || offset.0 > track.coverage.v1_evaluated_offset_end.0
+            })
+        }) {
             return Err(collector_core::Error::Invalid(
-                "audio limitations are oversized or invalid".into(),
+                "audio offset evidence falls outside recorded coverage".into(),
             ));
         }
+        if self.status != AudioVerificationStatus::Verified && self.selected_offset.is_some()
+            || (self.status == AudioVerificationStatus::AmbiguousOffsets)
+                == self.ambiguous_offsets.is_empty()
+        {
+            return Err(collector_core::Error::Invalid(
+                "audio offset evidence is inconsistent with its status".into(),
+            ));
+        }
+        validate_limitations(&self.limitations)?;
         Ok(())
     }
+}
+
+fn validate_search_coverage(coverage: &AudioSearchCoverage) -> collector_core::Result<()> {
+    if coverage.v1_evaluated_offset_start.0 > coverage.v1_evaluated_offset_end.0
+        || coverage.v2_evaluated_offsets.len() > 5879
+        || coverage
+            .v2_evaluated_offsets
+            .windows(2)
+            .any(|pair| pair[0].0 >= pair[1].0)
+        || coverage.v2_evaluated_offsets.iter().any(|offset| {
+            offset.0 < coverage.v1_evaluated_offset_start.0
+                || offset.0 > coverage.v1_evaluated_offset_end.0
+        })
+    {
+        return Err(collector_core::Error::Invalid(
+            "invalid per-version audio search coverage".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn complete_v2_search(coverage: &AudioSearchCoverage) -> bool {
+    i64::from(coverage.v1_evaluated_offset_end.0) - i64::from(coverage.v1_evaluated_offset_start.0)
+        + 1
+        == coverage.v2_evaluated_offsets.len() as i64
+}
+
+fn complete_audio_search(coverage: &AudioSearchCoverage) -> bool {
+    complete_v2_search(coverage)
+        && coverage.unavailable_leading_frames.0 == 0
+        && coverage.unavailable_trailing_frames.0 == 0
+}
+
+fn validate_limitations(limitations: &[String]) -> collector_core::Result<()> {
+    if limitations.len() > 128
+        || limitations
+            .iter()
+            .any(|value| value.len() > 4096 || value.chars().any(char::is_control))
+    {
+        return Err(collector_core::Error::Invalid(
+            "audio limitations are oversized or invalid".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub const ACCURATERIP_INTERPRETATION_VERSION: u32 = 1;
+
+pub struct InterpretAccurateRipInput {
+    pub database: AccurateRipDatabaseIdentity,
+    pub database_response_digest: Digest,
+    pub input_digests: Vec<Digest>,
+}
+
+/// Convert the shared checksum search into the music module's evidence policy.
+/// The shared `Verified` state means at least one track; this boundary alone may
+/// promote it to whole-disc verification after checking every expected track.
+pub fn interpret_accuraterip_summary(
+    dbar: &DbarFile,
+    summary: &VerificationSummary,
+    input: InterpretAccurateRipInput,
+) -> ModuleResult<AudioVerificationResult> {
+    dbar.validate_request(
+        input.database.track_count,
+        input.database.accuraterip_id1,
+        input.database.accuraterip_id2,
+        input.database.cddb_id,
+    )
+    .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+    let coverage = AudioSearchCoverage {
+        v1_evaluated_offset_start: StereoSampleFrameOffset(summary.evaluated_sample_shift_start),
+        v1_evaluated_offset_end: StereoSampleFrameOffset(summary.evaluated_sample_shift_end),
+        v2_evaluated_offsets: summary
+            .v2_evaluated_sample_shifts
+            .iter()
+            .copied()
+            .map(StereoSampleFrameOffset)
+            .collect(),
+        unavailable_leading_frames: PcmFrame(u64::from(summary.unavailable_leading_frames)),
+        unavailable_trailing_frames: PcmFrame(u64::from(summary.unavailable_trailing_frames)),
+    };
+    validate_search_coverage(&coverage).map_err(|error| ModuleError::Invalid(error.to_string()))?;
+    let complete_search = complete_audio_search(&coverage);
+    let expected_tracks = usize::from(input.database.track_count);
+    if !dbar.responses.is_empty()
+        && (summary.tracks.len() != expected_tracks
+            || summary
+                .tracks
+                .iter()
+                .enumerate()
+                .any(|(index, track)| usize::from(track.position) != index + 1))
+    {
+        return Err(ModuleError::Invalid(
+            "AccurateRip result does not cover every expected database track".into(),
+        ));
+    }
+    if summary.status == VerificationStatus::Verified && !summary.ambiguous_offsets.is_empty() {
+        return Err(ModuleError::Invalid(
+            "verified summary contains ambiguous offsets".into(),
+        ));
+    }
+    for track in &summary.tracks {
+        // The shared verifier retains zero-offset computed values when it clears
+        // a selection for mismatch/ambiguity. Preserve that computation origin.
+        let offset = track.sample_shift.unwrap_or(0);
+        if !summary.v2_evaluated_sample_shifts.contains(&offset)
+            || (summary.status == VerificationStatus::Verified
+                && track.sample_shift != summary.chosen_sample_shift)
+        {
+            return Err(ModuleError::Invalid(
+                "track computation offset disagrees with search evidence".into(),
+            ));
+        }
+        for (matches, computed, version) in [
+            (
+                &track.v1_matches,
+                track.computed.v1,
+                junk_libs_accuraterip::ChecksumVersion::V1,
+            ),
+            (
+                &track.v2_matches,
+                track.computed.v2,
+                junk_libs_accuraterip::ChecksumVersion::V2,
+            ),
+        ] {
+            for matched in matches {
+                let expected = dbar
+                    .responses
+                    .get(matched.pressing)
+                    .and_then(|response| {
+                        track
+                            .position
+                            .checked_sub(1)
+                            .and_then(|position| response.tracks.get(usize::from(position)))
+                    })
+                    .ok_or_else(|| {
+                        ModuleError::Invalid(
+                            "checksum match references a missing database entry".into(),
+                        )
+                    })?;
+                if matched.checksum != computed
+                    || expected.checksum != computed
+                    || matched.confidence != expected.confidence
+                    || !(matched.version == version
+                        || matched.version == junk_libs_accuraterip::ChecksumVersion::Both)
+                {
+                    return Err(ModuleError::Invalid(
+                        "checksum match disagrees with the frozen database entry".into(),
+                    ));
+                }
+            }
+        }
+    }
+    let all_tracks_verified = summary.tracks.len() == expected_tracks
+        && summary
+            .tracks
+            .iter()
+            .all(|track| track.status == TrackVerificationStatus::Verified);
+    let status = match summary.status {
+        VerificationStatus::Verified
+            if all_tracks_verified && summary.chosen_sample_shift.is_some() =>
+        {
+            AudioVerificationStatus::Verified
+        }
+        VerificationStatus::Verified | VerificationStatus::Mismatched if complete_search => {
+            AudioVerificationStatus::Mismatched
+        }
+        VerificationStatus::Verified
+        | VerificationStatus::IncompleteSearch
+        | VerificationStatus::Mismatched => AudioVerificationStatus::IncompleteSearch,
+        VerificationStatus::NoData => AudioVerificationStatus::NoData,
+        VerificationStatus::AmbiguousOffsets => AudioVerificationStatus::AmbiguousOffsets,
+    };
+    let tracks = summary
+        .tracks
+        .iter()
+        .map(|track| {
+            let v1_confidence = track
+                .v1_matches
+                .iter()
+                .map(|matched| u32::from(matched.confidence))
+                .max();
+            let v2_confidence = track
+                .v2_matches
+                .iter()
+                .map(|matched| u32::from(matched.confidence))
+                .max();
+            let track_status = match track.status {
+                TrackVerificationStatus::Verified => AudioVerificationStatus::Verified,
+                TrackVerificationStatus::Ambiguous => AudioVerificationStatus::AmbiguousOffsets,
+                TrackVerificationStatus::NoData => AudioVerificationStatus::NoData,
+                TrackVerificationStatus::Mismatched if complete_search => {
+                    AudioVerificationStatus::Mismatched
+                }
+                TrackVerificationStatus::Mismatched => AudioVerificationStatus::IncompleteSearch,
+            };
+            Ok(AudioTrackVerification {
+                position: track.position,
+                status: track_status,
+                computed_offset: StereoSampleFrameOffset(track.sample_shift.unwrap_or(0)),
+                checksums: vec![
+                    AudioChecksumEvidence {
+                        version: AudioChecksumVersion::AccurateRipV1,
+                        checksum: Digest::new(
+                            HashAlgorithm::AccurateRipV1,
+                            format!("{:08x}", track.computed.v1),
+                        )
+                        .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+                        confidence: v1_confidence,
+                    },
+                    AudioChecksumEvidence {
+                        version: AudioChecksumVersion::AccurateRipV2,
+                        checksum: Digest::new(
+                            HashAlgorithm::AccurateRipV2,
+                            format!("{:08x}", track.computed.v2),
+                        )
+                        .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+                        confidence: v2_confidence,
+                    },
+                ],
+                coverage: coverage.clone(),
+                limitations: Vec::new(),
+            })
+        })
+        .collect::<ModuleResult<Vec<_>>>()?;
+    let mut limitations = Vec::new();
+    if !complete_v2_search(&coverage)
+        && !matches!(
+            status,
+            AudioVerificationStatus::Verified | AudioVerificationStatus::NoData
+        )
+    {
+        limitations.push(
+            "AccurateRip v2 was evaluated only at the recorded candidate offsets; the result is inconclusive".into(),
+        );
+    }
+    if summary.tracks.iter().any(|track| track.frame_450_support)
+        && !summary
+            .tracks
+            .iter()
+            .any(|track| track.status == TrackVerificationStatus::Verified)
+    {
+        limitations
+            .push("frame-450 evidence identified offset candidates but cannot verify audio".into());
+    }
+    let result = AudioVerificationResult {
+        status,
+        selected_offset: (status == AudioVerificationStatus::Verified)
+            .then_some(summary.chosen_sample_shift)
+            .flatten()
+            .map(StereoSampleFrameOffset),
+        ambiguous_offsets: if status == AudioVerificationStatus::AmbiguousOffsets {
+            summary
+                .ambiguous_offsets
+                .iter()
+                .map(|candidate| StereoSampleFrameOffset(candidate.sample_shift))
+                .collect()
+        } else {
+            Vec::new()
+        },
+        algorithm_version: ACCURATERIP_INTERPRETATION_VERSION,
+        database: AccurateRipDatabaseIdentity {
+            track_count: input.database.track_count,
+            accuraterip_id1: input.database.accuraterip_id1,
+            accuraterip_id2: input.database.accuraterip_id2,
+            cddb_id: input.database.cddb_id,
+        },
+        database_response_count: u32::try_from(dbar.responses.len())
+            .map_err(|_| ModuleError::Invalid("too many AccurateRip database responses".into()))?,
+        database_response_digest: input.database_response_digest,
+        input_digests: input.input_digests,
+        tracks,
+        limitations,
+    };
+    result
+        .validate()
+        .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+    Ok(result)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -899,11 +1343,328 @@ pub fn open_redumper_pcm_package(
     Ok((reader, windows))
 }
 
+fn operation_access(request: &OperationRequest) -> ModuleResult<PackageAccess> {
+    let scope = match request.entity {
+        OperationEntity::Import(id) => collector_core::PackageScope::Import(id),
+        OperationEntity::Representation(id) => collector_core::PackageScope::Representation(id),
+        _ => {
+            return Err(ModuleError::Invalid(
+                "CD processing requires an Import or Representation".into(),
+            ));
+        }
+    };
+    Ok(PackageAccess {
+        collection_id: request.collection_id,
+        scope,
+    })
+}
+
+fn anchor_file(
+    inventory: &PackageInventory,
+    index: usize,
+) -> ModuleResult<&collector_core::PackageInventoryFile> {
+    inventory
+        .files
+        .get(index)
+        .ok_or_else(|| ModuleError::Invalid("anchor file index is out of bounds".into()))
+}
+
+fn read_cue(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    index: usize,
+) -> ModuleResult<(PackageFileId, String)> {
+    let file = anchor_file(inventory, index)?;
+    if file.bytes.0 > MAX_CUE_BYTES {
+        return Err(ModuleError::FailedOperation(
+            "CUE sheet exceeds its one-MiB bound".into(),
+        ));
+    }
+    let mut reader = host.package_file(access, file.id)?;
+    let mut bytes = Vec::with_capacity(file.bytes.0 as usize);
+    reader
+        .by_ref()
+        .take(MAX_CUE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+    if bytes.len() as u64 != file.bytes.0 {
+        return Err(ModuleError::FailedOperation(
+            "CUE sheet length changed while reading".into(),
+        ));
+    }
+    let text = String::from_utf8(bytes)
+        .map_err(|_| ModuleError::FailedOperation("CUE sheet is not UTF-8".into()))?;
+    Ok((file.id, text))
+}
+
+fn analyze_selection(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    selection: &CdPackageSelection,
+) -> ModuleResult<CdProcessingResult> {
+    match selection.package_kind {
+        CdPackageKind::Cue => {
+            let (id, cue) = read_cue(host, access, inventory, selection.anchor_file_index)?;
+            analyze_cue_package(&cue, id, inventory)
+        }
+        CdPackageKind::Redumper => {
+            let file = anchor_file(inventory, selection.anchor_file_index)?;
+            analyze_redumper_package(file.id, inventory, |id| host.package_file(access, id))
+        }
+    }
+}
+
+enum PackagePcmReader {
+    Cue(PackageCdPcmReader),
+    Redumper(junk_libs_disc::redumper::pcm::RawAudioReader),
+}
+
+impl junk_libs_disc::CdPcmReader for PackagePcmReader {
+    fn total_frames(&self) -> u64 {
+        match self {
+            Self::Cue(reader) => junk_libs_disc::CdPcmReader::total_frames(reader),
+            Self::Redumper(reader) => junk_libs_disc::CdPcmReader::total_frames(reader),
+        }
+    }
+
+    fn seek_frame(&mut self, frame: u64) -> Result<(), junk_libs_core::AnalysisError> {
+        match self {
+            Self::Cue(reader) => junk_libs_disc::CdPcmReader::seek_frame(reader, frame),
+            Self::Redumper(reader) => junk_libs_disc::CdPcmReader::seek_frame(reader, frame),
+        }
+    }
+
+    fn read_frames(
+        &mut self,
+        output: &mut [[i16; 2]],
+    ) -> Result<usize, junk_libs_core::AnalysisError> {
+        match self {
+            Self::Cue(reader) => junk_libs_disc::CdPcmReader::read_frames(reader, output),
+            Self::Redumper(reader) => junk_libs_disc::CdPcmReader::read_frames(reader, output),
+        }
+    }
+}
+
+fn open_pcm_selection(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    selection: &CdPackageSelection,
+) -> ModuleResult<(PackagePcmReader, Vec<DiscPcmTrack>, CdProcessingResult)> {
+    let layout = analyze_selection(host, access, inventory, selection)?;
+    let (reader, tracks) = match selection.package_kind {
+        CdPackageKind::Cue => {
+            let (id, cue) = read_cue(host, access, inventory, selection.anchor_file_index)?;
+            let (reader, tracks) =
+                open_cue_pcm_package(&cue, id, inventory, |file| host.package_file(access, file))?;
+            (PackagePcmReader::Cue(reader), tracks)
+        }
+        CdPackageKind::Redumper => {
+            let file = anchor_file(inventory, selection.anchor_file_index)?;
+            let (reader, tracks) = open_redumper_pcm_package(file.id, inventory, |file| {
+                host.package_file(access, file)
+            })?;
+            (PackagePcmReader::Redumper(reader), tracks)
+        }
+    };
+    Ok((reader, tracks, layout))
+}
+
+fn parse_hex_id(value: &str, label: &str) -> ModuleResult<u32> {
+    u32::from_str_radix(value, 16)
+        .map_err(|_| ModuleError::Invalid(format!("invalid {label} identifier")))
+}
+
+/// Domain policy for acquiring catalog data from a supported structural result.
+pub fn accuraterip_query_from_structure(
+    result: &CdProcessingResult,
+) -> ModuleResult<catalog::DbarQuery> {
+    let CdProcessingResult::Layout {
+        tracks,
+        disc_ids: Some(ids),
+        limitations,
+        ..
+    } = result
+    else {
+        return Err(ModuleError::Invalid(
+            "AccurateRip requires a complete audio CD layout".into(),
+        ));
+    };
+    if !limitations.is_empty()
+        || tracks.is_empty()
+        || tracks.len() > 99
+        || calculate_cd_ids(tracks)? != *ids
+    {
+        return Err(ModuleError::Invalid(
+            "AccurateRip requires a supported complete audio CD layout".into(),
+        ));
+    }
+    Ok(catalog::DbarQuery {
+        track_count: tracks.len() as u8,
+        accuraterip_id1: parse_hex_id(&ids.accuraterip_id1, "AccurateRip 1")?,
+        accuraterip_id2: parse_hex_id(&ids.accuraterip_id2, "AccurateRip 2")?,
+        cddb_id: parse_hex_id(&ids.freedb, "CDDB")?,
+    })
+}
+
+fn parsed_dbar(
+    snapshot: &crate::CatalogSnapshotInput,
+) -> ModuleResult<(DbarFile, DbarSnapshotObservation)> {
+    if snapshot.provider.0 != ACCURATERIP_PROVIDER_ID || snapshot.entries.len() != 1 {
+        return Err(ModuleError::Invalid(
+            "frozen snapshot is not an AccurateRip response".into(),
+        ));
+    }
+    let observation: DbarSnapshotObservation = snapshot
+        .observation
+        .parse()
+        .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+    let parsed: ParsedDbarSnapshot = snapshot.entries[0]
+        .parse()
+        .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+    if observation.schema_version != 1
+        || parsed.responses.len() != observation.response_count as usize
+        || matches!(observation.outcome, DbarOutcome::NoData) && !parsed.responses.is_empty()
+        || matches!(observation.outcome, DbarOutcome::Data) && parsed.responses.is_empty()
+    {
+        return Err(ModuleError::Invalid(
+            "AccurateRip snapshot observation disagrees with its verified bytes".into(),
+        ));
+    }
+    let dbar = DbarFile {
+        responses: parsed
+            .responses
+            .into_iter()
+            .map(|response| DbarResponse {
+                track_count: response.track_count,
+                ar_id1: response.accuraterip_id1,
+                ar_id2: response.accuraterip_id2,
+                cddb_id: response.cddb_id,
+                tracks: response
+                    .tracks
+                    .into_iter()
+                    .map(|track| ExpectedChecksum {
+                        confidence: track.confidence,
+                        checksum: track.checksum,
+                        checksum_450: track.checksum_450,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    Ok((dbar, observation))
+}
+
+fn verify_selection(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    inventory: &PackageInventory,
+    selection: &AccurateRipSelection,
+) -> ModuleResult<CdProcessingResult> {
+    if !(0..=junk_libs_accuraterip::DEFAULT_MAX_SAMPLE_SHIFT).contains(&selection.maximum_offset) {
+        return Err(ModuleError::Invalid(
+            "maximum AccurateRip offset is out of bounds".into(),
+        ));
+    }
+    let package = CdPackageSelection {
+        package_kind: selection.package_kind,
+        anchor_file_index: selection.anchor_file_index,
+    };
+    let (reader, tracks, layout) = open_pcm_selection(host, access, inventory, &package)?;
+    let CdProcessingResult::Layout {
+        disc_ids: Some(ids),
+        tracks: layout_tracks,
+        ..
+    } = layout
+    else {
+        return Err(ModuleError::UnavailableCapability(
+            "AccurateRip requires a supported complete audio layout".into(),
+        ));
+    };
+    let snapshot = host.catalog_snapshot(selection.snapshot_id)?;
+    let (dbar, observation) = parsed_dbar(&snapshot)?;
+    let expected = AccurateRipDatabaseIdentity {
+        track_count: u8::try_from(layout_tracks.len())
+            .map_err(|_| ModuleError::Invalid("too many CD tracks".into()))?,
+        accuraterip_id1: parse_hex_id(&ids.accuraterip_id1, "AccurateRip 1")?,
+        accuraterip_id2: parse_hex_id(&ids.accuraterip_id2, "AccurateRip 2")?,
+        cddb_id: parse_hex_id(&ids.freedb, "CDDB")?,
+    };
+    if observation.query.track_count != expected.track_count
+        || observation.query.accuraterip_id1 != expected.accuraterip_id1
+        || observation.query.accuraterip_id2 != expected.accuraterip_id2
+        || observation.query.cddb_id != expected.cddb_id
+    {
+        return Err(ModuleError::Invalid(
+            "AccurateRip snapshot query does not match the frozen package layout".into(),
+        ));
+    }
+    let mut disc = BoundedDiscReader::new(reader, tracks)
+        .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+    let summary = verify_with_offset_reader(
+        &dbar,
+        &mut disc,
+        VerificationOptions {
+            max_sample_shift: selection.maximum_offset,
+        },
+        || {
+            host.checkpoint()
+                .map_err(|error| junk_libs_core::AnalysisError::Other(error.to_string()))
+        },
+    )
+    .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+    let fingerprint = host.source_fingerprint(access)?;
+    let verification = interpret_accuraterip_summary(
+        &dbar,
+        &summary,
+        InterpretAccurateRipInput {
+            database: expected,
+            database_response_digest: snapshot.digest,
+            input_digests: fingerprint
+                .files
+                .into_iter()
+                .map(|file| file.sha256)
+                .collect(),
+        },
+    )?;
+    Ok(CdProcessingResult::AudioVerification { verification })
+}
+
+fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSelection> {
+    let anchors = inventory
+        .files
+        .iter()
+        .enumerate()
+        .filter_map(|(index, file)| {
+            let name = file.display_name.as_str().to_ascii_lowercase();
+            if name.ends_with(".cue") {
+                Some((index, CdPackageKind::Cue))
+            } else if name.ends_with(".toc") {
+                Some((index, CdPackageKind::Redumper))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let [(anchor_file_index, package_kind)] = anchors.as_slice() else {
+        return Err(ModuleError::UnavailableCapability(
+            "CD analysis needs exactly one CUE or redumper TOC anchor; review may continue unidentified"
+                .into(),
+        ));
+    };
+    Ok(CdPackageSelection {
+        package_kind: *package_kind,
+        anchor_file_index: *anchor_file_index,
+    })
+}
+
 pub struct Music;
 
 impl CollectionModule for Music {
     fn descriptor(&self) -> ModuleDescriptor {
-        descriptor(
+        let mut descriptor = descriptor(
             "org.junk.music",
             "Music CDs",
             vec![
@@ -927,7 +1688,26 @@ impl CollectionModule for Music {
                     kind: DomainFieldKind::Structured,
                 },
             ],
-        )
+        );
+        for capability in &mut descriptor.capabilities {
+            if capability.id.as_str() == "org.junk.music.import-analysis" {
+                capability.availability = Availability::Available;
+            }
+        }
+        let capability = |id: &str, display_name: &str| Capability {
+            id: CapabilityId::new(id).unwrap(),
+            display_name: display_name.into(),
+            availability: Availability::Available,
+            scope: OperationScope::CollectionDomain,
+        };
+        descriptor.capabilities.extend([
+            capability(CD_STRUCTURE_OPERATION, "Inspect CD structure"),
+            capability(
+                ACCURATERIP_VERIFICATION_OPERATION,
+                "Verify audio with AccurateRip",
+            ),
+        ]);
+        descriptor
     }
 
     fn validate_current(&self, data: &ModuleData) -> ModuleResult<()> {
@@ -967,22 +1747,59 @@ impl CollectionModule for Music {
 
     fn validate_operation_result(
         &self,
-        _capability: &CapabilityId,
+        capability: &CapabilityId,
         result: &RawJson,
     ) -> ModuleResult<()> {
+        if capability.as_str() == "org.junk.music.import-analysis" {
+            let output: MusicImportAnalysisOutput = result
+                .parse()
+                .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+            if !output.candidates.is_empty()
+                || output.observations.len() != 1
+                || output.limitations.len() > 64
+            {
+                return Err(ModuleError::Invalid(
+                    "invalid music Import analysis result".into(),
+                ));
+            }
+            let observation: CdProcessingResult = output.observations[0]
+                .parse()
+                .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+            if !matches!(observation, CdProcessingResult::Layout { .. }) {
+                return Err(ModuleError::Invalid(
+                    "music Import analysis must contain structural evidence".into(),
+                ));
+            }
+            return self.validate_operation_result(
+                &CapabilityId::new(CD_STRUCTURE_OPERATION).unwrap(),
+                &output.observations[0],
+            );
+        }
         let result: CdProcessingResult = result
             .parse()
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
         match result {
-            CdProcessingResult::AudioVerification { verification } => verification
-                .validate()
-                .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+            CdProcessingResult::AudioVerification { verification } => {
+                if capability.as_str() != ACCURATERIP_VERIFICATION_OPERATION {
+                    return Err(ModuleError::Invalid(
+                        "CD result does not match its operation".into(),
+                    ));
+                }
+                verification
+                    .validate()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?
+            }
             CdProcessingResult::Layout {
                 tracks,
                 source_spans,
                 disc_ids,
                 limitations,
             } => {
+                if capability.as_str() != CD_STRUCTURE_OPERATION {
+                    return Err(ModuleError::Invalid(
+                        "CD result does not match its operation".into(),
+                    ));
+                }
                 validate_cd_layout(&tracks)?;
                 validate_cd_source_spans(&source_spans)?;
                 if let Some(ids) = disc_ids
@@ -1013,12 +1830,63 @@ impl CollectionModule for Music {
 
     fn operate(
         &self,
-        _request: OperationRequest,
-        _host: &dyn crate::ModuleHost,
+        request: OperationRequest,
+        host: &dyn crate::ModuleHost,
     ) -> ModuleResult<OperationOutput> {
-        Err(ModuleError::UnavailableCapability(
-            "music operation handler is not implemented".into(),
-        ))
+        let access = operation_access(&request)?;
+        let inventory = host.package_inventory(access)?;
+        let result = match request.capability.as_str() {
+            CD_STRUCTURE_OPERATION => {
+                let selection: CdPackageSelection = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                analyze_selection(host, access, &inventory, &selection)?
+            }
+            ACCURATERIP_VERIFICATION_OPERATION => {
+                let selection: AccurateRipSelection = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                verify_selection(host, access, &inventory, &selection)?
+            }
+            "org.junk.music.import-analysis" => {
+                let _: MusicImportAnalysisInput = request
+                    .input
+                    .parse()
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                let selection = detect_package(&inventory)?;
+                let structure = analyze_selection(host, access, &inventory, &selection)?;
+                let limitations = match &structure {
+                    CdProcessingResult::Layout { limitations, .. } => limitations.clone(),
+                    _ => unreachable!(),
+                };
+                return Ok(OperationOutput {
+                    value: RawJson::from_value(
+                        serde_json::to_value(MusicImportAnalysisOutput {
+                            candidates: vec![],
+                            limitations,
+                            observations: vec![RawJson::from_value(
+                                serde_json::to_value(structure)
+                                    .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+                            )],
+                        })
+                        .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+                    ),
+                });
+            }
+            _ => {
+                return Err(ModuleError::UnknownCapability(
+                    request.capability.to_string(),
+                ));
+            }
+        };
+        Ok(OperationOutput {
+            value: RawJson::from_value(
+                serde_json::to_value(result)
+                    .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+            ),
+        })
     }
 }
 

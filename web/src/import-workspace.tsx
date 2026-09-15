@@ -133,7 +133,7 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
   if(!record)return;setBusy(true);setJob(undefined);
   try{
    const accepted=await api<{job_id:string}>(`/imports/${record.id}/publish`,{method:'POST'});
-   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));
+   jobsChanged();await waitForJob(accepted.job_id,setJob);jobsChanged();setRecord(await api<ImportView>(`/imports/${record.id}`));onPublished(await api<Item>(`/items/${item.id}`));
   }catch(error){onError(error);try{setRecord(await api<ImportView>(`/imports/${record.id}`));}catch(refreshError){onError(refreshError);}}finally{setBusy(false);}
  }
 

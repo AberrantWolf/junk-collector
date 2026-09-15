@@ -338,6 +338,28 @@ pub trait StreamingProviderPort: Send + Sync {
     ) -> Result<ProviderStreamResponse>;
 }
 
+/// Adapt a bounded response into the single acquisition/publication pipeline.
+/// This adapter owns no registry, scheduling or provider policy.
+pub struct BoundedProviderAdapter(pub std::sync::Arc<dyn ProviderPort>);
+
+impl StreamingProviderPort for BoundedProviderAdapter {
+    fn acquire_stream(
+        &self,
+        request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        let response = self.0.acquire(request, execution)?;
+        response.validate(request.maximum_response_bytes)?;
+        Ok(ProviderStreamResponse {
+            media_type: response.media_type,
+            bytes: ByteLength(response.bytes.len() as u64),
+            digest: response.digest,
+            parsed_observation: response.parsed_observation,
+            reader: Box::new(std::io::Cursor::new(response.bytes)),
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ParsedCatalogSnapshot {
     pub observation: RawJson,
@@ -436,6 +458,13 @@ pub struct StartProcessingCommand {
     pub snapshot_id: Option<SnapshotId>,
     #[schema(value_type = Object)]
     pub selection: RawJson,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AcquireAccurateRipCommand {
+    pub representation_id: collector_core::RepresentationId,
+    pub structure_observation_id: ObservationId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

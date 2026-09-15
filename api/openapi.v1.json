@@ -728,6 +728,62 @@
         }
       }
     },
+    "/api/v1/captures/{id}/accuraterip-snapshots": {
+      "post": {
+        "operationId": "acquire_accuraterip_snapshot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquireAccurateRipCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/captures/{id}/operations": {
       "get": {
         "operationId": "capture_processing_summaries",
@@ -3762,6 +3818,22 @@
             "type": "string"
           }
         }
+      },
+      "AcquireAccurateRipCommand": {
+        "type": "object",
+        "required": [
+          "representation_id",
+          "structure_observation_id"
+        ],
+        "properties": {
+          "representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "structure_observation_id": {
+            "$ref": "#/components/schemas/ObservationId"
+          }
+        },
+        "additionalProperties": false
       },
       "Acquisition": {
         "type": "object",

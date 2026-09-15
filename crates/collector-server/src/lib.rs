@@ -9,14 +9,15 @@ use axum::{
     routing::get,
 };
 use collector_app::{
-    AccountUpdate, AccountView, ActivateCatalogSnapshotCommand, AuthenticatedPrincipal,
-    CatalogSnapshotStatus, CollectionService, CommandContext, ComponentDetails, CreateAssetCommand,
-    CreateCollectionCommand, CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart,
-    EnrollmentView, GrantView, ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary,
-    ImportView, JobView, MediaResource, NativeDeviceView, PasskeyView, PresentedAsset,
-    PresentedCollection, PresentedEvidence, PresentedItem, ProcessingSummary, ReturnLoanCommand,
-    ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails,
-    StartLoanCommand, StartProcessingCommand, UpdateAssetCommand,
+    AccountUpdate, AccountView, AcquireAccurateRipCommand, ActivateCatalogSnapshotCommand,
+    AuthenticatedPrincipal, CatalogSnapshotStatus, CollectionService, CommandContext,
+    ComponentDetails, CreateAssetCommand, CreateCollectionCommand, CreateImportCommand,
+    DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView,
+    ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary, ImportView, JobView,
+    MediaResource, NativeDeviceView, PasskeyView, PresentedAsset, PresentedCollection,
+    PresentedEvidence, PresentedItem, ProcessingSummary, ReturnLoanCommand, ReviewImportCommand,
+    SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails, StartLoanCommand,
+    StartProcessingCommand, UpdateAssetCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -505,6 +506,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(dispose_specimen))
         .routes(routes!(verify))
         .routes(routes!(start_processing_operation))
+        .routes(routes!(acquire_accuraterip_snapshot))
         .routes(routes!(capture_processing_summaries))
         .routes(routes!(curation_catalog_snapshots))
         .routes(routes!(create_upload))
@@ -1926,6 +1928,28 @@ async fn start_processing_operation(
         state
             .service
             .enqueue_processing_operation(&actor, id, input, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
+}
+
+#[utoipa::path(post, path = "/api/v1/captures/{id}/accuraterip-snapshots", params(("id" = CaptureId, Path), ("Idempotency-Key" = String, Header)), request_body = AcquireAccurateRipCommand, responses((status = 202, body = serde_json::Value), (status = 400), (status = 403), (status = 404), (status = 409)))]
+async fn acquire_accuraterip_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CaptureId>,
+    Json(input): Json<AcquireAccurateRipCommand>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .enqueue_accuraterip_acquisition(&actor, id, input, &context)
     })
     .await?;
     Ok((

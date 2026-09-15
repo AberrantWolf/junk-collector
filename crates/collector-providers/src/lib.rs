@@ -2,6 +2,9 @@
 //! neutral observations produced here; this crate owns filesystem/network and
 //! provider-format mechanisms only.
 
+mod accuraterip;
+pub use accuraterip::*;
+
 use collector_app::{
     CatalogParserPort, ParsedCatalogSnapshot, ProcessingExecutionContext, ProviderRequest,
     ProviderStreamResponse, SnapshotRecord, StreamingProviderPort,

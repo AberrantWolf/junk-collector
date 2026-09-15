@@ -893,6 +893,7 @@ struct ImportAnalysisOutput {
 struct ProcessingHost<'a> {
     port: &'a dyn ProcessingPort,
     access: PackageAccess,
+    source_fingerprint: &'a SourceFingerprint,
     frozen_snapshot_id: Option<SnapshotId>,
     catalog_parsers: &'a std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>,
     jobs: Arc<dyn JobPort>,
@@ -1044,6 +1045,13 @@ impl ModuleHost for ProcessingHost<'_> {
         }
     }
 
+    fn source_fingerprint(&self, access: PackageAccess) -> ModuleResult<SourceFingerprint> {
+        if access != self.access {
+            return Err(ModuleError::AccessDenied);
+        }
+        Ok(self.source_fingerprint.clone())
+    }
+
     fn catalog_snapshot(&self, id: SnapshotId) -> ModuleResult<CatalogSnapshotInput> {
         if self.frozen_snapshot_id != Some(id) {
             return Err(ModuleError::Invalid(
@@ -1080,6 +1088,7 @@ impl ModuleHost for ProcessingHost<'_> {
         Ok(CatalogSnapshotInput {
             id,
             provider: record.provider,
+            digest: record.digest,
             observation: parsed.observation,
             entries: parsed.entries,
         })
@@ -3163,6 +3172,7 @@ impl CollectionService {
                 collection_id: frozen.collection_id,
                 scope: frozen.source,
             },
+            source_fingerprint: &frozen.source_fingerprint,
             frozen_snapshot_id: frozen.snapshot_id,
             catalog_parsers: self.catalog_parsers.as_ref(),
             jobs: self.jobs.clone(),
@@ -3717,6 +3727,75 @@ impl CollectionService {
         )
     }
 
+    pub fn enqueue_accuraterip_acquisition(
+        &self,
+        actor: &Principal,
+        capture_id: CaptureId,
+        command: AcquireAccurateRipCommand,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        let capture = self.reader.capture(capture_id)?;
+        let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
+        if eligibility.owner.0 != "org.junk.music"
+            || !capture
+                .representations
+                .iter()
+                .any(|value| value.id == command.representation_id)
+        {
+            return Err(Error::NotFound);
+        }
+        let structure = self
+            .processing
+            .processing_record(command.structure_observation_id)?
+            .observation;
+        if structure.collection_id != capture.collection_id
+            || structure.operation.as_str() != collector_modules::music::CD_STRUCTURE_OPERATION
+            || structure.operation_version != eligibility.schema_version
+            || structure.typed_result.module != eligibility.owner
+            || structure.typed_result.schema_version != eligibility.schema_version
+            || structure.source_fingerprint.source
+                != PackageScope::Representation(command.representation_id)
+            || !matches!(structure.support, OperationSupport::Supported)
+        {
+            return Err(Error::Invalid(
+                "AccurateRip acquisition requires structural evidence for this representation"
+                    .into(),
+            ));
+        }
+        let inventory = self.processing.package_inventory(
+            capture.collection_id,
+            PackageScope::Representation(command.representation_id),
+        )?;
+        structure
+            .source_fingerprint
+            .validate_inventory(&inventory)?;
+        if self.fingerprint_inventory(&inventory)? != structure.source_fingerprint {
+            return Err(Error::Conflict);
+        }
+        let result: collector_modules::music::CdProcessingResult =
+            structure.typed_result.payload.parse()?;
+        let query = collector_modules::music::accuraterip_query_from_structure(&result)
+            .map_err(|error| Error::Invalid(error.to_string()))?;
+        let job = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+        let frozen = FrozenAcquisitionJob {
+            request: ProviderRequest {
+                collection_id: capture.collection_id,
+                provider: ModuleId("org.junk.providers.accuraterip".into()),
+                operation: OperationId::new("org.junk.providers.accuraterip.acquire")?,
+                source_fingerprint: Some(structure.source_fingerprint),
+                query: RawJson::from_value(
+                    serde_json::to_value(query)
+                        .map_err(|error| Error::Invalid(error.to_string()))?,
+                ),
+                maximum_response_bytes: 8 * 1024 * 1024,
+            },
+            collection_binding: eligibility.binding,
+            snapshot_id: SnapshotId(job.0),
+            created_at: self.authentication.now(),
+        };
+        self.enqueue_catalog_acquisition(actor, frozen, context)
+    }
+
     pub fn import_catalog_snapshot(
         &self,
         actor: &Principal,
@@ -4102,12 +4181,6 @@ impl CollectionService {
                     claim.item_id,
                 )?;
                 self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
-                let provider = self
-                    .streaming_providers
-                    .get(&frozen.request.provider.0)
-                    .ok_or_else(|| {
-                        Error::Unavailable("configured catalog provider is unavailable".into())
-                    })?;
                 let mut execution = DurableProcessingContext {
                     frozen: FrozenJobInput::Acquisition(frozen.clone()),
                     jobs: self.jobs.clone(),
@@ -4117,6 +4190,12 @@ impl CollectionService {
                 if execution.cancellation_requested()? {
                     return Err(Error::JobCancelled);
                 }
+                let provider = self
+                    .streaming_providers
+                    .get(&frozen.request.provider.0)
+                    .ok_or_else(|| {
+                        Error::Unavailable("configured provider is unavailable".into())
+                    })?;
                 let mut response = provider.acquire_stream(&frozen.request, &mut execution)?;
                 let snapshot = SnapshotRecord {
                     id: frozen.snapshot_id,
@@ -4194,6 +4273,7 @@ impl CollectionService {
                         collection_id: frozen.collection_id,
                         scope: frozen.source,
                     },
+                    source_fingerprint: &frozen.source_fingerprint,
                     frozen_snapshot_id: frozen.snapshot_id,
                     catalog_parsers: self.catalog_parsers.as_ref(),
                     jobs: self.jobs.clone(),

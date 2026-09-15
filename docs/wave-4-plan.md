@@ -1,6 +1,6 @@
 # Wave 4 implementation handoff
 
-Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1 reviewed and corrected locally; D05.2 next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
+Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1 is next**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
 [release requirements](release-requirements.md), [architecture](architecture.md),
@@ -74,14 +74,14 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 5 | D04.2 | D04.1 | DAT snapshots and complete-match policy | Reviewed/corrected 2026-09-13; vectors pass |
 | 6 | D04.3 | D04.2 | Game jobs, curation and supported-operation matrix | Reviewed/corrected 2026-09-13; proceed to D05.1 |
 | 7 | D05.1 | W4.2 | Exact CD PCM/layout and bounded checksum readers | Reviewed/corrected 2026-09-14; proceed to D05.2 |
-| 8 | D05.2 | D05.1 | AccurateRip acquisition and result policy | Review |
-| 9 | D05.3 | D05.2 | CD jobs, curation and fixture qualification | D05 root review |
-| 10 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Review |
-| 11 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Routine plus provider tests |
-| 12 | D06.3 | D06.2 | Metadata review and artwork UI | D06 root review |
-| 13 | D07.1 | D05.1, W4.2 | Immutable conversion recipes and exact encoders | Review; sibling gates if changed |
-| 14 | D07.2 | D07.1 | Recoverable derivative publication | Review |
-| 15 | D07.3 | D07.2 | Availability, ranged access and web controls | D07 root review |
+| 8 | D05.2 | D05.1 | AccurateRip acquisition and result policy | Reviewed/corrected 2026-09-14; proceed to D05.3 |
+| 9 | D05.3 | D05.2 | CD jobs, curation and fixture qualification | Reviewed/corrected 2026-09-15; proceed to D07.1 |
+| 10 | D07.1 | D05.1, W4.2 | Immutable conversion recipes and exact encoders | Review; sibling gates if changed |
+| 11 | D07.2 | D07.1 | Recoverable derivative publication | Review |
+| 12 | D07.3 | D07.2 | Availability, ranged access and web controls | D07 root review |
+| 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Review |
+| 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Routine plus provider tests |
+| 15 | D06.3 | D06.2 | Metadata review and artwork UI | D06 root review |
 | 16 | P05.1 | D06.3, D07.3 | Portable export and change inventory | Review |
 | 17 | P05.2 | P05.1 | Consistent full backup and restore | Review |
 | 18 | P05.3 | P05.2 | CLI/admin integration and recovery drills | P05 root review |
@@ -160,6 +160,11 @@ serial order above. C01 precedes S04; C02 follows both. Do not introduce a circu
 “rotation required for initial pairing” dependency. P05 follows domain records
 so export tests cover the new portable data. D07 depends on exact CD reading,
 not on a successful AccurateRip match or an online provider.
+
+The [music-first delivery assessment](music-first-milestones.md) proposes moving
+D07 and C01 forward and bringing C07 ahead of the full desktop/offline wave. It
+now advances D07 ahead of D06 in this ledger. The later C01/C07 acceleration
+remains a proposal to settle before assigning those roots.
 
 ## Contract checkpoints for remaining work
 
@@ -541,7 +546,7 @@ INDEX/gap variants; short/truncated/missing sidecars; bounded memory and cancell
 Vector-versus-streaming equivalence is additional evidence, not the sole oracle.
 **Review:** exact coordinates and bounded arithmetic before integrating the network.
 
-**Local implementation evidence (2026-09-14; review checkpoint):** Collector now
+**Local implementation evidence (2026-09-14; reviewed and corrected):** Collector now
 maps authorized frozen BIN/CUE and current raw-redumper packages to typed signed
 sector/index/gap/source-span layouts, published disc-ID primitives and exact seekable
 little-endian `i16` stereo PCM. Structural CUE directives are strict; malformed,
@@ -564,7 +569,7 @@ conversion. Junk Libs, Phono and Trash Amp format/test/clippy gates pass. Retro'
 format and full workspace tests pass; its all-target strict clippy gate fails on
 existing Rust 1.95 lint debt unrelated to this change, so no Retro files were
 changed. The external owned redumper dump and live/network ARver gates were not run
-and remain unqualified. D05.2 has not started.
+and remain unqualified. The subsequent D05.2 checkpoint is recorded below.
 
 ### D05.2 — AccurateRip provider and result interpretation
 
@@ -601,6 +606,29 @@ claim. See [review notes](wave-4-review.md#d051-review--2026-09-14).
 timeout, provider outage with cache, cancellation and replay with a later provider
 response. Use local HTTP fixtures; live checks are opt-in qualification only.
 
+**Local implementation evidence (2026-09-14; reviewed and corrected):**
+`collector-providers` now owns the pinned-origin dBAR URL and blocking HTTP adapter.
+It uses a 15-second maximum timeout, an 8-MiB cap enforced while reading, at most
+three transient attempts, a shared one-request-per-second limiter, cancellable
+Retry-After delays, no automatic redirects, and manual same-origin redirect checks.
+The only injectable HTTP origin accepts an uncredentialed loopback literal for
+local fixtures. Exact 200 and 404 bodies become digest-bound observations; 404 is
+typed no-data, while malformed, misdirected, oversized and unavailable responses
+cannot become audio-mismatch evidence. Archived dBAR replay re-reads the complete
+body and checks its recorded length and SHA-256, including trailing-byte rejection.
+
+The music module now interprets the reviewed shared verifier without widening its
+claim. Each track records computed ARv1/ARv2 checksums, their computation offset, confidence, the inclusive
+v1 interval, explicit v2 candidate offsets, unavailable physical edges and input
+digests. Whole-disc `Verified` requires every requested/database track at one
+unambiguous selected offset. A partial match cannot verify the disc. Candidate-only v2 search, unavailable
+edge coverage, tied offsets and frame-450-only evidence remain inconclusive; a
+database mismatch requires complete v1 and v2 coverage over the declared physical
+interval. Local HTTP and policy fixtures cover the listed states and refresh/replay.
+No music capability, server composition, job workflow, route, UI, observation
+publication or D05.3 fixture workflow was added. Live AccurateRip and owned-dump
+qualification were not run, and no sibling repository was changed.
+
 ### D05.3 — CD workflow and root acceptance
 
 Wire structural and AccurateRip operations into the module registry, jobs and web.
@@ -611,6 +639,57 @@ redumper package through staging, analysis, publication, verification and reinde
 Add an opt-in real-dump oracle runner with documented inputs and reference outputs.
 If no owned dump is available, record the real-layout gate as externally unqualified
 and do not advertise that layout as independently validated.
+
+**Integration constraints from D05.2 review:**
+
+- Adapt the bounded `ProviderPort` response into the existing streaming acquisition
+  executor; do not introduce a second registry, scheduler or publication path.
+  Compose one shared AccurateRip provider instance so its request limiter covers
+  all jobs, including redirects and retries.
+- Derive the query from the frozen supported layout and the response digest from
+  the verified archived snapshot. Wrap results in the existing source/snapshot-bound
+  processing observation. Retain each track's `computed_offset` even when no
+  disc-wide offset is selected. Never fabricate no-data for network failures.
+- Exercise the actual shared verifier through provider replay, application jobs
+  and archive publication, rather than constructing all verification summaries
+  by hand. Preserve candidate-only v2 coverage as inconclusive and require all
+  expected tracks for whole-disc success.
+- Make coordinated contract changes where needed, without checkpoint migrations
+  or placeholder successful capabilities. Stop for D05 root review before D06.1.
+
+**Local implementation evidence (2026-09-14; awaiting root review):** The Music
+module now owns registered Import analysis, CD structure and AccurateRip operations.
+Application policy derives a dBAR query only from a current frozen supported-layout
+observation and stores its Representation fingerprint in the acquisition request.
+The existing acquisition executor adapts the bounded small-response provider into
+the normal streamed snapshot publisher. Server composition shares one provider
+instance between acquisition and parsing, including its redirect/retry limiter.
+Before module interpretation, the parser consumes all archived bytes and verifies
+recorded length and SHA-256; the module cross-checks the query against freshly
+derived layout IDs and records the checked snapshot digest plus all frozen input
+digests in its result.
+
+The archive integration test stages, analyzes, reviews and publishes synthetic
+BIN/CUE and signed-coordinate redumper packages. BIN/CUE then produces structure
+and whole-disc shared-verifier output; the test also covers provider outage and
+same-Job retry, queued cancellation, same-length archived-byte corruption, restored
+retry, checked no-data, distinct refresh snapshots, historical observations and
+archive-only reindex. Redumper structure publishes while its deliberately unsupported
+disc-ID coordinates yield an explicit unavailable verification observation without
+removing the Capture. The React workflow exposes package/layout selection, immutable
+snapshot acquisition, bounded offset choice, durable progress, separate results,
+per-track computation/coverage and limitations beside the existing artwork tools.
+The browser smoke fixture exercises the actual structure/acquisition/verification
+controls with a local dBAR service and passes in an isolated headless Chrome profile,
+including immediate post-publication Item refresh and retained artwork.
+
+`scripts/run_d05_real_dump_oracle.py` and the private-root manifest contract run
+the production package readers and shared bounded verifier only when
+`JUNK_COLLECTOR_W4_CD_DUMP_ROOT` is supplied. No owned dump or completed external
+reference manifest is available here, so live provider, owned redumper, real
+mixed-mode and mastering/offset qualification remain external. No D07 FLAC work
+was added. Stop for D05 root review; after acceptance, D07 is the recommended next
+root under the music-first proposal, which has not silently replaced the serial ledger.
 
 ### D06.1 — Durable metadata authority
 
@@ -682,6 +761,15 @@ foreign-language labels, viewer redaction, keyboard navigation and 390px layout.
 Do not render raw provider HTML or include unreviewed URLs as executable content.
 
 ### D07.1 — Recipes and exact conversion
+
+**User decision (2026-09-14):** Maintaining a parallel server-side FLAC library
+is optional. Initially prepare derivatives only on explicit request; importing,
+tracking and verifying masters must work without generating FLAC. FLAC-first means
+the default conversion format, not automatic conversion of every import. A future
+opt-in maintenance policy must use the same jobs and representations. Disabling
+automatic preparation must not implicitly delete existing derivatives or masters.
+When no playable representation exists, show preparation as an optional action;
+do not promise direct raw-dump playback or silently transcode on a media GET.
 
 1. Keep existing `ConversionProfile::Flac` / `Opus { bitrate_kbps }` API readable.
    Introduce immutable `RecipeId` behind those user presets; a preset is not enough
@@ -1017,27 +1105,30 @@ performance claim is made for 100,000 items/one million records in this wave;
 P06/R02 own that measurement. Preserve all earlier acceptance tests, especially
 Wave 3 final-chunk replay, interrupted cancellation and post-commit recovery cases.
 
-## Ready-to-send implementing-agent prompt
+## Ready-to-send implementation prompt
 
 ```text
-Implement D05.2 only. D05.1, D04 and CT.1–CT.4 are reviewed and corrected locally.
-Read docs/wave-4-review.md and the D05.2 review constraints before coding. Preserve
-explicit v1/v2 search coverage and inconclusive outcomes; never turn incomplete
-search or one matching track into whole-disc verification. Use frozen bounded
-provider responses and local HTTP fixtures. Stop before D05.3 workflow integration.
-Stop for architectural conflicts or missing required qualification.
-Preserve the existing working-tree changes. Read decisions/pre-release-evolution.md
-alongside the required architecture/status/release documents. Inspect the immediate
-reader/result contract, qualified primitives, independent vectors, and migrated
-callers together. Do not add compatibility wrappers solely for a wave checkpoint
-or scaffold unimplemented production APIs. Preserve real data and sibling consumers.
-Read AGENTS.md and the required architecture/status/release documents first.
-Follow the fixed decisions, dependencies, tests and stop conditions exactly.
-Use TDD for the listed failure/state/algorithm cases and real adapters for production.
-Do not implement another child to bypass a blocked dependency, silently broaden
-support, reset user state, or claim unavailable external qualification as passed.
-Preserve unrelated edits and separate shared-library extractions from Collector
-integration. Update the ledger, handoff backlog, implementation status and validation
-with actual results. Stop at the child's review checkpoint with a concise diff/test/
-limitation report. Do not commit until authorized. Do not spawn other agents.
+Implement D07.1 only, following its acceptance criteria in docs/wave-4-plan.md.
+Read AGENTS.md, architecture/status/release requirements, pre-release evolution,
+the D05 review and docs/music-first-milestones.md first. D05 is reviewed locally;
+owned-disc and external mastering qualification remain unverified.
+
+Settle immutable conversion recipes and exact track/PCM ownership before coding.
+Reuse D05 package readers and shared integer PCM algorithms. Keep optional encoder
+processes in mechanism adapters, authorization/jobs in application services and
+track semantics in the music module. Use bounded pipes/readers, explicit tool
+versions/settings, cancellable subprocesses and independently decoded FLAC PCM
+comparison. Do not confuse conversion validation with AccurateRip verification.
+
+FLAC preparation is optional and explicit. Import, inventory and verification do
+not depend on it. Preserve masters and HTOA/pregap semantics; unsupported layouts
+must fail clearly. Verification no-data/mismatch/outage must not independently
+block conversion of supported audio. Follow the specified FLAC and Opus profiles;
+missing tools remain unavailable rather than simulated success.
+
+Plan the immediate D07.2/D07.3 track-descriptor consumer contract without creating
+placeholder endpoints. Do not implement publication, web playback, metadata
+providers or unrelated roots here. Update the ledger/status/validation and report
+exact checks and missing external qualification. Stop for D07.1 review. Preserve
+unrelated changes; do not commit or spawn other agents.
 ```

@@ -81,3 +81,52 @@ The shared verifier's `Verified` status identifies at least one full-track match
 D05.2 must require all expected tracks for whole-disc success and retain incomplete
 v2 coverage as inconclusive. No exhaustive v2-search or real-dump qualification is
 claimed. No schema migration, HTTP surface, or new runtime capability was added.
+
+## D05.2 review — 2026-09-14
+
+The provider mechanism and music interpretation policy remain in their intended
+layers. No runtime music capability, route, job or UI is registered yet; D05.3
+owns that integration. No sibling implementation change or migration was needed.
+
+Corrected findings:
+
+- Partial results lost the offset used to compute their checksums when the
+  disc-wide selection was cleared. Every track now retains `computed_offset`.
+- Interpretation trusted supplied match records without checking the referenced
+  dBAR pressing, checksum, confidence or track computation offset. Inconsistent
+  records now fail closed. The result validator also rejects incomplete searches
+  relabeled as mismatches and selected offsets inconsistent with computations.
+- Redirect requests bypassed the provider's rate limiter. Every wire request now
+  passes through it. Local tests cover same-origin redirects, rejected foreign or
+  credential-bearing origins, and IPv6 loopback fixture configuration.
+- Added a real shared-search-to-policy test using an independent constant-sample
+  arithmetic oracle, alongside adversarial result mutation tests.
+
+D05.3 is next. Reuse the existing acquisition executor with the bounded provider
+adapter and bind results to the verified snapshot and frozen package. Local tests
+are not live AccurateRip, owned-disc or complete D05 workflow qualification.
+
+## D05.3 review — 2026-09-15
+
+Corrected architecture and user-workflow findings:
+
+- Replaced the second provider map/executor branch with a bounded-response adapter
+  registered in the single streaming acquisition pipeline. Duplicate provider IDs
+  now have one registration boundary.
+- Consolidated duplicated dBAR DTOs into music-owned catalog contracts, consumed
+  by the provider adapter. The dependency checker explicitly permits this inward
+  adapter-to-domain dependency; domain code acquires no infrastructure dependency.
+  Supported-layout-to-query policy also moved from application code into music.
+- Bounded actual CUE reads, rather than trusting only the inventory's stated size.
+  The private oracle now hashes payloads incrementally rather than allocating a
+  full raw dump for each digest.
+- The UI now displays track checksums, confidence, physical edge coverage and
+  limitations, including nested Import structural details. Large candidate-offset
+  lists can be expanded. A snapshot is labeled frozen, not verified audio.
+- Added viewer-denial coverage to the integrated CD acquisition workflow. The
+  original redumper workflow covered only a deliberately unsupported layout;
+  added a supported raw-redumper package through import, verification and reindex.
+
+D07.1 is the next bounded implementation ticket for optional playback derivatives.
+D05 does not implement music playback or qualify owned dumps/live AccurateRip.
+See the dated validation entry for executed checks and environment limitations.

@@ -1909,3 +1909,150 @@ D05.1 sibling checkpoints:
 
 Collector consumes these shared libraries through local path dependencies.
 Unrelated Phono and Trash Amp working-tree files were excluded from the checkpoint.
+
+## D05.2 local implementation — 2026-09-14
+
+- Added the production AccurateRip provider mechanism in `collector-providers`,
+  using the existing small-response `ProviderPort`. Production is pinned to the
+  AccurateRip HTTPS origin; local tests can inject only an uncredentialed loopback
+  HTTP origin. Requests use a shared one-per-second limiter, a 15-second maximum
+  timeout, manual same-origin redirects capped at three, at most three transient
+  attempts, cancellable Retry-After delays, and an 8-MiB limit enforced during
+  reads. No provider/network code entered the music module.
+- Exact 200 dBAR and 404 no-data bodies are retained with SHA-256 and a typed query
+  observation. Malformed/truncated, empty-success, wrong-identity and oversized
+  responses return unavailable rather than an audio mismatch. Offline replay reads
+  the complete archived Snapshot body and verifies recorded length/digest before
+  parsing; same-length mutation, truncation, trailing bytes and cancellation fail.
+- Music-owned interpretation records algorithm version, database query/response
+  identity, exact input digests and per-track computed ARv1/ARv2 checksum/confidence,
+  inclusive v1 interval, explicit v2 candidate offsets and unavailable edge frames.
+  A shared one-track match cannot promote the disc. Every expected track plus one
+  unambiguous selected offset is required for whole-disc verification. Database
+  mismatch requires complete v2 coverage and no unavailable physical search edge;
+  incomplete v2, edge-limited, tied-offset and frame-450-only cases stay inconclusive.
+- TDD failure was recorded before the new contracts existed. Focused policy tests
+  now pass 6 cases and local HTTP/frozen-response tests pass 5 cases. The negative
+  fixtures specifically include one-of-two matched tracks, candidate-only v2,
+  complete-v2 with unavailable edges, tied offsets, frame-450-only support, wrong
+  dBAR IDs, changed/truncated/trailing snapshot bytes, oversize, timeout, outage,
+  retry cancellation, cached replay and a later response with a distinct digest.
+- Passed: `python3 scripts/check_architecture.py`; `cargo fmt --all -- --check`;
+  `cargo test --workspace --locked` (232 tests); `cargo clippy --workspace
+  --all-targets --locked -- -D warnings`; `npm --prefix web run check`;
+  `npm --prefix web run check:api`; `npm --prefix web run build`; and
+  `cargo build -p collector-server --locked`. No web asset changed, so browser
+  smoke was not applicable.
+- D05.2 stops at review. No provider was composed into the server, no music
+  capability/job/route/UI was registered, and no observation publication or D05.3
+  workflow was added. No sibling file or user archive changed. Live AccurateRip,
+  owned real-dump, real mixed-mode, and external mastering/search qualification
+  were not available and are not claimed. No commit was made.
+
+## D05.2 review validation — 2026-09-14
+
+Review fixes preserve per-track computation offsets, check match records against
+frozen dBAR entries, reject inconsistent result envelopes, rate-limit redirect
+requests, and support IPv6 loopback fixtures. The policy suite now has nine cases,
+including an actual shared offset search with independently calculated constant-PCM
+checksums; the provider suite has six local HTTP/replay cases.
+
+Passed architecture/document links, Wave 4 fixture recipes, formatting, the
+workspace test suite, the final focused policy suite, warning-free workspace/all-target
+Clippy, TypeScript checking, generated
+API contract comparison, web build and rebuilt server binary. No web workflow
+changed, so browser smoke was not repeated. Live-provider, owned-disc and full D05
+workflow qualification remain outstanding. No sibling file or user archive was
+modified and no commit was made. See the D05.2 review and D05.3 handoff constraints.
+
+## D05.3 local implementation — 2026-09-14
+
+- Registered music Import analysis, CD structure and AccurateRip verification with
+  the compiled Music owner. All execution uses the existing authorized frozen jobs,
+  application cancellation checkpoints, package handles, acquisition executor and
+  archive-v4 observation/snapshot publisher. No scheduler, PCM decoder, checksum
+  algorithm, migration, conversion or FLAC path was added.
+- The server composes one AccurateRip provider instance for requests and checked
+  replay. Small bounded responses are adapted into the existing streamed snapshot
+  publication path. The parser reads the complete archived payload and rejects
+  length/digest changes before emitting neutral dBAR entries. The music operation
+  cross-checks the frozen query against package-derived disc IDs and publishes the
+  snapshot digest, input SHA-256 values, per-track computation offsets and explicit
+  ARv1/ARv2 coverage from the real shared bounded verifier.
+- `music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex`
+  stages/analyzes/reviews/publishes generated BIN/CUE and signed-coordinate redumper
+  packages. It exercises whole-disc shared verification, exact archived-byte
+  corruption rejection and retry, provider outage and same-Job retry, queued
+  cancellation, checked no-data, distinct refresh snapshots, historical evidence,
+  unsupported redumper verification that leaves preservation intact, normal reindex
+  and archive-only projection rebuild.
+- The curation UI exposes clear structure/fetch/verify actions, package and anchor
+  selection, immutable snapshot labels, a bounded frame-offset control, durable Job
+  progress/errors, per-track outcomes/computation coordinates/version coverage and
+  limitations. It remains in the Item dialog beside existing art/text tools. The
+  smoke fixture now stages and publishes actual synthetic BIN/CUE bytes and drives
+  the structure, local dBAR acquisition and verification controls.
+- Added `scripts/run_d05_real_dump_oracle.py`, an ignored private-root test, and an
+  example manifest requiring independently recorded layout digest, result/offset and
+  per-track ARv1/ARv2 outputs. With `JUNK_COLLECTOR_W4_CD_DUMP_ROOT` unset, the runner
+  returned its documented unavailable exit status. No private path or bytes were
+  printed or copied.
+- Focused provider tests (12 DAT/AccurateRip tests) passed after composing the
+  blocking adapter safely across async server startup/shutdown. The focused archive
+  workflow test passed. Architecture/document/fixture checks, formatting, all 237
+  non-ignored workspace tests, warning-free all-target Clippy, TypeScript checking,
+  generated API comparison, web build and the post-asset server rebuild passed; the
+  private real-dump oracle remains intentionally ignored without its opt-in input.
+  The first browser run found and led to the provider lifecycle correction. Two
+  sandboxed launches then aborted with `SIGABRT`/`EPERM`; the allowed run exposed
+  stale fixture assumptions and an immediate post-publication Item refresh gap.
+  After correcting both, `npm --prefix web run test:smoke` passed in an isolated
+  headless Chrome profile, including actual BIN/CUE staging/publication, structure,
+  local dBAR acquisition, shared verification, artwork retention and offline error
+  recovery through the rendered workflow.
+
+**External/unavailable:** no owned dump, completed private oracle manifest, live
+AccurateRip qualification, real mixed-mode disc, alternate mastering/offset oracle,
+physical media, target Linux/NAS or external browser matrix was available. Synthetic
+success is not claimed as those gates. D05.3 stops for D05 root review. D07 is the
+recommended next root under the music-first proposal after acceptance; it was not
+started.
+
+Manual D05 check: create/open a Music CDs collection and Item with artwork; in
+Capture accession select all files for one copied BIN/CUE package, stage it, choose
+Review import, keep it unidentified if appropriate, and publish. Reopen the Item's
+curation dialog. Under Music CD analysis choose the two-file Representation, select
+Inspect CD structure, select BIN/CUE and the `.cue` anchor, then run it. Confirm the
+track INDEX/PCM coordinates and limitations. Choose Fetch AccurateRip response and
+watch Background work; an outage may fail/retry but the Capture and structure must
+remain. After a response is archived, choose Verify audio with AccurateRip, select
+that immutable snapshot and an explicit offset bound, then run it. Inspect the disc
+outcome plus every track's computed offset, ARv1 range, explicit ARv2 offsets and
+limitations. Fetch again to confirm both old and new snapshot-bound results remain,
+restart/reindex, and confirm history and artwork still appear. Repeat structure with
+a copied current redumper package; unsupported coordinates/layouts must say so and
+must not remove or relabel the preserved master.
+
+## D05.3 review validation — 2026-09-15
+
+The reviewed integration uses one acquisition registry, a bounded-response adapter,
+and music-owned shared catalog DTOs. Layout-to-query policy is module-owned. CUE
+reads are capped during consumption; the private oracle hashes payloads in 64-KiB
+chunks. The UI exposes checksum/confidence and physical edge coverage, including
+nested structure observations. AGENTS.md records the architectural lesson.
+
+Passed: architecture/document links, Wave 4 fixture recipes, formatting, workspace
+checks/tests, all-target warning-free Clippy, TypeScript, generated API comparison,
+web build and rebuilt server. The extended focused CD workflow passed with both
+supported and unsupported raw-redumper packages (68.86 seconds); viewer acquisition
+denial is covered. Both normal and LOCAL_SETUP=1 browser smoke passed after updating the expected
+sample-unit label and adding confidence/edge-detail assertions.
+
+The default selected Xcode toolchain refused linking because its license had not
+been accepted. These review checks used the already-installed Command Line Tools
+via DEVELOPER_DIR=/Library/Developer/CommandLineTools, without accepting a license
+or changing system configuration. Sandboxed Chrome aborted with SIGABRT/EPERM;
+browser runs used approved execution with isolated temporary server/browser state.
+The private real-dump oracle, live AccurateRip, Linux/NAS and physical-device
+qualification remain unrun. No sibling file or user archive was changed; no commit
+was made. D07.1 is next, with optional explicit FLAC preparation.

@@ -5,11 +5,17 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-browser-'));
 const password=randomBytes(24).toString('hex');
 const localSetup=process.env.LOCAL_SETUP==='1';
 const port=19843;
+const accurateRipPort=19844;
+const frames=451*588;const first=2940;const last=frames-2940;const checksum=Number((BigInt(first+last)*BigInt(last-first+1)/2n)&0xffff_ffffn);
+const dbar=Buffer.alloc(22);dbar[0]=1;dbar.writeUInt32LE(451,1);dbar.writeUInt32LE(903,5);dbar.writeUInt32LE(0x02000601,9);dbar[13]=17;dbar.writeUInt32LE(checksum,14);dbar.writeUInt32LE(0,18);
+const accurateRipServer=createServer((_request,response)=>{response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
+await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nauthentication_origin = "https://localhost:${port}"\nallowed_origins = ["https://localhost:${port}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["https://localhost:${port}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
@@ -29,7 +35,7 @@ if(localSetup){
  assert.match(repairedConfig,/public_curation = false/);
 }
 let logs='';let server;
-function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
+function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${accurateRipPort}/`}});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
 async function waitForServer(){for(let i=0;i<100;i++){try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server did not become ready');}
 async function stopServer(){if(!server||server.exitCode!==null)return;server.kill('SIGINT');await new Promise(resolve=>server.once('exit',resolve));}
 async function archiveUnavailableOwnerFixture(collectionId,itemId){
@@ -244,7 +250,7 @@ try{
  assert.match(await importWorkspace.textContent(),/browser-disc\.bin/);
  await importWorkspace.getByRole('button',{name:'Review import',exact:true}).click();
  await importWorkspace.getByText('Analysis limitations',{exact:true}).waitFor();
- assert.match(await importWorkspace.textContent(),/D04\/D05/);
+ assert.match(await importWorkspace.textContent(),/exactly one CUE or redumper TOC/);
  const reviewForm=importWorkspace.getByRole('form',{name:'Review import'});
  await reviewForm.getByLabel('Leave capture unattached').check();
  await reviewForm.getByRole('button',{name:'Review import',exact:true}).click();
@@ -324,7 +330,40 @@ try{
  assert.equal(await savedReview.getByRole('combobox',{name:'Carrier',exact:true}).locator('option:checked').textContent(),'Disc 1 carrier','saved association was lost when editing review');
  await savedReview.getByRole('button',{name:'Review import',exact:true}).click();
  await restoredImport.getByText('Review saved.',{exact:false}).waitFor();
- const restoredJobs=restoredCurator.getByRole('region',{name:'Background work'});
+ await restoredImport.getByRole('button',{name:'Publish capture',exact:true}).click();
+ await restoredImport.getByText('Capture published.',{exact:false}).waitFor();
+ await restoredImport.getByRole('button',{name:'Stage another package',exact:true}).click();
+ const cueBytes=Buffer.from('FILE "disc.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n');
+ const pcmBytes=Buffer.alloc(frames*4);for(let index=0;index<frames;index++)pcmBytes[index*4]=1;
+ const cdStage=restoredImport.getByRole('form',{name:'Stage package'});
+ await cdStage.getByLabel('Original package files').setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cueBytes},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcmBytes}]);
+ await cdStage.getByRole('button',{name:'Stage package',exact:true}).click();
+ await restoredImport.getByRole('button',{name:'Review import',exact:true}).click();
+ const cdReview=restoredImport.getByRole('form',{name:'Review import'});await cdReview.waitFor();
+ await cdReview.getByLabel('Attach to A test pressing').check();
+ await cdReview.getByRole('button',{name:'Review import',exact:true}).click();
+ await restoredImport.getByRole('button',{name:'Publish capture',exact:true}).click();
+ await restoredImport.getByText('Capture published.',{exact:false}).waitFor();
+ await restoredCurator.getByRole('button',{name:'Close curator'}).click();
+ await page.getByRole('button',{name:/A test pressing/}).click();
+ await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ const cdCurator=page.getByRole('dialog',{name:/Edit entry/});
+ const musicAnalysis=cdCurator.getByRole('region',{name:'Music CD analysis'});await musicAnalysis.waitFor();
+ const cdDocket=musicAnalysis.locator('.import-docket').filter({hasText:'2 files'});
+ await cdDocket.getByLabel('Operation').selectOption('org.junk.music.cd-structure');
+ await cdDocket.getByLabel('Package file').selectOption('0');
+ await cdDocket.getByRole('button',{name:'Run operation',exact:true}).click();
+ await cdDocket.getByText('CD structure recorded · 1 tracks',{exact:true}).waitFor();
+ await cdDocket.getByRole('button',{name:'Fetch AccurateRip response',exact:true}).click();
+ await cdDocket.getByLabel('Operation').selectOption('org.junk.music.accuraterip-verification');
+ await cdDocket.getByLabel('Maximum offset in stereo sample frames').fill('0');
+ await cdDocket.getByRole('button',{name:'Run operation',exact:true}).click();
+ await cdDocket.getByText('AccurateRip: verified',{exact:true}).waitFor();
+ assert.match(await cdDocket.innerText(), /confidence 17/);
+ assert.match(await cdDocket.innerText(), /Unavailable physical edge frames/);
+ assert.match(await cdDocket.innerText(),/Track 1: verified, computed at 0 stereo sample frames/);
+ assert.equal(await cdCurator.getByRole('img',{name:'Private archival cover'}).count(),1,'music analysis displaced artwork from the text workflow');
+ const restoredJobs=cdCurator.getByRole('region',{name:'Background work'});
  await page.context().setOffline(true);
  await restoredJobs.getByRole('button',{name:'Refresh jobs',exact:true}).click();
  await restoredJobs.getByRole('alert').waitFor();
@@ -335,7 +374,7 @@ try{
  assert.equal(await page.evaluate(()=>getComputedStyle(document.querySelector('.import-docket')).animationName),'none');
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.evaluate(async()=>{const jobs=await(await fetch('/api/v1/jobs?limit=1')).json();const importKey=Object.keys(localStorage).find(key=>key.startsWith('collector.import.'));sessionStorage.setItem('owner-import-id',importKey?localStorage.getItem(importKey)||'':'');sessionStorage.setItem('owner-job-id',jobs.items[0].id);});
- await restoredCurator.getByRole('button',{name:'Close curator'}).click();
+ await cdCurator.getByRole('button',{name:'Close curator'}).click();
  await page.locator('.collection-row img').waitFor({state:'visible'});
  assert.equal(await page.locator('.collection-row img').count(),1);
  if(localSetup){
@@ -441,4 +480,4 @@ try{
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
  console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial, WebAuthn registration/login and mobile layout.');
-}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();await stopServer();await rm(scratch,{recursive:true,force:true});}
+}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await rm(scratch,{recursive:true,force:true});}

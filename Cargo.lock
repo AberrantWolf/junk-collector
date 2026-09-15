@@ -546,8 +546,10 @@ dependencies = [
  "junk-libs-game-formats",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.20",
+ "toml",
  "utoipa",
 ]
 
@@ -557,8 +559,12 @@ version = "0.1.0"
 dependencies = [
  "collector-app",
  "collector-core",
+ "collector-modules",
  "hex",
+ "httpdate",
+ "junk-libs-accuraterip",
  "junk-libs-dat",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -887,6 +893,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -2062,6 +2069,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",

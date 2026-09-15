@@ -22,6 +22,19 @@ External qualification is opt-in and never changes the synthetic expected result
 Missing variables mean “externally unqualified”, not passed. Tests must not print,
 archive, copy, or hard-code the supplied root or any secret discovered through it.
 
+For D05, copy `d05/oracle.example.toml` to `oracle.toml` in the owned fixture
+root and replace every placeholder with independently recorded normalized layout
+JSON SHA-256 (source identities replaced by their manifest-relative names),
+AccurateRip outcome/offset, and per-track ARv1/ARv2 values. List every package file
+in deterministic package order and keep the dBAR reference response under the same
+private root. Then run `python3 scripts/run_d05_real_dump_oracle.py`. The runner
+uses the production CUE/redumper readers and shared bounded verifier, reads no path
+outside the supplied root, and does not print or copy the root or payload bytes.
+An unset variable, missing manifest, placeholder, mismatched output, unsupported
+layout, or unavailable reference response fails qualification; it is never treated
+as a pass. The repository does not currently contain an owned dump or completed
+external reference manifest.
+
 Run `python3 scripts/check_wave4_fixtures.py` from the repository root; the
 architecture check also invokes it. The checker parses every TOML file, regenerates
 each declared inline/formula/composite byte vector, and checks length, SHA-256 and

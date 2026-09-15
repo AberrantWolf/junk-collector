@@ -29,6 +29,8 @@ tempfile = "3"
 utoipa = { version = "5", features = ["chrono", "uuid"] }
 utoipa-axum = "0.2"
 url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+httpdate = "1"
 junk-libs-audio = { path = "../junk-libs/junk-libs-audio" }
 junk-libs-accuraterip = { path = "../junk-libs/junk-libs-accuraterip" }
 junk-libs-core = { path = "../junk-libs/junk-libs-core" }

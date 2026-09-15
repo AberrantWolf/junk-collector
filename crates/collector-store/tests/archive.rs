@@ -1,20 +1,24 @@
 use collector_app::{
-    AccessPort, ActiveOwnership, AdministrationPort, AuthenticatedPrincipal, CarrierDetails,
-    Catalog, CollectionService, CollectionTypeAdministrationService, CollectionTypePort,
-    CommandContext, ComponentDetails, ContentPort, CreateAssetCommand, CreateCollectionCommand,
-    CreateImportCommand, CredentialKind, DisposeSpecimenCommand, FrozenAcquisitionJob,
-    IdempotencyPort, ImportCandidate, ImportCatalogSnapshotCommand, ImportDeclaredFile,
-    ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord, ImportReviewDecision,
-    ImportSourceKind, ImportSourceSummary, ImportView, JobPort, JobSpec, MediaResource,
-    MetadataAuthorityRecord, ProcessingExecutionContext, ProcessingPort, ProcessingQuery,
-    ProviderRequest, ProviderStreamResponse, ProvisionalImportPort, ReceiptDecision,
+    AccessPort, AcquireAccurateRipCommand, ActiveOwnership, AdministrationPort,
+    AuthenticatedPrincipal, CarrierDetails, Catalog, CollectionService,
+    CollectionTypeAdministrationService, CollectionTypePort, CommandContext, ComponentDetails,
+    ContentPort, CreateAssetCommand, CreateCollectionCommand, CreateImportCommand, CredentialKind,
+    DisposeSpecimenCommand, FrozenAcquisitionJob, IdempotencyPort, ImportCandidate,
+    ImportCatalogSnapshotCommand, ImportDeclaredFile, ImportIdentityDecision, ImportPhase,
+    ImportPort, ImportRecord, ImportReviewDecision, ImportSourceKind, ImportSourceSummary,
+    ImportView, JobPort, JobSpec, MediaResource, MetadataAuthorityRecord,
+    ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderPort, ProviderRequest,
+    ProviderResponse, ProviderStreamResponse, ProvisionalImportPort, ReceiptDecision,
     ReturnLoanCommand, ReturnedPossession, ReviewImportCommand, SaveItemCommand, SnapshotPort,
     SnapshotQuery, SnapshotRecord, SpecimenDetails, StartLoanCommand, StartProcessingCommand,
     StreamingProviderPort, UpdateAssetCommand,
 };
 use collector_core::*;
 use collector_modules::*;
-use collector_providers::{LOCAL_DAT_PROVIDER_ID, LocalDatProvider, LocalDatSource};
+use collector_providers::{
+    ACCURATERIP_PROVIDER_ID, AccurateRipProvider, LOCAL_DAT_PROVIDER_ID, LocalDatProvider,
+    LocalDatSource,
+};
 use collector_store::{Clock, Store, UploadFile};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -190,6 +194,48 @@ struct FixtureStreamingProvider {
     bytes: Vec<u8>,
 }
 
+struct FixtureAccurateRipProvider {
+    bytes: Vec<u8>,
+    unavailable: Arc<AtomicBool>,
+    no_data: Arc<AtomicBool>,
+}
+
+impl ProviderPort for FixtureAccurateRipProvider {
+    fn acquire(
+        &self,
+        request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderResponse> {
+        if execution.cancellation_requested()? {
+            return Err(Error::JobCancelled);
+        }
+        if self.unavailable.load(Ordering::SeqCst) {
+            return Err(Error::Unavailable("synthetic provider outage".into()));
+        }
+        let query: serde_json::Value = request.query.value()?;
+        let no_data = self.no_data.load(Ordering::SeqCst);
+        let bytes = if no_data {
+            Vec::new()
+        } else {
+            self.bytes.clone()
+        };
+        let response = ProviderResponse {
+            media_type: "application/vnd.accuraterip.dbar".into(),
+            digest: Digest::sha256(&bytes),
+            bytes,
+            parsed_observation: RawJson::from_value(serde_json::json!({
+                "schema_version":1,
+                "query":query,
+                "outcome":if no_data { "no_data" } else { "data" },
+                "response_count":if no_data { 0 } else { 1 }
+            })),
+            limitations: vec![],
+        };
+        response.validate(request.maximum_response_bytes)?;
+        Ok(response)
+    }
+}
+
 impl StreamingProviderPort for FixtureStreamingProvider {
     fn acquire_stream(
         &self,
@@ -353,6 +399,15 @@ impl Clock for TestClock {
 
 fn command() -> CommandContext {
     CommandContext::new(TransactionId::new().to_string()).unwrap()
+}
+
+fn synthetic_redumper_toc(first_lba: i32, leadout_lba: i32) -> Vec<u8> {
+    let mut toc = vec![0, 18, 1, 1];
+    toc.extend_from_slice(&[0, 0x10, 1, 0]);
+    toc.extend_from_slice(&first_lba.to_be_bytes());
+    toc.extend_from_slice(&[0, 0x10, 0xaa, 0]);
+    toc.extend_from_slice(&leadout_lba.to_be_bytes());
+    toc
 }
 
 fn typed_collection(name: &str) -> CreateCollectionCommand {
@@ -5848,7 +5903,7 @@ fn optional_import_analysis_persists_candidates_or_honest_unavailability() {
         .unwrap();
     assert_eq!(unavailable.phase, ImportPhase::AwaitingReview);
     assert!(unavailable.candidates.is_empty());
-    assert!(unavailable.limitations[0].contains("D04/D05"));
+    assert!(unavailable.limitations[0].contains("exactly one CUE or redumper TOC"));
 }
 
 #[test]
@@ -6358,6 +6413,595 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
     assert_eq!(
         store.active_snapshot(collection.id, &provider_id).unwrap(),
         Some(second_snapshot)
+    );
+}
+
+#[test]
+fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex() {
+    let (root, store, actor, base_service, collection) = setup();
+    let frames = 451_u64 * 588;
+    let mut pcm = Vec::with_capacity((frames * 4) as usize);
+    for _ in 0..frames {
+        pcm.extend_from_slice(&[1, 0, 0, 0]);
+    }
+    let checksum = ((2940_u64 + (frames - 2940)) * (frames - 5879) / 2) as u32;
+    let id1 = 451_u32;
+    let id2 = 903_u32;
+    let cddb = 0x0200_0601_u32;
+    let mut dbar = vec![1];
+    dbar.extend_from_slice(&id1.to_le_bytes());
+    dbar.extend_from_slice(&id2.to_le_bytes());
+    dbar.extend_from_slice(&cddb.to_le_bytes());
+    dbar.push(17);
+    dbar.extend_from_slice(&checksum.to_le_bytes());
+    dbar.extend_from_slice(&0_u32.to_le_bytes());
+    let unavailable = Arc::new(AtomicBool::new(true));
+    let no_data = Arc::new(AtomicBool::new(false));
+    let provider = Arc::new(FixtureAccurateRipProvider {
+        bytes: dbar,
+        unavailable: unavailable.clone(),
+        no_data: no_data.clone(),
+    });
+    let parser = Arc::new(
+        AccurateRipProvider::with_test_origin(
+            "junk-collector-test/1",
+            "http://127.0.0.1:1/",
+            std::time::Duration::from_millis(50),
+        )
+        .unwrap(),
+    );
+    let provider_id = ModuleId(ACCURATERIP_PROVIDER_ID.into());
+    let service = base_service
+        .with_streaming_provider(
+            provider_id.clone(),
+            Arc::new(collector_app::BoundedProviderAdapter(provider)),
+        )
+        .unwrap()
+        .with_catalog_parser(provider_id.clone(), parser)
+        .unwrap();
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let created = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "synthetic-bin-cue".into(),
+                },
+                files: vec![
+                    UploadFile {
+                        name: "disc.cue".into(),
+                        bytes: ByteLength(cue.len() as u64),
+                        sha256: None,
+                    },
+                    UploadFile {
+                        name: "disc.bin".into(),
+                        bytes: ByteLength(pcm.len() as u64),
+                        sha256: None,
+                    },
+                ],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, created.id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, created.id, 1, 0, &pcm)
+        .unwrap();
+    let analysis_job = service
+        .enqueue_import_analysis(
+            &actor,
+            created.id,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("music-import-analysis").unwrap());
+    assert_eq!(
+        service.job(&actor, analysis_job).unwrap().state,
+        JobState::Completed
+    );
+    let analyzed = service.provisional_import(&actor, created.id).unwrap();
+    assert!(analyzed.candidates.is_empty());
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            created.id,
+            ReviewImportCommand {
+                expected_revision: analyzed.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let publication = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    assert!(service.run_next_job("music-publication").unwrap());
+    assert_eq!(
+        service.job(&actor, publication).unwrap().state,
+        JobState::Completed
+    );
+    let published = service.provisional_import(&actor, created.id).unwrap();
+    let structure_job = service
+        .enqueue_processing_operation(
+            &actor,
+            published.capture_id,
+            StartProcessingCommand {
+                operation: OperationId::new(collector_modules::music::CD_STRUCTURE_OPERATION)
+                    .unwrap(),
+                operation_version: 1,
+                representation_id: published.representation_id,
+                snapshot_id: None,
+                selection: RawJson::from_value(serde_json::json!({
+                    "package_kind":"cue",
+                    "anchor_file_index":0
+                })),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("music-structure").unwrap());
+    assert_eq!(
+        service.job(&actor, structure_job).unwrap().state,
+        JobState::Completed
+    );
+
+    // Acquisition enforces collection roles before inspecting structural evidence.
+    let viewer_id = store
+        .create_user("cd-viewer", "viewer password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, viewer_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.enqueue_accuraterip_acquisition(
+            &viewer,
+            published.capture_id,
+            AcquireAccurateRipCommand {
+                representation_id: published.representation_id,
+                structure_observation_id: ObservationId(structure_job.0)
+            },
+            &command()
+        ),
+        Err(Error::Forbidden)
+    ));
+
+    let acquire = |service: &CollectionService| {
+        service
+            .enqueue_accuraterip_acquisition(
+                &actor,
+                published.capture_id,
+                AcquireAccurateRipCommand {
+                    representation_id: published.representation_id,
+                    structure_observation_id: ObservationId(structure_job.0),
+                },
+                &command(),
+            )
+            .unwrap()
+    };
+    let outage_job = acquire(&service);
+    assert!(service.run_next_job("accuraterip-outage").unwrap());
+    assert_eq!(
+        service.job(&actor, outage_job).unwrap().state,
+        JobState::Failed
+    );
+    assert!(Catalog::capture(&*store, published.capture_id).is_ok());
+    unavailable.store(false, Ordering::SeqCst);
+    service.retry_job(&actor, outage_job, &command()).unwrap();
+    assert!(service.run_next_job("accuraterip-retry").unwrap());
+    assert_eq!(
+        service.job(&actor, outage_job).unwrap().state,
+        JobState::Completed
+    );
+    let first_snapshot = service
+        .curation_catalog_snapshots(&actor, collection.id, None, 10)
+        .unwrap()
+        .items[0]
+        .snapshot
+        .id;
+
+    let cancelled_job = acquire(&service);
+    service
+        .cancel_job(&actor, cancelled_job, &command())
+        .unwrap();
+    assert!(!service.run_next_job("accuraterip-cancelled").unwrap());
+    assert_eq!(
+        service.job(&actor, cancelled_job).unwrap().state,
+        JobState::Cancelled
+    );
+
+    let refreshed_job = acquire(&service);
+    assert!(service.run_next_job("accuraterip-refresh").unwrap());
+    assert_eq!(
+        service.job(&actor, refreshed_job).unwrap().state,
+        JobState::Completed
+    );
+    let snapshots = service
+        .curation_catalog_snapshots(&actor, collection.id, None, 10)
+        .unwrap();
+    assert_eq!(snapshots.items.len(), 2);
+    let second_snapshot = snapshots
+        .items
+        .iter()
+        .find(|value| value.snapshot.id != first_snapshot)
+        .unwrap()
+        .snapshot
+        .id;
+
+    for snapshot_id in [first_snapshot, second_snapshot] {
+        let verification = service
+            .enqueue_processing_operation(
+                &actor,
+                published.capture_id,
+                StartProcessingCommand {
+                    operation: OperationId::new(
+                        collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                    )
+                    .unwrap(),
+                    operation_version: 1,
+                    representation_id: published.representation_id,
+                    snapshot_id: Some(snapshot_id),
+                    selection: RawJson::from_value(serde_json::json!({
+                        "package_kind":"cue",
+                        "anchor_file_index":0,
+                        "snapshot_id":snapshot_id,
+                        "maximum_offset":0
+                    })),
+                },
+                &command(),
+            )
+            .unwrap();
+        assert!(service.run_next_job("accuraterip-verification").unwrap());
+        let job = service.job(&actor, verification).unwrap();
+        assert_eq!(job.state, JobState::Completed, "{:?}", job.error);
+    }
+    let summaries = service
+        .capture_processing_summaries(
+            &actor,
+            published.capture_id,
+            published.representation_id,
+            None,
+            20,
+        )
+        .unwrap();
+    let verified = summaries.items.iter().filter(|summary| {
+        summary.operation.as_str() == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
+            && summary.result.get().contains("\"status\":\"verified\"")
+            && summary.result.get().contains("\"computed_offset\":0")
+    });
+    assert_eq!(verified.count(), 2);
+
+    let collection_dir = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let snapshot_payload = collection_dir
+        .join("snapshots")
+        .join(first_snapshot.to_string())
+        .join("payload/source.bin");
+    let original_snapshot = std::fs::read(&snapshot_payload).unwrap();
+    let mut corrupted_snapshot = original_snapshot.clone();
+    corrupted_snapshot[0] ^= 0xff;
+    std::fs::write(&snapshot_payload, corrupted_snapshot).unwrap();
+    let corrupt_verification = service
+        .enqueue_processing_operation(
+            &actor,
+            published.capture_id,
+            StartProcessingCommand {
+                operation: OperationId::new(
+                    collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                )
+                .unwrap(),
+                operation_version: 1,
+                representation_id: published.representation_id,
+                snapshot_id: Some(first_snapshot),
+                selection: RawJson::from_value(serde_json::json!({
+                    "package_kind":"cue",
+                    "anchor_file_index":0,
+                    "snapshot_id":first_snapshot,
+                    "maximum_offset":0
+                })),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("corrupt-snapshot").unwrap());
+    assert_eq!(
+        service.job(&actor, corrupt_verification).unwrap().state,
+        JobState::Failed
+    );
+    std::fs::write(&snapshot_payload, original_snapshot).unwrap();
+    service
+        .retry_job(&actor, corrupt_verification, &command())
+        .unwrap();
+    assert!(service.run_next_job("restored-snapshot").unwrap());
+    assert_eq!(
+        service.job(&actor, corrupt_verification).unwrap().state,
+        JobState::Completed
+    );
+    no_data.store(true, Ordering::SeqCst);
+    let no_data_acquisition = acquire(&service);
+    assert!(service.run_next_job("accuraterip-no-data").unwrap());
+    assert_eq!(
+        service.job(&actor, no_data_acquisition).unwrap().state,
+        JobState::Completed
+    );
+    let no_data_snapshot = service
+        .curation_catalog_snapshots(&actor, collection.id, None, 10)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|value| value.snapshot.parsed_observation.get().contains("no_data"))
+        .unwrap()
+        .snapshot
+        .id;
+    let no_data_verification = service
+        .enqueue_processing_operation(
+            &actor,
+            published.capture_id,
+            StartProcessingCommand {
+                operation: OperationId::new(
+                    collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                )
+                .unwrap(),
+                operation_version: 1,
+                representation_id: published.representation_id,
+                snapshot_id: Some(no_data_snapshot),
+                selection: RawJson::from_value(serde_json::json!({
+                    "package_kind":"cue",
+                    "anchor_file_index":0,
+                    "snapshot_id":no_data_snapshot,
+                    "maximum_offset":0
+                })),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        service
+            .run_next_job("accuraterip-no-data-verification")
+            .unwrap()
+    );
+    assert_eq!(
+        service.job(&actor, no_data_verification).unwrap().state,
+        JobState::Completed
+    );
+    assert!(
+        service
+            .capture_processing_summaries(
+                &actor,
+                published.capture_id,
+                published.representation_id,
+                None,
+                20,
+            )
+            .unwrap()
+            .items
+            .iter()
+            .any(|summary| summary.snapshot_id == Some(no_data_snapshot)
+                && summary.result.get().contains("\"status\":\"no_data\""))
+    );
+    store.reindex().unwrap();
+    for snapshot_id in [first_snapshot, second_snapshot] {
+        assert!(
+            store
+                .snapshot(SnapshotQuery {
+                    collection_id: collection.id,
+                    snapshot_id
+                })
+                .is_ok()
+        );
+    }
+
+    // Exercise both an unsupported lead-in and a complete supported raw package.
+    for supported in [false, true] {
+        let toc = if supported {
+            synthetic_redumper_toc(0, 451)
+        } else {
+            synthetic_redumper_toc(-45_150, -45_149)
+        };
+        let mut raw = if supported {
+            vec![0_u8; 45_150 * 2352]
+        } else {
+            Vec::new()
+        };
+        if supported {
+            raw.extend_from_slice(&pcm);
+        } else {
+            raw.resize(2352, 0);
+        }
+        let sectors = raw.len() / 2352;
+        let redumper_files = [
+            ("rip.toc", toc),
+            ("rip.scram", raw),
+            ("rip.state", vec![4_u8; sectors * 588]),
+            ("rip.subcode", vec![0_u8; sectors * 96]),
+        ];
+        let redumper = service
+            .create_provisional_import(
+                &actor,
+                CreateImportCommand {
+                    collection_id: collection.id,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "synthetic-redumper".into(),
+                    },
+                    files: redumper_files
+                        .iter()
+                        .map(|(name, bytes)| UploadFile {
+                            name: (*name).into(),
+                            bytes: ByteLength(bytes.len() as u64),
+                            sha256: None,
+                        })
+                        .collect(),
+                    association: CaptureAssociation::default(),
+                    expected_item_revision: None,
+                },
+                &command(),
+            )
+            .unwrap();
+        for (index, (_, bytes)) in redumper_files.iter().enumerate() {
+            for (chunk, bytes) in bytes.chunks(1024 * 1024).enumerate() {
+                service
+                    .stage_provisional_import_chunk(
+                        &actor,
+                        redumper.id,
+                        index,
+                        (chunk * 1024 * 1024) as u64,
+                        bytes,
+                    )
+                    .unwrap();
+            }
+        }
+        let redumper_analysis = service
+            .enqueue_import_analysis(
+                &actor,
+                redumper.id,
+                ModuleId("org.junk.music".into()),
+                &command(),
+            )
+            .unwrap();
+        assert!(service.run_next_job("redumper-analysis").unwrap());
+        assert_eq!(
+            service.job(&actor, redumper_analysis).unwrap().state,
+            JobState::Completed
+        );
+        let analyzed = service.provisional_import(&actor, redumper.id).unwrap();
+        assert_eq!(
+            analyzed
+                .limitations
+                .iter()
+                .any(|value| value.contains("lead-in")),
+            !supported
+        );
+        let reviewed = service
+            .review_provisional_import(
+                &actor,
+                redumper.id,
+                ReviewImportCommand {
+                    expected_revision: analyzed.revision,
+                    identity: ImportIdentityDecision::Unidentified,
+                    association: CaptureAssociation::default(),
+                    expected_item_revision: None,
+                },
+                &command(),
+            )
+            .unwrap();
+        let redumper_publication = service
+            .enqueue_import_publication(&actor, reviewed.id, &command())
+            .unwrap();
+        assert!(service.run_next_job("redumper-publication").unwrap());
+        assert_eq!(
+            service.job(&actor, redumper_publication).unwrap().state,
+            JobState::Completed
+        );
+        let redumper = service.provisional_import(&actor, redumper.id).unwrap();
+        let redumper_structure = service
+            .enqueue_processing_operation(
+                &actor,
+                redumper.capture_id,
+                StartProcessingCommand {
+                    operation: OperationId::new(collector_modules::music::CD_STRUCTURE_OPERATION)
+                        .unwrap(),
+                    operation_version: 1,
+                    representation_id: redumper.representation_id,
+                    snapshot_id: None,
+                    selection: RawJson::from_value(serde_json::json!({
+                        "package_kind":"redumper",
+                        "anchor_file_index":0
+                    })),
+                },
+                &command(),
+            )
+            .unwrap();
+        assert!(service.run_next_job("redumper-structure").unwrap());
+        assert_eq!(
+            service.job(&actor, redumper_structure).unwrap().state,
+            JobState::Completed
+        );
+        let redumper_verification = service
+            .enqueue_processing_operation(
+                &actor,
+                redumper.capture_id,
+                StartProcessingCommand {
+                    operation: OperationId::new(
+                        collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                    )
+                    .unwrap(),
+                    operation_version: 1,
+                    representation_id: redumper.representation_id,
+                    snapshot_id: Some(first_snapshot),
+                    selection: RawJson::from_value(serde_json::json!({
+                        "package_kind":"redumper",
+                        "anchor_file_index":0,
+                        "snapshot_id":first_snapshot,
+                        "maximum_offset":0
+                    })),
+                },
+                &command(),
+            )
+            .unwrap();
+        assert!(service.run_next_job("redumper-verification").unwrap());
+        assert_eq!(
+            service.job(&actor, redumper_verification).unwrap().state,
+            JobState::Completed
+        );
+        let redumper_summaries = service
+            .capture_processing_summaries(
+                &actor,
+                redumper.capture_id,
+                redumper.representation_id,
+                None,
+                10,
+            )
+            .unwrap();
+        assert!(redumper_summaries.items.iter().any(|summary| {
+            summary.operation.as_str()
+                == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
+                && if supported {
+                    matches!(summary.support, OperationSupport::Supported)
+                        && summary.result.get().contains("\"status\":\"verified\"")
+                } else {
+                    matches!(
+                        summary.support,
+                        OperationSupport::UnavailableDependency { .. }
+                    )
+                }
+        }));
+        assert!(Catalog::capture(&*store, redumper.capture_id).is_ok());
+        store.reindex().unwrap();
+        assert!(
+            store
+                .processing_record(ObservationId(redumper_structure.0))
+                .is_ok()
+        );
+    }
+    drop(service);
+    drop(store);
+    let restored = Store::open(
+        root.path().join("archive"),
+        root.path().join("reindexed-state"),
+    )
+    .unwrap();
+    assert!(
+        restored
+            .processing_record(ObservationId(structure_job.0))
+            .is_ok()
     );
 }
 

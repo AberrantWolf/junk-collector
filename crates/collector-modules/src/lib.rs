@@ -235,6 +235,12 @@ pub trait ModuleHost {
         ))
     }
 
+    fn source_fingerprint(&self, _access: PackageAccess) -> ModuleResult<SourceFingerprint> {
+        Err(ModuleError::UnavailableCapability(
+            "source fingerprint access is unavailable".into(),
+        ))
+    }
+
     fn single_package_reader(
         &self,
         access: PackageAccess,
@@ -283,6 +289,7 @@ pub struct OperationOutput {
 pub struct CatalogSnapshotInput {
     pub id: SnapshotId,
     pub provider: ModuleId,
+    pub digest: Digest,
     pub observation: RawJson,
     pub entries: Vec<RawJson>,
 }
