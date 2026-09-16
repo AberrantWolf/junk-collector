@@ -526,7 +526,7 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
-            "DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
+            "DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
         )
         .map_err(storage)?;
         for (collection, path) in collections {
@@ -2982,6 +2982,18 @@ fn project(tx: &Connection, record: &RevisionRecord, path: &str) -> Result<()> {
             params![item.id.to_string(), item.title, item.subtitle],
         )
         .map_err(storage)?;
+    }
+    let metadata: Option<String> = tx
+        .query_row(
+            "SELECT record FROM metadata_authorities WHERE id=?",
+            [item.id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage)?;
+    if let Some(raw) = metadata {
+        let metadata = serde_json::from_str(&raw).map_err(storage)?;
+        processing::project_effective_metadata_search(tx, &metadata)?;
     }
     for evidence in &record.evidence {
         let evidence = archive_v3::EvidenceRecordV3::from_wave1(item.collection_id, evidence);

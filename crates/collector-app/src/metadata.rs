@@ -54,7 +54,7 @@ pub struct RefreshMetadataCommand {
     pub observation: MetadataRefreshObservation,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderArtworkLink {
     pub provider_record_id: String,
@@ -73,7 +73,7 @@ pub struct RefreshProviderMetadataCommand {
     pub artwork: Vec<ProviderArtworkLink>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PublishProviderArtworkCommand {
     pub snapshot_id: SnapshotId,
@@ -89,6 +89,140 @@ pub struct MetadataView {
     pub current_candidates: Vec<MetadataCandidateIdentity>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataProviderAvailability {
+    Available,
+    Unconfigured,
+    Inapplicable,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataProviderView {
+    pub id: ModuleId,
+    pub label: String,
+    pub availability: MetadataProviderAvailability,
+    pub can_acquire: bool,
+    pub guidance: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataLookupKind {
+    ReleaseId,
+    DiscId,
+    Search,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataLookupChoice {
+    pub id: String,
+    pub kind: MetadataLookupKind,
+    pub label: String,
+    pub value: String,
+    pub recommended: bool,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataCandidateView {
+    pub identity: MetadataCandidateIdentity,
+    pub title: MetadataText,
+    pub subtitle: Option<MetadataText>,
+    pub artwork: Option<AssetId>,
+    pub complete_identity: bool,
+    pub strength: MatchStrength,
+    pub current: bool,
+    pub selected: bool,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataCatalogSourceView {
+    pub observation_id: ObservationId,
+    pub snapshot_id: SnapshotId,
+    pub label: String,
+    pub current: bool,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataPermissions {
+    pub can_update: bool,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataReviewView {
+    pub item_id: ItemId,
+    pub revision: Revision,
+    pub authority: MetadataAuthority,
+    pub display: ResolvedMetadataDisplay,
+    pub candidates: Vec<MetadataCandidateView>,
+    pub providers: Vec<MetadataProviderView>,
+    pub lookup_choices: Vec<MetadataLookupChoice>,
+    pub catalog_sources: Vec<MetadataCatalogSourceView>,
+    pub permissions: MetadataPermissions,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AcquireMetadataCommand {
+    MusicBrainzRelease {
+        release_id: String,
+        #[serde(default)]
+        refresh: bool,
+    },
+    MusicBrainzDisc {
+        disc_id: String,
+        #[serde(default)]
+        refresh: bool,
+    },
+    MusicBrainzSearch {
+        query: String,
+        #[serde(default)]
+        refresh: bool,
+    },
+    CoverArtListing {
+        candidate: MetadataCandidateIdentity,
+    },
+    CoverArtImage {
+        candidate: MetadataCandidateIdentity,
+        image_id: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyMetadataSnapshotCommand {
+    pub expected_revision: Revision,
+    pub snapshot_id: SnapshotId,
+    pub source_observation_id: Option<ObservationId>,
+    #[serde(default)]
+    pub artwork: Vec<ProviderArtworkLink>,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataArtworkOption {
+    pub release_id: String,
+    pub image_id: String,
+    pub front: bool,
+    pub back: bool,
+    pub approved: bool,
+    pub types: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CompleteMetadataAcquisitionCommand {
+    pub job_id: JobId,
+    pub expected_revision: Revision,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CompletedMetadataAcquisition {
+    Metadata { review: Box<MetadataReviewView> },
+    ArtworkOptions { options: Vec<MetadataArtworkOption> },
+    ArtworkPublished { asset: Box<crate::PresentedAsset> },
+}
+
 struct LoadedMetadataAuthority {
     revision: Revision,
     authority: MetadataAuthority,
@@ -97,6 +231,31 @@ struct LoadedMetadataAuthority {
 }
 
 impl CollectionService {
+    pub(crate) fn effective_metadata_for_item(
+        &self,
+        item: &Item,
+    ) -> Result<ResolvedMetadataDisplay> {
+        let LoadedMetadataAuthority {
+            authority,
+            legacy,
+            current,
+            ..
+        } = self.authority_or_inventory(item)?;
+        let mut candidates = self
+            .processing
+            .metadata_candidates(item.collection_id, item.id)?;
+        merge_metadata_candidates(
+            &mut candidates,
+            legacy.iter().flat_map(|value| &value.candidates),
+        )?;
+        resolve_metadata_display(
+            item,
+            &authority,
+            &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
+            "en",
+        )
+    }
+
     pub fn enqueue_musicbrainz_metadata_acquisition(
         &self,
         actor: &Principal,
@@ -122,6 +281,19 @@ impl CollectionService {
             "metadata.musicbrainz.acquire",
             &(item_id, &query),
             |effects| {
+        if !self
+            .streaming_providers
+            .contains_key(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
+            || !self
+                .catalog_parsers
+                .contains_key(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
+        {
+            return Err(Error::Unavailable(
+                "MusicBrainz is not configured. Add providers.musicbrainz_user_agent to the server configuration and restart the server."
+                    .into(),
+            ));
+        }
+
                 let frozen = FrozenAcquisitionJob {
                     request: ProviderRequest {
                         collection_id: item.collection_id,
@@ -179,6 +351,19 @@ impl CollectionService {
             "metadata.cover-art.acquire",
             &(item_id, &query),
             |effects| {
+        if !self
+            .streaming_providers
+            .contains_key(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID)
+            || !self
+                .catalog_parsers
+                .contains_key(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID)
+        {
+            return Err(Error::Unavailable(
+                "Cover Art Archive is not configured. Configure MusicBrainz provider identification and restart the server."
+                    .into(),
+            ));
+        }
+
                 let frozen = FrozenAcquisitionJob {
                     request: ProviderRequest {
                         collection_id: item.collection_id,
@@ -509,6 +694,487 @@ impl CollectionService {
         })
     }
 
+    pub fn metadata_review(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+    ) -> Result<MetadataReviewView> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let view = self.metadata_view(actor, item_id)?;
+        let current = view.current_candidates.iter().collect::<BTreeSet<_>>();
+        let can_update = self
+            .content_write_eligibility(actor, item.collection_id)
+            .and_then(|eligibility| self.validate_owned_domain(&eligibility, &item.domain))
+            .is_ok()
+            && !item.deleted;
+        let music = item.domain.module.0 == "org.junk.music";
+        let games = item.domain.module.0 == "org.junk.games";
+        let provider = |id: &str, label: &str, applicable: bool, guidance: &str| {
+            let configured =
+                self.streaming_providers.contains_key(id) && self.catalog_parsers.contains_key(id);
+            MetadataProviderView {
+                id: ModuleId(id.into()),
+                label: label.into(),
+                availability: if !applicable {
+                    MetadataProviderAvailability::Inapplicable
+                } else if configured {
+                    MetadataProviderAvailability::Available
+                } else {
+                    MetadataProviderAvailability::Unconfigured
+                },
+                can_acquire: applicable && configured && can_update,
+                guidance: if applicable && configured {
+                    guidance.into()
+                } else if applicable {
+                    "Ask the server administrator to configure a meaningful MusicBrainz User-Agent, then restart the server. Inventory, preservation and existing artwork remain available."
+                        .into()
+                } else {
+                    "This provider does not apply to this collection type.".into()
+                },
+            }
+        };
+        let mut lookup_choices = Vec::new();
+        if music {
+            for identity in &item.identifiers {
+                let release = collector_modules::music::MusicBrainzQuery::ReleaseId {
+                    release_id: identity.value.clone(),
+                    refresh: false,
+                };
+                let disc = collector_modules::music::MusicBrainzQuery::DiscId {
+                    disc_id: identity.value.clone(),
+                    refresh: false,
+                };
+                let (kind, label) = if identity.provider.0.contains("musicbrainz")
+                    && identity.provider.0.contains("disc")
+                    && disc.validate().is_ok()
+                {
+                    (MetadataLookupKind::DiscId, "Recorded disc identifier")
+                } else if identity.provider.0.contains("musicbrainz") && release.validate().is_ok()
+                {
+                    (
+                        MetadataLookupKind::ReleaseId,
+                        "Recorded MusicBrainz release",
+                    )
+                } else {
+                    continue;
+                };
+                let digest = Digest::sha256(
+                    format!("{}:{}", identity.provider.0, identity.value).as_bytes(),
+                );
+                lookup_choices.push(MetadataLookupChoice {
+                    id: format!("recorded:{}", digest.hex),
+                    kind,
+                    label: format!("{label}: {}", identity.value),
+                    value: identity.value.clone(),
+                    recommended: false,
+                });
+            }
+            for capture in &item.captures {
+                for representation in &capture.representations {
+                    let source = PackageScope::Representation(representation.id);
+                    let fingerprint = self
+                        .processing
+                        .recorded_source(item.collection_id, source)?;
+                    let page = self.processing.observations(&crate::ProcessingQuery {
+                        collection_id: item.collection_id,
+                        source,
+                        source_fingerprint: fingerprint.clone(),
+                        operation: Some(OperationId::new(
+                            collector_modules::music::CD_STRUCTURE_OPERATION,
+                        )?),
+                        after: None,
+                        limit: 50,
+                    })?;
+                    for observation in page.items {
+                        if observation.source_fingerprint != fingerprint {
+                            continue;
+                        }
+                        if let Ok(collector_modules::music::CdProcessingResult::Layout {
+                            disc_ids: Some(ids),
+                            ..
+                        }) = observation.typed_result.payload.parse()
+                        {
+                            if !lookup_choices.iter().any(|choice| {
+                                choice.kind == MetadataLookupKind::DiscId
+                                    && choice.value == ids.musicbrainz
+                            }) {
+                                lookup_choices.push(MetadataLookupChoice {
+                                    id: format!("layout:{}", observation.id),
+                                    kind: MetadataLookupKind::DiscId,
+                                    label: format!(
+                                        "Disc identifier from recorded layout: {}",
+                                        ids.musicbrainz
+                                    ),
+                                    value: ids.musicbrainz,
+                                    recommended: false,
+                                });
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            let search_value = [view.display.title.value.as_str()]
+                .into_iter()
+                .chain(
+                    view.display
+                        .subtitle
+                        .as_ref()
+                        .map(|value| value.value.as_str()),
+                )
+                .collect::<Vec<_>>()
+                .join(" ");
+            let search_value = search_value
+                .chars()
+                .scan(0usize, |bytes, character| {
+                    *bytes += character.len_utf8();
+                    (*bytes <= 255).then_some(character)
+                })
+                .collect::<String>();
+            lookup_choices.push(MetadataLookupChoice {
+                id: format!("search:{}", Digest::sha256(search_value.as_bytes()).hex),
+                kind: MetadataLookupKind::Search,
+                label: format!("Search by current text: {search_value}"),
+                value: search_value,
+                recommended: false,
+            });
+            let recorded = lookup_choices
+                .iter()
+                .filter(|choice| choice.kind != MetadataLookupKind::Search)
+                .count();
+            if recorded == 1 {
+                if let Some(choice) = lookup_choices
+                    .iter_mut()
+                    .find(|choice| choice.kind != MetadataLookupKind::Search)
+                {
+                    choice.recommended = true;
+                }
+            } else if recorded == 0
+                && let Some(choice) = lookup_choices
+                    .iter_mut()
+                    .find(|choice| choice.kind == MetadataLookupKind::Search)
+            {
+                choice.recommended = true;
+            }
+        }
+        let mut catalog_sources = Vec::new();
+        if games {
+            for capture in &item.captures {
+                for representation in &capture.representations {
+                    let source = PackageScope::Representation(representation.id);
+                    let source_fingerprint = self
+                        .processing
+                        .recorded_source(item.collection_id, source)?;
+                    let page = self.processing.observations(&crate::ProcessingQuery {
+                        collection_id: item.collection_id,
+                        source,
+                        source_fingerprint: source_fingerprint.clone(),
+                        operation: Some(OperationId::new("org.junk.games.catalog-verification")?),
+                        after: None,
+                        limit: 200,
+                    })?;
+                    for observation in page.items {
+                        let Some(snapshot_id) = observation.snapshot_id else {
+                            continue;
+                        };
+                        if observation.typed_result.module.0 != "org.junk.games"
+                            || observation
+                                .typed_result
+                                .payload
+                                .parse::<collector_modules::games::GameProcessingResult>()
+                                .is_err()
+                        {
+                            continue;
+                        }
+                        catalog_sources.push(MetadataCatalogSourceView {
+                            observation_id: observation.id,
+                            snapshot_id,
+                            label: format!(
+                                "Recorded DAT result from {}",
+                                observation.created_at.format("%Y-%m-%d %H:%M UTC")
+                            ),
+                            current: observation.source_fingerprint == source_fingerprint,
+                        });
+                    }
+                }
+            }
+        }
+        catalog_sources.sort_by(|left, right| {
+            right
+                .current
+                .cmp(&left.current)
+                .then_with(|| left.observation_id.cmp(&right.observation_id))
+        });
+        let candidates = view
+            .candidates
+            .into_iter()
+            .map(|candidate| MetadataCandidateView {
+                current: current.contains(&candidate.identity),
+                selected: view.authority.selected_candidate.as_ref() == Some(&candidate.identity),
+                identity: candidate.identity,
+                title: candidate.title,
+                subtitle: candidate.subtitle,
+                artwork: candidate.artwork,
+                complete_identity: candidate.complete_identity,
+                strength: candidate.strength,
+            })
+            .collect();
+        Ok(MetadataReviewView {
+            item_id,
+            revision: view.revision,
+            authority: view.authority,
+            display: view.display,
+            candidates,
+            providers: vec![
+                provider(
+                    collector_modules::music::MUSICBRAINZ_PROVIDER_ID,
+                    "MusicBrainz",
+                    music,
+                    "Lookup is optional and explicit. It supplies descriptive identity candidates, not checksum or audio verification.",
+                ),
+                provider(
+                    collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID,
+                    "Cover Art Archive",
+                    music,
+                    "Artwork is fetched explicitly and published through the collection Asset pipeline before selection.",
+                ),
+            ],
+            lookup_choices,
+            catalog_sources,
+            permissions: MetadataPermissions { can_update },
+        })
+    }
+
+    /// Dispatch one completed acquisition to its application-owned result action.
+    /// Image publication does not require another network lookup or silently alter
+    /// metadata authority: the published image is available for explicit selection.
+    pub fn complete_metadata_acquisition(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+        command: CompleteMetadataAcquisitionCommand,
+        context: &CommandContext,
+    ) -> Result<CompletedMetadataAcquisition> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let job = self.job(actor, command.job_id)?;
+        if job.item_id != Some(item_id) || job.collection_id != Some(item.collection_id) {
+            return Err(Error::NotFound);
+        }
+        if job.state != crate::JobState::Completed {
+            return Err(Error::Conflict);
+        }
+        let Some(crate::JobResultView::CatalogSnapshot { snapshot_id }) = job.result else {
+            return Err(Error::Invalid("job has no metadata snapshot".into()));
+        };
+        let snapshot = self.processing.snapshot(SnapshotQuery {
+            collection_id: item.collection_id,
+            snapshot_id,
+        })?;
+        if snapshot.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID {
+            return Ok(CompletedMetadataAcquisition::Metadata {
+                review: Box::new(self.apply_metadata_snapshot(
+                    actor,
+                    item_id,
+                    ApplyMetadataSnapshotCommand {
+                        expected_revision: command.expected_revision,
+                        snapshot_id,
+                        source_observation_id: None,
+                        artwork: Vec::new(),
+                    },
+                    context,
+                )?),
+            });
+        }
+        if snapshot.provider.0 != collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID {
+            return Err(Error::Invalid("job is not a metadata acquisition".into()));
+        }
+        let observation: collector_modules::music::CoverArtArchiveSnapshotObservation =
+            snapshot.parsed_observation.parse()?;
+        observation.validate()?;
+        match observation.query {
+            collector_modules::music::CoverArtArchiveQuery::Listing { .. } => {
+                Ok(CompletedMetadataAcquisition::ArtworkOptions {
+                    options: self.metadata_artwork_options(actor, item_id, snapshot_id)?,
+                })
+            }
+            collector_modules::music::CoverArtArchiveQuery::Image { .. } => {
+                let asset = self.publish_provider_artwork(
+                    actor,
+                    item_id,
+                    PublishProviderArtworkCommand { snapshot_id },
+                    context,
+                )?;
+                Ok(CompletedMetadataAcquisition::ArtworkPublished {
+                    asset: Box::new(self.asset_presented(
+                        actor,
+                        item.collection_id,
+                        asset.asset.id,
+                    )?),
+                })
+            }
+        }
+    }
+
+    pub fn acquire_metadata(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+        command: AcquireMetadataCommand,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        match command {
+            AcquireMetadataCommand::MusicBrainzRelease {
+                release_id,
+                refresh,
+            } => self.enqueue_musicbrainz_metadata_acquisition(
+                actor,
+                item_id,
+                collector_modules::music::MusicBrainzQuery::ReleaseId {
+                    release_id,
+                    refresh,
+                },
+                context,
+            ),
+            AcquireMetadataCommand::MusicBrainzDisc { disc_id, refresh } => self
+                .enqueue_musicbrainz_metadata_acquisition(
+                    actor,
+                    item_id,
+                    collector_modules::music::MusicBrainzQuery::DiscId { disc_id, refresh },
+                    context,
+                ),
+            AcquireMetadataCommand::MusicBrainzSearch { query, refresh } => self
+                .enqueue_musicbrainz_metadata_acquisition(
+                    actor,
+                    item_id,
+                    collector_modules::music::MusicBrainzQuery::Search { query, refresh },
+                    context,
+                ),
+            AcquireMetadataCommand::CoverArtListing { candidate } => {
+                self.validate_musicbrainz_candidate(actor, item_id, &candidate)?;
+                self.enqueue_cover_art_acquisition(
+                    actor,
+                    item_id,
+                    collector_modules::music::CoverArtArchiveQuery::Listing {
+                        release_id: candidate.provider_record_id,
+                    },
+                    context,
+                )
+            }
+            AcquireMetadataCommand::CoverArtImage {
+                candidate,
+                image_id,
+            } => {
+                self.validate_musicbrainz_candidate(actor, item_id, &candidate)?;
+                self.enqueue_cover_art_acquisition(
+                    actor,
+                    item_id,
+                    collector_modules::music::CoverArtArchiveQuery::Image {
+                        release_id: candidate.provider_record_id,
+                        image_id,
+                    },
+                    context,
+                )
+            }
+        }
+    }
+
+    pub fn apply_metadata_snapshot(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+        command: ApplyMetadataSnapshotCommand,
+        context: &CommandContext,
+    ) -> Result<MetadataReviewView> {
+        self.refresh_provider_metadata(
+            actor,
+            item_id,
+            RefreshProviderMetadataCommand {
+                expected_revision: command.expected_revision,
+                snapshot_id: command.snapshot_id,
+                source_observation_id: command.source_observation_id,
+                artwork: command.artwork,
+            },
+            context,
+        )?;
+        self.metadata_review(actor, item_id)
+    }
+
+    pub fn metadata_artwork_options(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+        snapshot_id: SnapshotId,
+    ) -> Result<Vec<MetadataArtworkOption>> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, Action::Curate)?;
+        let snapshot = self.processing.snapshot(SnapshotQuery {
+            collection_id: item.collection_id,
+            snapshot_id,
+        })?;
+        if snapshot.provider.0 != collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID {
+            return Err(Error::Invalid(
+                "artwork choices require a Cover Art Archive listing".into(),
+            ));
+        }
+        let parser = self
+            .catalog_parsers
+            .get(&snapshot.provider.0)
+            .ok_or_else(|| Error::Unavailable("artwork provider parser is unavailable".into()))?;
+        let mut reader = self.processing.snapshot_bytes(SnapshotQuery {
+            collection_id: item.collection_id,
+            snapshot_id,
+        })?;
+        let parsed = parser.parse_snapshot(&snapshot, reader.as_mut(), &mut || Ok(false))?;
+        let observation: collector_modules::music::CoverArtArchiveSnapshotObservation =
+            parsed.observation.parse()?;
+        if !matches!(
+            observation.query,
+            collector_modules::music::CoverArtArchiveQuery::Listing { .. }
+        ) {
+            return Err(Error::Invalid(
+                "artwork choices require a Cover Art Archive listing".into(),
+            ));
+        }
+        parsed
+            .entries
+            .into_iter()
+            .map(|raw| {
+                let option: collector_modules::music::CoverArtObservation = raw.parse()?;
+                option.validate()?;
+                Ok(MetadataArtworkOption {
+                    release_id: option.release_id,
+                    image_id: option.image_id,
+                    front: option.front,
+                    back: option.back,
+                    approved: option.approved,
+                    types: option.types,
+                })
+            })
+            .collect()
+    }
+
+    fn validate_musicbrainz_candidate(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+        candidate: &MetadataCandidateIdentity,
+    ) -> Result<()> {
+        if candidate.provider.0 != collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+            || !self
+                .metadata_view(actor, item_id)?
+                .candidates
+                .iter()
+                .any(|value| &value.identity == candidate)
+        {
+            return Err(Error::Invalid(
+                "artwork lookup requires an observed MusicBrainz release candidate".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn update_metadata_authority(
         &self,
         actor: &Principal,
@@ -689,48 +1355,7 @@ impl CollectionService {
             .processing
             .metadata_authority(item.collection_id, item.id)?
         {
-            let mut authority = record.authority;
-            if let Some(baseline) = record.inventory {
-                for (field, old, new) in [
-                    (MetadataField::Title, &baseline.title, &item.title),
-                    (MetadataField::Subtitle, &baseline.subtitle, &item.subtitle),
-                ] {
-                    if old != new {
-                        apply_authority_change(
-                            &mut authority,
-                            &MetadataAuthorityChange::SetFieldOverride {
-                                field,
-                                value: new.clone(),
-                                language: None,
-                            },
-                            &[],
-                        )?;
-                    }
-                }
-            } else if record.display.is_none() {
-                // Contract-only historical authorities predate explicit clearing.
-                // Preserve their existing overrides and seed remaining inventory text.
-                for (field, value) in [
-                    (MetadataField::Title, &item.title),
-                    (MetadataField::Subtitle, &item.subtitle),
-                ] {
-                    if !authority
-                        .field_overrides
-                        .iter()
-                        .any(|entry| entry.field == field)
-                    {
-                        apply_authority_change(
-                            &mut authority,
-                            &MetadataAuthorityChange::SetFieldOverride {
-                                field,
-                                value: value.clone(),
-                                language: None,
-                            },
-                            &[],
-                        )?;
-                    }
-                }
-            }
+            let authority = metadata_authority_for_inventory(item, &record)?;
             return Ok(LoadedMetadataAuthority {
                 revision: record.revision,
                 authority,
@@ -822,6 +1447,67 @@ impl CollectionService {
             current: None,
         })
     }
+}
+
+pub fn metadata_authority_for_inventory(
+    item: &Item,
+    record: &MetadataAuthorityRecord,
+) -> Result<MetadataAuthority> {
+    let mut authority = record.authority.clone();
+    if let Some(baseline) = &record.inventory {
+        for (field, old, new) in [
+            (MetadataField::Title, &baseline.title, &item.title),
+            (MetadataField::Subtitle, &baseline.subtitle, &item.subtitle),
+        ] {
+            if old != new {
+                apply_authority_change(
+                    &mut authority,
+                    &MetadataAuthorityChange::SetFieldOverride {
+                        field,
+                        value: new.clone(),
+                        language: None,
+                    },
+                    &[],
+                )?;
+            }
+        }
+    } else if record.display.is_none() {
+        // Contract-only historical authorities predate explicit clearing.
+        // Preserve their existing overrides and seed remaining inventory text.
+        for (field, value) in [
+            (MetadataField::Title, &item.title),
+            (MetadataField::Subtitle, &item.subtitle),
+        ] {
+            if !authority
+                .field_overrides
+                .iter()
+                .any(|entry| entry.field == field)
+            {
+                apply_authority_change(
+                    &mut authority,
+                    &MetadataAuthorityChange::SetFieldOverride {
+                        field,
+                        value: value.clone(),
+                        language: None,
+                    },
+                    &[],
+                )?;
+            }
+        }
+    }
+    Ok(authority)
+}
+
+/// Shared policy for presentation and rebuildable search projection.
+pub fn resolve_record_metadata(
+    item: &Item,
+    record: &MetadataAuthorityRecord,
+    history: &[MetadataCandidateObservation],
+) -> Result<ResolvedMetadataDisplay> {
+    let authority = metadata_authority_for_inventory(item, record)?;
+    let current =
+        current_metadata_candidates(&authority, history, record.current_candidates.as_deref())?;
+    resolve_metadata_display(item, &authority, &current, "en")
 }
 
 pub(crate) fn current_metadata_candidates(

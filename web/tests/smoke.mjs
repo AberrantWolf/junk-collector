@@ -12,6 +12,11 @@ const password=randomBytes(24).toString('hex');
 const localSetup=process.env.LOCAL_SETUP==='1';
 const port=19843;
 const accurateRipPort=19844;
+const metadataProviderPort=19845;
+const releaseIds={english:'11111111-1111-4111-8111-111111111111',alternate:'22222222-2222-4222-8222-222222222222',japanese:'33333333-3333-4333-8333-333333333333'};
+const release=(id,title,language,disambiguation)=>({id,title,disambiguation,'text-representation':{language,script:language==='ja'?'Jpan':'Latn'},'artist-credit':[{name:'Test ensemble',artist:{id:'44444444-4444-4444-8444-444444444444',name:'Test ensemble'}}],media:[{discs:[{id:'fixture-disc-id'}]}],'release-group':{id:'55555555-5555-4555-8555-555555555555'}});
+const releases=[release(releaseIds.english,'Provider pressing','en','2001 fixture'),release(releaseIds.alternate,'Provider pressing alternate','en','2001 fixture'),release(releaseIds.japanese,'試験盤','ja','日本盤')];
+const providerPng=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 const hasFlac=spawnSync('flac',['--version'],{encoding:'utf8'}).status===0;
 const trackFrames=[225*588,226*588];const frames=trackFrames[0]+trackFrames[1];
 const sum32=(first,last)=>Number((BigInt(first+last)*BigInt(last-first+1)/2n)&0xffff_ffffn);
@@ -20,6 +25,8 @@ const dbar=Buffer.alloc(31);dbar[0]=2;dbar.writeUInt32LE(676,1);dbar.writeUInt32
 for(let index=0;index<2;index++){const offset=13+index*9;dbar[offset]=17;dbar.writeUInt32LE(checksums[index],offset+1);dbar.writeUInt32LE(0,offset+5);}
 const accurateRipServer=createServer((_request,response)=>{response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
 await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
+const metadataProviderServer=createServer((request,response)=>{const url=new URL(request.url,'http://fixture.invalid');if(url.pathname==='/ws/2/release/'){const body=Buffer.from(JSON.stringify({releases}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
+await new Promise((resolve,reject)=>{metadataProviderServer.once('error',reject);metadataProviderServer.listen(metadataProviderPort,'127.0.0.1',resolve);});
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nauthentication_origin = "https://localhost:${port}"\nallowed_origins = ["https://localhost:${port}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["https://localhost:${port}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
@@ -29,6 +36,7 @@ const binary=path.join(root,'target/debug/collector-server');
 if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nallowed_origins = []\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
 if(hasFlac)await writeFile(config,'\n[encoders]\nflac = "flac"\n',{flag:'a'});
 await writeFile(config,`\n[dat_sources.browser]\npath = "${datPath}"\nsystem = "nes"\ncatalog = "Browser fixture"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`,{flag:'a'});
+await writeFile(config,'\n[providers]\nmusicbrainz_user_agent = "junk-collector-smoke/0.1 (test@example.invalid)"\n',{flag:'a'});
 const init=spawnSync(binary,['--config',config,localSetup?'setup':'init', '--username',localSetup?'collector':'owner'],{input:password,encoding:'utf8'});
 assert.equal(init.status,0,init.stderr);
 if(localSetup){
@@ -40,7 +48,7 @@ if(localSetup){
  assert.match(repairedConfig,/public_curation = false/);
 }
 let logs='';let server;
-function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${accurateRipPort}/`}});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
+function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${accurateRipPort}/`,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`}});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
 async function waitForServer(){for(let i=0;i<100;i++){try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server did not become ready');}
 async function stopServer(){if(!server||server.exitCode!==null)return;server.kill('SIGINT');await new Promise(resolve=>server.once('exit',resolve));}
 async function archiveUnavailableOwnerFixture(collectionId,itemId){
@@ -226,6 +234,79 @@ try{
  await page.screenshot({path:path.join(root,'web/test-results/assets-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'asset editor has mobile horizontal overflow');
  await page.setViewportSize({width:1440,height:1000});
+ const metadataReview=curator.getByRole('region',{name:'Metadata review'});
+ await metadataReview.getByText('Lookup is optional and explicit.',{exact:false}).waitFor();
+ const sourceSelect=metadataReview.getByRole('combobox',{name:'Identifier or search source'});
+ await sourceSelect.focus();await page.keyboard.press('Tab');
+ assert.equal(await metadataReview.getByLabel('Request a fresh provider response').evaluate(node=>node===document.activeElement),true,'metadata source controls lost their keyboard order');
+ let releaseCompletion;const heldCompletion=new Promise(resolve=>{releaseCompletion=resolve;});
+ let sawCompletion;const completionStarted=new Promise(resolve=>{sawCompletion=resolve;});
+ await page.route('**/metadata/acquisitions/complete',async route=>{sawCompletion();await heldCompletion;await route.abort().catch(()=>{});},{times:1});
+ await metadataReview.getByRole('button',{name:'Find metadata',exact:true}).click();
+ await metadataReview.getByText('Metadata refresh',{exact:true}).waitFor();
+ let completionTimeout;try{await Promise.race([completionStarted,new Promise((_,reject)=>{completionTimeout=setTimeout(()=>reject(new Error("metadata completion did not start within 30 seconds")),30000);})]);}finally{clearTimeout(completionTimeout);}
+ page.once('dialog',dialog=>dialog.accept());
+ await curator.getByRole('button',{name:'Close curator'}).click();
+ releaseCompletion();
+ const untouched=await page.evaluate(async()=>{const items=await(await fetch('/api/v1/items?limit=1')).json();return await(await fetch(`/api/v1/items/${items.items[0].id}/metadata`)).json();});
+ assert.equal(untouched.revision,0,'closing a detached panel applied pending metadata');
+ await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await metadataReview.getByText('Metadata refresh completed.',{exact:false}).waitFor();
+ assert.equal(await metadataReview.locator('.candidate').count(),3,'provider alternatives were not retained');
+ assert.equal(await metadataReview.locator('.candidate.current').count(),3,'fresh search candidates were not current');
+ await metadataReview.getByRole('button',{name:'Clear title override',exact:true}).click();
+ await metadataReview.getByRole('button',{name:'Clear subtitle override',exact:true}).click();
+ const japaneseCandidate=metadataReview.locator('.candidate').filter({hasText:'試験盤'});
+ await japaneseCandidate.getByRole('button',{name:'Select this version',exact:true}).click();
+ await metadataReview.locator('.effective-metadata').getByText('試験盤',{exact:true}).waitFor();
+ const titleAuthority=metadataReview.getByLabel('Displayed title');
+ await titleAuthority.fill('Draft survives metadata conflict');
+ await page.evaluate(async()=>{const items=await(await fetch('/api/v1/items?limit=1')).json();const item=items.items[0];const review=await(await fetch(`/api/v1/items/${item.id}/metadata`)).json();const response=await fetch(`/api/v1/items/${item.id}/metadata`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:review.revision,change:{change:'set_field_override',field:'subtitle',value:'Concurrent metadata edit',language:null}})});if(!response.ok)throw new Error(`concurrent metadata edit: ${response.status} ${await response.text()}`);});
+ await metadataReview.getByRole('button',{name:'Save title override',exact:true}).click();
+ await metadataReview.getByText('Your draft is still here',{exact:false}).waitFor();
+ assert.equal(await titleAuthority.inputValue(),'Draft survives metadata conflict');
+ await metadataReview.getByRole('button',{name:'Save title override',exact:true}).click();
+ await metadataReview.locator('.effective-metadata').getByText('Draft survives metadata conflict',{exact:true}).waitFor();
+ const clearDraftTitle=metadataReview.getByRole('button',{name:'Clear title override',exact:true});
+ await clearDraftTitle.click();await clearDraftTitle.waitFor({state:'detached'});
+ assert.equal(await titleAuthority.inputValue(),'試験盤','clearing the override did not restore the effective candidate default');
+ const artworkSelect=metadataReview.getByRole('combobox',{name:'Published image'});
+ await artworkSelect.selectOption({label:'Private archival cover'});
+ const useArtwork=metadataReview.getByRole('button',{name:'Use selected artwork',exact:true});
+ await useArtwork.waitFor({state:'visible'});await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.textContent?.trim()==='Use selected artwork'&&!button.disabled));await useArtwork.click();
+ const clearArtwork=metadataReview.getByRole('button',{name:'Clear artwork choice',exact:true});
+ await clearArtwork.waitFor();await clearArtwork.click();await clearArtwork.waitFor({state:'detached'});
+ await japaneseCandidate.getByRole('button',{name:'Find cover art',exact:true}).click();
+ await metadataReview.getByRole('heading',{name:'Cover Art Archive choices'}).waitFor();
+ await metadataReview.getByRole('button',{name:/Front cover/}).click();
+ await metadataReview.getByText('Artwork acquired and preserved.',{exact:false}).waitFor();
+ await metadataReview.getByRole('button',{name:'Use selected artwork',exact:true}).click();
+ // An explicit release lookup produces a new version; artwork publication itself
+ // must not depend on a second network request or change metadata selection.
+ await sourceSelect.selectOption('custom-release');
+ await metadataReview.getByLabel('Lookup value').fill(releaseIds.japanese);
+ await metadataReview.getByRole('button',{name:'Find metadata',exact:true}).click();
+ await metadataReview.getByText('Metadata refresh completed.',{exact:false}).waitFor();
+ const automaticChoice=metadataReview.getByRole('button',{name:'Use automatic choice',exact:true});
+ if(await automaticChoice.count())await automaticChoice.click();
+ await metadataReview.locator('.effective-metadata').getByText('試験盤',{exact:true}).waitFor();
+ await page.setViewportSize({width:390,height:844});
+ await metadataReview.scrollIntoViewIfNeeded();
+ await page.screenshot({path:path.join(root,'web/test-results/metadata-mobile.png'),fullPage:true});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'metadata review has mobile horizontal overflow');
+ await page.setViewportSize({width:1440,height:1000});
+ page.once('dialog',dialog=>dialog.accept());
+ await curator.getByRole('button',{name:'Close curator'}).click();
+ await curator.waitFor({state:'detached'});
+ await page.getByRole('searchbox').fill('試験盤');await page.waitForTimeout(350);
+ assert.equal(await page.locator('.collection-row').count(),1,'effective metadata was not searchable');
+ await page.getByRole('button',{name:/試験盤/}).click();
+ await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await metadataReview.locator('.candidate.historical').first().waitFor();
+ await metadataReview.getByLabel('Displayed title').fill('A test pressing');
+ await metadataReview.getByRole('button',{name:'Save title override',exact:true}).click();
+ await metadataReview.getByLabel('Displayed subtitle').fill('Japan · CD');
+ await metadataReview.getByRole('button',{name:'Save subtitle override',exact:true}).click();
  const importWorkspace=curator.getByRole('region',{name:'Capture accession'});
  await importWorkspace.getByLabel('Configured inbox').check();
  assert.equal(await importWorkspace.getByRole('combobox',{name:'Inbox',exact:true}).inputValue(),'Optical shelf');
@@ -436,7 +517,8 @@ try{
   if(localSetup){await playbackPage.goto('http://localhost:19841');await playbackPage.getByText('Client access only at this address.',{exact:false}).waitFor();}else await playbackPage.reload();
   await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.getByRole('button',{name:/A test pressing/}).click();
   const player=playbackPage.getByRole('region',{name:'Music player'});await player.waitFor();
-  assert.equal(await playbackPage.locator('.detail').getByRole('img',{name:'No artwork attached'}).count(),1,'viewer player lost the useful private-artwork placeholder');
+  const viewerArtwork=playbackPage.locator('.detail').getByRole('img',{name:/Cover Art Archive image/});await viewerArtwork.waitFor();
+  assert.equal(await viewerArtwork.count(),1,'viewer player did not receive the shared effective artwork');
   assert.equal(await player.getByRole('button',{name:/Prepare/}).count(),0,'viewer player exposed derivative preparation');
   assert.equal(await playbackPage.evaluate(()=>performance.getEntriesByType('resource').some(entry=>entry.name.endsWith('/curation.js'))),false,'viewer player imported the curation bundle');
   const expected=await playbackPage.evaluate(async()=>{const item=(await(await fetch('/api/v1/items?search=A%20test%20pressing&limit=1')).json()).items[0];const rows=await(await fetch(`/api/v1/items/${item.id}/music-tracks`)).json();return rows.filter(row=>row.profile.codec==='flac'&&row.state.status==='available').map(row=>({position:row.track_position,representation:row.state.representation_id,capture:row.capture_id,source:row.source_representation_id}));});
@@ -530,7 +612,7 @@ try{
  await stampForm.getByRole('button',{name:'Close curator'}).click();
  // Descriptor availability alone must not enable an unsupported stored Item.
  await fixturePage.route('**/api/v1/items?*',async route=>{const response=await route.fetch();const body=await response.json();body.items=body.items.slice(0,1).map(item=>({...item,title:'Unsupported schema fixture',domain:{...item.domain,schema_version:99},effective_permissions:{...item.effective_permissions,can_curate:false},content_permissions:{can_edit:false,status:'item_schema_unsupported',message:'Unsupported stored schema fixture.'}}));await route.fulfill({response,json:body});});
- await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:/Edit entry/});assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).isDisabled(),true);assert.equal(await readOnlyForm.getByRole('button',{name:'Save',exact:true}).isDisabled(),true);await readOnlyForm.getByText('Collection access',{exact:true}).waitFor();await readOnlyForm.getByRole('button',{name:'Close curator'}).click();
+ await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:/Edit entry/});assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).isDisabled(),true);assert.equal(await readOnlyForm.getByRole('button',{name:'Save inventory',exact:true}).isDisabled(),true);await readOnlyForm.getByText('Collection access',{exact:true}).waitFor();await readOnlyForm.getByRole('button',{name:'Close curator'}).click();
  await fixturePage.unroute('**/api/v1/collection-types');await fixturePage.route('**/api/v1/collection-types',route=>route.fulfill({json:[]}));await fixturePage.reload();await fixturePage.getByRole('button',{name:'Administration',exact:true}).waitFor();assert.equal(await fixturePage.getByRole('button',{name:'Administration',exact:true}).isEnabled(),true);assert.equal(await fixturePage.getByRole('button',{name:'Manage collections',exact:true}).isEnabled(),true);
  await fixturePage.close();
  const rejectedOwner=await page.evaluate(async()=>{
@@ -547,7 +629,7 @@ try{
  assert.equal(await page.locator('.collection-row').count(),0,'rejected item was published');
  // Build a valid temporary archived collection whose assigned owner is absent.
  // This exercises preservation/reindex fallback without forging a mixed-type API write.
- const unavailableFixture=await page.evaluate(async()=>{const collections=await(await fetch('/api/v1/collections')).json();const collection=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');const page=await(await fetch(`/api/v1/items?collection_id=${collection.id}`)).json();return {collectionId:collection.id,itemId:page.items[0].id};});
+ const unavailableFixture=await page.evaluate(async()=>{const collections=await(await fetch('/api/v1/collections')).json();const collection=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');const page=await(await fetch(`/api/v1/items?collection_id=${collection.id}`)).json();const item=page.items.find(value=>value.captures.length);if(!item)throw new Error('unavailable-owner fixture needs the captured music item');let review=await(await fetch(`/api/v1/items/${item.id}/metadata`)).json();for(const [field,value] of [['title','Opaque module fixture'],['subtitle','Unavailable owner preserved from archive']]){const response=await fetch(`/api/v1/items/${item.id}/metadata`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:review.revision,change:{change:'set_field_override',field,value,language:null}})});if(!response.ok)throw new Error(`unavailable-owner metadata: ${response.status} ${await response.text()}`);review=await response.json();}return {collectionId:collection.id,itemId:item.id};});
  await stopServer();await archiveUnavailableOwnerFixture(unavailableFixture.collectionId,unavailableFixture.itemId);server=startServer();await waitForServer();await page.reload();
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
  await page.getByText('Collection content is read-only.',{exact:true}).waitFor();
@@ -606,7 +688,8 @@ try{
  await page.getByRole('button',{name:/Opaque module fixture/}).waitFor();
  const isolation=await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const importId=sessionStorage.getItem('owner-import-id');const jobId=sessionStorage.getItem('owner-job-id');return {importStatus:(await fetch(`/api/v1/imports/${importId}`)).status,jobStatus:(await fetch(`/api/v1/jobs/${jobId}`)).status,collectionStatus:(await fetch('/api/v1/imports',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({collection_id:collection.id,package_name:'forbidden',files:[{name:'empty.bin',bytes:0,sha256:null}]})})).status};});
  assert.deepEqual(isolation,{importStatus:404,jobStatus:404,collectionStatus:403},'viewer crossed Import/Job ownership or collection curation scope');
- assert.equal(await page.locator('.collection-row img').count(),0,'viewer loaded curator-only artwork');
+ assert.equal(await page.locator('.collection-row img').count(),1,'viewer lost shared effective artwork after reindex');
+ assert.equal(await page.getByRole('img',{name:'Private archival cover'}).count(),0,'viewer loaded curator-only artwork');
  await page.getByRole('img',{name:'No artwork attached'}).first().waitFor();
  assert.equal(await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false},expected_revision:0})});return response.status;}),403);
  await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});
@@ -614,4 +697,4 @@ try{
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
  console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial, WebAuthn registration/login and mobile layout.');
-}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await rm(scratch,{recursive:true,force:true});}
+}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await new Promise(resolve=>metadataProviderServer.close(resolve));await rm(scratch,{recursive:true,force:true});}

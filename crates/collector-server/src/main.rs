@@ -512,6 +512,21 @@ async fn main() -> Result<()> {
                 )?
                 .with_catalog_parser(accuraterip_id, accuraterip)?;
             if let Some(user_agent) = &config.providers.musicbrainz_user_agent {
+                #[cfg(debug_assertions)]
+                let musicbrainz =
+                    if let Ok(origin) = std::env::var("JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN") {
+                        Arc::new(MusicBrainzProvider::with_test_origin(
+                            user_agent,
+                            &origin,
+                            std::time::Duration::from_secs(5),
+                            std::time::Duration::from_millis(1),
+                            std::time::Duration::from_secs(60),
+                            std::time::Duration::from_secs(10),
+                        )?)
+                    } else {
+                        Arc::new(MusicBrainzProvider::new(user_agent)?)
+                    };
+                #[cfg(not(debug_assertions))]
                 let musicbrainz = Arc::new(MusicBrainzProvider::new(user_agent)?);
                 let musicbrainz_id =
                     ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into());
@@ -524,6 +539,19 @@ async fn main() -> Result<()> {
                     )?
                     .with_catalog_parser(musicbrainz_id, musicbrainz)?;
 
+                #[cfg(debug_assertions)]
+                let cover_art =
+                    if let Ok(origin) = std::env::var("JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN") {
+                        Arc::new(CoverArtArchiveProvider::with_test_origins(
+                            user_agent,
+                            &origin,
+                            &[origin.as_str()],
+                            std::time::Duration::from_secs(5),
+                        )?)
+                    } else {
+                        Arc::new(CoverArtArchiveProvider::new(user_agent)?)
+                    };
+                #[cfg(not(debug_assertions))]
                 let cover_art = Arc::new(CoverArtArchiveProvider::new(user_agent)?);
                 let cover_art_id =
                     ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into());

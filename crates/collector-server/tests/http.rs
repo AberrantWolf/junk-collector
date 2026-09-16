@@ -2302,7 +2302,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 81);
+    assert_eq!(paths.len(), 86); // Includes application-owned metadata acquisition completion.
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -2328,6 +2328,10 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/collections/{id}/inboxes",
         "/api/v1/collections/{collection}/inboxes/{label}/stage",
         "/api/v1/collection-types",
+        "/api/v1/items/{id}/metadata",
+        "/api/v1/items/{id}/metadata/acquisitions",
+        "/api/v1/items/{id}/metadata/refresh",
+        "/api/v1/items/{id}/metadata/artwork",
     ] {
         assert!(
             paths.contains_key(path),
@@ -3022,7 +3026,7 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         body["domain"]["payload"]["private_raw_marker"],
         "do-not-serialize"
     );
-    assert_eq!(body["metadata"]["selected"], "private provider marker");
+    assert!(body.get("metadata").is_none());
     assert_eq!(body["specimens"][0]["private_notes"], "private note marker");
     assert_eq!(
         body["specimens"][0]["loans"][0]["contact"],
@@ -3644,6 +3648,7 @@ async fn focused_inventory_routes_require_curator_role_and_revisioned_idempotent
                 .uri(format!("/api/v1/items/{}/specimens", saved.id))
                 .header("origin", "https://collector.example")
                 .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
                 .header("content-type", "application/json")
                 .body(Body::from(body.clone()))
                 .unwrap(),
@@ -3920,4 +3925,416 @@ async fn static_modules_load_for_wrong_origin_guidance_but_api_stays_protected()
             .unwrap();
         assert_eq!(response.status(), status, "{path}");
     }
+}
+
+#[tokio::test]
+async fn metadata_review_routes_are_curation_only_and_effective_display_is_viewer_safe() {
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let owner = state
+        .store
+        .create_user("metadata-http-owner", "a long owner password", true)
+        .unwrap();
+    let viewer = state
+        .store
+        .create_user("metadata-http-viewer", "a long viewer password", false)
+        .unwrap();
+    let owner_actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&owner_actor),
+            typed_collection("Metadata HTTP"),
+            &command(),
+        )
+        .unwrap();
+    state
+        .store
+        .grant(collection.id, viewer, Role::Viewer)
+        .unwrap();
+    let item_id = ItemId::new();
+    let saved = state
+        .service
+        .save_item(
+            &owner_actor,
+            item_id,
+            collector_app::SaveItemCommand {
+                collection_id: collection.id,
+                title: "Inventory title".into(),
+                subtitle: "Inventory edition".into(),
+                identity_link: ItemIdentityLink::None,
+                domain: ModuleData {
+                    module: ModuleId("org.junk.music".into()),
+                    schema_version: 1,
+                    payload: RawJson::from_value(serde_json::json!({})),
+                },
+                identity: IdentityState::Tentative,
+                translations: vec![],
+                identifiers: vec![],
+                wishlist: false,
+            },
+            Revision(0),
+            &command(),
+        )
+        .unwrap();
+    let png = [
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let artwork = state
+        .service
+        .create_asset(
+            &owner_actor,
+            collector_app::CreateAssetCommand {
+                collection_id: collection.id,
+                subject: AssetSubject::Item { item_id },
+                kind: AssetKind::Cover,
+                visibility: Visibility::Shared,
+                alt_text: "Effective cover".into(),
+            },
+            &png,
+            &command(),
+        )
+        .unwrap();
+    let candidate = MetadataCandidateObservation {
+        identity: MetadataCandidateIdentity {
+            provider: ModuleId("org.junk.providers.musicbrainz".into()),
+            provider_record_id: "11111111-1111-1111-1111-111111111111".into(),
+            provider_record_version: Some("fixture-v1".into()),
+        },
+        title: MetadataText {
+            value: "Effective album".into(),
+            language: Some(LanguageTag::new("ja").unwrap()),
+        },
+        subtitle: Some(MetadataText {
+            value: "Fixture artist".into(),
+            language: Some(LanguageTag::new("ja").unwrap()),
+        }),
+        artwork: Some(artwork.id),
+        complete_identity: false,
+        strength: MatchStrength::Name,
+        provider_priority: 20,
+        observation: RawJson::from_value(serde_json::json!({
+            "private_raw_marker": "must-not-reach-the-client",
+            "unreviewed_url": "javascript:alert(1)",
+            "raw_html": "<script>bad()</script>"
+        })),
+    };
+    state
+        .service
+        .refresh_metadata(
+            &owner_actor,
+            saved.id,
+            collector_app::RefreshMetadataCommand {
+                expected_revision: Revision(0),
+                observation: MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates: vec![candidate],
+                    raw_observation: RawJson::from_value(serde_json::json!({
+                        "provider_secret": "must-not-reach-the-client"
+                    })),
+                    observed_at: chrono::Utc::now(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    for (revision, field) in [
+        (Revision(1), MetadataField::Title),
+        (Revision(2), MetadataField::Subtitle),
+    ] {
+        state
+            .service
+            .update_metadata_authority(
+                &owner_actor,
+                saved.id,
+                collector_app::UpdateMetadataAuthorityCommand {
+                    expected_revision: revision,
+                    change: collector_app::MetadataAuthorityChange::ClearFieldOverride { field },
+                },
+                &command(),
+            )
+            .unwrap();
+    }
+    let (owner_token, _) = state.store.issue_session(owner, "browser").unwrap();
+    let (viewer_token, _) = state.store.issue_session(viewer, "browser").unwrap();
+    let app = router(state.clone());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{item_id}/metadata"))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{item_id}/metadata"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 128 * 1024)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(!text.contains("private_raw_marker"));
+    assert!(!text.contains("provider_secret"));
+    assert!(!text.contains("javascript:"));
+    assert!(!text.contains("<script>"));
+    let review: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(review["display"]["title"]["value"], "Effective album");
+    assert_eq!(review["display"]["resolution"], "automatic");
+    assert_eq!(review["candidates"][0]["current"], true);
+    assert_eq!(review["candidates"][0]["title"]["language"], "ja");
+    assert_eq!(review["permissions"]["can_update"], true);
+    assert_eq!(review["providers"][0]["availability"], "unconfigured");
+
+    let select = serde_json::json!({
+        "expected_revision": 2,
+        "change": {
+            "change": "select_candidate",
+            "candidate": {
+                "provider": "org.junk.providers.musicbrainz",
+                "provider_record_id": "11111111-1111-1111-1111-111111111111",
+                "provider_record_version": "fixture-v1"
+            }
+        }
+    });
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{item_id}/metadata"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "metadata-stale-selection")
+                .body(Body::from(select.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    let mut select = select;
+    select["expected_revision"] = serde_json::json!(3);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/items/{item_id}/metadata"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "metadata-current-selection")
+                .body(Body::from(select.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let selected: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 128 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(selected["display"]["resolution"], "selected");
+    assert_eq!(selected["candidates"][0]["selected"], true);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{item_id}"))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 128 * 1024)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(!text.contains("must-not-reach-the-client"));
+    let presented: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        presented["effective_metadata"]["title"]["value"],
+        "Effective album"
+    );
+    assert_eq!(
+        presented["effective_metadata"]["artwork"],
+        artwork.id.to_string()
+    );
+    assert_eq!(presented["primary_artwork"], artwork.id.to_string());
+    assert_eq!(presented["title"], "Effective album");
+    assert!(presented.get("inventory_title").is_none());
+    assert!(presented.get("inventory_subtitle").is_none());
+    assert!(presented.get("metadata").is_none());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/items?collection_id={}&search=Effective%20album",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 128 * 1024)
+        .await
+        .unwrap();
+    let page: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(page["items"][0]["id"], item_id.to_string());
+
+    // Search must use the same authority/updated inventory policy as display,
+    // including unrelated edits and rebuilding from the archive.
+    for correction in [false, true] {
+        let mut changed = state.store.item(item_id).unwrap();
+        changed.wishlist = !changed.wishlist;
+        if correction {
+            changed.title = "Corrected inventory".into();
+        }
+        let revision = changed.revision;
+        state
+            .service
+            .save_item(
+                &owner_actor,
+                item_id,
+                collector_app::SaveItemCommand {
+                    collection_id: changed.collection_id,
+                    title: changed.title,
+                    subtitle: changed.subtitle,
+                    identity_link: changed.identity_link,
+                    domain: changed.domain,
+                    identity: changed.identity,
+                    translations: changed.translations,
+                    identifiers: changed.identifiers,
+                    wishlist: changed.wishlist,
+                },
+                revision,
+                &command(),
+            )
+            .unwrap();
+        for rebuild in [false, true] {
+            if rebuild {
+                collector_app::AdministrationPort::reindex(state.store.as_ref()).unwrap();
+            }
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/api/v1/items?collection_id={}&search={}",
+                            collection.id,
+                            if correction {
+                                "Corrected"
+                            } else {
+                                "Effective%20album"
+                            }
+                        ))
+                        .header("authorization", format!("Bearer {viewer_token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let page: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 128 * 1024)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                page["items"][0]["title"],
+                if correction {
+                    "Corrected inventory"
+                } else {
+                    "Effective album"
+                }
+            );
+        }
+    }
+
+    let completion_body = serde_json::json!({"job_id": JobId::new(), "expected_revision": 0});
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/items/{item_id}/metadata/acquisitions/complete"
+                ))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "viewer-completion-denied")
+                .body(Body::from(completion_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    state.exposure.public_curation = false;
+    state.ingress = Ingress::Public;
+    let public = router(state);
+    let response = public
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{item_id}/metadata"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let response = public
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/items/{item_id}/metadata/acquisitions/complete"
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "public-completion-absent")
+                .body(Body::from(completion_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

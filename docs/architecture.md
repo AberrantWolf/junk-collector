@@ -132,8 +132,14 @@ inputs before timestamps or other frozen state. Non-JSON negative responses rema
 exact snapshots referenced by metadata; malformed successful responses are failures.
 The HTTP connector validates its actual DNS answers, disables ambient proxies and
 pins HTTPS provider/storage origins. MusicBrainz has one composed admission/cooldown
-limiter and a process-local cache bounded to 128 entries/32 MiB. Automatic enrichment
-and metadata HTTP/UI remain the D06.3 child, not an implicit import side effect.
+limiter and a process-local cache bounded to 128 entries/32 MiB. Curation-only metadata
+HTTP/UI exposes explicit acquisition and authority changes; imports do not implicitly
+request enrichment. Application services dispatch completed, caller-owned, item-bound
+acquisitions to the existing single metadata or Asset effect. Artwork publication
+preserves an image for explicit cover selection without requiring another metadata
+request. Clients persist completion receipt inputs across panel reopen and abort
+obsolete requests. Effective display and rebuildable search share application-owned
+resolution, including later inventory corrections; adapters do not invent precedence.
 
 TOML manifests contain schema version, entity kind, typed identities, revision and the SHA-256 of the corresponding record. Archive schema 3 uses deterministic additive sidecars over schema-1/2 history. Canonical Item records contain inventory state but no embedded Captures or Assets; standalone Capture revisions and revisioned collection-level Asset records are authoritative. Append-only Evidence has collection identity, optional Item identity, one or more exact Representation identities, and is referenced by digest from revision envelopes. Legacy payload locations are adapter-only records. Item responses remain compatibility views hydrated from these canonical rows. The module/provider envelope preserves lexical JSON, including key order, number spelling, and nulls.
 

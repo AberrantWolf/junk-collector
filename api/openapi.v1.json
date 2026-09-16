@@ -2472,6 +2472,375 @@
         }
       }
     },
+    "/api/v1/items/{id}/metadata": {
+      "get": {
+        "operationId": "metadata_review",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataReviewView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_metadata_authority",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMetadataAuthorityCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataReviewView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/metadata/acquisitions": {
+      "post": {
+        "operationId": "acquire_metadata",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquireMetadataCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/metadata/acquisitions/complete": {
+      "post": {
+        "operationId": "complete_metadata_acquisition",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteMetadataAcquisitionCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletedMetadataAcquisition"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/metadata/artwork": {
+      "get": {
+        "operationId": "metadata_artwork_options",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SnapshotId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MetadataArtworkOption"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "publish_metadata_artwork",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishProviderArtworkCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedAsset"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/metadata/refresh": {
+      "post": {
+        "operationId": "apply_metadata_snapshot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyMetadataSnapshotCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataReviewView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/music-tracks": {
       "get": {
         "operationId": "music_track_availability",
@@ -3948,6 +4317,113 @@
         },
         "additionalProperties": false
       },
+      "AcquireMetadataCommand": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "release_id",
+              "source"
+            ],
+            "properties": {
+              "refresh": {
+                "type": "boolean"
+              },
+              "release_id": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "music_brainz_release"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "disc_id",
+              "source"
+            ],
+            "properties": {
+              "disc_id": {
+                "type": "string"
+              },
+              "refresh": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "music_brainz_disc"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "query",
+              "source"
+            ],
+            "properties": {
+              "query": {
+                "type": "string"
+              },
+              "refresh": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "music_brainz_search"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidate",
+              "source"
+            ],
+            "properties": {
+              "candidate": {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "cover_art_listing"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidate",
+              "image_id",
+              "source"
+            ],
+            "properties": {
+              "candidate": {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity"
+              },
+              "image_id": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "cover_art_image"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "Acquisition": {
         "type": "object",
         "properties": {
@@ -4014,6 +4490,38 @@
         "properties": {
           "module": {
             "$ref": "#/components/schemas/ModuleId"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApplyMetadataSnapshotCommand": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "snapshot_id"
+        ],
+        "properties": {
+          "artwork": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderArtworkLink"
+            }
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          },
+          "source_observation_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ObservationId"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -4612,6 +5120,83 @@
             "type": "string"
           }
         }
+      },
+      "CompleteMetadataAcquisitionCommand": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "job_id": {
+            "$ref": "#/components/schemas/JobId"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompletedMetadataAcquisition": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "review",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "metadata"
+                ]
+              },
+              "review": {
+                "$ref": "#/components/schemas/MetadataReviewView"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "options",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artwork_options"
+                ]
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetadataArtworkOption"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "asset",
+              "kind"
+            ],
+            "properties": {
+              "asset": {
+                "$ref": "#/components/schemas/PresentedAsset"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artwork_published"
+                ]
+              }
+            }
+          }
+        ]
       },
       "Component": {
         "type": "object",
@@ -5715,9 +6300,42 @@
           }
         ]
       },
+      "JobAccepted": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "$ref": "#/components/schemas/JobId"
+          }
+        }
+      },
       "JobId": {
         "type": "string",
         "format": "uuid"
+      },
+      "JobResultView": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "snapshot_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "catalog_snapshot"
+                ]
+              },
+              "snapshot_id": {
+                "$ref": "#/components/schemas/SnapshotId"
+              }
+            }
+          }
+        ]
       },
       "JobState": {
         "type": "string",
@@ -5803,6 +6421,16 @@
           },
           "phase": {
             "type": "string"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobResultView"
+              }
+            ]
           },
           "retryable": {
             "type": "boolean"
@@ -5927,6 +6555,247 @@
           "complete_hashes"
         ]
       },
+      "MetadataArtworkOption": {
+        "type": "object",
+        "required": [
+          "release_id",
+          "image_id",
+          "front",
+          "back",
+          "approved",
+          "types"
+        ],
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "back": {
+            "type": "boolean"
+          },
+          "front": {
+            "type": "boolean"
+          },
+          "image_id": {
+            "type": "string"
+          },
+          "release_id": {
+            "type": "string"
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MetadataAuthority": {
+        "type": "object",
+        "required": [
+          "field_overrides",
+          "retained_unknown_fields"
+        ],
+        "properties": {
+          "artwork_choice": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssetId"
+              }
+            ]
+          },
+          "domain_overrides": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ModuleData",
+                "description": "Typed domain authority owned by the collection module. Core preserves the\nenvelope; registry dispatch validates its owner and schema semantics."
+              }
+            ]
+          },
+          "field_overrides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataFieldOverride"
+            }
+          },
+          "preserved_field_overrides": {
+            "type": "array",
+            "items": {},
+            "description": "Unrecognized historical field authority, retained verbatim and never applied\nas common or domain authority without an explicit owner-aware conversion."
+          },
+          "retained_unknown_fields": {
+            "type": "object",
+            "description": "Legacy/provider-specific authority keys remain exact and portable."
+          },
+          "selected_candidate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity",
+                "description": "`None` means automatic candidate selection."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "MetadataAuthorityChange": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "candidate",
+              "change"
+            ],
+            "properties": {
+              "candidate": {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity"
+              },
+              "change": {
+                "type": "string",
+                "enum": [
+                  "select_candidate"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "clear_selected_candidate"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "field",
+              "value",
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "set_field_override"
+                ]
+              },
+              "field": {
+                "$ref": "#/components/schemas/MetadataField"
+              },
+              "language": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LanguageTag"
+                  }
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "field",
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "clear_field_override"
+                ]
+              },
+              "field": {
+                "$ref": "#/components/schemas/MetadataField"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "asset_id",
+              "change"
+            ],
+            "properties": {
+              "asset_id": {
+                "$ref": "#/components/schemas/AssetId"
+              },
+              "change": {
+                "type": "string",
+                "enum": [
+                  "set_artwork_choice"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "clear_artwork_choice"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "overrides",
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "set_domain_overrides"
+                ]
+              },
+              "overrides": {
+                "$ref": "#/components/schemas/ModuleData"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "clear_domain_overrides"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "MetadataCandidate": {
         "type": "object",
         "required": [
@@ -5960,6 +6829,281 @@
           }
         }
       },
+      "MetadataCandidateIdentity": {
+        "type": "object",
+        "required": [
+          "provider",
+          "provider_record_id"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "provider_record_id": {
+            "type": "string"
+          },
+          "provider_record_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "MetadataCandidateView": {
+        "type": "object",
+        "required": [
+          "identity",
+          "title",
+          "complete_identity",
+          "strength",
+          "current",
+          "selected"
+        ],
+        "properties": {
+          "artwork": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssetId"
+              }
+            ]
+          },
+          "complete_identity": {
+            "type": "boolean"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/MetadataCandidateIdentity"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "strength": {
+            "$ref": "#/components/schemas/MatchStrength"
+          },
+          "subtitle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataText"
+              }
+            ]
+          },
+          "title": {
+            "$ref": "#/components/schemas/MetadataText"
+          }
+        }
+      },
+      "MetadataCatalogSourceView": {
+        "type": "object",
+        "required": [
+          "observation_id",
+          "snapshot_id",
+          "label",
+          "current"
+        ],
+        "properties": {
+          "current": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "observation_id": {
+            "$ref": "#/components/schemas/ObservationId"
+          },
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          }
+        }
+      },
+      "MetadataField": {
+        "type": "string",
+        "enum": [
+          "title",
+          "subtitle"
+        ]
+      },
+      "MetadataFieldOverride": {
+        "type": "object",
+        "description": "Common fields are text, not arbitrary JSON. Artwork has exactly one authority\nslot on MetadataAuthority; unknown legacy values remain in its raw envelope.",
+        "required": [
+          "field",
+          "value"
+        ],
+        "properties": {
+          "field": {
+            "$ref": "#/components/schemas/MetadataField"
+          },
+          "language": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LanguageTag"
+              }
+            ]
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MetadataLookupChoice": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "value",
+          "recommended"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MetadataLookupKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "recommended": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "MetadataLookupKind": {
+        "type": "string",
+        "enum": [
+          "release_id",
+          "disc_id",
+          "search"
+        ]
+      },
+      "MetadataPermissions": {
+        "type": "object",
+        "required": [
+          "can_update"
+        ],
+        "properties": {
+          "can_update": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MetadataProviderAvailability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "unconfigured",
+          "inapplicable"
+        ]
+      },
+      "MetadataProviderView": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "availability",
+          "can_acquire",
+          "guidance"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/MetadataProviderAvailability"
+          },
+          "can_acquire": {
+            "type": "boolean"
+          },
+          "guidance": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "MetadataResolutionKind": {
+        "type": "string",
+        "enum": [
+          "manual",
+          "selected",
+          "automatic",
+          "tentative"
+        ]
+      },
+      "MetadataReviewView": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "revision",
+          "authority",
+          "display",
+          "candidates",
+          "providers",
+          "lookup_choices",
+          "catalog_sources",
+          "permissions"
+        ],
+        "properties": {
+          "authority": {
+            "$ref": "#/components/schemas/MetadataAuthority"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataCandidateView"
+            }
+          },
+          "catalog_sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataCatalogSourceView"
+            }
+          },
+          "display": {
+            "$ref": "#/components/schemas/ResolvedMetadataDisplay"
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "lookup_choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataLookupChoice"
+            }
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/MetadataPermissions"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataProviderView"
+            }
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
       "MetadataState": {
         "type": "object",
         "required": [
@@ -5987,6 +7131,64 @@
             ]
           }
         }
+      },
+      "MetadataText": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "language": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LanguageTag"
+              }
+            ]
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MetadataValueSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "source"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "identity",
+              "source"
+            ],
+            "properties": {
+              "identity": {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "candidate"
+                ]
+              }
+            }
+          }
+        ]
       },
       "ModuleData": {
         "type": "object",
@@ -6663,6 +7865,16 @@
                 "phase": {
                   "type": "string"
                 },
+                "result": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/JobResultView"
+                    }
+                  ]
+                },
                 "retryable": {
                   "type": "boolean"
                 },
@@ -6715,6 +7927,7 @@
                 "wishlist",
                 "captures",
                 "assets",
+                "effective_metadata",
                 "deleted",
                 "updated_at",
                 "presentation",
@@ -6746,6 +7959,9 @@
                 "domain": {
                   "$ref": "#/components/schemas/PresentedModuleData"
                 },
+                "effective_metadata": {
+                  "$ref": "#/components/schemas/ResolvedMetadataDisplay"
+                },
                 "effective_permissions": {
                   "$ref": "#/components/schemas/EffectivePermissions"
                 },
@@ -6764,14 +7980,16 @@
                 "identity_link": {
                   "$ref": "#/components/schemas/ItemIdentityLink"
                 },
-                "metadata": {
-                  "oneOf": [
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MetadataState"
-                    }
+                "inventory_subtitle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "inventory_title": {
+                  "type": [
+                    "string",
+                    "null"
                   ]
                 },
                 "presentation": {
@@ -7263,6 +8481,7 @@
           "wishlist",
           "captures",
           "assets",
+          "effective_metadata",
           "deleted",
           "updated_at",
           "presentation",
@@ -7294,6 +8513,9 @@
           "domain": {
             "$ref": "#/components/schemas/PresentedModuleData"
           },
+          "effective_metadata": {
+            "$ref": "#/components/schemas/ResolvedMetadataDisplay"
+          },
           "effective_permissions": {
             "$ref": "#/components/schemas/EffectivePermissions"
           },
@@ -7312,14 +8534,16 @@
           "identity_link": {
             "$ref": "#/components/schemas/ItemIdentityLink"
           },
-          "metadata": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/MetadataState"
-              }
+          "inventory_subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inventory_title": {
+            "type": [
+              "string",
+              "null"
             ]
           },
           "presentation": {
@@ -7546,6 +8770,22 @@
           }
         }
       },
+      "ProviderArtworkLink": {
+        "type": "object",
+        "required": [
+          "provider_record_id",
+          "asset_id"
+        ],
+        "properties": {
+          "asset_id": {
+            "$ref": "#/components/schemas/AssetId"
+          },
+          "provider_record_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "ProviderIdentity": {
         "type": "object",
         "required": [
@@ -7560,6 +8800,18 @@
             "type": "string"
           }
         }
+      },
+      "PublishProviderArtworkCommand": {
+        "type": "object",
+        "required": [
+          "snapshot_id"
+        ],
+        "properties": {
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          }
+        },
+        "additionalProperties": false
       },
       "RecoverAccount": {
         "type": "object",
@@ -7640,6 +8892,78 @@
           "lossless_derivative",
           "lossy_derivative"
         ]
+      },
+      "ResolvedMetadataDisplay": {
+        "type": "object",
+        "required": [
+          "title",
+          "resolution"
+        ],
+        "properties": {
+          "artwork": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssetId"
+              }
+            ]
+          },
+          "candidate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity"
+              }
+            ]
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/MetadataResolutionKind"
+          },
+          "subtitle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedMetadataText"
+              }
+            ]
+          },
+          "title": {
+            "$ref": "#/components/schemas/ResolvedMetadataText"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResolvedMetadataText": {
+        "type": "object",
+        "required": [
+          "value",
+          "source"
+        ],
+        "properties": {
+          "language": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LanguageTag"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/MetadataValueSource"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "ReturnLoan": {
         "type": "object",
@@ -8245,6 +9569,22 @@
         "properties": {
           "command": {
             "$ref": "#/components/schemas/UpdateAssetCommand"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateMetadataAuthorityCommand": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "change"
+        ],
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/MetadataAuthorityChange"
           },
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"

@@ -412,3 +412,69 @@ and [Cover Art Archive API](https://musicbrainz.org/doc/Cover_Art_Archive/API), 
 CAA listing/image routing through Archive storage. These documentation checks are
 not live-provider or deployment qualification; deterministic local fixtures remain
 the exercised network surface.
+
+## D06.3 local implementation — 2026-09-16 (awaiting review)
+
+Implemented the bounded metadata review child without beginning P05, native or
+offline work. The review should inspect these surfaces:
+
+- Application-owned curation routes now expose safe review, authority mutation,
+  provider acquisition, snapshot refresh and CAA artwork publication. Generated
+  contracts carry typed provider availability/guidance, server-owned lookup choices,
+  permissions, safe candidate history and catalog-snapshot Job results. Raw provider
+  observations, private inventory baselines and unreviewed URLs do not enter viewer
+  DTOs.
+- MusicBrainz/CAA workflow commands reuse the D06.2 acquisition registry, receipts,
+  Asset effect and metadata refresh effect. Unconfigured providers fail before a
+  doomed Job is created. CAA publication precedes the refreshed candidate artwork
+  link, and failed/absent providers leave inventory and existing artwork usable.
+- Presented items and FTS use effective metadata. Curators additionally receive
+  explicit inventory title/subtitle fields for the inventory editor; viewers receive
+  neither those baselines nor private artwork. Browse/detail show tentative metadata
+  independently of the missing-art placeholder.
+- The React workbench uses candidate identities and Job IDs rather than array
+  positions or display/error strings. It preserves field drafts across polling and
+  revision conflicts, persists pending Job identity for reopen, aborts obsolete
+  review loads, resumes polling, and exposes source defaults, configured-provider
+  guidance, status/cancel/retry, explicit selection, overrides and clear actions.
+
+The browser smoke uses loopback MusicBrainz and Cover Art Archive fixtures through
+the real provider adapters and durable Jobs. It reopens an active refresh, retains
+three alternatives and a Japanese label, preserves a draft across a concurrent
+authority revision, publishes actual PNG bytes through the Asset pipeline, searches
+effective text, checks shared-versus-curator artwork as a viewer, exercises keyboard
+order, and captures/checks the review at 390px. Google Chrome 153.0.8010.37 passed.
+Live providers, other browsers and deployment remain unrun. No commit was made;
+D06.3 and the D06 root now await review before P05.
+
+## D06 root review corrections — 2026-09-16
+
+D06.3 is reviewed and corrected locally. P05.1 is the next serial implementation
+child; this review does not implement it or claim full web curation completeness.
+
+- Moved acquired-result completion out of React into an application dispatch that
+  checks caller Job ownership, collection/Item binding and curation authorization.
+  It uses one existing receipt/effect, not nested independently committed commands.
+  CAA image publication preserves an Asset for explicit manual cover selection;
+  it neither requires another MusicBrainz request nor silently changes authority.
+- Acquisition replay now checks stored receipts before mutable provider availability.
+  The panel persists completion keys/revisions, aborts every detached request,
+  resumes safely on reopen and keeps failed completion available for explicit retry.
+  Field drafts survive conflicts and trigger discard confirmation on close. Music
+  and metadata panels have distinct stable keys through repeated refreshes.
+- Reused application-owned inventory/metadata precedence for search projection on
+  ordinary Item updates and full reindex. Later manual inventory corrections win,
+  while unrelated edits retain resolved provider text. Reindex discards stale
+  disposable metadata rows before rebuilding authoritative history.
+- Lookup choices use recorded CD MusicBrainz IDs and exclude unrelated disc IDs;
+  default search text respects provider bounds. Unsupported Item schemas expose
+  authorized history with disabled authority controls.
+- Added HTTP exposure/role checks for completion, inventory/reindex search coverage,
+  and a browser regression that holds completion, closes the panel before submission,
+  verifies unchanged authority, then reopens to apply the result once. The artwork
+  workflow now tests explicit selection and independent subsequent metadata lookup.
+
+Historical implementation records above describe the submitted checkpoint; this
+section supersedes its browser-owned publication/re-refresh sequencing. Final
+validation is recorded in `validation.md`. Live providers, other browsers and
+external deployment remain unqualified. No commit made.

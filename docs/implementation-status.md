@@ -27,6 +27,20 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   restore focus on close. Administration explains encoder setup; browser-based
   encoder settings writes and browser-triggered automatic MusicBrainz/artwork lookup remain absent.
 
+- D06.3 is reviewed and corrected locally. Curation-only generated
+  contracts expose typed metadata prerequisites, provider availability, permissions,
+  safe candidate history and typed catalog-job results without raw provider bodies.
+  The archival-workbench review panel provides explicit MusicBrainz/CAA lookup,
+  durable job status/cancel/retry/reopen behavior, field and artwork authority,
+  selectable history, provenance and clear actions. Effective metadata/artwork now
+  drives browse, search and detail, including inventory edits and reindex. Application
+  services complete acquired results; preserved artwork needs explicit cover selection.
+  Pending completion inputs survive reopen, and detached requests are cancelled.
+  Viewer reads omit inventory baselines,
+  private assets and observations. Deterministic browser fixtures exercised real
+  provider jobs and published image bytes through Google Chrome at desktop and
+  390px. Live providers and deployment qualification remain unrun.
+
 - D06.2 is reviewed and corrected locally. Optional configured
   MusicBrainz and Cover Art Archive adapters use the existing durable acquisition
   registry with pinned production origins, bounded/cancellable retry and redirect
@@ -37,7 +51,7 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
   authorized Item Asset pipeline before candidates may reference them. Manual
   titles, inventory corrections, selected history and explicit artwork remain
   authoritative. Deterministic local fixtures cover provider failures and reindex;
-  live providers, deployment and the D06.3 review UI remain unqualified/unimplemented.
+  live providers and deployment remain unqualified.
 
 - Six-crate Rust workspace with a typed collection graph, compiled-module registry, application authorization boundary and a schema-2 third-module contract test.
 - Foundation types now include collection-owned Work/Edition records, exclusive Item identity links, ordered specimen Components with optional data-bearing Carriers, collection-level Capture associations, typed asset subjects, language/currency/coordinate validation, canonical digests, and graph/representation validation.
@@ -269,7 +283,7 @@ matrix, exact dependency/tool selections, migration reservations, generated fixt
 recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
-D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. D06.1 durable metadata authority and deterministic resolution are reviewed and corrected locally; D06.2 providers and artwork are reviewed and corrected locally.
+D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. D06.1 durable metadata authority and deterministic resolution are reviewed and corrected locally; D06.2 providers and artwork are reviewed and corrected locally; D06.3 metadata review and effective presentation are reviewed and corrected locally.
 Archive schema 4 and catalog schema 6 cover processing observations,
 streamed snapshots, metadata authority, and conversion recipes; private schema 11
 persists frozen Job input, provisional Import observations and active catalog
@@ -322,10 +336,10 @@ offline-library management and the Trash Amp provider remain later tickets.
    locally implemented MusicBrainz/CAA enrichment and DAT metadata integration.
    D02/D03 and D04.1 complete the reusable disc/audio/game primitives locally; no
    Collector catalog verification is currently claimed.
-4. Implement D06.3 metadata review UI. D06.2 adds no metadata
-   review route or browser surface. The reviewed player’s actual Chrome FLAC
-   playback/seek/transition workflow passes; live-provider, other-browser,
-   gapless/sample-accurate and deployment qualification remain unclaimed.
+4. Proceed with P05.1 portable export/change inventory after the completed D06
+   root review. The local deterministic MusicBrainz/CAA workflow
+   passes with actual published artwork; live-provider, other-browser and deployment
+   qualification remain unclaimed.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
 6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.
 7. Add authenticated endpoint discovery, mDNS, automatic health checks and actual transfer failover. Extend the tested enrolled LAN trust path to automatic discovery and full native-client failover.

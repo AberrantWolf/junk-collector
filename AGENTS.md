@@ -14,6 +14,7 @@ Read `docs/architecture.md` before adding or changing a subsystem. `docs/impleme
 ## Lessons from implementation reviews
 
 - Bind command receipts to submitted inputs before resolving mutable server configuration. Share the actual effect implementation rather than nesting independently committed commands.
+- Keep provider workflow policy in application services; a frontend should not compose publication and enrichment into a second domain pipeline. Persist completion receipt inputs across panel reopen, fence every asynchronous continuation, and give sibling panels distinct stable React keys.
 - Release media elements when their refs detach, not only in passive-effect cleanup; fence superseded play promises. Test the detached element’s paused/source state and real playback before close or revocation, rather than checking only DOM removal.
 - Send typed availability/permission fields to clients; do not infer behavior from display or error text. Cancel obsolete UI requests and pollers, resume pending-job refresh after reopening, keep failures visible, and verify styles are included in served assets.
 

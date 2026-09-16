@@ -542,6 +542,7 @@ impl Store {
         }
         for record in authorities.into_values() {
             tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?)",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
+            project_effective_metadata_search(tx, &record)?;
         }
         Ok(())
     }
@@ -1189,6 +1190,7 @@ impl ProcessingPort for Store {
             }
         }
         tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,record=excluded.record",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
+        project_effective_metadata_search(&tx, &record)?;
         tx.commit().map_err(storage)?;
         finish_v3_publication(self, transaction)
     }
@@ -1233,4 +1235,50 @@ impl ProcessingPort for Store {
             .map(|value| serde_json::from_str(&value).map_err(storage))
             .collect()
     }
+}
+
+pub(crate) fn project_effective_metadata_search(
+    tx: &rusqlite::Connection,
+    record: &MetadataAuthorityRecord,
+) -> Result<()> {
+    let raw: String = tx
+        .query_row(
+            "SELECT record FROM items WHERE id=?",
+            [record.item_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(storage)?;
+    let item: collector_core::Item = serde_json::from_str(&raw).map_err(storage)?;
+    let mut statement = tx.prepare("SELECT record FROM metadata_candidates WHERE collection_id=? AND item_id=? ORDER BY candidate_key LIMIT 4097").map_err(storage)?;
+    let rows = statement
+        .query_map(
+            params![record.collection_id.to_string(), record.item_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(storage)?;
+    let candidates = rows
+        .map(|row| serde_json::from_str(&row.map_err(storage)?).map_err(storage))
+        .collect::<Result<Vec<_>>>()?;
+    let display = collector_app::resolve_record_metadata(&item, record, &candidates)?;
+    tx.execute(
+        "DELETE FROM search WHERE id=?",
+        [record.item_id.to_string()],
+    )
+    .map_err(storage)?;
+    if !item.deleted {
+        tx.execute(
+            "INSERT INTO search VALUES (?,?,?)",
+            params![
+                item.id.to_string(),
+                display.title.value,
+                display
+                    .subtitle
+                    .as_ref()
+                    .map(|value| value.value.as_str())
+                    .unwrap_or("")
+            ],
+        )
+        .map_err(storage)?;
+    }
+    Ok(())
 }

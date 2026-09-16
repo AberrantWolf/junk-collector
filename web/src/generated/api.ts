@@ -852,6 +852,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metadata_review"];
+        put: operations["update_metadata_authority"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/metadata/acquisitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["acquire_metadata"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/metadata/acquisitions/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["complete_metadata_acquisition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/metadata/artwork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metadata_artwork_options"];
+        put?: never;
+        post: operations["publish_metadata_artwork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/metadata/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["apply_metadata_snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/music-tracks": {
         parameters: {
             query?: never;
@@ -1322,6 +1402,31 @@ export interface components {
             representation_id: components["schemas"]["RepresentationId"];
             structure_observation_id: components["schemas"]["ObservationId"];
         };
+        AcquireMetadataCommand: {
+            refresh?: boolean;
+            release_id: string;
+            /** @enum {string} */
+            source: "music_brainz_release";
+        } | {
+            disc_id: string;
+            refresh?: boolean;
+            /** @enum {string} */
+            source: "music_brainz_disc";
+        } | {
+            query: string;
+            refresh?: boolean;
+            /** @enum {string} */
+            source: "music_brainz_search";
+        } | {
+            candidate: components["schemas"]["MetadataCandidateIdentity"];
+            /** @enum {string} */
+            source: "cover_art_listing";
+        } | {
+            candidate: components["schemas"]["MetadataCandidateIdentity"];
+            image_id: string;
+            /** @enum {string} */
+            source: "cover_art_image";
+        };
         Acquisition: {
             coordinates?: null | components["schemas"]["GeoCoordinate"];
             cost?: null | components["schemas"]["Money"];
@@ -1336,6 +1441,12 @@ export interface components {
         ActiveOwnership: "owned" | "borrowed" | "unknown";
         AnalyzeProvisionalImport: {
             module: components["schemas"]["ModuleId"];
+        };
+        ApplyMetadataSnapshotCommand: {
+            artwork?: components["schemas"]["ProviderArtworkLink"][];
+            expected_revision: components["schemas"]["Revision"];
+            snapshot_id: components["schemas"]["SnapshotId"];
+            source_observation_id?: null | components["schemas"]["ObservationId"];
         };
         ApproveEnrollment: {
             user_code: string;
@@ -1490,6 +1601,23 @@ export interface components {
         CollectionId: string;
         CompleteEnrollment: {
             completion_secret: string;
+        };
+        CompleteMetadataAcquisitionCommand: {
+            expected_revision: components["schemas"]["Revision"];
+            job_id: components["schemas"]["JobId"];
+        };
+        CompletedMetadataAcquisition: {
+            /** @enum {string} */
+            kind: "metadata";
+            review: components["schemas"]["MetadataReviewView"];
+        } | {
+            /** @enum {string} */
+            kind: "artwork_options";
+            options: components["schemas"]["MetadataArtworkOption"][];
+        } | {
+            asset: components["schemas"]["PresentedAsset"];
+            /** @enum {string} */
+            kind: "artwork_published";
         };
         Component: {
             carrier?: null | components["schemas"]["Carrier"];
@@ -1769,8 +1897,16 @@ export interface components {
             /** @enum {string} */
             kind: "edition";
         };
+        JobAccepted: {
+            job_id: components["schemas"]["JobId"];
+        };
         /** Format: uuid */
         JobId: string;
+        JobResultView: {
+            /** @enum {string} */
+            kind: "catalog_snapshot";
+            snapshot_id: components["schemas"]["SnapshotId"];
+        };
         /** @enum {string} */
         JobState: "queued" | "running" | "cancel_requested" | "completed" | "failed" | "cancelled";
         JobView: {
@@ -1788,6 +1924,7 @@ export interface components {
             kind: string;
             limitation?: string | null;
             phase: string;
+            result?: null | components["schemas"]["JobResultView"];
             retryable: boolean;
             state: components["schemas"]["JobState"];
             /** Format: int64 */
@@ -1825,6 +1962,59 @@ export interface components {
         };
         /** @enum {string} */
         MatchStrength: "name" | "identifier" | "disc_layout" | "complete_hashes";
+        MetadataArtworkOption: {
+            approved: boolean;
+            back: boolean;
+            front: boolean;
+            image_id: string;
+            release_id: string;
+            types: string[];
+        };
+        MetadataAuthority: {
+            artwork_choice?: null | components["schemas"]["AssetId"];
+            domain_overrides?: null | components["schemas"]["ModuleData"];
+            field_overrides: components["schemas"]["MetadataFieldOverride"][];
+            /**
+             * @description Unrecognized historical field authority, retained verbatim and never applied
+             *     as common or domain authority without an explicit owner-aware conversion.
+             */
+            preserved_field_overrides?: unknown[];
+            /** @description Legacy/provider-specific authority keys remain exact and portable. */
+            retained_unknown_fields: Record<string, never>;
+            selected_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+        };
+        MetadataAuthorityChange: {
+            candidate: components["schemas"]["MetadataCandidateIdentity"];
+            /** @enum {string} */
+            change: "select_candidate";
+        } | {
+            /** @enum {string} */
+            change: "clear_selected_candidate";
+        } | {
+            /** @enum {string} */
+            change: "set_field_override";
+            field: components["schemas"]["MetadataField"];
+            language?: null | components["schemas"]["LanguageTag"];
+            value: string;
+        } | {
+            /** @enum {string} */
+            change: "clear_field_override";
+            field: components["schemas"]["MetadataField"];
+        } | {
+            asset_id: components["schemas"]["AssetId"];
+            /** @enum {string} */
+            change: "set_artwork_choice";
+        } | {
+            /** @enum {string} */
+            change: "clear_artwork_choice";
+        } | {
+            /** @enum {string} */
+            change: "set_domain_overrides";
+            overrides: components["schemas"]["ModuleData"];
+        } | {
+            /** @enum {string} */
+            change: "clear_domain_overrides";
+        };
         MetadataCandidate: {
             id: string;
             language: components["schemas"]["LanguageTag"];
@@ -1834,12 +2024,90 @@ export interface components {
             subtitle: string;
             title: string;
         };
+        MetadataCandidateIdentity: {
+            provider: components["schemas"]["ModuleId"];
+            provider_record_id: string;
+            provider_record_version?: string | null;
+        };
+        MetadataCandidateView: {
+            artwork?: null | components["schemas"]["AssetId"];
+            complete_identity: boolean;
+            current: boolean;
+            identity: components["schemas"]["MetadataCandidateIdentity"];
+            selected: boolean;
+            strength: components["schemas"]["MatchStrength"];
+            subtitle?: null | components["schemas"]["MetadataText"];
+            title: components["schemas"]["MetadataText"];
+        };
+        MetadataCatalogSourceView: {
+            current: boolean;
+            label: string;
+            observation_id: components["schemas"]["ObservationId"];
+            snapshot_id: components["schemas"]["SnapshotId"];
+        };
+        /** @enum {string} */
+        MetadataField: "title" | "subtitle";
+        /**
+         * @description Common fields are text, not arbitrary JSON. Artwork has exactly one authority
+         *     slot on MetadataAuthority; unknown legacy values remain in its raw envelope.
+         */
+        MetadataFieldOverride: {
+            field: components["schemas"]["MetadataField"];
+            language?: null | components["schemas"]["LanguageTag"];
+            value: string;
+        };
+        MetadataLookupChoice: {
+            id: string;
+            kind: components["schemas"]["MetadataLookupKind"];
+            label: string;
+            recommended: boolean;
+            value: string;
+        };
+        /** @enum {string} */
+        MetadataLookupKind: "release_id" | "disc_id" | "search";
+        MetadataPermissions: {
+            can_update: boolean;
+        };
+        /** @enum {string} */
+        MetadataProviderAvailability: "available" | "unconfigured" | "inapplicable";
+        MetadataProviderView: {
+            availability: components["schemas"]["MetadataProviderAvailability"];
+            can_acquire: boolean;
+            guidance: string;
+            id: components["schemas"]["ModuleId"];
+            label: string;
+        };
+        /** @enum {string} */
+        MetadataResolutionKind: "manual" | "selected" | "automatic" | "tentative";
+        MetadataReviewView: {
+            authority: components["schemas"]["MetadataAuthority"];
+            candidates: components["schemas"]["MetadataCandidateView"][];
+            catalog_sources: components["schemas"]["MetadataCatalogSourceView"][];
+            display: components["schemas"]["ResolvedMetadataDisplay"];
+            item_id: components["schemas"]["ItemId"];
+            lookup_choices: components["schemas"]["MetadataLookupChoice"][];
+            permissions: components["schemas"]["MetadataPermissions"];
+            providers: components["schemas"]["MetadataProviderView"][];
+            revision: components["schemas"]["Revision"];
+        };
         MetadataState: {
             candidates: components["schemas"]["MetadataCandidate"][];
             overrides: {
                 [key: string]: unknown;
             };
             selected?: string | null;
+        };
+        MetadataText: {
+            language?: null | components["schemas"]["LanguageTag"];
+            value: string;
+        };
+        MetadataValueSource: {
+            /** @enum {string} */
+            source: "manual";
+        } | {
+            identity: components["schemas"]["MetadataCandidateIdentity"];
+            /** @enum {string} */
+            source: "candidate";
         };
         /**
          * @description JSON is the versioned module boundary; known modules parse borrowed/owned views
@@ -2007,6 +2275,7 @@ export interface components {
                 kind: string;
                 limitation?: string | null;
                 phase: string;
+                result?: null | components["schemas"]["JobResultView"];
                 retryable: boolean;
                 state: components["schemas"]["JobState"];
                 /** Format: int64 */
@@ -2024,12 +2293,14 @@ export interface components {
                 content_permissions: components["schemas"]["ContentPermissions"];
                 deleted: boolean;
                 domain: components["schemas"]["PresentedModuleData"];
+                effective_metadata: components["schemas"]["ResolvedMetadataDisplay"];
                 effective_permissions: components["schemas"]["EffectivePermissions"];
                 id: components["schemas"]["ItemId"];
                 identifiers: components["schemas"]["ProviderIdentity"][];
                 identity: components["schemas"]["IdentityState"];
                 identity_link: components["schemas"]["ItemIdentityLink"];
-                metadata?: null | components["schemas"]["MetadataState"];
+                inventory_subtitle?: string | null;
+                inventory_title?: string | null;
                 presentation: components["schemas"]["ModulePresentation"];
                 primary_artwork?: null | components["schemas"]["AssetId"];
                 revision: components["schemas"]["Revision"];
@@ -2154,12 +2425,14 @@ export interface components {
             content_permissions: components["schemas"]["ContentPermissions"];
             deleted: boolean;
             domain: components["schemas"]["PresentedModuleData"];
+            effective_metadata: components["schemas"]["ResolvedMetadataDisplay"];
             effective_permissions: components["schemas"]["EffectivePermissions"];
             id: components["schemas"]["ItemId"];
             identifiers: components["schemas"]["ProviderIdentity"][];
             identity: components["schemas"]["IdentityState"];
             identity_link: components["schemas"]["ItemIdentityLink"];
-            metadata?: null | components["schemas"]["MetadataState"];
+            inventory_subtitle?: string | null;
+            inventory_title?: string | null;
             presentation: components["schemas"]["ModulePresentation"];
             primary_artwork?: null | components["schemas"]["AssetId"];
             revision: components["schemas"]["Revision"];
@@ -2211,9 +2484,16 @@ export interface components {
             display_name: string;
             expected_revision: components["schemas"]["Revision"];
         };
+        ProviderArtworkLink: {
+            asset_id: components["schemas"]["AssetId"];
+            provider_record_id: string;
+        };
         ProviderIdentity: {
             provider: components["schemas"]["ModuleId"];
             value: string;
+        };
+        PublishProviderArtworkCommand: {
+            snapshot_id: components["schemas"]["SnapshotId"];
         };
         RecoverAccount: {
             code: string;
@@ -2233,6 +2513,18 @@ export interface components {
         RepresentationId: string;
         /** @enum {string} */
         RepresentationRole: "preservation_master" | "lossless_derivative" | "lossy_derivative";
+        ResolvedMetadataDisplay: {
+            artwork?: null | components["schemas"]["AssetId"];
+            candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+            resolution: components["schemas"]["MetadataResolutionKind"];
+            subtitle?: null | components["schemas"]["ResolvedMetadataText"];
+            title: components["schemas"]["ResolvedMetadataText"];
+        };
+        ResolvedMetadataText: {
+            language?: null | components["schemas"]["LanguageTag"];
+            source: components["schemas"]["MetadataValueSource"];
+            value: string;
+        };
         ReturnLoan: {
             command: components["schemas"]["ReturnLoanCommand"];
             expected_revision: components["schemas"]["Revision"];
@@ -2388,6 +2680,10 @@ export interface components {
         };
         UpdateAssetEnvelope: {
             command: components["schemas"]["UpdateAssetCommand"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        UpdateMetadataAuthorityCommand: {
+            change: components["schemas"]["MetadataAuthorityChange"];
             expected_revision: components["schemas"]["Revision"];
         };
         Upload: {
@@ -4562,6 +4858,341 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metadata_review: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataReviewView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_metadata_authority: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMetadataAuthorityCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataReviewView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    acquire_metadata: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquireMetadataCommand"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    complete_metadata_acquisition: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteMetadataAcquisitionCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletedMetadataAcquisition"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metadata_artwork_options: {
+        parameters: {
+            query: {
+                snapshot_id: components["schemas"]["SnapshotId"];
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataArtworkOption"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    publish_metadata_artwork: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishProviderArtworkCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedAsset"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    apply_metadata_snapshot: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyMetadataSnapshotCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataReviewView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

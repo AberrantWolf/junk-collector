@@ -9,15 +9,17 @@ use axum::{
     routing::get,
 };
 use collector_app::{
-    AccountUpdate, AccountView, AcquireAccurateRipCommand, ActivateCatalogSnapshotCommand,
-    AuthenticatedPrincipal, CatalogSnapshotStatus, CollectionService, CommandContext,
-    ComponentDetails, CreateAssetCommand, CreateCollectionCommand, CreateImportCommand,
-    DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView,
-    ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary, ImportView, JobView,
-    MediaResource, MusicTrackAvailability, NativeDeviceView, PasskeyView, PrepareMusicTrack,
-    PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem, ProcessingSummary,
-    ReturnLoanCommand, ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView,
-    SpecimenDetails, StartLoanCommand, StartProcessingCommand, UpdateAssetCommand,
+    AccountUpdate, AccountView, AcquireAccurateRipCommand, AcquireMetadataCommand,
+    ActivateCatalogSnapshotCommand, ApplyMetadataSnapshotCommand, AuthenticatedPrincipal,
+    CatalogSnapshotStatus, CollectionService, CommandContext, ComponentDetails, CreateAssetCommand,
+    CreateCollectionCommand, CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart,
+    EnrollmentView, GrantView, ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary,
+    ImportView, JobView, MediaResource, MetadataArtworkOption, MetadataReviewView,
+    MusicTrackAvailability, NativeDeviceView, PasskeyView, PrepareMusicTrack, PresentedAsset,
+    PresentedCollection, PresentedEvidence, PresentedItem, ProcessingSummary,
+    PublishProviderArtworkCommand, ReturnLoanCommand, ReviewImportCommand, SaveItemCommand,
+    SaveItemEditCommand, SessionView, SpecimenDetails, StartLoanCommand, StartProcessingCommand,
+    UpdateAssetCommand, UpdateMetadataAuthorityCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -528,6 +530,12 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_job))
         .routes(routes!(retry_job))
         .routes(routes!(prepare_music_track))
+        .routes(routes!(metadata_review, update_metadata_authority))
+        .routes(routes!(acquire_metadata))
+        .routes(routes!(complete_metadata_acquisition))
+        .routes(routes!(apply_metadata_snapshot))
+        .routes(routes!(metadata_artwork_options))
+        .routes(routes!(publish_metadata_artwork))
         .routes(routes!(create_asset).layer(DefaultBodyLimit::max(20 * 1024 * 1024)))
         .routes(routes!(update_asset, tombstone_asset))
         .routes(routes!(chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)))
@@ -1097,6 +1105,144 @@ async fn item(
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.item_presented(&actor, id)).await?,
+    ))
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+struct JobAccepted {
+    job_id: JobId,
+}
+
+#[utoipa::path(get, path = "/api/v1/items/{id}/metadata", params(("id" = ItemId, Path)), responses((status = 200, body = MetadataReviewView), (status = 403), (status = 404)))]
+async fn metadata_review(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<Json<MetadataReviewView>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.metadata_review(&actor, id)).await?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/items/{id}/metadata", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = UpdateMetadataAuthorityCommand, responses((status = 200, body = MetadataReviewView), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn update_metadata_authority(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<UpdateMetadataAuthorityCommand>,
+) -> ApiResult<Json<MetadataReviewView>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .update_metadata_authority(&actor, id, command, &context)?;
+            state.service.metadata_review(&actor, id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/metadata/acquisitions", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = AcquireMetadataCommand, responses((status = 202, body = JobAccepted), (status = 403), (status = 404), (status = 409), (status = 422), (status = 503)))]
+async fn acquire_metadata(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<AcquireMetadataCommand>,
+) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .acquire_metadata(&actor, id, command, &context)
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(JobAccepted { job_id })))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/metadata/acquisitions/complete", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::CompleteMetadataAcquisitionCommand, responses((status = 200, body = collector_app::CompletedMetadataAcquisition), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn complete_metadata_acquisition(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<collector_app::CompleteMetadataAcquisitionCommand>,
+) -> ApiResult<Json<collector_app::CompletedMetadataAcquisition>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .complete_metadata_acquisition(&actor, id, command, &context)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/metadata/refresh", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = ApplyMetadataSnapshotCommand, responses((status = 200, body = MetadataReviewView), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn apply_metadata_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<ApplyMetadataSnapshotCommand>,
+) -> ApiResult<Json<MetadataReviewView>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .apply_metadata_snapshot(&actor, id, command, &context)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct MetadataArtworkQuery {
+    snapshot_id: SnapshotId,
+}
+
+#[utoipa::path(get, path = "/api/v1/items/{id}/metadata/artwork", params(("id" = ItemId, Path), ("snapshot_id" = SnapshotId, Query)), responses((status = 200, body = Vec<MetadataArtworkOption>), (status = 403), (status = 404), (status = 422)))]
+async fn metadata_artwork_options(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Query(query): Query<MetadataArtworkQuery>,
+) -> ApiResult<Json<Vec<MetadataArtworkOption>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .metadata_artwork_options(&actor, id, query.snapshot_id)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/metadata/artwork", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = PublishProviderArtworkCommand, responses((status = 200, body = PresentedAsset), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn publish_metadata_artwork(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<PublishProviderArtworkCommand>,
+) -> ApiResult<Json<PresentedAsset>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            let asset = state
+                .service
+                .publish_provider_artwork(&actor, id, command, &context)?;
+            state
+                .service
+                .asset_presented(&actor, asset.collection_id, asset.asset.id)
+        })
+        .await?,
     ))
 }
 #[derive(Deserialize, utoipa::ToSchema)]

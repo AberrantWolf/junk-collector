@@ -31,7 +31,7 @@ async function registerPasskey(){
 function Artwork({item,large=false}:{item:Item;large?:boolean}){
  const artwork=item.assets.find(asset=>asset.id===item.primary_artwork);const [failed,setFailed]=useState(false);
  useEffect(()=>setFailed(false),[artwork?.id]);
- return <div className={`artwork ${large?'large':''}`}>{artwork&&!failed?<img src={`/api/v1/collections/${item.collection_id}/assets/${artwork.id}/thumbnail`} loading="lazy" alt={artwork.alt_text||`${item.title} artwork`} onError={()=>setFailed(true)}/>:<span role="img" aria-label="No artwork attached" className="art-placeholder"><b aria-hidden="true">◇</b><small>No art</small></span>}</div>;
+ return <div className="artwork-stack"><div className={`artwork ${large?'large':''}`}>{artwork&&!failed?<img src={`/api/v1/collections/${item.collection_id}/assets/${artwork.id}/thumbnail`} loading="lazy" alt={artwork.alt_text||`${item.title} artwork`} onError={()=>setFailed(true)}/>:<span role="img" aria-label="No artwork attached" className="art-placeholder"><b aria-hidden="true">◇</b><small>No art</small></span>}</div>{item.effective_metadata.resolution==='tentative'&&<small className="metadata-state">Tentative metadata</small>}</div>;
 }
 
 function App(){

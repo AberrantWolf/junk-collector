@@ -81,7 +81,7 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 12 | D07.3 | D07.2 | Availability, ranged access and web controls | Reviewed/corrected 2026-09-15; bounded browser-player child reviewed and corrected locally |
 | 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Reviewed/corrected 2026-09-15; proceed to D06.2 |
 | 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Reviewed/corrected locally 2026-09-15 |
-| 15 | D06.3 | D06.2 | Metadata review and artwork UI | D06 root review |
+| 15 | D06.3 | D06.2 | Metadata review and artwork UI | Reviewed and corrected 2026-09-16; D06 root review complete |
 | 16 | P05.1 | D06.3, D07.3 | Portable export and change inventory | Review |
 | 17 | P05.2 | P05.1 | Consistent full backup and restore | Review |
 | 18 | P05.3 | P05.2 | CLI/admin integration and recovery drills | P05 root review |
@@ -752,7 +752,7 @@ were added. See the dated review/validation records for qualification.
 
 ### D06.2 — Providers and artwork
 
-**Status (2026-09-15): reviewed and corrected locally; D06.3 is next.**
+**Status (2026-09-16): reviewed and corrected locally; D06.3 is reviewed and corrected locally.**
 
 Initial providers are MusicBrainz release/disc identity, Cover Art Archive, and
 DAT-backed game catalog titles/identifiers from D04. Do not add ScreenScraper,
@@ -834,6 +834,9 @@ malformed success, and non-JSON no-match preservation. No metadata HTTP/UI added
 
 ### D06.3 — Metadata review UI
 
+**Status (2026-09-16): reviewed and corrected locally; D06 root review complete.
+P05.1 is the next serial child.**
+
 Add a curation panel for alternatives, provenance, explicit selection, per-field
 overrides and clear-override actions. Preserve drafts through job polling/conflicts;
 allow reopening a saved decision after refresh. Display effective text/artwork in
@@ -841,6 +844,35 @@ browse/search/detail rows with tentative versus definitive identity distinct fro
 artwork absence. Test actual provider-job results, outage/refresh without lost edits,
 foreign-language labels, viewer redaction, keyboard navigation and 390px layout.
 Do not render raw provider HTML or include unreviewed URLs as executable content.
+
+**Local implementation evidence (2026-09-16; awaiting review):** Application-owned
+curation routes expose safe review, acquisition, refresh and artwork commands plus
+typed provider availability, lookup choices, permissions and catalog-snapshot Job
+results. MusicBrainz/CAA sequencing reuses acquisition Jobs, receipts, Asset
+publication and the metadata refresh effect; absent providers return typed guidance
+without blocking inventory or existing art. Effective metadata is projected into
+browse/search/detail and FTS, with curator-only inventory baselines and role-filtered
+artwork. The React panel retains drafts across polling and revision conflicts,
+persists active Job identity for reopen, cancels obsolete loads, distinguishes
+current candidates from selectable history, and provides explicit field, candidate
+and artwork set/clear actions.
+
+The deterministic browser workflow used loopback MusicBrainz/CAA fixtures through
+the production provider adapters, reopened an in-flight acquisition, selected
+foreign-language history, exercised an authority conflict, acquired and published
+real PNG bytes, searched effective text, and checked viewer artwork filtering,
+keyboard order and 390px overflow. Chrome 153.0.8010.37 passed. Live MusicBrainz/
+CAA, other browsers and deployment remain unrun.
+
+**Root review corrections (2026-09-16):** Acquired-result completion now belongs to
+application services, authorizes the caller and Item, and dispatches one existing
+receipt/effect. Image publication no longer depends on a second MusicBrainz request
+or silently changes authority; users explicitly choose the preserved cover. The
+panel aborts detached work, persists completion keys/revisions, retains failed
+completion for explicit retry, and protects unsaved drafts on dismissal. Shared
+application resolution keeps search consistent through Item changes and reindex.
+Lookup defaults distinguish recorded MusicBrainz disc IDs from unrelated IDs;
+unsupported Item schemas remain read-only. No live-provider qualification is claimed.
 
 ### D07.1 — Recipes and exact conversion
 
@@ -1350,44 +1382,35 @@ validation and the next prompt together without beginning D06, C01 or native C04
 ## Ready-to-send implementation prompt
 
 ```text
-Implement D06.3 only: usable metadata review, refresh and artwork UI. Read AGENTS.md,
+Implement P05.1 only: portable export and change inventory. Read AGENTS.md,
 docs/architecture.md, docs/implementation-status.md, docs/release-requirements.md,
-docs/decisions/pre-release-evolution.md, docs/wave-4-review.md,
-docs/handoff-backlog.md, the complete D06.3 child, and U05 interface-readiness guidance.
-D06.1 and D06.2 are reviewed locally. Preserve unrelated work; do not commit,
-spawn agents or start native/offline/P05 work.
+docs/decisions/pre-release-evolution.md, docs/handoff-backlog.md, the Wave 4 shared
+prerequisites, the complete P05.1 child and P05 root acceptance criteria.
+D06.1–D06.3 and D07.1–D07.3 are reviewed and corrected locally. Preserve unrelated
+work. Do not commit, spawn agents, start P05.2/P05.3, or add native/offline features.
 
-Expose application services through curation-only routes and generated contracts.
-Add typed prerequisite/availability/permission and job-result DTOs where needed;
-frontends must not inspect raw provider JSON or reproduce provider/resolution policy.
-Coordinate MusicBrainz/CAA acquisition, artwork publication and metadata refresh in
-application services where orchestration is needed, using existing jobs, receipts,
-Asset effects and refresh effects. Keep acquisition optional and explicit. Failed
-or absent providers cannot block inventory, preservation or existing artwork.
+First trace existing archive journals, revisions, processing sidecars and export
+ports. Keep policy in application services and filesystem/locking/copy mechanisms
+in the archive adapter. Freeze a complete committed revision inventory under the
+single writer lock, then copy immutable bytes outside it. Export to a new directory
+bundle with readable versioned TOML, stable identities, revisions and digests.
+Include dependency closure, tombstones, masters/assets/derivatives, recipes,
+snapshots, observations, metadata authority and opaque module bytes. Omit accounts,
+credentials, trust, jobs and unrelated private state. Verify every copied file and
+write the completion marker last. Preserve all sources; reject overlapping roots,
+symlinks, special files and traversal. Bound work and cancellation.
 
-Give users valid defaults and identifier/source choices, configured-provider guidance,
-visible pending/success/failure states, cancellation/retry where jobs permit, and
-reopenable results. Retain alternatives and provenance; distinguish current candidates
-from selectable history, tentative identity from missing art, and metadata from
-checksum/audio verification. Support field overrides, explicit historical selection,
-manual artwork and explicit clear actions. Preserve drafts through polling/conflicts.
-Do not key state by array position, error strings or display text. Cancel obsolete
-requests and restart needed polling after reopening.
+Implement versioned change inventory/delta semantics bound to the complete base
+inventory digest. This is portable offline transfer, not replication or concurrent
+writers. Do not add compatibility wrappers or migrations for checkpoint stability.
+Use focused tests first for coherent export during later writes, incomplete copy,
+invalid/missing dependencies, changed base, unknown modules, tombstones and private
+state omission. Prove fresh archive import and reindex retain loans, manual overrides,
+evidence and IDs, with explicit access reassignment. Reuse existing import/recovery
+mechanisms; do not silently leave round-trip acceptance for another child.
 
-Use effective metadata in browse/search/detail with artwork beside game/CD text.
-Apply viewer redaction to effective metadata/artwork as well as raw inventory DTOs;
-never leak private asset references or raw observations. Public client reads still
-work; disabled public curation pages AND APIs remain absent. Enforce collection
-roles independently. No provider secrets, raw HTML, archive paths or executable
-unreviewed URLs in clients.
-
-Tests first for backend exposure, authorization, revisions, private-field filtering,
-current/history selection, outage preservation and refresh orchestration. Exercise
-real browser workflows with local provider fixtures and actual published assets,
-including search, overrides/clear, refresh/reopen, keyboard navigation and 390px
-layout. An assigned URL or mock UI success is not workflow qualification.
-Run all repository checks, API contract check and browser smoke; rebuild the server
-with changed embedded assets. Use COLLECTOR_TEST_FLAC=1 when available. Report live
-providers and deployment qualification as unrun unless actually exercised. Update
-status, child ledger, validation and next prompt together. Stop after D06.3 for review.
+Run architecture/fixture checks, formatting, workspace tests, clippy and generated
+API/web checks as affected. Rebuild embedded assets if changed. Update implementation
+status, P05.1 ledger, review notes, validation and ready-to-send review prompt together.
+Report incomplete acceptance honestly. Stop for review after P05.1.
 ```

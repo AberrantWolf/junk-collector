@@ -2591,3 +2591,75 @@ was performed. Browser smoke was not rerun: no metadata routes or frontend chang
 The initial rerun exposed a hanging fixture on assertion failure; bounded teardown
 and blocking accepted sockets fixed its failure reporting. The final runs above
 passed. D06.3's ready-to-send implementation prompt is current. No commit made.
+
+## D06.3 local implementation validation — 2026-09-16
+
+The new curation-only metadata contract test covers collection-role denial, disabled
+public-route absence, optimistic revision conflict, explicit candidate selection,
+safe current/history DTOs, raw provider-body filtering, typed unavailable-provider
+state, viewer omission of inventory baselines, role-visible effective artwork and
+effective-title search. Existing D06.1/D06.2 archive suites continue to cover outage
+preservation, current-versus-historical refresh, immutable versions, manual authority,
+failed image publication, restart and reindex.
+
+The browser smoke passed in Google Chrome 153.0.8010.37 with local MusicBrainz/CAA
+fixtures and actual published PNG bytes. It exercised provider guidance and defaults,
+durable Job polling/reopen, three retained alternatives, Japanese explicit selection,
+field override/clear, a preserved conflict draft, manual artwork set/clear, CAA
+listing/image/publication/re-refresh, effective search, viewer redaction, keyboard
+navigation and a no-overflow 390×844 layout. The existing FLAC playback workflow also
+passed with FLAC 1.5.0.
+
+Final gates:
+
+- `python3 scripts/check_architecture.py`: passed, including documentation links and
+  Wave 4 fixture manifests.
+- `cargo fmt --all -- --check`: passed.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 278 passed, one ignored
+  user-owned CD-dump oracle, zero failures.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api` and
+  `npm --prefix web run build`: passed.
+- `cargo build -p collector-server`: passed after rebuilding changed embedded assets.
+- `npm --prefix web run test:smoke`: passed with the deterministic provider fixtures,
+  published artwork, virtual WebAuthn and real FLAC browser playback.
+
+Live MusicBrainz/CAA, other browsers, target deployment, owned-disc, Opus and scale
+qualification were not run. D06.3 is implemented locally and awaits the D06 root
+review; P05 has not started. No commit was made.
+
+## D06 root review validation — 2026-09-16
+
+Reviewed D06.3 and corrected application ownership of acquisition completion,
+receipt replay order, detached/persisted client completion, draft dismissal,
+stable sibling panel keys, lookup eligibility and effective search projection.
+The expanded HTTP regression checks unchanged effective provider search after an
+unrelated inventory update, later manual inventory title precedence, and both
+cases after reindex. Completion routes reject viewers and remain absent from a
+public listener with curation disabled.
+
+Passed:
+
+- Architecture/documentation and Wave 4 fixture checks; Rust formatting and diff
+  whitespace checks.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 278 passed, one ignored
+  user-owned dump oracle. The expanded metadata HTTP regression passed again after
+  the final search cases were added.
+- Workspace/all-target Clippy with `--locked -- -D warnings`.
+- Web type check, generated API check, production asset build and rebuilt embedded
+  Rust server.
+- Standard browser smoke in Google Chrome 153.0.8010.37: held an acquired-result
+  completion request, closed the panel, checked unchanged authority and reopened
+  to finish; exercised explicit cover publication/selection, metadata history,
+  conflict drafts, search, viewer filtering, keyboard order and 390px layout.
+  Actual FLAC 1.5.0 playback, seek, queue advance and grant revocation passed.
+
+The local-setup/private-management smoke also passed on the final rebuilt binary,
+including the metadata workflow, wrong-origin guidance, repaired origin, preserved
+TLS/account state, client-only routing, private management and actual FLAC playback.
+Initial validation caught the new route-count assertion, a legitimate draft-discard
+confirmation in the test, and duplicate sibling React keys; these were corrected,
+and the standard browser workflow passed afterward. Screenshots were inspected for
+mobile layout. Live providers, other browsers, owned-disc, Opus, deployment and
+scale qualification remain unrun. D06 root review is complete; P05.1 is next.
+No commit made.

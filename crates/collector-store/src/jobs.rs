@@ -18,6 +18,7 @@ type StoredJobRecord = (
     i64,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 fn read_job_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredJobRecord> {
@@ -36,6 +37,7 @@ fn read_job_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredJobRecord>
         row.get(11)?,
         row.get(12)?,
         row.get(13)?,
+        row.get(14)?,
     ))
 }
 
@@ -63,6 +65,10 @@ fn parse_job_record(row: StoredJobRecord) -> Result<JobRecord> {
             .ok_or_else(|| Error::Storage("job update timestamp is invalid".into()))?,
         error: row.12,
         limitation: row.13,
+        result: row
+            .14
+            .map(|value| serde_json::from_str(&value).map_err(storage))
+            .transpose()?,
     })
 }
 
@@ -706,7 +712,7 @@ impl Store {
         let row = lock(&self.db)?
             .query_row(
                 "SELECT id,user_id,collection_id,item_id,kind,state,phase,
-                   completed_units,total_units,attempt,created_at,updated_at,error,limitation
+                   completed_units,total_units,attempt,created_at,updated_at,error,limitation,result
                  FROM private.jobs WHERE id=? AND user_id=?",
                 params![id.to_string(), user.to_string()],
                 read_job_record,
@@ -742,7 +748,7 @@ impl Store {
         let mut statement = db
             .prepare(
                 "SELECT id,user_id,collection_id,item_id,kind,state,phase,
-                   completed_units,total_units,attempt,created_at,updated_at,error,limitation
+                   completed_units,total_units,attempt,created_at,updated_at,error,limitation,result
                  FROM private.jobs
                  WHERE user_id=? AND (? IS NULL OR created_at<? OR (created_at=? AND id<?))
                  ORDER BY created_at DESC,id DESC LIMIT ?",

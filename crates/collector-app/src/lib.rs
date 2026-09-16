@@ -445,6 +445,13 @@ pub struct JobRecord {
     pub updated_at: DateTime<Utc>,
     pub error: Option<String>,
     pub limitation: Option<String>,
+    pub result: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JobResultView {
+    CatalogSnapshot { snapshot_id: SnapshotId },
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -462,6 +469,8 @@ pub struct JobView {
     pub retryable: bool,
     pub error: Option<String>,
     pub limitation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<JobResultView>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -481,6 +490,7 @@ impl From<JobRecord> for JobView {
                     | "catalog_acquisition"
                     | "processing_operation"
             );
+        let result = safe_job_result(&record.kind, record.result.as_ref());
         Self {
             id: record.id,
             collection_id: record.collection_id,
@@ -497,10 +507,20 @@ impl From<JobRecord> for JobView {
             limitation: record
                 .limitation
                 .map(|value| value.chars().take(512).collect()),
+            result,
             created_at: record.created_at,
             updated_at: record.updated_at,
         }
     }
+}
+
+fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<JobResultView> {
+    if kind != "catalog_acquisition" {
+        return None;
+    }
+    let result = result.and_then(|value| value.get("completion").or(Some(value)))?;
+    let snapshot_id = result.get("snapshot_id")?.as_str()?.parse().ok()?;
+    Some(JobResultView::CatalogSnapshot { snapshot_id })
 }
 
 pub trait JobPort: Send + Sync {
@@ -1251,6 +1271,10 @@ pub struct PresentedItem {
     pub revision: Revision,
     pub title: String,
     pub subtitle: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inventory_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inventory_subtitle: Option<String>,
     pub identity_link: ItemIdentityLink,
     pub domain: PresentedModuleData,
     pub identity: IdentityState,
@@ -1262,8 +1286,7 @@ pub struct PresentedItem {
     pub assets: Vec<PresentedAsset>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_artwork: Option<AssetId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<MetadataState>,
+    pub effective_metadata: ResolvedMetadataDisplay,
     pub deleted: bool,
     pub updated_at: DateTime<Utc>,
     pub presentation: ModulePresentation,
@@ -1719,8 +1742,9 @@ impl CollectionService {
         let mut items = Vec::with_capacity(page.items.len());
         for mut item in page.items {
             let role = self.authorize(actor, item.collection_id, Action::Browse)?;
+            let effective_metadata = self.effective_metadata_for_item(&item)?;
             item.redact_for(role);
-            items.push(self.presented(item, role)?);
+            items.push(self.presented(item, role, effective_metadata)?);
         }
         Ok(Page {
             items,
@@ -1730,10 +1754,16 @@ impl CollectionService {
     pub fn item_presented(&self, actor: &Principal, id: ItemId) -> Result<PresentedItem> {
         let mut item = self.reader.item(id)?;
         let role = self.authorize(actor, item.collection_id, Action::Browse)?;
+        let effective_metadata = self.effective_metadata_for_item(&item)?;
         item.redact_for(role);
-        self.presented(item, role)
+        self.presented(item, role, effective_metadata)
     }
-    fn presented(&self, item: Item, role: Role) -> Result<PresentedItem> {
+    fn presented(
+        &self,
+        item: Item,
+        role: Role,
+        mut effective_metadata: ResolvedMetadataDisplay,
+    ) -> Result<PresentedItem> {
         let collection = self.reader.collection(item.collection_id)?;
         let (effective_permissions, content_permissions) =
             self.presented_content_permissions(role, &collection, Some(&item.domain));
@@ -1778,12 +1808,24 @@ impl CollectionService {
         }
         let private = role != Role::Viewer;
         asset_states.sort_by_key(|state| state.asset.id);
+        effective_metadata.artwork = effective_metadata
+            .artwork
+            .filter(|asset_id| asset_states.iter().any(|state| state.asset.id == *asset_id));
+        let primary_artwork = effective_metadata.artwork.or(primary_artwork);
+        let inventory_title = item.title;
+        let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
             id: item.id,
             collection_id: item.collection_id,
             revision: item.revision,
-            title: item.title,
-            subtitle: item.subtitle,
+            title: effective_metadata.title.value.clone(),
+            subtitle: effective_metadata
+                .subtitle
+                .as_ref()
+                .map(|value| value.value.clone())
+                .unwrap_or_default(),
+            inventory_title: private.then_some(inventory_title),
+            inventory_subtitle: private.then_some(inventory_subtitle),
             identity_link: item.identity_link,
             domain: PresentedModuleData {
                 module: item.domain.module,
@@ -1805,7 +1847,7 @@ impl CollectionService {
                 .map(|state| PresentedAsset::from_state(state, role))
                 .collect(),
             primary_artwork,
-            metadata: private.then_some(item.metadata),
+            effective_metadata,
             deleted: item.deleted,
             updated_at: item.updated_at,
             presentation,

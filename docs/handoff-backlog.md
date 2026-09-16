@@ -49,7 +49,7 @@ The [collection-type refactor](collection-types-plan.md) (CT.1–CT.4) is the in
 prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1–D07.2 are reviewed and corrected locally; D07.3 is reviewed and corrected locally. Authenticated descriptors, availability-aware
 content permissions, generic owner-driven forms and valid unavailable-owner browser
 fallback coverage are present. D06.1 is reviewed and corrected locally; D06.2 is
-reviewed and corrected locally.
+reviewed and corrected locally; D06.3 is reviewed and corrected locally. P05.1 is the next serial child.
 The plan supplies child steps, fixed ownership,
 fixture requirements, failure tests and review checkpoints. C01 precedes S04,
 and C02 follows both. Its final section contains a ready-to-send agent prompt.
@@ -165,7 +165,8 @@ implemented interface; U05.3 validates complete journeys and negative cases.
 See the [interface readiness plan](interface-readiness-plan.md) for contracts,
 coverage and acceptance. Application/module services own eligibility; all clients
 consume it. This complements P04 import history/cleanup and applies to future
-interface acceptance too. It does not replace the current D06.3 assignment.
+interface acceptance too. It does not replace the current D06 root review; U05
+remains later work.
 
 ### U01 — Explain local setup and denied operations in the WebUI
 
@@ -452,7 +453,7 @@ filesystem termination behavior remain externally unqualified.
 P04.1–P04.3 passed their original acceptance; P04.4 identifiable import/attempt
 history, P04.5 cleanup, and P04.6 completion review remain planned. See the
 [import management follow-up](import-management-plan.md) for ownership, acceptance,
-and the future assignment. This gate does not change the current D06.3 handoff.
+and the future assignment. This gate does not change the current D06 root review.
 
 2026-09-15 usability correction: distinguish uploaded/analyzed/reviewed/published
 states, identify the next action, and avoid announcing publication after analysis.
@@ -609,8 +610,8 @@ Support reviewed raw redumper and BIN/CUE track models, AccurateRip IDs/checksum
 
 ### D06 — Metadata resolution, providers and review
 
-**Status (2026-09-15): D06.1 reviewed and corrected locally; D06.2 is reviewed and corrected
-locally.** Typed
+**Status (2026-09-16): D06.1 and D06.2 are reviewed and corrected locally; D06.3 is
+reviewed and corrected locally.** Typed
 title/subtitle and owner-bound domain authority, stable provider-record/version
 candidates, evidence-first deterministic resolution, explicit revisioned update/
 clear commands, raw refresh history and materialized display projection now use
@@ -622,7 +623,11 @@ D04-snapshot-backed DAT metadata without adding a second pipeline. Immutable
 digest versions, fixed provider priorities, fresh observation identities, exact
 raw history, cache/retry/redirect/resource policy, manual authority, image failure,
 restart and reindex have deterministic fixture coverage. Live-provider and
-deployment checks remain unrun; D06.3 review UI remains planned. Proceed to D06.3.
+deployment checks remain unrun. D06.3 adds curation-only typed review/acquisition/
+refresh/artwork routes, effective viewer-safe browse/search/detail projection and a
+reopenable provider-job review panel with manual authority and retained history.
+Deterministic Google Chrome workflow coverage uses local provider fixtures and real
+published artwork bytes. The D06 root review is complete; P05.1 is next.
 Follow the [Wave 4 child instructions](wave-4-plan.md#d061--durable-metadata-authority)
 and shared W4.0–W4.2 prerequisites in that plan.
 
@@ -640,9 +645,9 @@ Persist candidate alternatives/raw responses; rank strong identity before langua
 Whole-album FLAC preparation and independently queued encodes are defined in the
 [background-work plan](background-work-plan.md). D07.1–D07.3 validation covers
 per-track behavior, not this batch/nonblocking requirement. P02 owns queue bounds;
-U05 applies the rule to all interfaces. The current D06.3 handoff is unchanged.
+U05 applies the rule to all interfaces. The current D06 root review remains bounded.
 
-**Status (2026-09-15): D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. D07.2 publishes one track per job through the existing Capture journal. D07.3 adds viewer-safe ordered availability, server-owned optional encoder probing, curation-only preparation, strong ETag/ranged reads and web preparation/progress controls. The browser child consumes that DTO on the client surface, keeps Capture/source queues distinct, and has actual Google Chrome 153.0.8010.37 FLAC play/pause/seek/transition qualification. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external. The bounded child is reviewed; proceed to D06.3. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-15): D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. D07.2 publishes one track per job through the existing Capture journal. D07.3 adds viewer-safe ordered availability, server-owned optional encoder probing, curation-only preparation, strong ETag/ranged reads and web preparation/progress controls. The browser child consumes that DTO on the client surface, keeps Capture/source queues distinct, and has actual Google Chrome 153.0.8010.37 FLAC play/pause/seek/transition qualification. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external. The bounded child is reviewed; D06.3 is reviewed and corrected locally; P05.1 is next. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D03, D05, P02, A04. **Owner:** audio transforms, application derivative jobs, store representations.
 
