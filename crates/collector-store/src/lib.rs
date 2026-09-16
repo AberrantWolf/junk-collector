@@ -269,6 +269,7 @@ impl Store {
         store.reindex()?;
         store.recover_private_publications()?;
         store.reconcile_job_publications()?;
+        store.reconcile_import_cleanup()?;
         let journal_store = publication::PublicationJournalStore::new(&store.archive);
         for transaction_id in &store.recovery_report.committed {
             journal_store.advance(
@@ -1507,7 +1508,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 11 {
+    if private_version > 13 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -1879,6 +1880,49 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
+    }
+    // Guided intent and cleanup state. Checkpoint numbers reserve no future schemas.
+    if private_version < 13 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch(
+            "CREATE TABLE private.guided_ingest_intents (
+              import_id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              plan_token TEXT NOT NULL,
+              target_item_id TEXT NOT NULL,
+              default_title TEXT NOT NULL,
+              enrichment TEXT NOT NULL CHECK(enrichment IN ('automatic','none')),
+              enrichment_error TEXT,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX private.guided_ingest_owner_order
+              ON guided_ingest_intents(user_id,updated_at,import_id);
+            CREATE TABLE private.import_cleanup (
+              import_id TEXT PRIMARY KEY,
+              requested_at INTEGER NOT NULL,
+              reclaimed_bytes INTEGER NOT NULL DEFAULT 0,
+              pending_bytes INTEGER NOT NULL DEFAULT 0,
+              error TEXT
+            );
+            PRAGMA private.user_version = 13;",
+        )
+        .map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
+    // Preserve actual LA1 preview state without creating a checkpoint-only version.
+    for column in ["settled", "cancelled"] {
+        let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('guided_ingest_intents','private') WHERE name=?)", [column], |row| row.get(0)).map_err(storage)?;
+        if !exists {
+            db.execute_batch(&format!("ALTER TABLE private.guided_ingest_intents ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")).map_err(storage)?;
+        }
+    }
+    let cleanup_complete_column: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('import_cleanup','private') WHERE name='completed')", [], |row| row.get(0)).map_err(storage)?;
+    if !cleanup_complete_column {
+        db.execute_batch(
+            "ALTER TABLE private.import_cleanup ADD COLUMN completed INTEGER NOT NULL DEFAULT 0",
+        )
+        .map_err(storage)?;
     }
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))

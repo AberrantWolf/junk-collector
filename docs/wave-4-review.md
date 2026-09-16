@@ -478,3 +478,12 @@ Historical implementation records above describe the submitted checkpoint; this
 section supersedes its browser-owned publication/re-refresh sequencing. Final
 validation is recorded in `validation.md`. Live providers, other browsers and
 external deployment remain unqualified. No commit made.
+
+## Accepted delivery-order change — 2026-09-16
+
+After committing D06.3 as `3a6143b`, the user approved prioritizing a usable local
+web alpha. [Local alpha](local-alpha-plan.md) supersedes the serial P05.1 handoff:
+LA1 guided ingestion/automatic enrichment, LA2 album preparation/library use,
+LA3 actual local installation qualification. Existing review evidence is retained.
+This is a plan change, not completed implementation or waived preservation/security
+acceptance. Review integrated workflows rather than requiring a handoff per layer.

@@ -4,6 +4,22 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 This is the repository-local summary of the user-approved plan, recorded for handoff from commit `98e9187`. It describes the target, not current capabilities. [Implementation status](implementation-status.md) describes what exists; [handoff backlog](handoff-backlog.md) defines the remaining work. Implementation shortcuts are not amendments to these requirements. If a requirement needs to change, record the discrepancy and resolve it explicitly.
 
+## Earlier local-alpha delivery
+
+Accepted 2026-09-16: prioritize ingestion of raw dumps, automatic metadata,
+artwork/text browsing, supported CD playback and multiple trusted local users in
+the existing web UI. The [local-alpha plan](local-alpha-plan.md) is the active
+execution order. Automatic enrichment is default for its new guided import path;
+playback derivatives remain optional and explicitly requested. Local-only limits
+deployment scope, not authorization or transport protections. A tested stopped-server
+backup/restore procedure is an alpha gate; complete portable export, native/offline
+clients, public deployment and scale qualification remain full-release work.
+LA1 guided ingestion and automatic enrichment is reviewed and corrected locally;
+LA2 is ready for implementation and LA3 remains planned. The alpha is a smaller delivery milestone,
+not evidence that the requirements below are complete. Games initially use DAT
+metadata; general online game artwork remains an explicit follow-up. Actual
+supported dump formats require recorded qualification.
+
 ## Product and scope
 
 Junk Collector is a self-hosted preservation and collection system, initially for physical video games and music CDs. It keeps original data, evidence, descriptive metadata and physical inventory, including inventory without files and unidentified captures. Price is secondary. Browsing, search and offline collections must show cover/album art beside text rows for games and CDs, with useful edition/platform/artist information, accessible labels, foreign-language text and consistent placeholders. Missing artwork and uncertain identity are different states.

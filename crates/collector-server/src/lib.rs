@@ -11,15 +11,17 @@ use axum::{
 use collector_app::{
     AccountUpdate, AccountView, AcquireAccurateRipCommand, AcquireMetadataCommand,
     ActivateCatalogSnapshotCommand, ApplyMetadataSnapshotCommand, AuthenticatedPrincipal,
-    CatalogSnapshotStatus, CollectionService, CommandContext, ComponentDetails, CreateAssetCommand,
-    CreateCollectionCommand, CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart,
-    EnrollmentView, GrantView, ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary,
-    ImportView, JobView, MediaResource, MetadataArtworkOption, MetadataReviewView,
-    MusicTrackAvailability, NativeDeviceView, PasskeyView, PrepareMusicTrack, PresentedAsset,
-    PresentedCollection, PresentedEvidence, PresentedItem, ProcessingSummary,
-    PublishProviderArtworkCommand, ReturnLoanCommand, ReviewImportCommand, SaveItemCommand,
-    SaveItemEditCommand, SessionView, SpecimenDetails, StartLoanCommand, StartProcessingCommand,
-    UpdateAssetCommand, UpdateMetadataAuthorityCommand,
+    CatalogSnapshotStatus, CollectionService, CommandContext, ComponentDetails,
+    CorrectIngestAssociationCommand, CreateAssetCommand, CreateCollectionCommand,
+    CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView,
+    ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary, ImportView, IngestDetail,
+    IngestDiscardResult, IngestPlan, IngestSummary, JobView, MediaResource, MetadataArtworkOption,
+    MetadataReviewView, MusicTrackAvailability, NativeDeviceView, PasskeyView, PlanIngestCommand,
+    PrepareMusicTrack, PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem,
+    ProcessingSummary, PublishProviderArtworkCommand, RetryIngestCommand, ReturnLoanCommand,
+    ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails,
+    StartIngestCommand, StartLoanCommand, StartProcessingCommand, UpdateAssetCommand,
+    UpdateMetadataAuthorityCommand,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -97,14 +99,37 @@ impl Drop for JobRuntime {
     }
 }
 
-pub fn start_job_workers(service: CollectionService) -> JobRuntime {
+pub fn start_job_workers(state: AppState) -> JobRuntime {
+    let service = state.service.clone();
     let worker_instance = ServerId::new().to_string();
     let workers = (0..2)
         .map(|worker_index| {
             let service = service.clone();
+            let recovery_state = state.clone();
             let worker_instance = worker_instance.clone();
             tokio::spawn(async move {
+                let mut next_recovery = tokio::time::Instant::now();
                 loop {
+                    if worker_index == 0 && tokio::time::Instant::now() >= next_recovery {
+                        next_recovery =
+                            tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+                        let recovery_state = recovery_state.clone();
+                        let recovery = service.clone();
+                        match tokio::task::spawn_blocking(move || {
+                            recover_guided_inbox_staging(&recovery_state)?;
+                            recovery.resume_guided_ingests()
+                        })
+                        .await
+                        {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => {
+                                tracing::error!(%error, "guided ingest recovery failed")
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, "guided ingest recovery panicked")
+                            }
+                        }
+                    }
                     let service = service.clone();
                     let worker_instance = worker_instance.clone();
                     match tokio::task::spawn_blocking(move || {
@@ -514,6 +539,13 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(curation_catalog_snapshots))
         .routes(routes!(create_upload))
         .routes(routes!(create_provisional_import))
+        .routes(routes!(plan_ingest))
+        .routes(routes!(start_ingest, list_ingests))
+        .routes(routes!(ingest_detail))
+        .routes(routes!(discard_ingest))
+        .routes(routes!(cancel_ingest))
+        .routes(routes!(retry_ingest))
+        .routes(routes!(correct_ingest_association))
         .routes(routes!(provisional_import))
         .routes(routes!(analyze_provisional_import))
         .routes(routes!(review_provisional_import))
@@ -2044,6 +2076,199 @@ struct NewUpload {
     files: Vec<UploadFile>,
 }
 
+#[utoipa::path(post, path = "/api/v1/ingests/plan", request_body = PlanIngestCommand, responses((status = 200, body = IngestPlan), (status = 403), (status = 409), (status = 422)))]
+async fn plan_ingest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(mut command): Json<PlanIngestCommand>,
+) -> ApiResult<Json<IngestPlan>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .authorize(&actor, command.collection_id, Action::Curate)?;
+            for package in &mut command.packages {
+                if package.source.kind == ImportSourceKind::Inbox {
+                    let (_, files) = resolve_inbox_package(&state, &package.source)?;
+                    package.files = files;
+                }
+            }
+            state.service.plan_ingest(&actor, command)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/ingests", params(("Idempotency-Key" = String, Header)), request_body = StartIngestCommand, responses((status = 202, body = collector_app::AcceptedIngest), (status = 403), (status = 409), (status = 422)))]
+async fn start_ingest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<StartIngestCommand>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let accepted = blocking(move || {
+        let mut inbox_paths = Vec::new();
+        let accepted =
+            state
+                .service
+                .start_ingest_with_preflight(&actor, command, &context, |plan| {
+                    for package in &plan.packages {
+                        if package.source.kind == ImportSourceKind::Inbox {
+                            let (path, current_files) =
+                                resolve_inbox_package(&state, &package.source)?;
+                            if serde_json::to_value(&current_files)
+                                .map_err(|e| Error::Invalid(e.to_string()))?
+                                != serde_json::to_value(&package.files)
+                                    .map_err(|e| Error::Invalid(e.to_string()))?
+                            {
+                                return Err(Error::Conflict);
+                            }
+                            inbox_paths.push((package.position, path));
+                        }
+                    }
+                    Ok(())
+                })?;
+        // Best-effort dispatch uses the already validated path. Receipt replay
+        // does not resolve mutable inbox configuration; the sweep closes crash gaps.
+        for (position, path) in inbox_paths {
+            if let (Some(import), Some(path)) =
+                (accepted.imports.get(position as usize), path.to_str())
+                && let Err(error) = state
+                    .service
+                    .ensure_guided_inbox_staging(import.import_id, path)
+            {
+                tracing::warn!(%error, "accepted inbox staging deferred to recovery");
+            }
+        }
+        Ok(accepted)
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
+}
+
+#[derive(Deserialize)]
+struct IngestPageQuery {
+    collection_id: Option<CollectionId>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[utoipa::path(get, path = "/api/v1/ingests", params(("collection_id" = Option<CollectionId>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<IngestSummary>), (status = 403), (status = 422)))]
+async fn list_ingests(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<IngestPageQuery>,
+) -> ApiResult<Json<Page<IngestSummary>>> {
+    let actor = principal(&state, &headers)?;
+    let cursor = query
+        .cursor
+        .map(|value| value.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid Import cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state.service.ingest_page(
+                &actor,
+                query.collection_id,
+                cursor,
+                query.limit.unwrap_or(50),
+            )
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/ingests/{id}", params(("id" = ImportId, Path)), responses((status = 200, body = IngestDetail), (status = 403), (status = 404)))]
+async fn ingest_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+) -> ApiResult<Json<IngestDetail>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.ingest_detail(&actor, id)).await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct DiscardIngestCommand {
+    expected_revision: u64,
+}
+
+#[utoipa::path(post, path = "/api/v1/ingests/{id}/discard", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = DiscardIngestCommand, responses((status = 200, body = IngestDiscardResult), (status = 403), (status = 404), (status = 409)))]
+async fn discard_ingest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(command): Json<DiscardIngestCommand>,
+) -> ApiResult<Json<IngestDiscardResult>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .discard_ingest(&actor, id, command.expected_revision, &context)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/ingests/{id}/cancel", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = DiscardIngestCommand, responses((status = 200, body = IngestDetail), (status = 403), (status = 404), (status = 409)))]
+async fn cancel_ingest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(command): Json<DiscardIngestCommand>,
+) -> ApiResult<Json<IngestDetail>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .cancel_ingest(&actor, id, command.expected_revision, &context)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/ingests/{id}/retry", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = RetryIngestCommand, responses((status = 200, body = IngestDetail), (status = 403), (status = 404), (status = 409)))]
+async fn retry_ingest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(command): Json<RetryIngestCommand>,
+) -> ApiResult<Json<IngestDetail>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.retry_ingest(&actor, id, command, &context)).await?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/ingests/{id}/association", params(("id" = ImportId, Path), ("Idempotency-Key" = String, Header)), request_body = CorrectIngestAssociationCommand, responses((status = 200, body = IngestDetail), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn correct_ingest_association(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(command): Json<CorrectIngestAssociationCommand>,
+) -> ApiResult<Json<IngestDetail>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .correct_ingest_association(&actor, id, command, &context)
+        })
+        .await?,
+    ))
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 struct NewProvisionalImport {
@@ -2286,6 +2511,81 @@ fn direct_inbox_packages(root: &std::path::Path) -> Result<Vec<String>> {
     }
     packages.sort();
     Ok(packages)
+}
+
+fn resolve_inbox_package(
+    state: &AppState,
+    source: &ImportSourceSummary,
+) -> Result<(std::path::PathBuf, Vec<UploadFile>)> {
+    let label = source
+        .label
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("an inbox package requires an inbox label".into()))?;
+    if source.package_name.is_empty()
+        || source.package_name.contains(['/', '\\'])
+        || matches!(source.package_name.as_str(), "." | "..")
+    {
+        return Err(Error::Invalid(
+            "select a direct inbox package directory".into(),
+        ));
+    }
+    let root = state.inboxes.get(label).ok_or(Error::NotFound)?;
+    let canonical_root =
+        std::fs::canonicalize(root).map_err(|error| Error::Storage(error.to_string()))?;
+    let unresolved = root.join(&source.package_name);
+    let metadata = std::fs::symlink_metadata(&unresolved)
+        .map_err(|error| Error::Storage(error.to_string()))?;
+    let path =
+        std::fs::canonicalize(&unresolved).map_err(|error| Error::Storage(error.to_string()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() || !path.starts_with(canonical_root)
+    {
+        return Err(Error::Forbidden);
+    }
+    let files = Store::inventory_directory(&path)?;
+    Ok((path, files))
+}
+
+fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
+    let mut after = None;
+    loop {
+        let imports = state.service.resumable_guided_inbox_imports(after)?;
+        if imports.is_empty() {
+            break;
+        }
+        after = imports.last().map(|value| value.id);
+        for import in imports {
+            let (path, current) = match resolve_inbox_package(state, &import.source) {
+                Ok(value) => value,
+                Err(error) => {
+                    state.service.report_guided_staging_failure(import.id, "Configured inbox package is unavailable; restore the source or discard this import.")?;
+                    tracing::warn!(import_id=%import.id, %error, "guided inbox source is unavailable during recovery");
+                    continue;
+                }
+            };
+            if current.len() != import.files.len()
+                || current.iter().zip(&import.files).any(|(source, declared)| {
+                    source.name != declared.name
+                        || source.bytes != declared.bytes
+                        || source
+                            .sha256
+                            .as_ref()
+                            .zip(declared.digest.as_ref())
+                            .is_some_and(|(source, declared)| source != &declared.hex)
+                })
+            {
+                state.service.report_guided_staging_failure(import.id, "Inbox inventory changed after acceptance; restore the original package or discard and preview it again.")?;
+                tracing::warn!(import_id=%import.id, "guided inbox inventory changed before recovery");
+                continue;
+            }
+            let source = path
+                .to_str()
+                .ok_or_else(|| Error::Invalid("inbox source path must be UTF-8".into()))?;
+            if let Err(error) = state.service.ensure_guided_inbox_staging(import.id, source) {
+                tracing::warn!(import_id=%import.id, %error, "guided inbox staging recovery was deferred");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[utoipa::path(get, path = "/api/v1/collections/{id}/inboxes", params(("id" = CollectionId, Path)), responses((status = 200, body = Vec<InboxSourceView>), (status = 403)))]

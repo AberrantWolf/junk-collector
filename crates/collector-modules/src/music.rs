@@ -1,3 +1,4 @@
+use collector_core::PackageFileName;
 pub mod catalog;
 use catalog::{DbarOutcome, DbarSnapshotObservation, ParsedDbarSnapshot};
 use std::io::{Read, SeekFrom};
@@ -117,14 +118,20 @@ struct MusicImportAnalysisInput {
     _representation_id: collector_core::RepresentationId,
     #[serde(rename = "files")]
     _files: Vec<serde_json::Value>,
+    #[serde(default, rename = "snapshot_id")]
+    _snapshot_id: Option<collector_core::SnapshotId>,
+    #[serde(default, rename = "system")]
+    _system: Option<String>,
+    #[serde(default, rename = "domain")]
+    _domain: Option<ModuleData>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct MusicImportAnalysisOutput {
+pub struct MusicImportAnalysisOutput {
     candidates: Vec<serde_json::Value>,
     limitations: Vec<String>,
-    observations: Vec<RawJson>,
+    pub observations: Vec<RawJson>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1778,22 +1785,31 @@ fn verify_selection(
 /// Detect the one supported CD package anchor without opening any archive path.
 /// Application read/command services use this to present and prepare the same
 /// music-owned track mapping as processing jobs.
-pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSelection> {
-    let anchors = inventory
-        .files
+fn package_anchors(names: &[PackageFileName]) -> Vec<(usize, CdPackageKind)> {
+    names
         .iter()
         .enumerate()
-        .filter_map(|(index, file)| {
-            let name = file.display_name.as_str().to_ascii_lowercase();
-            if name.ends_with(".cue") {
+        .filter_map(|(index, name)| {
+            let lower = name.as_str().to_ascii_lowercase();
+            if lower.ends_with(".cue") {
                 Some((index, CdPackageKind::Cue))
-            } else if name.ends_with(".toc") {
+            } else if lower.ends_with(".toc") {
                 Some((index, CdPackageKind::Redumper))
             } else {
                 None
             }
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSelection> {
+    let anchors = package_anchors(
+        &inventory
+            .files
+            .iter()
+            .map(|file| file.display_name.clone())
+            .collect::<Vec<_>>(),
+    );
     let [(anchor_file_index, package_kind)] = anchors.as_slice() else {
         return Err(ModuleError::UnavailableCapability(
             "CD analysis needs exactly one CUE or redumper TOC anchor; review may continue unidentified"
@@ -1809,6 +1825,46 @@ pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSel
 pub struct Music;
 
 impl CollectionModule for Music {
+    fn import_readiness(&self, names: &[PackageFileName]) -> crate::ImportReadiness {
+        use crate::{ImportReadiness, IngestAnchorChoice, IngestBlocker, IngestBlockerKind};
+        let choices = package_anchors(names);
+        let anchors = choices
+            .iter()
+            .map(|(index, kind)| IngestAnchorChoice {
+                file_index: *index,
+                label: match kind {
+                    CdPackageKind::Cue => "BIN/CUE",
+                    CdPackageKind::Redumper => "Redumper TOC",
+                }
+                .into(),
+                selected: choices.len() == 1,
+            })
+            .collect();
+        let mut blockers = vec![];
+        let mut issue = |kind, message: String| {
+            blockers.push(IngestBlocker {
+                kind,
+                message,
+                blocks_analysis: true,
+                blocks_preservation: false,
+            })
+        };
+        match choices.as_slice() {
+            [] => issue(IngestBlockerKind::MissingAnchor, "CD analysis needs a CUE or redumper TOC anchor. Originals can still be preserved.".into()),
+            [(index, CdPackageKind::Redumper)] => {
+                let base = &names[*index].as_str()[..names[*index].as_str().len()-4];
+                for extension in ["scram", "state", "subcode"] {
+                    let required = format!("{base}.{extension}");
+                    if !names.iter().any(|name| name.as_str().eq_ignore_ascii_case(&required)) { issue(IngestBlockerKind::MissingCompanion, format!("Missing redumper companion {required}; add it for analysis or preserve without analysis.")); }
+                }
+            }
+            [(_, CdPackageKind::Cue)] if names.len()==1 => issue(IngestBlockerKind::MissingCompanion, "The CUE has no companion data file. Add its referenced files or preserve without analysis.".into()),
+            [_] => {},
+            _ => issue(IngestBlockerKind::AmbiguousAnchors, "Multiple CD anchors: select separate packages. Preservation without analysis remains available.".into()),
+        }
+        ImportReadiness { anchors, blockers }
+    }
+
     fn descriptor(&self) -> ModuleDescriptor {
         let mut descriptor = descriptor(
             "org.junk.music",

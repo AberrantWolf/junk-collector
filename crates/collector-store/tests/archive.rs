@@ -6,14 +6,15 @@ use collector_app::{
     DisposeSpecimenCommand, FrozenAcquisitionJob, IdempotencyPort, ImportCandidate,
     ImportCatalogSnapshotCommand, ImportDeclaredFile, ImportIdentityDecision, ImportPhase,
     ImportPort, ImportRecord, ImportReviewDecision, ImportSourceKind, ImportSourceSummary,
-    ImportView, JobPort, JobSpec, MediaResource, MetadataAuthorityChange, MetadataAuthorityRecord,
+    ImportView, IngestEnrichmentPolicy, IngestPackageSelection, JobPort, JobSpec, MediaResource,
+    MetadataAuthorityChange, MetadataAuthorityRecord, PlanIngestCommand,
     ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderArtworkLink, ProviderPort,
     ProviderRequest, ProviderResponse, ProviderStreamResponse, ProvisionalImportPort,
     PublishProviderArtworkCommand, ReceiptDecision, RefreshMetadataCommand,
     RefreshProviderMetadataCommand, ReturnLoanCommand, ReturnedPossession, ReviewImportCommand,
     SaveItemCommand, SnapshotPort, SnapshotQuery, SnapshotRecord, SpecimenDetails,
-    StartLoanCommand, StartProcessingCommand, StreamingProviderPort, UpdateAssetCommand,
-    UpdateMetadataAuthorityCommand,
+    StartIngestCommand, StartLoanCommand, StartProcessingCommand, StreamingProviderPort,
+    UpdateAssetCommand, UpdateMetadataAuthorityCommand,
 };
 use collector_core::*;
 use collector_modules::*;
@@ -1672,7 +1673,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        11
+        13
     );
     assert_eq!(
         private
@@ -5475,7 +5476,7 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
 }
 
 #[test]
-fn schema_eleven_preserves_durable_imports_without_private_path_columns() {
+fn schema_thirteen_preserves_durable_imports_without_private_path_columns() {
     let root = tempfile::tempdir().unwrap();
     let archive = root.path().join("archive");
     let state = root.path().join("state");
@@ -5489,7 +5490,7 @@ fn schema_eleven_preserves_durable_imports_without_private_path_columns() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        11
+        13
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -5513,6 +5514,732 @@ fn schema_eleven_preserves_durable_imports_without_private_path_columns() {
     assert_eq!(
         serde_json::to_value(reopened.import_record(id).unwrap()).unwrap(),
         expected
+    );
+}
+
+#[test]
+fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser_chaining() {
+    let (root, store, actor, service, collection) = setup();
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let selection = IngestPackageSelection {
+        source: ImportSourceSummary {
+            kind: ImportSourceKind::Browser,
+            label: None,
+            package_name: "Guided_album.cue".into(),
+        },
+        files: vec![
+            UploadFile {
+                name: "disc.cue".into(),
+                bytes: ByteLength(cue.len() as u64),
+                sha256: None,
+            },
+            UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(pcm.len() as u64),
+                sha256: None,
+            },
+        ],
+    };
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![selection],
+            },
+        )
+        .unwrap();
+    assert_eq!(plan.packages[0].anchors.len(), 1);
+    assert!(plan.packages[0].anchors[0].selected);
+    let mut stale = plan.clone();
+    stale.packages[0].files[1].bytes = ByteLength(pcm.len() as u64 + 1);
+    assert!(matches!(
+        service.start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan: stale,
+                enrichment: IngestEnrichmentPolicy::None,
+            },
+            &command(),
+        ),
+        Err(Error::Conflict)
+    ));
+    let key = command();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan: plan.clone(),
+                enrichment: IngestEnrichmentPolicy::None,
+            },
+            &key,
+        )
+        .unwrap();
+    let replay = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan: plan.clone(),
+                enrichment: IngestEnrichmentPolicy::None,
+            },
+            &key,
+        )
+        .unwrap();
+    let replay_again = service
+        .start_ingest_with_preflight(
+            &actor,
+            StartIngestCommand {
+                plan: plan.clone(),
+                enrichment: IngestEnrichmentPolicy::None,
+            },
+            &key,
+            |_| Err(Error::Unavailable("inbox or provider changed".into())),
+        )
+        .unwrap();
+    assert_eq!(
+        accepted.imports[0].import_id,
+        replay_again.imports[0].import_id
+    );
+    assert_eq!(accepted.imports[0].import_id, replay.imports[0].import_id);
+    assert_eq!(accepted.imports[0].capture_id, replay.imports[0].capture_id);
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    assert_eq!(
+        private
+            .execute(
+                "DELETE FROM jobs WHERE kind='import_analysis' AND json_extract(request,'$.import_id')=?",
+                [id.to_string()],
+            )
+            .unwrap(),
+        1,
+        "simulate a restart in the durable transition-to-job crash window"
+    );
+    drop(private);
+    let recovered = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    recovered.resume_guided_ingests().unwrap();
+    assert!(recovered.run_next_job("guided-analysis").unwrap());
+    assert!(recovered.run_next_job("guided-publication").unwrap());
+    let detail = recovered.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.summary.capture_revision, Some(Revision(1)));
+    assert!(matches!(
+        recovered.discard_ingest(&actor, id, detail.import.revision, &command()),
+        Err(Error::CancellationTooLate)
+    ));
+    let target = detail.summary.target_item_id.unwrap();
+    let current_item = store.item(target).unwrap();
+    assert_eq!(current_item.title, "Guided album");
+    let authority = store
+        .metadata_authority(collection.id, target)
+        .unwrap()
+        .unwrap();
+    assert!(
+        authority.authority.field_overrides.is_empty(),
+        "filename defaults must remain provisional"
+    );
+    assert_eq!(authority.inventory.unwrap().title, "Guided album");
+    let replacement = store.save(item(collection.id), Revision(0)).unwrap();
+    let corrected = recovered
+        .correct_ingest_association(
+            &actor,
+            id,
+            collector_app::CorrectIngestAssociationCommand {
+                expected_capture_revision: Revision(1),
+                association: CaptureAssociation {
+                    item_id: Some(replacement.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(replacement.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(corrected.summary.capture_revision, Some(Revision(2)));
+    assert_eq!(corrected.import.association.item_id, Some(replacement.id));
+    assert_eq!(corrected.summary.target_item_id, Some(replacement.id));
+    assert_eq!(
+        store
+            .capture(corrected.summary.capture_id)
+            .unwrap()
+            .association
+            .item_id,
+        Some(replacement.id)
+    );
+    assert_eq!(
+        store
+            .capture(corrected.summary.capture_id)
+            .unwrap()
+            .representations[0]
+            .files[0]
+            .digest,
+        Digest::sha256(cue)
+    );
+}
+
+#[test]
+fn guided_optional_provider_failure_preserves_master_and_manual_title_authority() {
+    let (_root, store, actor, service, collection) = setup();
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "automatic.cue".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::Automatic,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    let target = service
+        .ingest_detail(&actor, id)
+        .unwrap()
+        .summary
+        .target_item_id
+        .unwrap();
+    let mut edited = store.item(target).unwrap();
+    edited.title = "My manual album title".into();
+    store.save(edited.clone(), edited.revision).unwrap();
+    assert!(service.run_next_job("guided-analysis").unwrap());
+    assert!(service.run_next_job("guided-publication").unwrap());
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert!(
+        detail
+            .steps
+            .iter()
+            .any(|step| step.step == "artwork"
+                && step.state == collector_app::IngestStepState::Failed)
+    );
+    let presented = service.item_presented(&actor, target).unwrap();
+    assert_eq!(presented.title, "My manual album title");
+    assert_eq!(
+        store
+            .capture(detail.summary.capture_id)
+            .unwrap()
+            .representations[0]
+            .role,
+        RepresentationRole::PreservationMaster
+    );
+    let retried = service
+        .retry_ingest(
+            &actor,
+            id,
+            collector_app::RetryIngestCommand { job_id: None },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(retried.import.phase, ImportPhase::Published);
+    assert!(
+        retried
+            .steps
+            .iter()
+            .any(|step| step.step == "artwork"
+                && step.state == collector_app::IngestStepState::Failed)
+    );
+    let capture_before = store.capture(detail.summary.capture_id).unwrap();
+    let optional_job = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: optional_job,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(target),
+            kind: "catalog_acquisition".into(),
+            phase: "queued".into(),
+            total_units: 0,
+            request: serde_json::json!({"import_id": id}),
+            frozen_input: None,
+        })
+        .unwrap();
+    service
+        .cancel_job(&actor, optional_job, &command())
+        .unwrap();
+    assert_eq!(
+        service.ingest_detail(&actor, id).unwrap().summary.outcome,
+        collector_app::IngestStepState::Cancelled,
+        "generic cancellation must not leave a guided provider workflow active forever"
+    );
+    let cancelled = service
+        .cancel_ingest(&actor, id, retried.import.revision, &command())
+        .unwrap();
+    assert_eq!(cancelled.import.phase, ImportPhase::Published);
+    assert_eq!(
+        cancelled.summary.outcome,
+        collector_app::IngestStepState::Cancelled
+    );
+    assert_eq!(
+        serde_json::to_value(store.capture(detail.summary.capture_id).unwrap()).unwrap(),
+        serde_json::to_value(capture_before).unwrap()
+    );
+    assert!(matches!(
+        service.retry_ingest(
+            &actor,
+            id,
+            collector_app::RetryIngestCommand { job_id: None },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+}
+
+#[test]
+fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manual_authority() {
+    let (_root, store, actor, service, collection) = setup();
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "provider_default.cue".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::Automatic,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    assert!(service.run_next_job("guided-provider-analysis").unwrap());
+    let analysis = service
+        .ingest_detail(&actor, id)
+        .unwrap()
+        .import
+        .analysis_job_id
+        .unwrap();
+    let observation = store
+        .provisional_observations(id)
+        .unwrap()
+        .into_iter()
+        .find(|value| value.id == ObservationId(analysis.0))
+        .unwrap();
+    let payload: serde_json::Value = observation.typed_result.payload.parse().unwrap();
+    let disc_id = payload["observations"][0]["disc_ids"]["musicbrainz"]
+        .as_str()
+        .unwrap();
+    let release_id = "00000000-0000-4000-8000-000000000011";
+    let mb_body = format!(
+        r#"{{"releases":[{{"id":"{release_id}","title":"Automatic provider title","artist-credit":[{{"name":"Provider Artist","artist":{{"id":"00000000-0000-4000-8000-000000000012","name":"Provider Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"discs":[{{"id":"{disc_id}"}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000013"}}}}],"count":1}}"#
+    )
+    .into_bytes();
+    let mb_server =
+        metadata_fixture_server(vec![("200 OK\r\nContent-Type: application/json", mb_body)]);
+    let musicbrainz = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "junk-collector-test/0.1 (test@example.invalid)",
+            &mb_server.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([90, 40, 10]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let art = encoded.into_inner();
+    let caa_listing = format!(
+        r#"{{"release":"https://musicbrainz.org/release/{release_id}","images":[{{"id":"12345","front":true,"back":false,"approved":true,"types":["Front"],"comment":"","edit":1}}]}}"#
+    )
+    .into_bytes();
+    let caa_server = metadata_fixture_server(vec![
+        ("200 OK\r\nContent-Type: application/json", caa_listing),
+        ("200 OK\r\nContent-Type: image/png", art.clone()),
+    ]);
+    let cover_art = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "junk-collector-test/0.1 (test@example.invalid)",
+            &caa_server.origin,
+            &[caa_server.origin.as_str()],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
+    let service = service
+        .with_streaming_provider(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(musicbrainz.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            musicbrainz,
+        )
+        .unwrap()
+        .with_streaming_provider(
+            ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(cover_art.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(
+            ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+            cover_art,
+        )
+        .unwrap();
+    assert!(service.run_next_job("guided-provider-publication").unwrap());
+    assert!(service.run_next_job("guided-provider-metadata").unwrap());
+    assert!(service.run_next_job("guided-provider-art-listing").unwrap());
+    assert!(service.run_next_job("guided-provider-art-image").unwrap());
+    assert!(!service.run_next_job("guided-provider-finished").unwrap());
+    let target = service
+        .ingest_detail(&actor, id)
+        .unwrap()
+        .summary
+        .target_item_id
+        .unwrap();
+    let revision = store
+        .metadata_authority(collection.id, target)
+        .unwrap()
+        .unwrap()
+        .revision;
+    let mut intent = store.guided_ingest_intent(id).unwrap().unwrap();
+    intent.settled = false;
+    store.save_guided_ingest_intent(intent).unwrap();
+    service.resume_guided_ingests().unwrap();
+    assert_eq!(
+        store
+            .metadata_authority(collection.id, target)
+            .unwrap()
+            .unwrap()
+            .revision,
+        revision,
+        "reconciliation must not reapply already-observed metadata after artwork"
+    );
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(
+        detail.summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+    assert!(detail.steps.iter().any(|step| {
+        step.step == "metadata" && step.state == collector_app::IngestStepState::Succeeded
+    }));
+    assert!(detail.steps.iter().any(|step| {
+        step.step == "artwork" && step.state == collector_app::IngestStepState::Succeeded
+    }));
+    let target = detail.summary.target_item_id.unwrap();
+    assert_eq!(store.item(target).unwrap().title, "provider default");
+    let metadata = service.metadata_view(&actor, target).unwrap();
+    assert_eq!(metadata.display.title.value, "Automatic provider title");
+    let artwork = metadata.display.artwork.unwrap();
+    assert_eq!(
+        store.asset_state(artwork).unwrap().asset.file.digest,
+        Digest::sha256(&art)
+    );
+    assert!(metadata.authority.field_overrides.is_empty());
+    assert!(metadata.authority.artwork_choice.is_none());
+}
+
+#[test]
+fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
+    let (_root, store, actor, service, collection) = setup();
+    let cue = b"FILE \"missing.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+    let files = [
+        ("disc.cue", cue.as_slice()),
+        ("other.bin", b"original bytes".as_slice()),
+    ];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Malformed CD".into(),
+                    },
+                    files: files
+                        .iter()
+                        .map(|(name, bytes)| UploadFile {
+                            name: (*name).into(),
+                            bytes: ByteLength(bytes.len() as u64),
+                            sha256: None,
+                        })
+                        .collect(),
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    for (index, (_, bytes)) in files.iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(&actor, id, index, 0, bytes)
+            .unwrap();
+    }
+    assert!(service.run_next_job("malformed-analysis").unwrap());
+    assert!(
+        service
+            .run_next_job("preserve-after-analysis-failure")
+            .unwrap()
+    );
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert!(detail.steps.iter().any(|step| step.step == "identification"
+        && step.state == collector_app::IngestStepState::Failed));
+    assert_eq!(
+        store
+            .capture(detail.summary.capture_id)
+            .unwrap()
+            .representations[0]
+            .role,
+        RepresentationRole::PreservationMaster
+    );
+}
+
+#[test]
+fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
+    let (root, store, actor, service, collection) = setup();
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "mistake.bin".into(),
+                    },
+                    files: vec![UploadFile {
+                        name: "mistake.bin".into(),
+                        bytes: ByteLength(4),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::Automatic,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    let initial = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(initial.import.phase, ImportPhase::Staging);
+    assert_eq!(
+        initial.steps[0].state,
+        collector_app::IngestStepState::NeedsInput
+    );
+    let staged = service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, b"data")
+        .unwrap();
+    let other = store
+        .create_user("other-ingest", "a long other password", false)
+        .unwrap();
+    store.grant(collection.id, other, Role::Curator).unwrap();
+    let other = Principal {
+        user_id: other,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.ingest_detail(&other, id),
+        Err(Error::NotFound)
+    ));
+    let discarded = service
+        .discard_ingest(&actor, id, staged.revision, &command())
+        .unwrap();
+    assert!(discarded.cleanup_pending);
+    assert_eq!(discarded.pending_bytes, ByteLength(4));
+    service.resume_guided_ingests().unwrap();
+    let cleaned = service.ingest_detail(&actor, id).unwrap().cleanup.unwrap();
+    assert_eq!(cleaned.reclaimed_bytes, ByteLength(4));
+    assert_eq!(cleaned.pending_bytes, ByteLength(0));
+    assert!(
+        !root
+            .path()
+            .join("state/imports")
+            .join(id.to_string())
+            .exists()
+    );
+    assert!(matches!(
+        service.stage_provisional_import_chunk(&actor, id, 0, 0, b"data"),
+        Err(Error::Conflict)
+    ));
+}
+
+#[test]
+fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
+    let (root, store, actor, service, collection) = setup();
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "paused.bin".into(),
+                    },
+                    files: vec![UploadFile {
+                        name: "paused.bin".into(),
+                        bytes: ByteLength(8),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    let staged = service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, b"half")
+        .unwrap();
+    let cancelled = service
+        .cancel_ingest(&actor, id, staged.revision, &command())
+        .unwrap();
+    assert_eq!(cancelled.import.phase, ImportPhase::Cancelled);
+    assert!(matches!(
+        service.retry_ingest(
+            &actor,
+            id,
+            collector_app::RetryIngestCommand { job_id: None },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+    assert!(
+        matches!(
+            store.enqueue_job(JobSpec {
+                id: JobId::new(),
+                user_id: actor.user_id,
+                collection_id: Some(collection.id),
+                item_id: None,
+                kind: "import_analysis".into(),
+                phase: "queued".into(),
+                total_units: 0,
+                request: serde_json::json!({"import_id": id}),
+                frozen_input: None,
+            }),
+            Err(Error::Conflict)
+        ),
+        "cancelled imports cannot admit new jobs"
+    );
+    assert_eq!(
+        std::fs::read(
+            root.path()
+                .join("state/imports")
+                .join(id.to_string())
+                .join("0.part")
+        )
+        .unwrap(),
+        b"half",
+        "cancellation retains staged bytes until explicit safe discard"
+    );
+    let discarded = service
+        .discard_ingest(&actor, id, cancelled.import.revision, &command())
+        .unwrap();
+    assert!(discarded.cleanup_pending);
+    service.resume_guided_ingests().unwrap();
+    assert_eq!(
+        service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .cleanup
+            .unwrap()
+            .reclaimed_bytes,
+        ByteLength(4)
     );
 }
 

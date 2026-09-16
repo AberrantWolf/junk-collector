@@ -1,6 +1,6 @@
 # Junk Collector development
 
-Read `docs/architecture.md` before adding or changing a subsystem. `docs/implementation-status.md` distinguishes implemented behavior from planned capabilities; keep it current. For continued implementation, select one ticket from `docs/handoff-backlog.md` and read `docs/release-requirements.md`; complete its dependencies and acceptance criteria without silently broadening scope.
+Read `docs/architecture.md` before adding or changing a subsystem. `docs/implementation-status.md` distinguishes implemented behavior from planned capabilities; keep it current. For continued implementation, follow the active assignment in `docs/handoff-backlog.md` and read `docs/release-requirements.md`. The accepted `docs/local-alpha-plan.md` supersedes the old serial wave order: implement one complete user-facing delivery across layers, not one layer per handoff. Complete its dependencies and acceptance without silently broadening scope.
 
 - This is architecture-first. If a module has no natural place, revise the boundaries before implementing it.
 - Domain/core code has no HTTP, filesystem, database, GUI or device dependencies. Application services own policy; adapters own mechanisms.
@@ -12,6 +12,8 @@ Read `docs/architecture.md` before adding or changing a subsystem. `docs/impleme
 - Document incomplete capabilities honestly; never substitute a successful-looking mock for a missing implementation.
 
 ## Lessons from implementation reviews
+
+- Recover all pages of unfinished workflows periodically, not only the first page at startup. Commit the upstream Job outcome before advancing downstream work; preservation is not the end of enrichment. Persist terminal/cancelled state, fence generic Job retry as well as specialized commands, and keep UI polling until the whole requested workflow settles.
 
 - Bind command receipts to submitted inputs before resolving mutable server configuration. Share the actual effect implementation rather than nesting independently committed commands.
 - Keep provider workflow policy in application services; a frontend should not compose publication and enrichment into a second domain pipeline. Persist completion receipt inputs across panel reopen, fence every asynchronous continuation, and give sibling panels distinct stable React keys.

@@ -1,3 +1,4 @@
+use collector_core::PackageFileName;
 use std::{collections::BTreeMap, io::Read};
 
 use collector_core::{
@@ -232,10 +233,10 @@ struct GameImportCandidateOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct GameImportAnalysisOutput {
+pub struct GameImportAnalysisOutput {
     candidates: Vec<GameImportCandidateOutput>,
     limitations: Vec<String>,
-    observations: Vec<RawJson>,
+    pub observations: Vec<RawJson>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -854,6 +855,15 @@ pub fn hash_cue_package(
 pub struct Games;
 
 impl CollectionModule for Games {
+    fn import_readiness(&self, _names: &[PackageFileName]) -> crate::ImportReadiness {
+        // Game analysis consumes the complete inventory; it has no mandatory
+        // user-selected anchor. The registered analyzer reports format support.
+        crate::ImportReadiness {
+            anchors: vec![],
+            blockers: vec![],
+        }
+    }
+
     fn descriptor(&self) -> ModuleDescriptor {
         let mut descriptor = descriptor(
             "org.junk.games",

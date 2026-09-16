@@ -391,7 +391,40 @@ pub enum MigrationPolicy {
     Transform { reason: &'static str },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestBlockerKind {
+    MissingAnchor,
+    AmbiguousAnchors,
+    UnsupportedPackage,
+    MissingCompanion,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestBlocker {
+    pub kind: IngestBlockerKind,
+    pub message: String,
+    pub blocks_analysis: bool,
+    pub blocks_preservation: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestAnchorChoice {
+    pub file_index: usize,
+    pub label: String,
+    pub selected: bool,
+}
+
+pub struct ImportReadiness {
+    pub anchors: Vec<IngestAnchorChoice>,
+    pub blockers: Vec<IngestBlocker>,
+}
+
 pub trait CollectionModule: Send + Sync {
+    fn import_readiness(&self, _names: &[PackageFileName]) -> ImportReadiness {
+        ImportReadiness { anchors: vec![], blockers: vec![IngestBlocker { kind: IngestBlockerKind::UnsupportedPackage, message: "This module does not provide automatic import analysis; preservation is available.".into(), blocks_analysis: true, blocks_preservation: false }] }
+    }
+
     fn migration_policy(&self, _from: u32) -> MigrationPolicy {
         MigrationPolicy::Additive
     }
@@ -430,6 +463,17 @@ pub struct Registry {
     capabilities: BTreeMap<CapabilityId, String>,
 }
 impl Registry {
+    pub fn import_readiness(
+        &self,
+        owner: &ModuleId,
+        names: &[PackageFileName],
+    ) -> ModuleResult<ImportReadiness> {
+        self.modules
+            .get(&owner.0)
+            .ok_or_else(|| ModuleError::UnavailableCapability(owner.0.clone()))
+            .map(|module| module.import_readiness(names))
+    }
+
     pub fn builtins() -> Self {
         let mut result = Self::default();
         result.register(Box::new(games::Games)).unwrap();

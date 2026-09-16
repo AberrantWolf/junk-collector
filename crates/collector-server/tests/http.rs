@@ -491,6 +491,186 @@ async fn authenticated_descriptors_drive_third_module_create_edit_browse_and_rei
 }
 
 #[tokio::test]
+async fn guided_ingest_routes_resolve_inbox_intent_replay_and_private_history() {
+    let (root, mut state) = state();
+    state.exposure.public_curation = true;
+    let owner = state
+        .store
+        .create_user("guided-owner", "a long owner password", true)
+        .unwrap();
+    let stranger = state
+        .store
+        .create_user("guided-stranger", "a long stranger password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Guided imports"),
+            &command(),
+        )
+        .unwrap();
+    let (owner_token, _) = state.store.issue_session(owner, "browser").unwrap();
+    let (stranger_token, _) = state.store.issue_session(stranger, "browser").unwrap();
+    let inbox_root = root.path().join("guided-inbox");
+    std::fs::create_dir_all(inbox_root.join("Album One")).unwrap();
+    std::fs::write(
+        inbox_root.join("Album One/disc.cue"),
+        b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n",
+    )
+    .unwrap();
+    std::fs::write(inbox_root.join("Album One/disc.bin"), vec![0_u8; 2352 * 10]).unwrap();
+    Arc::make_mut(&mut state.inboxes).insert("Music shelf".into(), inbox_root);
+    let service = state.service.clone();
+    let app = router(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/ingests/plan")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "collection_id": collection.id,
+                        "packages": [{
+                            "source": {"kind":"inbox","label":"Music shelf","package_name":"../Album One"},
+                            "files": []
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/ingests/plan")
+                .header("authorization", format!("Bearer {owner_token}"))
+                .header("origin", "https://collector.example")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "collection_id": collection.id,
+                        "packages": [{
+                            "source": {"kind":"inbox","label":"Music shelf","package_name":"Album One"},
+                            "files": []
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let plan: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(plan["packages"][0]["files"].as_array().unwrap().len(), 2);
+    assert_eq!(plan["packages"][0]["anchors"][0]["selected"], true);
+
+    let start_body = serde_json::to_vec(&serde_json::json!({
+        "plan": plan,
+        "enrichment": "none"
+    }))
+    .unwrap();
+    let start = |key: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/ingests")
+            .header("authorization", format!("Bearer {owner_token}"))
+            .header("origin", "https://collector.example")
+            .header("idempotency-key", key)
+            .header("content-type", "application/json")
+            .body(Body::from(start_body.clone()))
+            .unwrap()
+    };
+    let response = app
+        .clone()
+        .oneshot(start("guided-inbox-start"))
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&response_body)
+    );
+    let accepted: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+    let import_id = accepted["imports"][0]["import_id"].as_str().unwrap();
+    let response = app
+        .clone()
+        .oneshot(start("guided-inbox-start"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let replayed: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(replayed["imports"][0]["import_id"], import_id);
+
+    assert!(service.run_next_job("guided-http-staging").unwrap());
+    assert!(service.run_next_job("guided-http-analysis").unwrap());
+    assert!(service.run_next_job("guided-http-publication").unwrap());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/ingests/{import_id}"))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let detail: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(detail["import"]["phase"], "published");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/ingests/{import_id}"))
+                .header("authorization", format!("Bearer {stranger_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_other_users() {
     let (root, mut state) = state();
     state.exposure.public_curation = true;
@@ -2302,7 +2482,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 86); // Includes application-owned metadata acquisition completion.
+    assert_eq!(paths.len(), 93); // Includes the seven guided-ingest contract paths.
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -2325,6 +2505,13 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/imports/{id}/review",
         "/api/v1/imports/{id}/publish",
         "/api/v1/imports/{id}/files/{index}",
+        "/api/v1/ingests/plan",
+        "/api/v1/ingests",
+        "/api/v1/ingests/{id}",
+        "/api/v1/ingests/{id}/discard",
+        "/api/v1/ingests/{id}/cancel",
+        "/api/v1/ingests/{id}/retry",
+        "/api/v1/ingests/{id}/association",
         "/api/v1/collections/{id}/inboxes",
         "/api/v1/collections/{collection}/inboxes/{label}/stage",
         "/api/v1/collection-types",

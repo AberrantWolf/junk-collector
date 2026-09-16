@@ -1,8 +1,9 @@
 use super::*;
 use crate::files::safe_name;
 use collector_app::{
-    ImportIdentityDecision, ImportPhase, ImportRecord, ImportSourceKind, PortableProcessingRecord,
-    ProcessingPort, ProvisionalImportPort,
+    GuidedIngestIntent, ImportIdentityDecision, ImportPhase, ImportRecord, ImportSourceKind,
+    IngestDiscardResult, IngestEnrichmentPolicy, PortableProcessingRecord, ProcessingPort,
+    ProvisionalImportPort,
 };
 use rusqlite::TransactionBehavior;
 use std::collections::HashSet;
@@ -49,6 +50,23 @@ fn parse_phase(value: &str) -> Result<ImportPhase> {
         "published" => Ok(ImportPhase::Published),
         "cancelled" => Ok(ImportPhase::Cancelled),
         _ => Err(Error::Storage("stored Import phase is invalid".into())),
+    }
+}
+
+fn enrichment(value: IngestEnrichmentPolicy) -> &'static str {
+    match value {
+        IngestEnrichmentPolicy::Automatic => "automatic",
+        IngestEnrichmentPolicy::None => "none",
+    }
+}
+
+fn parse_enrichment(value: &str) -> Result<IngestEnrichmentPolicy> {
+    match value {
+        "automatic" => Ok(IngestEnrichmentPolicy::Automatic),
+        "none" => Ok(IngestEnrichmentPolicy::None),
+        _ => Err(Error::Storage(
+            "stored guided enrichment policy is invalid".into(),
+        )),
     }
 }
 
@@ -281,42 +299,41 @@ fn parse(row: StoredImport) -> Result<ImportRecord> {
 
 const SELECT: &str = "SELECT id,user_id,revision,collection_id,source_kind,source_label,package_name,files,capture_id,representation_id,item_id,specimen_id,component_id,carrier_id,expected_item_revision,candidates,limitations,review,analysis_job_id,phase,created_at,updated_at FROM private.imports";
 
+fn insert_import(tx: &rusqlite::Transaction<'_>, record: &ImportRecord) -> Result<()> {
+    validate(record)?;
+    if record.view.revision != 1 {
+        return Err(Error::Invalid("a new Import starts at revision 1".into()));
+    }
+    let files = stored_json(&record.view.files, 16 * 1024 * 1024, "files")?;
+    let candidates = stored_json(&record.view.candidates, 1024 * 1024, "candidates")?;
+    let limitations = stored_json(&record.view.limitations, 256 * 1024, "limitations")?;
+    let review = record
+        .view
+        .review
+        .as_ref()
+        .map(|value| stored_json(value, 1024 * 1024, "review"))
+        .transpose()?;
+    tx.execute(
+        "INSERT INTO private.imports(id,user_id,revision,collection_id,source_kind,source_label,package_name,files,capture_id,representation_id,item_id,specimen_id,component_id,carrier_id,expected_item_revision,candidates,limitations,review,analysis_job_id,phase,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        params![record.view.id.to_string(),record.user_id.to_string(),record.view.revision,record.view.collection_id.to_string(),source_kind(record.view.source.kind),record.view.source.label,record.view.source.package_name,files,record.view.capture_id.to_string(),record.view.representation_id.to_string(),record.view.association.item_id.map(|id|id.to_string()),record.view.association.specimen_id.map(|id|id.to_string()),record.view.association.component_id.map(|id|id.to_string()),record.view.association.carrier_id.map(|id|id.to_string()),record.view.expected_item_revision.map(|revision|revision.0),candidates,limitations,review,record.view.analysis_job_id.map(|id|id.to_string()),phase(record.view.phase),record.view.created_at.timestamp(),record.view.updated_at.timestamp()],
+    )
+    .map_err(|error| {
+        if error.to_string().contains("UNIQUE constraint failed") {
+            Error::IdempotencyConflict
+        } else {
+            storage(error)
+        }
+    })?;
+    Ok(())
+}
+
 impl ProvisionalImportPort for Store {
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord> {
-        validate(&record)?;
-        if record.view.revision != 1 {
-            return Err(Error::Invalid("a new Import starts at revision 1".into()));
-        }
-        let files = stored_json(&record.view.files, 16 * 1024 * 1024, "files")?;
-        let candidates = stored_json(&record.view.candidates, 1024 * 1024, "candidates")?;
-        let limitations = stored_json(&record.view.limitations, 256 * 1024, "limitations")?;
-        let review = record
-            .view
-            .review
-            .as_ref()
-            .map(|value| stored_json(value, 1024 * 1024, "review"))
-            .transpose()?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        let changed = tx
-            .execute(
-                "INSERT INTO private.imports(id,user_id,revision,collection_id,source_kind,source_label,package_name,files,capture_id,representation_id,item_id,specimen_id,component_id,carrier_id,expected_item_revision,candidates,limitations,review,analysis_job_id,phase,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                params![record.view.id.to_string(),record.user_id.to_string(),record.view.revision,record.view.collection_id.to_string(),source_kind(record.view.source.kind),record.view.source.label,record.view.source.package_name,files,record.view.capture_id.to_string(),record.view.representation_id.to_string(),record.view.association.item_id.map(|id|id.to_string()),record.view.association.specimen_id.map(|id|id.to_string()),record.view.association.component_id.map(|id|id.to_string()),record.view.association.carrier_id.map(|id|id.to_string()),record.view.expected_item_revision.map(|revision|revision.0),candidates,limitations,review,record.view.analysis_job_id.map(|id|id.to_string()),phase(record.view.phase),record.view.created_at.timestamp(),record.view.updated_at.timestamp()],
-            )
-            .map_err(|error| {
-                if error.to_string().contains("UNIQUE constraint failed") {
-                    Error::IdempotencyConflict
-                } else {
-                    storage(error)
-                }
-            })?;
-        if changed != 1 {
-            return Err(Error::Storage(
-                "Import insert did not change one row".into(),
-            ));
-        }
+        insert_import(&tx, &record)?;
         self.record_command(&tx, &record.view)?;
         tx.commit().map_err(storage)?;
         Ok(record)
@@ -632,9 +649,407 @@ impl ProvisionalImportPort for Store {
         let revision = record.view.revision;
         self.save_import(record, revision)
     }
+
+    fn accept_guided_imports(
+        &self,
+        records: Vec<ImportRecord>,
+        intents: Vec<GuidedIngestIntent>,
+    ) -> Result<Vec<collector_app::ImportView>> {
+        if records.is_empty() || records.len() != intents.len() || records.len() > 64 {
+            return Err(Error::Invalid(
+                "guided acceptance requires 1..=64 paired packages".into(),
+            ));
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let mut views = Vec::with_capacity(records.len());
+        for (record, intent) in records.iter().zip(&intents) {
+            if intent.import_id != record.view.id
+                || intent.user_id != record.user_id
+                || intent.default_title.trim().is_empty()
+                || intent.default_title.len() > 4096
+                || intent.plan_token.len() != 64
+            {
+                return Err(Error::Invalid(
+                    "guided intent disagrees with its Import".into(),
+                ));
+            }
+            insert_import(&tx, record)?;
+            tx.execute(
+                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at) VALUES(?,?,?,?,?,?,NULL,?,?)",
+                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.default_title,enrichment(intent.enrichment),intent.created_at.timestamp(),intent.updated_at.timestamp()],
+            )
+            .map_err(storage)?;
+            views.push(record.view.clone());
+        }
+        self.record_command(&tx, &views)?;
+        tx.commit().map_err(storage)?;
+        Ok(views)
+    }
+
+    fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
+        lock(&self.db)?
+            .query_row(
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled FROM private.guided_ingest_intents WHERE import_id=?",
+                [id.to_string()],
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?)),
+            )
+            .optional()
+            .map_err(storage)?
+            .map(|row| {
+                Ok(GuidedIngestIntent {
+                    import_id: id,
+                    user_id: row.0.parse().map_err(storage)?,
+                    plan_token: row.1,
+                    target_item_id: row.2.parse().map_err(storage)?,
+                    default_title: row.3,
+                    enrichment: parse_enrichment(&row.4)?,
+                    enrichment_error: row.5,
+                    settled: row.8,
+                    cancelled: row.9,
+                    created_at: chrono::DateTime::from_timestamp(row.6, 0).ok_or_else(|| Error::Storage("guided intent creation timestamp is invalid".into()))?,
+                    updated_at: chrono::DateTime::from_timestamp(row.7, 0).ok_or_else(|| Error::Storage("guided intent update timestamp is invalid".into()))?,
+                })
+            })
+            .transpose()
+    }
+
+    fn resumable_guided_ingest_ids(
+        &self,
+        after: Option<ImportId>,
+        limit: u16,
+    ) -> Result<Vec<ImportId>> {
+        if !(1..=256).contains(&limit) {
+            return Err(Error::Invalid(
+                "guided recovery limit must be 1..=256".into(),
+            ));
+        }
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "SELECT g.import_id
+                 FROM private.guided_ingest_intents g
+                 JOIN private.imports i ON i.id=g.import_id
+                 WHERE i.phase IN ('analyzing','awaiting_review','published') AND g.settled=0 AND g.cancelled=0 AND (? IS NULL OR g.import_id>?)
+                 ORDER BY g.import_id
+                 LIMIT ?",
+            )
+            .map_err(storage)?;
+        statement
+            .query_map(
+                params![
+                    after.map(|id| id.to_string()),
+                    after.map(|id| id.to_string()),
+                    i64::from(limit)
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(storage)?
+            .map(|value| value.map_err(storage)?.parse::<ImportId>().map_err(storage))
+            .collect()
+    }
+
+    fn resumable_guided_inbox_records(
+        &self,
+        after: Option<ImportId>,
+        limit: u16,
+    ) -> Result<Vec<ImportRecord>> {
+        if !(1..=256).contains(&limit) {
+            return Err(Error::Invalid(
+                "guided inbox recovery limit must be 1..=256".into(),
+            ));
+        }
+        let db = lock(&self.db)?;
+        let sql = format!(
+            "{SELECT} WHERE phase='staging' AND source_kind='inbox'
+             AND EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=imports.id AND g.cancelled=0) AND (? IS NULL OR id>?)
+             ORDER BY id LIMIT ?"
+        );
+        let mut statement = db.prepare(&sql).map_err(storage)?;
+        statement
+            .query_map(
+                params![
+                    after.map(|id| id.to_string()),
+                    after.map(|id| id.to_string()),
+                    i64::from(limit)
+                ],
+                read,
+            )
+            .map_err(storage)?
+            .map(|row| parse(row.map_err(storage)?))
+            .collect()
+    }
+
+    fn reconcile_guided_cleanup(&self) -> Result<()> {
+        self.reconcile_import_cleanup()
+    }
+
+    fn guided_cleanup_status(&self, id: ImportId) -> Result<Option<IngestDiscardResult>> {
+        lock(&self.db)?.query_row("SELECT reclaimed_bytes,pending_bytes,completed FROM private.import_cleanup WHERE import_id=?",[id.to_string()],|row| Ok((row.get::<_,u64>(0)?,row.get::<_,u64>(1)?,row.get::<_,bool>(2)?))).optional().map_err(storage).map(|value| value.map(|(reclaimed,pending,completed)| IngestDiscardResult { import_id:id,reclaimed_bytes:ByteLength(reclaimed),pending_bytes:ByteLength(pending),cleanup_pending:!completed }))
+    }
+
+    fn save_guided_ingest_intent(&self, intent: GuidedIngestIntent) -> Result<()> {
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let changed = tx.execute("UPDATE private.guided_ingest_intents SET enrichment_error=?,updated_at=?,settled=CASE WHEN cancelled=1 THEN 1 ELSE ? END,cancelled=MAX(cancelled,?) WHERE import_id=? AND user_id=? AND plan_token=? AND target_item_id=?", params![intent.enrichment_error,intent.updated_at.timestamp(),intent.settled,intent.cancelled,intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string()]).map_err(storage)?;
+        if changed != 1 {
+            return Err(Error::Conflict);
+        }
+        self.record_command(&tx, &())?;
+        tx.commit().map_err(storage)
+    }
+
+    fn guided_import_records(
+        &self,
+        user: UserId,
+        collection: Option<CollectionId>,
+        cursor: Option<ImportId>,
+        limit: u16,
+    ) -> Result<Page<ImportRecord>> {
+        if !(1..=100).contains(&limit) {
+            return Err(Error::Invalid("Import page limit must be 1..=100".into()));
+        }
+        let db = lock(&self.db)?;
+        let mut sql = format!(
+            "{SELECT} WHERE user_id=? AND EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=imports.id)"
+        );
+        if collection.is_some() {
+            sql.push_str(" AND collection_id=?");
+        }
+        if cursor.is_some() {
+            sql.push_str(" AND id>?");
+        }
+        sql.push_str(" ORDER BY id LIMIT ?");
+        let mut statement = db.prepare(&sql).map_err(storage)?;
+        let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(user.to_string())];
+        if let Some(collection) = collection {
+            values.push(Box::new(collection.to_string()));
+        }
+        if let Some(cursor) = cursor {
+            values.push(Box::new(cursor.to_string()));
+        }
+        values.push(Box::new(i64::from(limit) + 1));
+        let refs = values
+            .iter()
+            .map(|value| value.as_ref())
+            .collect::<Vec<_>>();
+        let rows = statement
+            .query_map(refs.as_slice(), read)
+            .map_err(storage)?;
+        let mut items = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(parse)
+            .collect::<Result<Vec<_>>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|record| record.view.id.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
+    fn import_job_records(
+        &self,
+        id: ImportId,
+        user: UserId,
+    ) -> Result<Vec<collector_app::JobRecord>> {
+        self.job_records_for_import(id, user)
+    }
+
+    fn discard_guided_import(
+        &self,
+        id: ImportId,
+        expected_revision: u64,
+    ) -> Result<IngestDiscardResult> {
+        let _writer = lock(&self.writer)?;
+        let record = self.import_record(id)?;
+        if self.guided_cleanup_status(id)?.is_some() {
+            return Err(Error::Conflict);
+        }
+
+        if record.view.revision != expected_revision {
+            return Err(Error::Conflict);
+        }
+        if matches!(
+            record.view.phase,
+            ImportPhase::Publishing | ImportPhase::Published
+        ) {
+            return Err(Error::CancellationTooLate);
+        }
+        let pending = record
+            .view
+            .files
+            .iter()
+            .map(|file| file.received_bytes.0)
+            .sum::<u64>();
+        let now = self.clock.now().timestamp();
+        {
+            let mut db = lock(&self.db)?;
+            let tx = db
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+            tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',updated_at=? WHERE user_id=? AND state='queued' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
+            tx.execute("UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=? WHERE user_id=? AND state='running' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
+            let changed = tx.execute("UPDATE private.imports SET phase='cancelled',revision=revision+1,updated_at=? WHERE id=? AND revision=?",params![now,id.to_string(),expected_revision]).map_err(storage)?;
+            if changed != 1 {
+                return Err(Error::Conflict);
+            }
+            tx.execute("INSERT INTO private.import_cleanup(import_id,requested_at,reclaimed_bytes,pending_bytes,error) VALUES(?,?,0,?,NULL) ON CONFLICT(import_id) DO UPDATE SET requested_at=excluded.requested_at,pending_bytes=excluded.pending_bytes,error=NULL",params![id.to_string(),now,pending]).map_err(storage)?;
+            let result = IngestDiscardResult {
+                import_id: id,
+                reclaimed_bytes: ByteLength(0),
+                pending_bytes: ByteLength(pending),
+                cleanup_pending: true,
+            };
+            self.record_command(&tx, &result)?;
+            tx.commit().map_err(storage)?;
+        }
+        Ok(IngestDiscardResult {
+            import_id: id,
+            reclaimed_bytes: ByteLength(0),
+            pending_bytes: ByteLength(pending),
+            cleanup_pending: true,
+        })
+    }
+
+    fn cancel_guided_import(&self, id: ImportId, expected_revision: u64) -> Result<ImportRecord> {
+        let _writer = lock(&self.writer)?;
+        let record = self.import_record(id)?;
+        if record.view.revision != expected_revision {
+            return Err(Error::Conflict);
+        }
+        let committed = matches!(record.view.phase, ImportPhase::Published)
+            || self.capture(record.view.capture_id).is_ok();
+        let now = self.clock.now().timestamp();
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',updated_at=? WHERE user_id=? AND state='queued' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
+        tx.execute("UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=? WHERE user_id=? AND state='running' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
+        tx.execute(
+            "UPDATE private.guided_ingest_intents SET cancelled=1,settled=1 WHERE import_id=?",
+            [id.to_string()],
+        )
+        .map_err(storage)?;
+        let next_phase = if committed { "published" } else { "cancelled" };
+        let changed = tx.execute("UPDATE private.imports SET phase=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?",params![next_phase,now,id.to_string(),expected_revision]).map_err(storage)?;
+        if changed != 1 {
+            return Err(Error::Conflict);
+        }
+        let mut result = record;
+        result.view.phase = if committed {
+            ImportPhase::Published
+        } else {
+            ImportPhase::Cancelled
+        };
+        result.view.revision += 1;
+        result.view.updated_at = chrono::DateTime::from_timestamp(now, 0)
+            .ok_or_else(|| Error::Storage("cancellation timestamp is invalid".into()))?;
+        self.record_command(&tx, &result)?;
+        tx.commit().map_err(storage)?;
+        Ok(result)
+    }
 }
 
 impl Store {
+    pub(crate) fn reconcile_import_cleanup(&self) -> Result<()> {
+        let ids = {
+            let db = lock(&self.db)?;
+            let mut statement = db
+                .prepare("SELECT import_id FROM private.import_cleanup WHERE completed=0 ORDER BY import_id")
+                .map_err(storage)?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        let mut first_error = None;
+        for id in ids {
+            let id = id.parse().map_err(storage)?;
+            if let Err(error) = self.finish_import_cleanup(id) {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn finish_import_cleanup(&self, id: ImportId) -> Result<IngestDiscardResult> {
+        let _uploads = lock(&self.uploads)?;
+        let record = self.import_record(id)?;
+        if record.view.phase != ImportPhase::Cancelled
+            || self.capture(record.view.capture_id).is_ok()
+        {
+            return Err(Error::CancellationTooLate);
+        }
+        let active: bool = lock(&self.db)?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE state IN ('running','cancel_requested') AND json_extract(request,'$.import_id')=?)",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        let pending: u64 = lock(&self.db)?
+            .query_row(
+                "SELECT pending_bytes FROM private.import_cleanup WHERE import_id=?",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        if active {
+            let result = IngestDiscardResult {
+                import_id: id,
+                reclaimed_bytes: ByteLength(0),
+                pending_bytes: ByteLength(pending),
+                cleanup_pending: true,
+            };
+            return Ok(result);
+        }
+        let directory = self.state.join("imports").join(id.to_string());
+        let result = if directory.exists() {
+            fs::remove_dir_all(&directory).map_err(storage)
+        } else {
+            Ok(())
+        };
+        match result {
+            Ok(()) => {
+                let result = IngestDiscardResult {
+                    import_id: id,
+                    reclaimed_bytes: ByteLength(pending),
+                    pending_bytes: ByteLength(0),
+                    cleanup_pending: false,
+                };
+                let mut db = lock(&self.db)?;
+                let tx = db.transaction().map_err(storage)?;
+                tx.execute(
+                        "UPDATE private.import_cleanup SET reclaimed_bytes=?,pending_bytes=0,error=NULL,completed=1 WHERE import_id=?",
+                        params![pending, id.to_string()],
+                    )
+                    .map_err(storage)?;
+
+                tx.commit().map_err(storage)?;
+                Ok(result)
+            }
+            Err(error) => {
+                lock(&self.db)?
+                    .execute(
+                        "UPDATE private.import_cleanup SET error=? WHERE import_id=?",
+                        params![error.to_string(), id.to_string()],
+                    )
+                    .map_err(storage)?;
+                Err(error)
+            }
+        }
+    }
+
     fn publish_import_inner(
         &self,
         id: ImportId,

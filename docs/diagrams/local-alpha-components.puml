@@ -1,0 +1,23 @@
+@startuml
+ title Local alpha LA1 - implemented ingestion ownership
+ component "Web UI\nintent, decisions, progress" as Web
+ component "HTTP\nauthentication, generated contracts" as HTTP
+ component "Application ingestion coordinator\npolicy, authorization, recovery decisions" as App
+ component "Domain modules + narrow shared libraries\nreadiness, parsing, identity, audio" as Domain
+ component "Existing job host\nbounded execution, leases, cancellation" as Jobs
+ component "Store adapters\nprivate intent and attempts" as State
+ component "Existing archive publisher\nmasters, evidence, metadata, assets" as Archive
+ component "Provider / encoder adapters\nnetwork and process mechanisms" as IO
+ Web --> HTTP
+ HTTP --> App
+ App --> Domain
+ App --> State
+ App --> Jobs : durable intent / stable child identities
+ Jobs --> App : execute authorized steps
+ App --> Archive : existing effects
+ App --> IO : existing ports
+ note bottom of App
+ No browser orchestration, generic DAG engine,
+ duplicate importer or domain filesystem access.
+ end note
+@enduml

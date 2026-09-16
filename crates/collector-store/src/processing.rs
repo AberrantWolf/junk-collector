@@ -1213,6 +1213,15 @@ impl ProcessingPort for Store {
             .transpose()
     }
 
+    fn metadata_refresh_observed(
+        &self,
+        collection: CollectionId,
+        item: collector_core::ItemId,
+        observation: collector_core::ObservationId,
+    ) -> Result<bool> {
+        lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM metadata_refreshes WHERE id=? AND collection_id=? AND item_id=?)", params![observation.to_string(), collection.to_string(), item.to_string()], |row| row.get(0)).map_err(storage)
+    }
+
     fn metadata_candidates(
         &self,
         collection: CollectionId,

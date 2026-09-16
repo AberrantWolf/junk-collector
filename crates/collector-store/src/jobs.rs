@@ -73,6 +73,35 @@ fn parse_job_record(row: StoredJobRecord) -> Result<JobRecord> {
 }
 
 impl Store {
+    pub(crate) fn job_records_for_import(
+        &self,
+        import: ImportId,
+        user: UserId,
+    ) -> Result<Vec<JobRecord>> {
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "SELECT id,user_id,collection_id,item_id,kind,state,phase,
+                        completed_units,total_units,attempt,created_at,updated_at,
+                        error,limitation,result
+                 FROM private.jobs
+                 WHERE user_id=? AND json_extract(request,'$.import_id')=?
+                 ORDER BY created_at,id LIMIT 256",
+            )
+            .map_err(storage)?;
+        let rows = statement
+            .query_map(
+                params![user.to_string(), import.to_string()],
+                read_job_record,
+            )
+            .map_err(storage)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(parse_job_record)
+            .collect()
+    }
+
     pub(crate) fn active_derivative_job_records(
         &self,
         capture: CaptureId,
@@ -306,6 +335,7 @@ impl Store {
                 return Err(Error::IdempotencyConflict);
             }
         } else {
+            ensure_import_allows_work(&tx, &spec.request)?;
             tx.execute(
                 "INSERT INTO private.jobs(
                   id,user_id,collection_id,item_id,kind,state,phase,
@@ -830,6 +860,18 @@ impl Store {
         {
             return Err(Error::Conflict);
         }
+        let request: String = tx
+            .query_row(
+                "SELECT request FROM private.jobs WHERE id=?",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+        ensure_import_allows_work(&tx, &request)?;
+        if let Some(import) = request.get("import_id").and_then(serde_json::Value::as_str) {
+            tx.execute("UPDATE private.guided_ingest_intents SET settled=0,enrichment_error=NULL WHERE import_id=?", [import]).map_err(storage)?;
+        }
         let mut result = prior_result
             .as_deref()
             .map(serde_json::from_str)
@@ -870,15 +912,41 @@ fn cancel_job_import(
     request: &str,
     now: i64,
 ) -> Result<()> {
-    if kind.starts_with("import_") {
-        let request: serde_json::Value = serde_json::from_str(request).map_err(storage)?;
-        if let Some(import_id) = request.get("import_id").and_then(serde_json::Value::as_str) {
+    let request: serde_json::Value = serde_json::from_str(request).map_err(storage)?;
+    if let Some(import_id) = request.get("import_id").and_then(serde_json::Value::as_str) {
+        // Generic Job cancellation must also settle guided provider work. Its
+        // Capture can already be published, so do not cancel preservation here.
+        tx.execute(
+            "UPDATE private.guided_ingest_intents SET cancelled=1,settled=1,updated_at=? WHERE import_id=?",
+            params![now, import_id],
+        ).map_err(storage)?;
+        if kind.starts_with("import_") {
             tx.execute(
                 "UPDATE private.imports SET phase='cancelled',revision=revision+1,updated_at=?
                  WHERE id=? AND phase<>'published' AND phase<>'cancelled'",
                 params![now, import_id],
             )
             .map_err(storage)?;
+        }
+    }
+    Ok(())
+}
+
+// Admission and cancellation share the private-state transaction. A stopped
+// import cannot be resurrected through either the guided or generic job API.
+fn ensure_import_allows_work(
+    tx: &rusqlite::Transaction<'_>,
+    request: &serde_json::Value,
+) -> Result<()> {
+    if let Some(import) = request.get("import_id").and_then(serde_json::Value::as_str) {
+        let stopped: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM private.imports WHERE id=?1 AND phase='cancelled')
+             OR EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE import_id=?1 AND cancelled=1)
+             OR EXISTS(SELECT 1 FROM private.import_cleanup WHERE import_id=?1)",
+            [import], |row| row.get(0)
+        ).map_err(storage)?;
+        if stopped {
+            return Err(Error::Conflict);
         }
     }
     Ok(())

@@ -1,0 +1,39 @@
+@startuml
+ title Local alpha LA1 - implemented durable import sequence
+ actor User
+ participant "Web/API" as Web
+ participant "Application" as App
+ database "Private intent/jobs" as State
+ participant "Existing worker" as Worker
+ participant "Archive effects" as Archive
+ participant "Provider adapters" as Providers
+ User -> Web : select packages, collection, enrichment policy
+ Web -> App : plan and accept validated intent
+ App -> State : atomic intent + acceptance receipt
+ App --> Web : stable ImportIds, atomic package admission
+ note over Web,Worker : Browser may close; pending upload still requires bytes
+ Worker -> App : periodically resume all unsettled Import pages
+ App -> State : readiness and current authorization
+ alt browser bytes incomplete
+ App -> State : retain resumable upload state
+ else complete package and valid destination
+ App -> Archive : ensure target and preserve using existing journals
+ Archive --> App : committed Capture/Representation identities
+ App -> State : reconcile committed preservation
+ par optional metadata
+ App -> Providers : acquire identity / artwork with existing jobs
+ Providers --> App : retained snapshots or typed failure
+ App -> Archive : resolver / Asset effects, protect manual authority
+ else requested preparation (LA2)
+ App -> State : admit existing per-track jobs
+ end
+ App -> State : independent step outcomes and retry actions
+ end
+ User -> Web : reopen import list
+ Web -> App : authorized status query
+ App --> Web : preserved, processing, needs-input or partial outcome
+ note over App,Archive
+ Crash between effect and bookkeeping: reconcile stable identities.
+ Cancellation after commit retains originals and stops remaining owned work.
+ end note
+@enduml

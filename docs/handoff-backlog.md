@@ -4,15 +4,35 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
+## Active assignment — local alpha
+
+Accepted 2026-09-16 after D06.3 commit `3a6143b`: follow the
+[local-alpha plan](local-alpha-plan.md). **LA1 guided ingestion and automatic
+enrichment is reviewed and corrected locally; P05.1 is paused.** LA2 completes album preparation/browsing;
+LA3 qualifies actual dumps, local users and backup/restore. The detailed acceptance
+of old tickets remains useful, but their serial child handoffs no longer govern
+this work.
+
+| Active delivery | Mapped work | State |
+|---|---|---|
+| LA1 | P03/P04 intake/history/recovery, U05 journey readiness, D04–D06 integration | Reviewed and corrected; acceptance passed |
+| LA2 | D07.4–D07.5, browse/playback and nonblocking workflow | Ready for implementation; not started |
+| LA3 | Local real-dump/provider/user qualification and stopped-server recovery drill | Planned |
+
+The [LA2 implementation prompt](local-alpha-plan.md#ready-to-send-la2-implementation-prompt) is the
+next assignment. LA1 is a recommended backup checkpoint; no commit was made by the review. Preserve the broader release backlog below; mark its
+criteria complete only with corresponding evidence, not because an alpha delivery
+mentions them.
+
 ## How to use this backlog
 
 Read `AGENTS.md`, [architecture](architecture.md), [implementation status](implementation-status.md), and the ticket before editing. Start from the current checkout and inspect applicable sibling instructions before any extraction. Preserve local configuration, credentials and user archives; use temporary fixture servers for tests. Never reset the user's state to make a test pass.
 
-Assign one ticket at a time. Dependencies must be completed or their required contract explicitly available before dependent implementation starts. **Routine** tickets suit a less capable model after dependencies. **Review** tickets require experienced architecture/security/domain review of the design and final diff; this is a technical review checkpoint, not an instruction to ask the user for routine tool permission. **Gate** tickets produce a concrete design or fixture inventory first; their dependent tickets must not guess the unresolved contract. Only ask the user about unresolved product choices or unavailable required inputs, after inspecting the repository and sibling code.
+For the active alpha, assign one integrated LA delivery at a time; ordinary backend/API/UI steps proceed without intermediate handoffs. For later backlog work, assign one ticket at a time. Dependencies must be completed or their required contract explicitly available before dependent implementation starts. **Routine** tickets suit a less capable model after dependencies. **Review** tickets require experienced architecture/security/domain review of the design and final diff; this is a technical review checkpoint, not an instruction to ask the user for routine tool permission. **Gate** tickets produce a concrete design or fixture inventory first; their dependent tickets must not guess the unresolved contract. Only ask the user about unresolved product choices or unavailable required inputs, after inspecting the repository and sibling code.
 
-Each ticket lists its owning layers, entry files, scope, acceptance and limits. New files/crates are allowed when justified by those boundaries. A ticket that remains too large after inspection must be split into numbered child tickets here, with independent acceptance tests, before a successor is asked to implement it wholesale. Do not silently absorb adjacent tickets. Record status, resulting commits, exact checks and remaining limitations under the ticket on completion; update implementation-status.md and validation.md as appropriate.
+Each ticket lists its owning layers, entry files, scope, acceptance and limits. New files/crates are allowed when justified by those boundaries. Split a delivery only when it contains an unresolved boundary or independent user outcome, not merely because it spans multiple layers. Keep routine internal steps in its implementation checklist. Do not silently absorb adjacent tickets. Record status, resulting commits, exact checks and remaining limitations under the ticket on completion; update implementation-status.md and validation.md as appropriate.
 
-### Suggested order
+### Historical full-release order (alpha takes precedence)
 
 | Wave | Tickets | Purpose |
 |---|---|---|
@@ -23,11 +43,10 @@ Each ticket lists its owning layers, entry files, scope, acceptance and limits. 
 | 5 | C03, C04, C05, C06, C07, P06 | Client integration, offline use, Trash Amp and scale |
 | 6 | R01, R02, R03 | Deployment, performance and release evidence |
 
-Within a wave follow the explicit dependencies below, not table position. Independent tracks may proceed separately if deliberately assigned. The next implementation wave is **Wave 4**; select one of its tickets only after checking its explicit dependencies and splitting it into bounded children where needed. Wave 3 completion does not qualify unavailable private fixtures, providers, hardware, or target platforms. Do not give a small model the entire table as one coding task.
+For work resumed after alpha, follow explicit dependencies rather than table position. The table is not the next assignment: LA1 is current. Existing completion records do not qualify unavailable private fixtures, providers, hardware or target platforms. Do not assign the entire release table as one coding task.
 
-A [music-first scheduling proposal](music-first-milestones.md) identifies earlier
-web and Trash Amp playback milestones without removing release gates. It is a
-proposal; D05.3 is reviewed; D07 now precedes D06. Later native acceleration remains a proposal.
+The [historical music-first proposal](music-first-milestones.md) retains useful
+Trash Amp/native design context. Its execution order is superseded by local alpha.
 
 ### Contract planning for remaining waves
 
@@ -39,20 +58,21 @@ integration. Wave 6 tests the current release format and real external imports; 
 does not automatically freeze backend compatibility. Update callers and generated
 contracts together, with a concrete preservation/conversion path for actual data.
 
-### Wave 4 execution entry point
+### Wave 4 contract and history reference
 
-The [Wave 4 implementation handoff](wave-4-plan.md) is the detailed execution
-contract for D04–D07, P05, C01, S04 and C02. **W4.0 is reviewed and corrected;
+The [Wave 4 implementation handoff](wave-4-plan.md) retains the detailed
+contracts for D04–D07, P05, C01, S04 and C02. **W4.0 is reviewed and corrected;
 W4.1 contracts are reviewed and corrected; W4.2 durable processing integration is
 reviewed and corrected.**
 The [collection-type refactor](collection-types-plan.md) (CT.1–CT.4) is the inserted
 prerequisite. CT.1–CT.4 are reviewed and corrected. D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1–D07.2 are reviewed and corrected locally; D07.3 is reviewed and corrected locally. Authenticated descriptors, availability-aware
 content permissions, generic owner-driven forms and valid unavailable-owner browser
 fallback coverage are present. D06.1 is reviewed and corrected locally; D06.2 is
-reviewed and corrected locally; D06.3 is reviewed and corrected locally. P05.1 is the next serial child.
+reviewed and corrected locally; D06.3 is reviewed and corrected locally. LA1 is
+implemented locally and is the active review assignment; P05.1 is paused.
 The plan supplies child steps, fixed ownership,
 fixture requirements, failure tests and review checkpoints. C01 precedes S04,
-and C02 follows both. Its final section contains a ready-to-send agent prompt.
+and C02 follows both. Its final section now redirects to the active local-alpha assignment.
 
 W4.0 inspected Collector `c5c3ecfb2ada2624e780ac128b290e4c37f1d468`
 and the four current sibling revisions without changing them. The dated reuse map
@@ -159,14 +179,16 @@ Planned children (complete in order): [A04.1 DTO firewall/read services](wave-2-
 
 ### U05 — Guided interfaces and readiness review
 
-**Status (2026-09-15): planned; required before web UI completion.** U05.1 adds
-typed readiness and smart analysis defaults; U05.2 audits and corrects every
+**Status (updated 2026-09-16): LA1 guided-intake subset implemented; broader gate
+remains planned and required before web UI completion.** LA1 adds typed package
+anchors/blockers and provider prerequisites for its path. U05.1 still owns the
+complete operation matrix; U05.2 audits and corrects every
 implemented interface; U05.3 validates complete journeys and negative cases.
 See the [interface readiness plan](interface-readiness-plan.md) for contracts,
 coverage and acceptance. Application/module services own eligibility; all clients
 consume it. This complements P04 import history/cleanup and applies to future
-interface acceptance too. It does not replace the current D06 root review; U05
-remains later work.
+interface acceptance too. It does not replace completed D06 review, and LA1 does
+not claim application-wide U05 completion.
 
 ### U01 — Explain local setup and denied operations in the WebUI
 
@@ -449,9 +471,12 @@ filesystem termination behavior remain externally unqualified.
 
 ### P04 — Inbox, import-review and job UI
 
-**Current scope (2026-09-15): reopened for required web UI completion work.**
-P04.1–P04.3 passed their original acceptance; P04.4 identifiable import/attempt
-history, P04.5 cleanup, and P04.6 completion review remain planned. See the
+**Current scope (updated 2026-09-16): reopened for required web UI completion work.**
+P04.1–P04.3 passed their original acceptance. LA1 implements the focused guided
+subset of P04.4/P04.5: personal bounded list/detail and retained attempts, reopen,
+step retry/cancel, durable unpublished staging reclamation, and published Capture
+association correction. P04.4 search/filter breadth, terminal dismiss/archive/
+restore, selected/bulk cleanup and the full P04.6 completion review remain planned. See the
 [import management follow-up](import-management-plan.md) for ownership, acceptance,
 and the future assignment. This gate does not change the current D06 root review.
 
@@ -627,7 +652,8 @@ deployment checks remain unrun. D06.3 adds curation-only typed review/acquisitio
 refresh/artwork routes, effective viewer-safe browse/search/detail projection and a
 reopenable provider-job review panel with manual authority and retained history.
 Deterministic Google Chrome workflow coverage uses local provider fixtures and real
-published artwork bytes. The D06 root review is complete; P05.1 is next.
+published artwork bytes. The D06 root review is complete; LA1 is implemented
+locally and reviewed with corrections under the local-alpha plan.
 Follow the [Wave 4 child instructions](wave-4-plan.md#d061--durable-metadata-authority)
 and shared W4.0–W4.2 prerequisites in that plan.
 
@@ -647,7 +673,7 @@ Whole-album FLAC preparation and independently queued encodes are defined in the
 per-track behavior, not this batch/nonblocking requirement. P02 owns queue bounds;
 U05 applies the rule to all interfaces. The current D06 root review remains bounded.
 
-**Status (2026-09-15): D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. D07.2 publishes one track per job through the existing Capture journal. D07.3 adds viewer-safe ordered availability, server-owned optional encoder probing, curation-only preparation, strong ETag/ranged reads and web preparation/progress controls. The browser child consumes that DTO on the client surface, keeps Capture/source queues distinct, and has actual Google Chrome 153.0.8010.37 FLAC play/pause/seek/transition qualification. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external. The bounded child is reviewed; D06.3 is reviewed and corrected locally; P05.1 is next. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-15): D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. D07.2 publishes one track per job through the existing Capture journal. D07.3 adds viewer-safe ordered availability, server-owned optional encoder probing, curation-only preparation, strong ETag/ranged reads and web preparation/progress controls. The browser child consumes that DTO on the client surface, keeps Capture/source queues distinct, and has actual Google Chrome 153.0.8010.37 FLAC play/pause/seek/transition qualification. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external. The bounded child is reviewed; D06.3 is reviewed and corrected locally; LA1 is reviewed and corrected locally under the local-alpha plan. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D03, D05, P02, A04. **Owner:** audio transforms, application derivative jobs, store representations.
 

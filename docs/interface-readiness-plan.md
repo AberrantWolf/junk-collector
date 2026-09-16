@@ -1,10 +1,15 @@
 # U05 — Guided interfaces and readiness review
 
+**Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
+LA1–LA3 integrate the relevant acceptance below across layers. Individual child
+assignments at the bottom are reference scope, not separate required handoffs.
+Keep unmet broader criteria open; alpha does not certify every web interface.
+
 User requirement, 2026-09-15. Planned, not implemented. Required alongside
 [P04.4–P04.6](import-management-plan.md) before declaring the web UI complete.
 Applies to every implemented web surface and to acceptance of future web, native
 and CLI interfaces. It does not require implementing all future clients now or
-change the current P05.1 handoff.
+block LA1 on unrelated future interfaces.
 
 ## Standard for every action
 
@@ -67,7 +72,7 @@ Both require the appropriate supporting package members, not just a sidecar.
 
 | Child | State | Scope |
 |---|---|---|
-| U05.1 — Readiness contracts and analysis defaults | Planned | A03/A04/P03/D05: module input requirements, typed preflight/eligible inputs, complete analysis workflow |
+| U05.1 — Readiness contracts and analysis defaults | LA1 guided subset implemented | LA1 previews typed anchors/blockers/provider availability and selects one unique CUE/TOC anchor; the full operation matrix remains planned |
 | U05.2 — Audit and correct all implemented interfaces | Planned | U05.1 plus each surface's owning services: enumerate every screen/action, implement findings through their owners |
 | U05.3 — Interface completion review | Planned | U05.2/P04.6: actual user journeys, negative cases and audited completion evidence |
 
@@ -95,7 +100,7 @@ first-file/default-profile shortcuts and verify that known-invalid submissions
 create no job. Record real UI evidence and all remaining gaps; a happy-path smoke
 test or completed audit document alone cannot satisfy acceptance.
 
-## Ready-to-send assignment when scheduled
+## Historical child assignment (use the local-alpha handoff instead)
 
 Implement U05.1 from docs/interface-readiness-plan.md. Read AGENTS.md,
 docs/architecture.md, docs/release-requirements.md and the relevant A03/A04/P03/D05

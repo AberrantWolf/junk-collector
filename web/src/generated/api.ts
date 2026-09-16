@@ -756,6 +756,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_ingests"];
+        put?: never;
+        post: operations["start_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingests/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["plan_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ingest_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingests/{id}/association": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["correct_ingest_association"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingests/{id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["discard_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingests/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retry_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items": {
         parameters: {
             query?: never;
@@ -1384,6 +1496,10 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcceptedIngest: {
+            imports: components["schemas"]["IngestSummary"][];
+            rejected: components["schemas"]["IngestRejectedPackage"][];
+        };
         AccountChange: {
             administrator: boolean;
             display_name: string;
@@ -1662,6 +1778,11 @@ export interface components {
             /** @enum {string} */
             codec: "opus";
         };
+        CorrectIngestAssociationCommand: {
+            association: components["schemas"]["CaptureAssociation"];
+            expected_capture_revision: components["schemas"]["Revision"];
+            expected_item_revision?: null | components["schemas"]["Revision"];
+        };
         /**
          * @description Typed creation input reserved for CT.2 runtime integration. Keeping the
          *     module mandatory here prevents `LegacyUnassigned` from becoming a valid new
@@ -1677,6 +1798,10 @@ export interface components {
         Digest: {
             algorithm: components["schemas"]["HashAlgorithm"];
             hex: string;
+        };
+        DiscardIngestCommand: {
+            /** Format: int64 */
+            expected_revision: number;
         };
         DisposeSpecimen: {
             command: components["schemas"]["DisposeSpecimenCommand"];
@@ -1862,6 +1987,105 @@ export interface components {
         InboxSourceView: {
             label: string;
             packages: string[];
+        };
+        IngestAnchorChoice: {
+            file_index: number;
+            label: string;
+            selected: boolean;
+        };
+        IngestAttemptView: {
+            /** Format: int32 */
+            attempt: number;
+            diagnostic?: string | null;
+            /** Format: date-time */
+            finished_at?: string | null;
+            job_id: components["schemas"]["JobId"];
+            /** Format: date-time */
+            started_at?: string | null;
+            state: components["schemas"]["JobState"];
+            step: string;
+        };
+        IngestBlocker: {
+            blocks_analysis: boolean;
+            blocks_preservation: boolean;
+            kind: components["schemas"]["IngestBlockerKind"];
+            message: string;
+        };
+        /** @enum {string} */
+        IngestBlockerKind: "missing_anchor" | "ambiguous_anchors" | "unsupported_package" | "missing_companion";
+        IngestDetail: {
+            attempts: components["schemas"]["IngestAttemptView"][];
+            cleanup?: null | components["schemas"]["IngestDiscardResult"];
+            import: components["schemas"]["ImportView"];
+            steps: components["schemas"]["IngestStepView"][];
+            summary: components["schemas"]["IngestSummary"];
+        };
+        IngestDiscardResult: {
+            cleanup_pending: boolean;
+            import_id: components["schemas"]["ImportId"];
+            pending_bytes: components["schemas"]["ByteLength"];
+            reclaimed_bytes: components["schemas"]["ByteLength"];
+        };
+        /** @enum {string} */
+        IngestEnrichmentPolicy: "automatic" | "none";
+        IngestPackageSelection: {
+            files: components["schemas"]["UploadFile"][];
+            source: components["schemas"]["ImportSourceSummary"];
+        };
+        IngestPermissions: {
+            can_cancel: boolean;
+            can_correct_association: boolean;
+            can_discard: boolean;
+        };
+        IngestPlan: {
+            collection_id: components["schemas"]["CollectionId"];
+            packages: components["schemas"]["IngestPlanPackage"][];
+            token: string;
+        };
+        IngestPlanPackage: {
+            analysis_available: boolean;
+            anchors: components["schemas"]["IngestAnchorChoice"][];
+            artwork_available: boolean;
+            blockers: components["schemas"]["IngestBlocker"][];
+            default_title: string;
+            files: components["schemas"]["UploadFile"][];
+            metadata_available: boolean;
+            /** Format: int32 */
+            position: number;
+            source: components["schemas"]["ImportSourceSummary"];
+        };
+        IngestRejectedPackage: {
+            /** Format: int32 */
+            position: number;
+            reason: string;
+        };
+        /** @enum {string} */
+        IngestStepState: "pending" | "active" | "needs_input" | "succeeded" | "failed" | "skipped" | "cancelled";
+        IngestStepView: {
+            /** Format: int32 */
+            attempt?: number | null;
+            job_id?: null | components["schemas"]["JobId"];
+            message?: string | null;
+            retryable: boolean;
+            state: components["schemas"]["IngestStepState"];
+            step: string;
+        };
+        IngestSummary: {
+            capture_id: components["schemas"]["CaptureId"];
+            capture_revision?: null | components["schemas"]["Revision"];
+            collection_id: components["schemas"]["CollectionId"];
+            enrichment: components["schemas"]["IngestEnrichmentPolicy"];
+            /** Format: int32 */
+            file_count: number;
+            import_id: components["schemas"]["ImportId"];
+            outcome: components["schemas"]["IngestStepState"];
+            package_name: string;
+            permissions: components["schemas"]["IngestPermissions"];
+            phase: components["schemas"]["ImportPhase"];
+            target_item_id?: null | components["schemas"]["ItemId"];
+            total_bytes: components["schemas"]["ByteLength"];
+            /** Format: date-time */
+            updated_at: string;
         };
         Item: {
             assets: components["schemas"]["Asset"][];
@@ -2259,6 +2483,26 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_IngestSummary: {
+            items: {
+                capture_id: components["schemas"]["CaptureId"];
+                capture_revision?: null | components["schemas"]["Revision"];
+                collection_id: components["schemas"]["CollectionId"];
+                enrichment: components["schemas"]["IngestEnrichmentPolicy"];
+                /** Format: int32 */
+                file_count: number;
+                import_id: components["schemas"]["ImportId"];
+                outcome: components["schemas"]["IngestStepState"];
+                package_name: string;
+                permissions: components["schemas"]["IngestPermissions"];
+                phase: components["schemas"]["ImportPhase"];
+                target_item_id?: null | components["schemas"]["ItemId"];
+                total_bytes: components["schemas"]["ByteLength"];
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            next_cursor?: string | null;
+        };
         Page_JobView: {
             items: {
                 /** Format: int32 */
@@ -2348,6 +2592,10 @@ export interface components {
         };
         /** Format: int64 */
         PcmFrame: number;
+        PlanIngestCommand: {
+            collection_id: components["schemas"]["CollectionId"];
+            packages: components["schemas"]["IngestPackageSelection"][];
+        };
         /** @enum {string} */
         Possession: "present" | "lent" | "elsewhere" | "unknown";
         PrepareMusicTrack: {
@@ -2525,6 +2773,9 @@ export interface components {
             source: components["schemas"]["MetadataValueSource"];
             value: string;
         };
+        RetryIngestCommand: {
+            job_id?: null | components["schemas"]["JobId"];
+        };
         ReturnLoan: {
             command: components["schemas"]["ReturnLoanCommand"];
             expected_revision: components["schemas"]["Revision"];
@@ -2649,6 +2900,10 @@ export interface components {
         StartEnrollment: {
             device_name: string;
             username?: string | null;
+        };
+        StartIngestCommand: {
+            enrichment: components["schemas"]["IngestEnrichmentPolicy"];
+            plan: components["schemas"]["IngestPlan"];
         };
         StartLoan: {
             command: components["schemas"]["StartLoanCommand"];
@@ -4573,6 +4828,344 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ImportView"];
                 };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_ingests: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_IngestSummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_ingest: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartIngestCommand"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedIngest"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    plan_ingest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanIngestCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestPlan"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ingest_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestDetail"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    correct_ingest_association: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectIngestAssociationCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestDetail"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancel_ingest: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscardIngestCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestDetail"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    discard_ingest: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscardIngestCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestDiscardResult"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    retry_ingest: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryIngestCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestDetail"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: {
                 headers: {

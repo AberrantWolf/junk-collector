@@ -2663,3 +2663,92 @@ and the standard browser workflow passed afterward. Screenshots were inspected f
 mobile layout. Live providers, other browsers, owned-disc, Opus, deployment and
 scale qualification remain unrun. D06 root review is complete; P05.1 is next.
 No commit made.
+
+## Local-alpha planning validation — 2026-09-16
+
+Documentation-only scheduling/contract change after D06.3 commit `3a6143b`.
+Added the accepted local-alpha delivery plan, illustrative typed contracts,
+coordinator pseudocode, and two PlantUML source diagrams. Updated active handoffs,
+AGENTS.md, architecture/status/release scope and the older detailed plans together.
+LA1 is next; P05.1 is paused. No alpha feature is claimed implemented.
+
+`python3 scripts/check_architecture.py` passed (including documentation links and
+fixture checks); `git diff --check` passed. Inspected the diagrams as source;
+PlantUML is not installed and diagram rendering was not run. No runtime source or
+assets changed, so Rust/browser suites were not rerun. Actual dump corpus, live
+providers, deployment and backup restore remain LA3 qualification work.
+
+## LA1 local implementation validation — 2026-09-16
+
+LA1 guided ingestion and automatic enrichment is implemented locally and submitted
+for integrated review. Focused store regressions cover intent replay and changed
+input, stable Item/Capture/Representation identities, intent-to-Job restart
+reconciliation, automatic MusicBrainz/CAA title and artwork, DAT-backed metadata,
+manual-title authority during provider failure/retry, cancellation with retained
+bytes, actual unpublished discard reclamation, cross-user denial, too-late discard
+and published Capture association correction. The HTTP regression additionally
+exercises configured-inbox planning and staging, traversal rejection, replay,
+server-owned completion and private history authorization.
+
+The standard temporary-profile browser journey passed in Google Chrome
+153.0.8010.37. It uploaded a package from the collection page without a pre-created
+Item, previewed the destination, accepted the intent, closed the curator, reopened
+server-side history, observed `published · succeeded`, inspected the retained
+Capture identity and found the new collection entry. Existing WebAuthn, role,
+management, artwork and real FLAC 1.5.0 playback/revocation coverage passed in the
+same run.
+
+Final gates:
+
+- `python3 scripts/check_architecture.py` and `cargo fmt --all -- --check`: passed.
+- `cargo test --workspace`: 278 passed, one ignored user-owned CD-dump oracle,
+  zero failures. The expected long music-CD/AccurateRip test passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `npm --prefix web run generate:api`, `npm --prefix web run check`,
+  `npm --prefix web run check:api`, `npm --prefix web run build` and
+  `cargo build -p collector-server`: passed; the Rust server was rebuilt after the
+  embedded web assets changed.
+- `npm --prefix web run test:smoke`: passed with temporary accounts, archive,
+  local deterministic providers and virtual WebAuthn.
+- `git diff --check`: passed after the final implementation and documentation edits.
+
+Live MusicBrainz/CAA, user-owned game/CD dumps, real Opus, other browsers, target
+deployment, backup restore and scale qualification were not run. Deterministic
+provider and synthetic package fixtures do not satisfy LA3 real-input qualification.
+The broader P04 bulk/history cleanup and application-wide U05 audit remain planned;
+LA2, P05, native clients and a new online game provider were not started. No commit
+was made.
+
+
+## LA1 independent review — 2026-09-16
+
+Review fixes cover durable receipt ordering, paginated periodic recovery, terminal
+workflow state, shared provider mapping and full-history replay, initial-authority
+recovery, transactional cancellation/retry admission, cleanup receipts/progress,
+module-owned readiness and the guided UI lifecycle. See local-alpha-review.md.
+
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked`: 285 passed, one ignored
+  user-owned CD dump/oracle gate. All workspace doc-tests passed.
+- After the final progress-label correction, `cargo test -p collector-store --test
+  archive guided`: all six focused ingestion regressions passed. Includes malformed
+  CUE analysis preserving originals, post-publication cancellation retaining the
+  Capture, stopped-import admission denial and provider observation replay.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`, architecture
+  checker, formatting, TypeScript, generated API check and `git diff --check`: passed.
+- Web assets rebuilt and the embedded server rebuilt. FLAC 1.5.0 was available.
+- `npm --prefix web run test:smoke` and `LOCAL_SETUP=1 npm --prefix web run
+  test:smoke`: passed using Google Chrome 153.0.8010.37. Both include guided
+  browser CD intake with automatic metadata/artwork, close/reopen history,
+  shared artwork after reindex, actual playback, revocation and existing UI checks.
+- Final generic provider-Job cancellation correction: all six guided regressions
+  passed again; Clippy and the embedded server build were rerun.
+
+Earlier review runs exposed and corrected cleanup completion SQL typing and stale
+progress projections. The expanded browser fixture required an actual queried disc
+ID and an additional shared-artwork row; it waits for upload completion before
+closing. A stalled older held-request test was stopped and its fixture hold bounded.
+These failed/interrupted intermediate runs are not counted as acceptance.
+
+Live MusicBrainz/CAA, user-owned dumps, target hosting, the LA3 backup drill and
+non-Chrome browsers remain unqualified. PlantUML sources were updated; no renderer
+was available. No sibling extraction was performed, and no user archive was touched.

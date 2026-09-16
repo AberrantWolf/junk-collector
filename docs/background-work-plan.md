@@ -1,8 +1,13 @@
 # Album preparation and nonblocking background work
 
+**Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
+LA2 integrates the relevant acceptance below across layers. Individual child
+assignments at the bottom are reference scope, not separate required handoffs.
+Keep unmet broader criteria open; alpha does not certify every web interface.
+
 User requirement, 2026-09-15. Planned, not implemented. Required before web UI
 completion alongside [P04](import-management-plan.md) and
-[U05](interface-readiness-plan.md). Does not interrupt the current P05.1 handoff.
+[U05](interface-readiness-plan.md). Scheduled by the local-alpha plan.
 
 ## Finding and ownership
 
@@ -93,7 +98,7 @@ and dependent/conflicting actions remain guarded. A spinner or a test that waits
 for each job before submitting the next does not establish this requirement.
 Record actual UI/server evidence and update the child ledger and status together.
 
-## Ready-to-send assignment when scheduled
+## Historical child assignment (use the local-alpha handoff instead)
 
 Implement D07.4 from docs/background-work-plan.md. Read AGENTS.md,
 docs/architecture.md, docs/release-requirements.md and D07/P02 contracts. Define

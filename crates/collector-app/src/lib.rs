@@ -3,6 +3,7 @@ mod collection_types;
 pub use collection_types::*;
 mod derivatives;
 pub use derivatives::*;
+mod guided_ingest;
 mod metadata;
 pub use metadata::*;
 mod processing;
@@ -334,6 +335,171 @@ pub struct ImportRecord {
     pub view: ImportView,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestEnrichmentPolicy {
+    Automatic,
+    None,
+}
+
+pub use collector_modules::{IngestAnchorChoice, IngestBlocker, IngestBlockerKind};
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestPlanPackage {
+    pub position: u16,
+    pub source: ImportSourceSummary,
+    pub files: Vec<UploadFile>,
+    pub default_title: String,
+    pub anchors: Vec<IngestAnchorChoice>,
+    pub blockers: Vec<IngestBlocker>,
+    pub analysis_available: bool,
+    pub metadata_available: bool,
+    pub artwork_available: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanIngestCommand {
+    pub collection_id: CollectionId,
+    pub packages: Vec<IngestPackageSelection>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IngestPackageSelection {
+    pub source: ImportSourceSummary,
+    pub files: Vec<UploadFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestPlan {
+    pub collection_id: CollectionId,
+    pub token: String,
+    pub packages: Vec<IngestPlanPackage>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartIngestCommand {
+    pub plan: IngestPlan,
+    pub enrichment: IngestEnrichmentPolicy,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GuidedIngestIntent {
+    pub import_id: ImportId,
+    pub user_id: UserId,
+    pub plan_token: String,
+    pub target_item_id: ItemId,
+    pub default_title: String,
+    pub enrichment: IngestEnrichmentPolicy,
+    pub enrichment_error: Option<String>,
+    pub settled: bool,
+    pub cancelled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct AcceptedIngest {
+    pub imports: Vec<IngestSummary>,
+    pub rejected: Vec<IngestRejectedPackage>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestRejectedPackage {
+    pub position: u16,
+    pub reason: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestStepState {
+    Pending,
+    Active,
+    NeedsInput,
+    Succeeded,
+    Failed,
+    Skipped,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestStepView {
+    pub step: String,
+    pub state: IngestStepState,
+    pub job_id: Option<JobId>,
+    pub attempt: Option<u32>,
+    pub message: Option<String>,
+    pub retryable: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestAttemptView {
+    pub job_id: JobId,
+    pub step: String,
+    pub attempt: u32,
+    pub state: JobState,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub diagnostic: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestPermissions {
+    pub can_cancel: bool,
+    pub can_discard: bool,
+    pub can_correct_association: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestSummary {
+    pub import_id: ImportId,
+    pub collection_id: CollectionId,
+    pub package_name: String,
+    pub file_count: u32,
+    pub total_bytes: ByteLength,
+    pub target_item_id: Option<ItemId>,
+    pub capture_id: CaptureId,
+    pub capture_revision: Option<Revision>,
+    pub phase: ImportPhase,
+    pub outcome: IngestStepState,
+    pub enrichment: IngestEnrichmentPolicy,
+    pub updated_at: DateTime<Utc>,
+    pub permissions: IngestPermissions,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestDetail {
+    pub summary: IngestSummary,
+    pub import: ImportView,
+    pub steps: Vec<IngestStepView>,
+    pub attempts: Vec<IngestAttemptView>,
+    pub cleanup: Option<IngestDiscardResult>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestDiscardResult {
+    pub import_id: ImportId,
+    pub reclaimed_bytes: ByteLength,
+    pub pending_bytes: ByteLength,
+    pub cleanup_pending: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CorrectIngestAssociationCommand {
+    pub expected_capture_revision: Revision,
+    pub association: CaptureAssociation,
+    pub expected_item_revision: Option<Revision>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetryIngestCommand {
+    pub job_id: Option<JobId>,
+}
+
 pub trait ProvisionalImportPort: Send + Sync {
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord>;
     fn import_record(&self, id: ImportId) -> Result<ImportRecord>;
@@ -362,6 +528,39 @@ pub trait ProvisionalImportPort: Send + Sync {
         before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<ImportRecord>;
     fn cancel_import(&self, id: ImportId) -> Result<ImportRecord>;
+    fn accept_guided_imports(
+        &self,
+        records: Vec<ImportRecord>,
+        intents: Vec<GuidedIngestIntent>,
+    ) -> Result<Vec<ImportView>>;
+    fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>>;
+    fn resumable_guided_ingest_ids(
+        &self,
+        after: Option<ImportId>,
+        limit: u16,
+    ) -> Result<Vec<ImportId>>;
+    fn resumable_guided_inbox_records(
+        &self,
+        after: Option<ImportId>,
+        limit: u16,
+    ) -> Result<Vec<ImportRecord>>;
+    fn reconcile_guided_cleanup(&self) -> Result<()>;
+    fn guided_cleanup_status(&self, id: ImportId) -> Result<Option<IngestDiscardResult>>;
+    fn save_guided_ingest_intent(&self, intent: GuidedIngestIntent) -> Result<()>;
+    fn guided_import_records(
+        &self,
+        user: UserId,
+        collection: Option<CollectionId>,
+        cursor: Option<ImportId>,
+        limit: u16,
+    ) -> Result<Page<ImportRecord>>;
+    fn import_job_records(&self, id: ImportId, user: UserId) -> Result<Vec<JobRecord>>;
+    fn discard_guided_import(
+        &self,
+        id: ImportId,
+        expected_revision: u64,
+    ) -> Result<IngestDiscardResult>;
+    fn cancel_guided_import(&self, id: ImportId, expected_revision: u64) -> Result<ImportRecord>;
 }
 
 pub trait ImportPort: Send + Sync {
@@ -879,6 +1078,8 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
 #[derive(Clone)]
 pub struct CollectionService {
     reader: Arc<dyn CollectionReadPort>,
+    writer: Arc<dyn CollectionWritePort>,
+    guided_transitions: Arc<std::sync::Mutex<()>>,
     access: Arc<dyn AccessPort>,
     content: Arc<dyn ContentPort>,
     imports: Arc<dyn ImportPort>,
@@ -1543,6 +1744,7 @@ impl CollectionService {
             + 'static,
     {
         let reader: Arc<dyn CollectionReadPort> = catalog.clone();
+        let writer: Arc<dyn CollectionWritePort> = catalog.clone();
         let content: Arc<dyn ContentPort> = catalog.clone();
         let imports: Arc<dyn ImportPort> = catalog.clone();
         let provisional_imports: Arc<dyn ProvisionalImportPort> = catalog.clone();
@@ -1555,6 +1757,8 @@ impl CollectionService {
         let processing: Arc<dyn ProcessingPort> = catalog.clone();
         Self {
             reader,
+            writer,
+            guided_transitions: Arc::new(std::sync::Mutex::new(())),
             access,
             content,
             imports,
@@ -3040,10 +3244,12 @@ impl CollectionService {
         bytes: &[u8],
     ) -> Result<ImportView> {
         self.provisional_import_for_write(actor, id)?;
-        Ok(self
-            .provisional_imports
-            .stage_import_chunk(id, index, offset, bytes)?
-            .view)
+        self.provisional_imports
+            .stage_import_chunk(id, index, offset, bytes)?;
+        self.reconcile_guided_ingest(id)?;
+        self.provisional_imports
+            .import_record(id)
+            .map(|record| record.view)
     }
     pub fn enqueue_inbox_import_staging(
         &self,
@@ -4088,6 +4294,18 @@ impl CollectionService {
             stop: Some(stop_heartbeat),
             thread: Some(heartbeat),
         };
+        let guided_import_id = claim
+            .request
+            .get("import_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| value.parse::<ImportId>().ok())
+            .filter(|id| {
+                self.provisional_imports
+                    .guided_ingest_intent(*id)
+                    .ok()
+                    .flatten()
+                    .is_some()
+            });
         let result = match claim.kind.as_str() {
             "integrity_verification" => (|| {
                 if claim.phase == "revision_committed" {
@@ -4451,9 +4669,10 @@ impl CollectionService {
         };
         heartbeat.stop()?;
         match result {
-            Ok(result) => self
-                .jobs
-                .complete_job(claim.id, &claim.claim_token, result)?,
+            Ok(result) => {
+                self.jobs
+                    .complete_job(claim.id, &claim.claim_token, result)?;
+            }
             Err(Error::JobCancelled) => {
                 if claim.kind.starts_with("import_")
                     && let Some(import_id) = claim
@@ -4482,6 +4701,9 @@ impl CollectionService {
                     &error.to_string().chars().take(512).collect::<String>(),
                 )?;
             }
+        }
+        if let Some(id) = guided_import_id {
+            self.reconcile_guided_ingest(id)?;
         }
         Ok(true)
     }

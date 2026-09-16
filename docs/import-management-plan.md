@@ -1,7 +1,13 @@
 # Import history and cleanup — P04 completion follow-up
 
-User requirement, 2026-09-15. Planned, not implemented. Required before calling
-the web curation UI complete; it need not interrupt the current P05.1 handoff.
+**Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
+LA1 integrates the relevant acceptance below across layers. Individual child
+assignments at the bottom are reference scope, not separate required handoffs.
+Keep unmet broader criteria open; alpha does not certify every web interface.
+
+User requirement, 2026-09-15. LA1 implements the focused single-import journey;
+the broader completion gate remains planned. Required before calling
+the web curation UI complete.
 P04.1–P04.3 remain historically validated but do not satisfy this added gate.
 See the [backlog](handoff-backlog.md#p04--inbox-import-review-and-job-ui) and
 [music-first milestones](music-first-milestones.md).
@@ -30,9 +36,9 @@ it does not depend on C06 event streaming.
 
 | Child | State | Scope and dependencies |
 |---|---|---|
-| P04.4 — Identifiable import and attempt history | Planned | P02/P03/A04: bounded list/detail and safe attempt projections, integrated web history |
-| P04.5 — Import cleanup lifecycle | Planned | P04.4/P01: discard unpublished imports, reclaim staging bytes, dismiss/restore terminal history, correct mistaken published associations |
-| P04.6 — Web completion review | Planned | P04.4–P04.5: real UI, authorization, interruption/recovery and storage reclamation checks |
+| P04.4 — Identifiable import and attempt history | LA1 subset implemented | Bounded submitter-scoped list/detail, step/attempt projections and reopen are implemented; search/filter/dismissed history remain planned |
+| P04.5 — Import cleanup lifecycle | LA1 subset implemented | Cancel/fence and discard unpublished staging with actual byte results plus published association correction are implemented; archive/restore, bulk and cleanup-failure UI remain planned |
+| P04.6 — Web completion review | Planned | LA1 real-browser journey is evidence for one path, not the full mixed-role/bulk/mobile completion matrix |
 
 ### P04.4 — Identifiable import and attempt history
 
@@ -90,7 +96,7 @@ playback and recovery checks must pass.
 Update this ledger, P04 status, milestones and validation together. P04.4–P04.6
 are a necessary web UI completion gate, not a claim that other requirements are met.
 
-## Ready-to-send assignment when scheduled
+## Historical child assignment (use the local-alpha handoff instead)
 
 Implement P04.4 from docs/import-management-plan.md. Read AGENTS.md,
 docs/architecture.md, docs/release-requirements.md and the P02/P03/P04 backlog

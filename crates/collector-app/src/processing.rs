@@ -641,6 +641,12 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         collection: CollectionId,
         item: collector_core::ItemId,
     ) -> Result<Option<MetadataAuthorityRecord>>;
+    fn metadata_refresh_observed(
+        &self,
+        collection: CollectionId,
+        item: collector_core::ItemId,
+        observation: collector_core::ObservationId,
+    ) -> Result<bool>;
     fn metadata_candidates(
         &self,
         collection: CollectionId,

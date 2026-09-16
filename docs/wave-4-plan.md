@@ -1,5 +1,11 @@
 # Wave 4 implementation handoff
 
+**Scheduling superseded 2026-09-16:** D06.3 is committed as `3a6143b`.
+The [local-alpha plan](local-alpha-plan.md) is active; LA1 is implemented locally
+and reviewed with corrections, and P05.1 is paused. The ledger below retains contract/history references, not the current
+serial assignment. Routine cross-layer work now proceeds within one integrated
+alpha delivery.
+
 Status: **W4.2 reviewed; CT.1–CT.4 and D04.1–D04.3 reviewed and corrected; D05.1–D05.2 reviewed and corrected locally; D05.3 reviewed and corrected locally; D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally; D06.1 reviewed and corrected locally; D06.2 is reviewed and corrected locally**. Baseline: `c5c3ecf` (Wave 3 plus recovery
 and upload-resume review fixes), 2026-09-11. This plan covers D04, D05, D06,
 D07, P05, C01, S04, and C02. It supplements, rather than replaces,
@@ -82,7 +88,7 @@ for permission to run ordinary tools. Root review includes all its child tests.
 | 13 | D06.1 | D04.3, D05.3 | Durable metadata authority and resolver | Reviewed/corrected 2026-09-15; proceed to D06.2 |
 | 14 | D06.2 | D06.1 | MusicBrainz, CAA and DAT-backed game metadata | Reviewed/corrected locally 2026-09-15 |
 | 15 | D06.3 | D06.2 | Metadata review and artwork UI | Reviewed and corrected 2026-09-16; D06 root review complete |
-| 16 | P05.1 | D06.3, D07.3 | Portable export and change inventory | Review |
+| 16 | P05.1 | D06.3, D07.3 | Portable export and change inventory | Paused for local alpha |
 | 17 | P05.2 | P05.1 | Consistent full backup and restore | Review |
 | 18 | P05.3 | P05.2 | CLI/admin integration and recovery drills | P05 root review |
 | 19 | C01.1 | W4.0 | Persistent connections and platform secret storage | Review |
@@ -835,7 +841,8 @@ malformed success, and non-JSON no-match preservation. No metadata HTTP/UI added
 ### D06.3 — Metadata review UI
 
 **Status (2026-09-16): reviewed and corrected locally; D06 root review complete.
-P05.1 is the next serial child.**
+LA1 is reviewed and corrected locally under the local-alpha
+plan; P05.1 is paused.**
 
 Add a curation panel for alternatives, provenance, explicit selection, per-field
 overrides and clear-override actions. Preserve drafts through job polling/conflicts;
@@ -1379,38 +1386,8 @@ were actually exercised. Stop after this bounded browser child; update status,
 validation and the next prompt together without beginning D06, C01 or native C04.
 ```
 
-## Ready-to-send implementation prompt
+## Current implementation handoff
 
-```text
-Implement P05.1 only: portable export and change inventory. Read AGENTS.md,
-docs/architecture.md, docs/implementation-status.md, docs/release-requirements.md,
-docs/decisions/pre-release-evolution.md, docs/handoff-backlog.md, the Wave 4 shared
-prerequisites, the complete P05.1 child and P05 root acceptance criteria.
-D06.1–D06.3 and D07.1–D07.3 are reviewed and corrected locally. Preserve unrelated
-work. Do not commit, spawn agents, start P05.2/P05.3, or add native/offline features.
-
-First trace existing archive journals, revisions, processing sidecars and export
-ports. Keep policy in application services and filesystem/locking/copy mechanisms
-in the archive adapter. Freeze a complete committed revision inventory under the
-single writer lock, then copy immutable bytes outside it. Export to a new directory
-bundle with readable versioned TOML, stable identities, revisions and digests.
-Include dependency closure, tombstones, masters/assets/derivatives, recipes,
-snapshots, observations, metadata authority and opaque module bytes. Omit accounts,
-credentials, trust, jobs and unrelated private state. Verify every copied file and
-write the completion marker last. Preserve all sources; reject overlapping roots,
-symlinks, special files and traversal. Bound work and cancellation.
-
-Implement versioned change inventory/delta semantics bound to the complete base
-inventory digest. This is portable offline transfer, not replication or concurrent
-writers. Do not add compatibility wrappers or migrations for checkpoint stability.
-Use focused tests first for coherent export during later writes, incomplete copy,
-invalid/missing dependencies, changed base, unknown modules, tombstones and private
-state omission. Prove fresh archive import and reindex retain loans, manual overrides,
-evidence and IDs, with explicit access reassignment. Reuse existing import/recovery
-mechanisms; do not silently leave round-trip acceptance for another child.
-
-Run architecture/fixture checks, formatting, workspace tests, clippy and generated
-API/web checks as affected. Rebuild embedded assets if changed. Update implementation
-status, P05.1 ledger, review notes, validation and ready-to-send review prompt together.
-Report incomplete acceptance honestly. Stop for review after P05.1.
-```
+Use the [LA1 ready-to-send prompt](local-alpha-plan.md#ready-to-send-la1-prompt).
+The former P05.1 prompt is superseded by the accepted 2026-09-16 local-alpha
+scheduling decision. P05 contracts above remain planned full-release work.

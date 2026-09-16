@@ -1,4 +1,9 @@
-# Proposed music-first delivery order
+# Historical music-first delivery proposal
+
+**Superseded 2026-09-16 by the accepted [local-alpha plan](local-alpha-plan.md).**
+LA1 ingestion/enrichment is reviewed and corrected locally; LA2 completes album preparation
+and web listening, followed by local qualification. Native acceleration below is
+retained as future design context, not a prerequisite or active assignment.
 
 Planning assessment, 2026-09-14. This is a proposed scheduling change, not evidence
 of implemented playback or authorization to skip acceptance gates. D05.3 was reviewed on 2026-09-15. D07 now precedes D06 in the active Wave 4
@@ -27,14 +32,14 @@ independent enqueueing. U05 audits the same nonblocking rule across the applicat
 background work may limit execution concurrency, but must not prevent unrelated
 eligible submissions. Both are mandatory for web completion, not prerequisites
 for the already-reviewed early playback checkpoint. Scheduling remains unassigned;
-the current P05.1 handoff is unchanged.
+the next assignment is LA2 under the local-alpha plan; LA1 review passed.
 
 Additional user requirement (2026-09-15): [U05.1–U05.3](interface-readiness-plan.md)
 is a second mandatory web completion gate. Establish smart defaults and typed
 readiness, audit/correct every implemented screen and action, and validate full
 journeys with missing/ambiguous inputs and unavailable capabilities. Apply the
 same standard as future native/CLI interfaces land. This gate has no assigned
-implementation date and does not change the current P05.1 handoff.
+implementation date and is scheduled through the local-alpha plan.
 
 User requirement (2026-09-15): early playback is not web UI completion. The
 [P04.4–P04.6 import-management follow-up](import-management-plan.md) is mandatory

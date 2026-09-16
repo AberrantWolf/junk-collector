@@ -4,6 +4,80 @@
   padding-top: 28px;
 }
 
+.guided-ingest {
+  background: color-mix(in srgb, var(--paper) 92%, var(--accent));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+.ingest-preview,
+.ingest-detail {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+.ingest-history {
+  display: grid;
+  gap: 8px;
+  max-height: 288px;
+  overflow: auto;
+}
+
+.ingest-history > button {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 3px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 11px;
+  text-align: left;
+}
+
+.ingest-history > button small {
+  color: var(--muted);
+  grid-column: 1 / -1;
+}
+
+.ingest-steps {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.ingest-steps > div {
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px;
+}
+
+.ingest-steps p {
+  font-size: 13px;
+  margin: 3px 0;
+}
+
+.association-correction {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+@media (max-width: 620px) {
+  .ingest-history > button,
+  .ingest-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
 .import-workspace h3,
 .import-workspace h4 {
   margin: 0;

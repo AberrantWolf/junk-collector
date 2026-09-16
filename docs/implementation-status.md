@@ -16,7 +16,29 @@ This repository is an executable architecture/server foundation, not the complet
 
 Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation tickets and the [release requirements](release-requirements.md) for the repository-local target specification. The gap list below is a summary, not a substitute for ticket acceptance criteria.
 
+## Active delivery target — 2026-09-16
+
+D06.3 is committed as `3a6143b`. The accepted [local-alpha plan](local-alpha-plan.md)
+now takes precedence over the remaining wave order. LA1 guided ingestion and
+automatic enrichment is reviewed and corrected locally. LA2
+album preparation and usable browsing/playback and LA3 real local installation
+qualification remain planned; P05.1 remains paused.
+The full first release, native clients and public deployment remain later targets.
+
 ## Implemented
+
+- LA1 adds collection-page guided intake without a pre-created Item for configured
+  direct inbox packages and resumable browser uploads. Typed planning previews
+  package boundaries, unique CUE/TOC anchors, blockers, destinations and provider
+  availability. Accepted intent owns stable Item/Capture/Representation identities;
+  existing Jobs continue analysis, publication, DAT/MusicBrainz metadata and CAA
+  artwork without a browser-owned chain. Server-side bounded history reopens after
+  reload, exposes steps/attempts and permissions, supports retry/cancel, safely
+  discards unpublished staging, and corrects a published Capture association.
+  Filename titles and provider artwork stay automatic rather than manual authority;
+  provider failure never rolls back originals. Private schema 13 persists intent
+  and cleanup state. Focused P04/U05 journey coverage is implemented, not their
+  broader completion gates.
 
 - 2026-09-15 workflow corrections to P04/U01/D07: upload, analysis, review and
   publication have distinct labels and next steps; analysis no longer announces
@@ -285,9 +307,9 @@ advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
 D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. D06.1 durable metadata authority and deterministic resolution are reviewed and corrected locally; D06.2 providers and artwork are reviewed and corrected locally; D06.3 metadata review and effective presentation are reviewed and corrected locally.
 Archive schema 4 and catalog schema 6 cover processing observations,
-streamed snapshots, metadata authority, and conversion recipes; private schema 11
-persists frozen Job input, provisional Import observations and active catalog
-selection. Import publication
+streamed snapshots, metadata authority, and conversion recipes; private schema 13
+persists frozen Job input, provisional Import observations, active catalog
+selection, guided-ingest intent and restartable staging cleanup. Import publication
 rebinds evidence to its committed Representation with checked file mapping and
 retained provenance. Registered dispatch, authorization, restart/cancellation,
 idempotent retry, archive-only recovery, and current-versus-historical summaries
@@ -314,18 +336,16 @@ offline-library management and the Trash Amp provider remain later tickets.
   remain missing. U05 must audit all interfaces for unnecessary background-work
   blocking before web completion; execution concurrency stays server-bounded.
 
-- **Interface readiness gate, added 2026-09-15:** [U05.1–U05.3](interface-readiness-plan.md)
-  remain planned. Analysis currently offers all package files and defaults to
-  file 0/BIN-CUE. Valid operation-specific defaults, eligible inputs and up-front
-  missing-prerequisite guidance are required, followed by an audit and fixes
-  across every implemented interface before web UI completion.
+- **Interface readiness gate, added 2026-09-15:** LA1 implements typed readiness,
+  unique-anchor defaults and prerequisite guidance for its guided import journey.
+  The broader [U05.1–U05.3](interface-readiness-plan.md) operation matrix and
+  application-wide audit remain planned before web UI completion.
 
-- **Web UI completion gate, added 2026-09-15:** P04.4–P04.6 are planned and
-  unimplemented. Identifiable import/attempt history, reopening older imports,
-  discarding erroneous unpublished imports with staging reclamation, and
-  dismissible/restorable history are required. See the
-  [import-management plan](import-management-plan.md). Earlier P04-complete
-  statements describe the original P04.1–P04.3 acceptance only.
+- **Web UI completion gate, added 2026-09-15:** LA1 implements bounded personal
+  import/attempt history, reopen, retry/cancel, staging reclamation and published
+  association correction for guided intake. P04 search/filter, bulk cleanup,
+  dismiss/archive/restore, cleanup-failure UI and its full completion review remain
+  planned. See the [import-management plan](import-management-plan.md).
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
 2. Complete independent accessibility/security review for the locally implemented
@@ -336,8 +356,8 @@ offline-library management and the Trash Amp provider remain later tickets.
    locally implemented MusicBrainz/CAA enrichment and DAT metadata integration.
    D02/D03 and D04.1 complete the reusable disc/audio/game primitives locally; no
    Collector catalog verification is currently claimed.
-4. Proceed with P05.1 portable export/change inventory after the completed D06
-   root review. The local deterministic MusicBrainz/CAA workflow
+4. Complete the active local-alpha deliveries before returning to P05.1 portable
+   export/change inventory. The local deterministic MusicBrainz/CAA workflow
    passes with actual published artwork; live-provider, other-browser and deployment
    qualification remain unclaimed.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.

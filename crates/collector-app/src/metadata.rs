@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    AssetState, CollectionService, CommandContext, CommandEffects, CreateAssetCommand,
-    FrozenAcquisitionJob, MetadataAuthorityRecord, Principal, ProviderRequest, SnapshotQuery,
+    AssetState, CollectionService, CommandContext, CreateAssetCommand, FrozenAcquisitionJob,
+    MetadataAuthorityRecord, Principal, ProcessingPort, ProviderRequest, SnapshotQuery,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -510,148 +510,237 @@ impl CollectionService {
                     collection_id: item.collection_id,
                     snapshot_id: command.snapshot_id,
                 })?;
-                let parser = self
-                    .catalog_parsers
-                    .get(&snapshot.provider.0)
-                    .ok_or_else(|| {
-                        Error::Unavailable("metadata provider parser is unavailable".into())
-                    })?;
-                let mut reader = self.processing.snapshot_bytes(SnapshotQuery {
-                    collection_id: item.collection_id,
-                    snapshot_id: command.snapshot_id,
-                })?;
-                let parsed =
-                    parser.parse_snapshot(&snapshot, reader.as_mut(), &mut || Ok(false))?;
-                let artwork = command
-                    .artwork
-                    .iter()
-                    .map(|value| (value.provider_record_id.clone(), value.asset_id))
-                    .collect::<BTreeMap<_, _>>();
-                let candidates;
-                let raw_observation;
-                if eligibility.owner.0 == "org.junk.music"
-                    && snapshot.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
-                {
-                    if command.source_observation_id.is_some() {
-                        return Err(Error::Invalid(
-                            "MusicBrainz metadata does not accept a DAT source observation".into(),
-                        ));
-                    }
-                    let observation: collector_modules::music::MusicBrainzSnapshotObservation =
-                        parsed.observation.parse()?;
-                    candidates = collector_modules::music::musicbrainz_metadata_candidates(
-                        &snapshot.digest,
-                        &observation,
-                        &parsed.entries,
-                        &artwork,
-                    )?;
-                    raw_observation = exact_json_or_snapshot_reference(
-                        self.processing.as_ref(),
-                        &snapshot,
-                        8 * 1024 * 1024,
-                    )?;
-                } else if eligibility.owner.0 == "org.junk.games"
-                    && snapshot.provider.0 == "org.junk.providers.local-dat"
-                {
-                    if !artwork.is_empty() {
-                        return Err(Error::Invalid(
-                            "the configured DAT provider does not supply artwork".into(),
-                        ));
-                    }
-                    let source_id = command.source_observation_id.ok_or_else(|| {
-                        Error::Invalid("DAT metadata requires its D04 catalog observation".into())
-                    })?;
-                    let source = self.processing.processing_record(source_id)?.observation;
-                    if source.collection_id != item.collection_id
-                        || source.snapshot_id != Some(snapshot.id)
-                        || source.operation.as_str() != "org.junk.games.catalog-verification"
-                        || source.typed_result.module != eligibility.owner
-                    {
-                        return Err(Error::Invalid(
-                            "DAT metadata source does not match this item and snapshot".into(),
-                        ));
-                    }
-                    let representation = match source.source_fingerprint.source {
-                        PackageScope::Representation(id) => id,
-                        _ => {
-                            return Err(Error::Invalid(
-                                "DAT metadata requires committed Representation evidence".into(),
-                            ));
-                        }
-                    };
-                    if !item.captures.iter().any(|capture| {
-                        capture
-                            .representations
-                            .iter()
-                            .any(|value| value.id == representation)
-                    }) {
-                        return Err(Error::Invalid(
-                            "DAT metadata evidence is not associated with this item".into(),
-                        ));
-                    }
-                    let result: collector_modules::games::GameProcessingResult =
-                        source.typed_result.payload.parse()?;
-                    let catalog = match result {
-                        collector_modules::games::GameProcessingResult::CatalogMatch {
-                            catalog,
-                        } => catalog,
-                        _ => {
-                            return Err(Error::Invalid(
-                                "DAT metadata requires a catalog match result".into(),
-                            ));
-                        }
-                    };
-                    candidates = collector_modules::games::dat_metadata_candidates(
-                        snapshot.provider.clone(),
-                        &snapshot.digest,
-                        &parsed.entries,
-                        &catalog,
-                    )?;
-                    raw_observation = RawJson::from_value(serde_json::json!({
-                        "provider":"org.junk.providers.local-dat",
-                        "snapshot_id":snapshot.id,
-                        "snapshot_digest":snapshot.digest,
-                        "source_observation_id":source_id
-                    }));
-                } else {
-                    return Err(Error::Invalid(
-                        "metadata provider is incompatible with the collection owner".into(),
-                    ));
-                }
-                let candidate_ids = candidates
-                    .iter()
-                    .map(|candidate| candidate.identity.provider_record_id.as_str())
-                    .collect::<BTreeSet<_>>();
-                if artwork
-                    .keys()
-                    .any(|record_id| !candidate_ids.contains(record_id.as_str()))
-                {
-                    return Err(Error::Invalid(
-                        "metadata artwork link does not identify an observed candidate".into(),
-                    ));
-                }
+                let observation = self.provider_metadata_observation(
+                    &item,
+                    &eligibility.owner,
+                    &command,
+                    provider_observation_id(
+                        actor.user_id,
+                        item_id,
+                        &snapshot.provider,
+                        context.key(),
+                    ),
+                )?;
                 let refresh = RefreshMetadataCommand {
                     expected_revision: command.expected_revision,
-                    observation: MetadataRefreshObservation {
-                        id: provider_observation_id(
-                            actor.user_id,
-                            item_id,
-                            &snapshot.provider,
-                            context.key(),
-                        ),
-                        outcome: if candidates.is_empty() {
-                            MetadataRefreshOutcome::NoMatch
-                        } else {
-                            MetadataRefreshOutcome::Candidates
-                        },
-                        candidates,
-                        raw_observation,
-                        observed_at: self.authentication.now(),
-                    },
+                    observation,
                 };
                 self.refresh_metadata_effect(&item, &eligibility.owner, &refresh, effects)
             },
         )
+    }
+
+    /// Background counterpart used by the guided-ingest coordinator. It shares
+    /// the same parser, candidate and authority effects without fabricating a
+    /// request Principal or a nested command receipt.
+    pub(crate) fn refresh_provider_metadata_for_job(
+        &self,
+        user_id: UserId,
+        item: &Item,
+        snapshot_id: SnapshotId,
+        source_observation_id: Option<ObservationId>,
+        artwork_links: Vec<ProviderArtworkLink>,
+        observation_id: ObservationId,
+    ) -> Result<MetadataAuthorityRecord> {
+        let eligibility = self.content_write_eligibility_for_user(user_id, item.collection_id)?;
+        self.validate_owned_domain(&eligibility, &item.domain)?;
+        if let Some(existing) = self
+            .processing
+            .metadata_authority(item.collection_id, item.id)?
+            && self.processing.metadata_refresh_observed(
+                item.collection_id,
+                item.id,
+                observation_id,
+            )?
+        {
+            return Ok(existing);
+        }
+        let revision = self
+            .processing
+            .metadata_authority(item.collection_id, item.id)?
+            .map_or(Revision(0), |record| record.revision);
+        let observation = self.provider_metadata_observation(
+            item,
+            &eligibility.owner,
+            &RefreshProviderMetadataCommand {
+                expected_revision: revision,
+                snapshot_id,
+                source_observation_id,
+                artwork: artwork_links,
+            },
+            observation_id,
+        )?;
+        let refresh = RefreshMetadataCommand {
+            expected_revision: revision,
+            observation,
+        };
+        self.refresh_metadata_effect(item, &eligibility.owner, &refresh, self.processing.as_ref())
+    }
+
+    fn provider_metadata_observation(
+        &self,
+        item: &Item,
+        owner: &ModuleId,
+        command: &RefreshProviderMetadataCommand,
+        observation_id: ObservationId,
+    ) -> Result<MetadataRefreshObservation> {
+        let snapshot_id = command.snapshot_id;
+        let source_observation_id = command.source_observation_id;
+        let artwork_links = &command.artwork;
+        let snapshot = self.processing.snapshot(SnapshotQuery {
+            collection_id: item.collection_id,
+            snapshot_id,
+        })?;
+        let parser = self
+            .catalog_parsers
+            .get(&snapshot.provider.0)
+            .ok_or_else(|| Error::Unavailable("metadata provider parser is unavailable".into()))?;
+        let mut reader = self.processing.snapshot_bytes(SnapshotQuery {
+            collection_id: item.collection_id,
+            snapshot_id,
+        })?;
+        let parsed = parser.parse_snapshot(&snapshot, reader.as_mut(), &mut || Ok(false))?;
+        let artwork = artwork_links
+            .iter()
+            .map(|value| (value.provider_record_id.clone(), value.asset_id))
+            .collect::<BTreeMap<_, _>>();
+        let (candidates, raw_observation) = if owner.0 == "org.junk.music"
+            && snapshot.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+        {
+            if source_observation_id.is_some() {
+                return Err(Error::Invalid(
+                    "MusicBrainz metadata does not accept a DAT source observation".into(),
+                ));
+            }
+            let observation: collector_modules::music::MusicBrainzSnapshotObservation =
+                parsed.observation.parse()?;
+            let candidates = collector_modules::music::musicbrainz_metadata_candidates(
+                &snapshot.digest,
+                &observation,
+                &parsed.entries,
+                &artwork,
+            )?;
+            let raw = exact_json_or_snapshot_reference(
+                self.processing.as_ref(),
+                &snapshot,
+                8 * 1024 * 1024,
+            )?;
+            (candidates, raw)
+        } else if owner.0 == "org.junk.games"
+            && snapshot.provider.0 == "org.junk.providers.local-dat"
+        {
+            if !artwork.is_empty() {
+                return Err(Error::Invalid(
+                    "the configured DAT provider does not supply artwork".into(),
+                ));
+            }
+            let source_id = source_observation_id.ok_or_else(|| {
+                Error::Invalid("DAT metadata requires its D04 catalog observation".into())
+            })?;
+            let source = self.processing.processing_record(source_id)?.observation;
+            if source.collection_id != item.collection_id
+                || source.snapshot_id != Some(snapshot.id)
+                || source.typed_result.module != *owner
+            {
+                return Err(Error::Invalid(
+                    "DAT metadata source does not match this item and snapshot".into(),
+                ));
+            }
+            let representation = match source.source_fingerprint.source {
+                PackageScope::Representation(id) => id,
+                _ => {
+                    return Err(Error::Invalid(
+                        "DAT metadata requires committed Representation evidence".into(),
+                    ));
+                }
+            };
+            if !item.captures.iter().any(|capture| {
+                capture
+                    .representations
+                    .iter()
+                    .any(|value| value.id == representation)
+            }) {
+                return Err(Error::Invalid(
+                    "DAT metadata evidence is not associated with this item".into(),
+                ));
+            }
+            let catalog = if source.operation.as_str() == "org.junk.games.catalog-verification" {
+                match source
+                    .typed_result
+                    .payload
+                    .parse::<collector_modules::games::GameProcessingResult>()?
+                {
+                    collector_modules::games::GameProcessingResult::CatalogMatch { catalog } => {
+                        catalog
+                    }
+                    _ => {
+                        return Err(Error::Invalid(
+                            "DAT metadata requires a catalog match result".into(),
+                        ));
+                    }
+                }
+            } else if source.operation.as_str() == "org.junk.games.import-analysis" {
+                let value: collector_modules::games::GameImportAnalysisOutput =
+                    source.typed_result.payload.parse()?;
+                let raw = value.observations.get(1).ok_or_else(|| {
+                    Error::Invalid("DAT Import analysis contains no catalog result".into())
+                })?;
+                match raw.parse::<collector_modules::games::GameProcessingResult>()? {
+                    collector_modules::games::GameProcessingResult::CatalogMatch { catalog } => {
+                        catalog
+                    }
+                    _ => {
+                        return Err(Error::Invalid(
+                            "DAT Import analysis has no catalog match".into(),
+                        ));
+                    }
+                }
+            } else {
+                return Err(Error::Invalid(
+                    "DAT metadata requires catalog or Import analysis evidence".into(),
+                ));
+            };
+            let candidates = collector_modules::games::dat_metadata_candidates(
+                snapshot.provider.clone(),
+                &snapshot.digest,
+                &parsed.entries,
+                &catalog,
+            )?;
+            let raw = RawJson::from_value(serde_json::json!({
+                "provider":"org.junk.providers.local-dat",
+                "snapshot_id":snapshot.id,
+                "snapshot_digest":snapshot.digest,
+                "source_observation_id":source_id
+            }));
+            (candidates, raw)
+        } else {
+            return Err(Error::Invalid(
+                "metadata provider is incompatible with the collection owner".into(),
+            ));
+        };
+        let candidate_ids = candidates
+            .iter()
+            .map(|candidate| candidate.identity.provider_record_id.as_str())
+            .collect::<BTreeSet<_>>();
+        if artwork
+            .keys()
+            .any(|id| !candidate_ids.contains(id.as_str()))
+        {
+            return Err(Error::Invalid(
+                "metadata artwork link does not identify an observed candidate".into(),
+            ));
+        }
+        Ok(MetadataRefreshObservation {
+            id: observation_id,
+            outcome: if candidates.is_empty() {
+                MetadataRefreshOutcome::NoMatch
+            } else {
+                MetadataRefreshOutcome::Candidates
+            },
+            candidates,
+            raw_observation,
+            observed_at: self.authentication.now(),
+        })
     }
 
     /// Curator detail. Raw candidate observations are intentionally not part of
@@ -1274,7 +1363,7 @@ impl CollectionService {
         item: &Item,
         owner: &ModuleId,
         command: &RefreshMetadataCommand,
-        effects: &dyn CommandEffects,
+        effects: &dyn ProcessingPort,
     ) -> Result<MetadataAuthorityRecord> {
         command.observation.validate()?;
         let LoadedMetadataAuthority {
@@ -1814,7 +1903,7 @@ fn provider_observation_id(
     ObservationId(uuid::Uuid::from_bytes(bytes))
 }
 
-fn read_exact_snapshot_bytes(
+pub(crate) fn read_exact_snapshot_bytes(
     processing: &dyn crate::ProcessingPort,
     snapshot: &crate::SnapshotRecord,
     maximum: u64,

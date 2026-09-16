@@ -2113,6 +2113,395 @@
         }
       }
     },
+    "/api/v1/ingests": {
+      "get": {
+        "operationId": "list_ingests",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_IngestSummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "start_ingest",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartIngestCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedIngest"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/ingests/plan": {
+      "post": {
+        "operationId": "plan_ingest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanIngestCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestPlan"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/ingests/{id}": {
+      "get": {
+        "operationId": "ingest_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/ingests/{id}/association": {
+      "put": {
+        "operationId": "correct_ingest_association",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectIngestAssociationCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/ingests/{id}/cancel": {
+      "post": {
+        "operationId": "cancel_ingest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscardIngestCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/ingests/{id}/discard": {
+      "post": {
+        "operationId": "discard_ingest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscardIngestCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestDiscardResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/ingests/{id}/retry": {
+      "post": {
+        "operationId": "retry_ingest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryIngestCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items": {
       "get": {
         "operationId": "browse",
@@ -4247,6 +4636,27 @@
   },
   "components": {
     "schemas": {
+      "AcceptedIngest": {
+        "type": "object",
+        "required": [
+          "imports",
+          "rejected"
+        ],
+        "properties": {
+          "imports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestSummary"
+            }
+          },
+          "rejected": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestRejectedPackage"
+            }
+          }
+        }
+      },
       "AccountChange": {
         "type": "object",
         "required": [
@@ -5395,6 +5805,32 @@
           }
         ]
       },
+      "CorrectIngestAssociationCommand": {
+        "type": "object",
+        "required": [
+          "expected_capture_revision",
+          "association"
+        ],
+        "properties": {
+          "association": {
+            "$ref": "#/components/schemas/CaptureAssociation"
+          },
+          "expected_capture_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "expected_item_revision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Revision"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateCollectionCommand": {
         "type": "object",
         "description": "Typed creation input reserved for CT.2 runtime integration. Keeping the\nmodule mandatory here prevents `LegacyUnassigned` from becoming a valid new\ncollection request while CT.1 leaves persisted Collection unchanged.",
@@ -5432,6 +5868,20 @@
             "type": "string"
           }
         }
+      },
+      "DiscardIngestCommand": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "DisposeSpecimen": {
         "type": "object",
@@ -6148,6 +6598,432 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "IngestAnchorChoice": {
+        "type": "object",
+        "required": [
+          "file_index",
+          "label",
+          "selected"
+        ],
+        "properties": {
+          "file_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "label": {
+            "type": "string"
+          },
+          "selected": {
+            "type": "boolean"
+          }
+        }
+      },
+      "IngestAttemptView": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "step",
+          "attempt",
+          "state"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "diagnostic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "job_id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "step": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestBlocker": {
+        "type": "object",
+        "required": [
+          "kind",
+          "message",
+          "blocks_analysis",
+          "blocks_preservation"
+        ],
+        "properties": {
+          "blocks_analysis": {
+            "type": "boolean"
+          },
+          "blocks_preservation": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IngestBlockerKind"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestBlockerKind": {
+        "type": "string",
+        "enum": [
+          "missing_anchor",
+          "ambiguous_anchors",
+          "unsupported_package",
+          "missing_companion"
+        ]
+      },
+      "IngestDetail": {
+        "type": "object",
+        "required": [
+          "summary",
+          "import",
+          "steps",
+          "attempts"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestAttemptView"
+            }
+          },
+          "cleanup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IngestDiscardResult"
+              }
+            ]
+          },
+          "import": {
+            "$ref": "#/components/schemas/ImportView"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestStepView"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/IngestSummary"
+          }
+        }
+      },
+      "IngestDiscardResult": {
+        "type": "object",
+        "required": [
+          "import_id",
+          "reclaimed_bytes",
+          "pending_bytes",
+          "cleanup_pending"
+        ],
+        "properties": {
+          "cleanup_pending": {
+            "type": "boolean"
+          },
+          "import_id": {
+            "$ref": "#/components/schemas/ImportId"
+          },
+          "pending_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "reclaimed_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          }
+        }
+      },
+      "IngestEnrichmentPolicy": {
+        "type": "string",
+        "enum": [
+          "automatic",
+          "none"
+        ]
+      },
+      "IngestPackageSelection": {
+        "type": "object",
+        "required": [
+          "source",
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadFile"
+            }
+          },
+          "source": {
+            "$ref": "#/components/schemas/ImportSourceSummary"
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngestPermissions": {
+        "type": "object",
+        "required": [
+          "can_cancel",
+          "can_discard",
+          "can_correct_association"
+        ],
+        "properties": {
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "can_correct_association": {
+            "type": "boolean"
+          },
+          "can_discard": {
+            "type": "boolean"
+          }
+        }
+      },
+      "IngestPlan": {
+        "type": "object",
+        "required": [
+          "collection_id",
+          "token",
+          "packages"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestPlanPackage"
+            }
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestPlanPackage": {
+        "type": "object",
+        "required": [
+          "position",
+          "source",
+          "files",
+          "default_title",
+          "anchors",
+          "blockers",
+          "analysis_available",
+          "metadata_available",
+          "artwork_available"
+        ],
+        "properties": {
+          "analysis_available": {
+            "type": "boolean"
+          },
+          "anchors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestAnchorChoice"
+            }
+          },
+          "artwork_available": {
+            "type": "boolean"
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestBlocker"
+            }
+          },
+          "default_title": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadFile"
+            }
+          },
+          "metadata_available": {
+            "type": "boolean"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/ImportSourceSummary"
+          }
+        }
+      },
+      "IngestRejectedPackage": {
+        "type": "object",
+        "required": [
+          "position",
+          "reason"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestStepState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "active",
+          "needs_input",
+          "succeeded",
+          "failed",
+          "skipped",
+          "cancelled"
+        ]
+      },
+      "IngestStepView": {
+        "type": "object",
+        "required": [
+          "step",
+          "state",
+          "retryable"
+        ],
+        "properties": {
+          "attempt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "job_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IngestStepState"
+          },
+          "step": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestSummary": {
+        "type": "object",
+        "required": [
+          "import_id",
+          "collection_id",
+          "package_name",
+          "file_count",
+          "total_bytes",
+          "capture_id",
+          "phase",
+          "outcome",
+          "enrichment",
+          "updated_at",
+          "permissions"
+        ],
+        "properties": {
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "capture_revision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Revision"
+              }
+            ]
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "enrichment": {
+            "$ref": "#/components/schemas/IngestEnrichmentPolicy"
+          },
+          "file_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "import_id": {
+            "$ref": "#/components/schemas/ImportId"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/IngestStepState"
+          },
+          "package_name": {
+            "type": "string"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/IngestPermissions"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/ImportPhase"
+          },
+          "target_item_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          },
+          "total_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -7783,6 +8659,97 @@
           }
         }
       },
+      "Page_IngestSummary": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "import_id",
+                "collection_id",
+                "package_name",
+                "file_count",
+                "total_bytes",
+                "capture_id",
+                "phase",
+                "outcome",
+                "enrichment",
+                "updated_at",
+                "permissions"
+              ],
+              "properties": {
+                "capture_id": {
+                  "$ref": "#/components/schemas/CaptureId"
+                },
+                "capture_revision": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Revision"
+                    }
+                  ]
+                },
+                "collection_id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "enrichment": {
+                  "$ref": "#/components/schemas/IngestEnrichmentPolicy"
+                },
+                "file_count": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "import_id": {
+                  "$ref": "#/components/schemas/ImportId"
+                },
+                "outcome": {
+                  "$ref": "#/components/schemas/IngestStepState"
+                },
+                "package_name": {
+                  "type": "string"
+                },
+                "permissions": {
+                  "$ref": "#/components/schemas/IngestPermissions"
+                },
+                "phase": {
+                  "$ref": "#/components/schemas/ImportPhase"
+                },
+                "target_item_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ItemId"
+                    }
+                  ]
+                },
+                "total_bytes": {
+                  "$ref": "#/components/schemas/ByteLength"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_JobView": {
         "type": "object",
         "required": [
@@ -8183,6 +9150,25 @@
         "type": "integer",
         "format": "int64",
         "minimum": 0
+      },
+      "PlanIngestCommand": {
+        "type": "object",
+        "required": [
+          "collection_id",
+          "packages"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestPackageSelection"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "Possession": {
         "type": "string",
@@ -8965,6 +9951,22 @@
         },
         "additionalProperties": false
       },
+      "RetryIngestCommand": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ReturnLoan": {
         "type": "object",
         "required": [
@@ -9448,6 +10450,22 @@
             ]
           }
         }
+      },
+      "StartIngestCommand": {
+        "type": "object",
+        "required": [
+          "plan",
+          "enrichment"
+        ],
+        "properties": {
+          "enrichment": {
+            "$ref": "#/components/schemas/IngestEnrichmentPolicy"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/IngestPlan"
+          }
+        },
+        "additionalProperties": false
       },
       "StartLoan": {
         "type": "object",

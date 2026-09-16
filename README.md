@@ -1,5 +1,11 @@
 # Junk Collector
 
+Current delivery target: [local web alpha](docs/local-alpha-plan.md) — guided raw-dump
+imports, automatic metadata, browsing, CD playback and trusted local users. The
+integration is planned; [implementation status](docs/implementation-status.md)
+distinguishes current capabilities from remaining work.
+
+
 A homelab collection archive for physical games and music CDs, their original dumps, artwork, and verification evidence.
 
 **Development foundation — not yet the complete first release.** The server, portable archive, upload/thumbnail workflows, authentication, and artwork/text WebUI are executable. Native apps, shared audio, catalog verification and several curation workflows remain unfinished. See [implementation status](docs/implementation-status.md) and [architecture](docs/architecture.md). Remaining work is organized in the [handoff backlog](docs/handoff-backlog.md), with the [accepted release requirements](docs/release-requirements.md) preserved alongside it.
