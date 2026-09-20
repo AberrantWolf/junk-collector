@@ -3,11 +3,12 @@ use collector_app::{
     AuthenticatedPrincipal, CarrierDetails, Catalog, CollectionService,
     CollectionTypeAdministrationService, CollectionTypePort, CommandContext, ComponentDetails,
     ContentPort, CreateAssetCommand, CreateCollectionCommand, CreateImportCommand, CredentialKind,
-    DisposeSpecimenCommand, FrozenAcquisitionJob, IdempotencyPort, ImportCandidate,
-    ImportCatalogSnapshotCommand, ImportDeclaredFile, ImportIdentityDecision, ImportPhase,
-    ImportPort, ImportRecord, ImportReviewDecision, ImportSourceKind, ImportSourceSummary,
-    ImportView, IngestEnrichmentPolicy, IngestPackageSelection, JobPort, JobSpec, MediaResource,
-    MetadataAuthorityChange, MetadataAuthorityRecord, PlanIngestCommand,
+    DisposeSpecimenCommand, FrozenAcquisitionJob, FrozenJobInput, FrozenPreparationMember,
+    IdempotencyPort, ImportCandidate, ImportCatalogSnapshotCommand, ImportDeclaredFile,
+    ImportIdentityDecision, ImportPhase, ImportPort, ImportRecord, ImportReviewDecision,
+    ImportSourceKind, ImportSourceSummary, ImportView, IngestEnrichmentPolicy,
+    IngestPackageSelection, JobPort, JobSpec, MediaResource, MetadataAuthorityChange,
+    MetadataAuthorityRecord, PlanIngestCommand, PrepareMusicAlbum, PrepareMusicTrack,
     ProcessingExecutionContext, ProcessingPort, ProcessingQuery, ProviderArtworkLink, ProviderPort,
     ProviderRequest, ProviderResponse, ProviderStreamResponse, ProvisionalImportPort,
     PublishProviderArtworkCommand, ReceiptDecision, RefreshMetadataCommand,
@@ -1144,9 +1145,30 @@ fn setup() -> (
     CollectionService,
     Collection,
 ) {
+    setup_with_clock(None)
+}
+
+fn setup_with_clock(
+    clock: Option<Arc<dyn Clock>>,
+) -> (
+    tempfile::TempDir,
+    Arc<Store>,
+    Principal,
+    CollectionService,
+    Collection,
+) {
     let root = tempfile::tempdir().unwrap();
-    let store =
-        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let store = Arc::new(
+        match clock {
+            Some(clock) => Store::open_with_clock(
+                root.path().join("archive"),
+                root.path().join("state"),
+                clock,
+            ),
+            None => Store::open(root.path().join("archive"), root.path().join("state")),
+        }
+        .unwrap(),
+    );
     let user = store
         .create_user("owner", "a long test password", true)
         .unwrap();
@@ -1158,7 +1180,10 @@ fn setup() -> (
     let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
     let collection = service
         .create_collection(
-            &test_authentication(&actor),
+            &store
+                .login("owner", "a long test password", "setup")
+                .unwrap()
+                .1,
             typed_collection("日本の音楽"),
             &command(),
         )
@@ -5518,11 +5543,143 @@ fn schema_thirteen_preserves_durable_imports_without_private_path_columns() {
 }
 
 #[test]
+fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
+    let (_root, store, actor, service, collection) = setup();
+    let names = [
+        "disc.cue",
+        "disc.toc",
+        "disc.scram",
+        "disc.state",
+        "disc.subcode",
+        "disc.bin",
+    ];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: Some(1),
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Redumper album".into(),
+                    },
+                    files: names
+                        .into_iter()
+                        .map(|name| UploadFile {
+                            name: name.into(),
+                            bytes: ByteLength(1),
+                            sha256: None,
+                        })
+                        .collect(),
+                }],
+            },
+        )
+        .unwrap();
+    assert!(plan.packages[0].blockers.is_empty());
+    assert_eq!(
+        plan.packages[0]
+            .anchors
+            .iter()
+            .find(|anchor| anchor.selected)
+            .map(|anchor| anchor.file_index),
+        Some(1)
+    );
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+            },
+            &CommandContext::new("guided-redumper-anchor").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .guided_ingest_intent(accepted.imports[0].import_id)
+            .unwrap()
+            .unwrap()
+            .anchor_file_index,
+        Some(1)
+    );
+}
+
+#[test]
+fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
+    let (_root, _store, actor, service, _collection) = setup();
+    let collection = service
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Guided games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let rom = b"owned fixture";
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "fixture.rom".into(),
+                    },
+                    files: vec![UploadFile {
+                        name: "fixture.rom".into(),
+                        bytes: ByteLength(rom.len() as u64),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import_id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, import_id, 0, 0, rom)
+        .unwrap();
+
+    assert!(service.run_next_job("guided-game-analysis").unwrap());
+    let detail = service.ingest_detail(&actor, import_id).unwrap();
+    let analysis = service
+        .job(&actor, detail.import.analysis_job_id.unwrap())
+        .unwrap();
+    assert_eq!(analysis.state, JobState::Completed);
+    assert!(
+        detail
+            .import
+            .limitations
+            .iter()
+            .any(|limitation| { limitation.contains("No active DAT snapshot was selected") })
+    );
+}
+
+#[test]
 fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser_chaining() {
     let (root, store, actor, service, collection) = setup();
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
+        anchor_file_index: None,
         source: ImportSourceSummary {
             kind: ImportSourceKind::Browser,
             label: None,
@@ -5560,6 +5717,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             StartIngestCommand {
                 plan: stale,
                 enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
             },
             &command(),
         ),
@@ -5572,6 +5730,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             StartIngestCommand {
                 plan: plan.clone(),
                 enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
             },
             &key,
         )
@@ -5582,6 +5741,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             StartIngestCommand {
                 plan: plan.clone(),
                 enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
             },
             &key,
         )
@@ -5592,6 +5752,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             StartIngestCommand {
                 plan: plan.clone(),
                 enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
             },
             &key,
             |_| Err(Error::Unavailable("inbox or provider changed".into())),
@@ -5684,6 +5845,246 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
 }
 
 #[test]
+fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
+    let (root, store, actor, service, collection) = setup();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let pcm = vec![0; 2352 * 10];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "album.cue".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: true,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    for phase in ["analysis", "publication", "album-admission"] {
+        assert!(service.run_next_job(phase).unwrap());
+    }
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    let batch = detail
+        .steps
+        .iter()
+        .find(|step| step.step == "preparation")
+        .unwrap()
+        .job_id
+        .unwrap();
+    let view = service.music_preparation_batch(&actor, batch).unwrap();
+    assert_eq!(view.queued, 1);
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute(
+        "UPDATE guided_ingest_intents SET preparation_batch_id=NULL WHERE import_id=?",
+        [id.to_string()],
+    )
+    .unwrap();
+    service
+        .cancel_ingest(&actor, id, detail.import.revision, &command())
+        .unwrap();
+    assert_eq!(
+        store
+            .job_record(view.members[0].job_id.unwrap(), actor.user_id)
+            .unwrap()
+            .state,
+        JobState::Cancelled
+    );
+    assert!(matches!(
+        service.retry_music_preparation_batch(&actor, batch, &command()),
+        Err(Error::Conflict)
+    ));
+    assert_eq!(
+        store
+            .capture(detail.summary.capture_id)
+            .unwrap()
+            .representations
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
+    let (_root, store, actor, service, collection) = setup();
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let toc = b"TRACK AUDIO\nFILE \"disc.bin\" 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let selection = IngestPackageSelection {
+        anchor_file_index: Some(0),
+        source: ImportSourceSummary {
+            kind: ImportSourceKind::Browser,
+            label: None,
+            package_name: "Prepared album.cue".into(),
+        },
+        files: vec![
+            UploadFile {
+                name: "disc.cue".into(),
+                bytes: ByteLength(cue.len() as u64),
+                sha256: None,
+            },
+            UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(pcm.len() as u64),
+                sha256: None,
+            },
+            UploadFile {
+                name: "disc.toc".into(),
+                bytes: ByteLength(toc.len() as u64),
+                sha256: None,
+            },
+        ],
+    };
+    let unavailable = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![selection.clone()],
+            },
+        )
+        .unwrap();
+    assert!(!unavailable.packages[0].preparation_available);
+    assert!(matches!(
+        service.start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan: unavailable,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: true,
+            },
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let service = service.with_audio_converter(encoder.clone());
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![selection],
+            },
+        )
+        .unwrap();
+    assert!(plan.packages[0].preparation_available);
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: true,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 2, 0, toc)
+        .unwrap();
+    assert!(service.run_next_job("guided-preparation-analysis").unwrap());
+    assert!(
+        service
+            .run_next_job("guided-preparation-publication")
+            .unwrap()
+    );
+    assert!(
+        service.run_next_job("guided-preparation-batch").unwrap(),
+        "{:?}",
+        service.ingest_detail(&actor, id).unwrap()
+    );
+    let during = service.ingest_detail(&actor, id).unwrap();
+    let preparation = during
+        .steps
+        .iter()
+        .find(|step| step.step == "preparation")
+        .unwrap();
+    assert_eq!(preparation.state, collector_app::IngestStepState::Active);
+    assert!(preparation.job_id.is_some());
+    assert!(service.run_next_job("guided-preparation-track").unwrap());
+    service.resume_guided_ingests().unwrap();
+    let completed = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(
+        completed.summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+    assert!(completed.steps.iter().any(|step| {
+        step.step == "preparation" && step.state == collector_app::IngestStepState::Succeeded
+    }));
+    let target = completed.summary.target_item_id.unwrap();
+    let capture = store.capture(completed.summary.capture_id).unwrap();
+    assert_eq!(capture.representations.len(), 2);
+    assert_eq!(
+        capture.representations[0].role,
+        RepresentationRole::PreservationMaster
+    );
+    assert_eq!(
+        capture.representations[1].role,
+        RepresentationRole::LosslessDerivative
+    );
+
+    let reused = service
+        .prepare_music_album(
+            &actor,
+            target,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![capture.representations[0].id],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(reused.succeeded, 1);
+    assert_eq!(
+        reused.members[0].state,
+        collector_app::MusicPreparationMemberState::AlreadyAvailable
+    );
+    assert_eq!(encoder.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn guided_optional_provider_failure_preserves_master_and_manual_title_authority() {
     let (_root, store, actor, service, collection) = setup();
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
@@ -5694,6 +6095,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
@@ -5721,6 +6123,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
             StartIngestCommand {
                 plan,
                 enrichment: IngestEnrichmentPolicy::Automatic,
+                prepare_music: false,
             },
             &command(),
         )
@@ -5835,6 +6238,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
@@ -5862,6 +6266,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             StartIngestCommand {
                 plan,
                 enrichment: IngestEnrichmentPolicy::Automatic,
+                prepare_music: false,
             },
             &command(),
         )
@@ -5918,6 +6323,10 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
     )
     .into_bytes();
     let caa_server = metadata_fixture_server(vec![
+        (
+            "400 Bad Request\r\nContent-Type: text/plain",
+            b"retry me".to_vec(),
+        ),
         ("200 OK\r\nContent-Type: application/json", caa_listing),
         ("200 OK\r\nContent-Type: image/png", art.clone()),
     ]);
@@ -5953,7 +6362,34 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .unwrap();
     assert!(service.run_next_job("guided-provider-publication").unwrap());
     assert!(service.run_next_job("guided-provider-metadata").unwrap());
-    assert!(service.run_next_job("guided-provider-art-listing").unwrap());
+    assert!(
+        service
+            .run_next_job("guided-provider-art-listing-failure")
+            .unwrap()
+    );
+    let artwork_job = service
+        .ingest_detail(&actor, id)
+        .unwrap()
+        .steps
+        .into_iter()
+        .find(|step| step.step == "artwork")
+        .and_then(|step| step.job_id)
+        .unwrap();
+    service
+        .retry_ingest(
+            &actor,
+            id,
+            collector_app::RetryIngestCommand {
+                job_id: Some(artwork_job),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        service
+            .run_next_job("guided-provider-art-listing-retry")
+            .unwrap()
+    );
     assert!(service.run_next_job("guided-provider-art-image").unwrap());
     assert!(!service.run_next_job("guided-provider-finished").unwrap());
     let target = service
@@ -6018,6 +6454,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
@@ -6041,6 +6478,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             StartIngestCommand {
                 plan,
                 enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
             },
             &command(),
         )
@@ -6080,6 +6518,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
@@ -6100,6 +6539,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
             StartIngestCommand {
                 plan,
                 enrichment: IngestEnrichmentPolicy::Automatic,
+                prepare_music: false,
             },
             &command(),
         )
@@ -6158,6 +6598,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
@@ -6178,6 +6619,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
             StartIngestCommand {
                 plan,
                 enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
             },
             &command(),
         )
@@ -6566,6 +7008,144 @@ fn browser_import_resumes_from_durable_offsets_after_restart() {
     ));
     let completed = service
         .stage_provisional_import_chunk(&actor, created.id, 0, 2, b"ta")
+        .unwrap();
+    assert_eq!(completed.phase, ImportPhase::Analyzing);
+    assert_eq!(completed.files[0].digest, Some(Digest::sha256(b"data")));
+}
+
+#[test]
+fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch() {
+    let (root, store, actor, service, collection) = setup();
+    let owner_session = store
+        .login("owner", "a long test password", "restore rehearsal")
+        .unwrap()
+        .1;
+    let viewer = store
+        .create_user("restore-viewer", "another long password", false)
+        .unwrap();
+    service
+        .grant(
+            &owner_session,
+            collection.id,
+            viewer,
+            Role::Viewer,
+            &command(),
+        )
+        .unwrap();
+
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let original = b"synthetic stopped-server rehearsal original";
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "master.bin".into(),
+                bytes: ByteLength(original.len() as u64),
+                sha256: Some(Digest::sha256(original).hex),
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 0, 0, original)
+        .unwrap();
+    service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
+
+    let pending = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "restore-pending".into(),
+                },
+                files: vec![UploadFile {
+                    name: "pending.bin".into(),
+                    bytes: ByteLength(4),
+                    sha256: Some(Digest::sha256(b"data").hex),
+                }],
+                association: CaptureAssociation::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let pending = service
+        .stage_provisional_import_chunk(&actor, pending.id, 0, 0, b"da")
+        .unwrap();
+    assert_eq!(pending.files[0].received_bytes, ByteLength(2));
+
+    let server_id = store.server_id().unwrap();
+    let account_names = store
+        .accounts()
+        .unwrap()
+        .into_iter()
+        .map(|account| account.username)
+        .collect::<Vec<_>>();
+    let evidence_records = serde_json::to_value(store.evidence(saved.id).unwrap()).unwrap();
+    drop(service);
+    drop(store);
+
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let archive_hashes = tree_hashes(&archive);
+    let state_hashes = tree_hashes(&state);
+    let restore = root.path().join("isolated-restore");
+    let restored_archive = restore.join("archive");
+    let restored_state = restore.join("state");
+    assert!(!restore.exists());
+    copy_tree(&archive, &restored_archive);
+    copy_tree(&state, &restored_state);
+    assert_eq!(tree_hashes(&restored_archive), archive_hashes);
+    assert_eq!(tree_hashes(&restored_state), state_hashes);
+
+    let restored = Arc::new(Store::open(&restored_archive, &restored_state).unwrap());
+    assert_eq!(restored.server_id().unwrap(), server_id);
+    assert_eq!(
+        restored
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .map(|account| account.username)
+            .collect::<Vec<_>>(),
+        account_names
+    );
+    restored
+        .login("owner", "a long test password", "restored owner")
+        .unwrap();
+    restored
+        .login("restore-viewer", "another long password", "restored viewer")
+        .unwrap();
+    assert_eq!(
+        Catalog::role(&*restored, viewer, collection.id).unwrap(),
+        Role::Viewer
+    );
+
+    let restored_service = CollectionService::new(restored.clone(), Arc::new(Registry::builtins()));
+    assert_eq!(
+        resource_bytes(
+            restored_service
+                .representation(&actor, saved.id, upload.representation_id, 0)
+                .unwrap()
+        ),
+        original
+    );
+    assert_eq!(
+        serde_json::to_value(restored.evidence(saved.id).unwrap()).unwrap(),
+        evidence_records
+    );
+    let resumed = restored_service
+        .provisional_import(&actor, pending.id)
+        .unwrap();
+    assert_eq!(resumed.files[0].received_bytes, ByteLength(2));
+    let completed = restored_service
+        .stage_provisional_import_chunk(&actor, pending.id, 0, 2, b"ta")
         .unwrap();
     assert_eq!(completed.phase, ImportPhase::Analyzing);
     assert_eq!(completed.files[0].digest, Some(Digest::sha256(b"data")));
@@ -10059,11 +10639,20 @@ fn derivative_import(
     actor: &Principal,
     collection: CollectionId,
 ) -> ImportView {
+    derivative_import_variant(service, actor, collection, 0)
+}
+
+fn derivative_import_variant(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    variant: u8,
+) -> ImportView {
     // Track 1 owns stored HTOA plus track 2's stored INDEX 00: 3 sectors.
     // Track 2 owns the final two sectors. No AccurateRip evidence is requested.
     let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 00 00:00:00\n INDEX 01 00:00:01\n TRACK 02 AUDIO\n INDEX 00 00:00:02\n INDEX 01 00:00:03\n";
     let pcm: Vec<u8> = (0..5 * 588)
-        .flat_map(|i| [i as u8, 0x80, 0xff, 0x7f])
+        .flat_map(|i| [(i as u8).wrapping_add(variant), 0x80, 0xff, 0x7f])
         .collect();
     let created = service
         .create_provisional_import(
@@ -10073,7 +10662,7 @@ fn derivative_import(
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
                     label: None,
-                    package_name: "derivative-fixture".into(),
+                    package_name: format!("derivative-fixture-{variant}"),
                 },
                 files: vec![
                     UploadFile {
@@ -10360,6 +10949,520 @@ fn derivative_jobs_converge_replay_keep_track_ownership_and_survive_item_edits_r
             &key
         ),
         Err(Error::IdempotencyConflict)
+    ));
+}
+
+#[test]
+fn album_batches_fan_out_durably_overlap_without_duplicate_tracks_and_retry_partial_failure() {
+    let clock = Arc::new(TestClock::new(chrono::Utc::now().timestamp()));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let service = service.with_audio_converter(encoder.clone());
+    let plan = service
+        .music_album_preparation_plan(&actor, saved.id)
+        .unwrap();
+    assert_eq!(plan.discs.len(), 1);
+    assert_eq!(plan.total_tracks, 2);
+    assert!(plan.discs[0].sources[0].default_selected);
+    let request = PrepareMusicAlbum {
+        source_representation_ids: vec![imported.representation_id],
+    };
+    let first = service
+        .prepare_music_album(&actor, saved.id, request.clone(), &command())
+        .unwrap();
+    clock.advance(7);
+    let second = service
+        .prepare_music_album(&actor, saved.id, request, &command())
+        .unwrap();
+    assert_ne!(first.batch_id, second.batch_id);
+    assert_eq!(first.members.len(), 2);
+    assert_eq!(
+        first
+            .members
+            .iter()
+            .map(|member| member.job_id)
+            .collect::<Vec<_>>(),
+        second
+            .members
+            .iter()
+            .map(|member| member.job_id)
+            .collect::<Vec<_>>()
+    );
+    clock.advance(7);
+    service.run_next_job("album-fanout-1").unwrap();
+    let second = service
+        .music_preparation_batch(&actor, second.batch_id)
+        .unwrap();
+    assert_eq!(second.queued, 2);
+    service
+        .cancel_music_preparation_batch(&actor, first.batch_id, &command())
+        .unwrap();
+    service.run_next_job("album-fanout-2").unwrap();
+    encoder.broken.store(true, Ordering::SeqCst);
+    service.run_next_job("album-track-failure").unwrap();
+    encoder.broken.store(false, Ordering::SeqCst);
+    service.run_next_job("album-track-success").unwrap();
+    let partial = service
+        .music_preparation_batch(&actor, second.batch_id)
+        .unwrap();
+    assert_eq!(partial.failed, 1);
+    assert_eq!(partial.succeeded, 1);
+    assert!(partial.can_retry);
+    service
+        .retry_music_preparation_batch(&actor, second.batch_id, &command())
+        .unwrap();
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .with_audio_converter(encoder.clone());
+    service.run_next_job("album-restart-retry").unwrap();
+    let completed = service
+        .music_preparation_batch(&actor, second.batch_id)
+        .unwrap();
+    assert_eq!(completed.succeeded, 2);
+    assert_eq!(completed.failed, 0);
+    let attempts = completed
+        .members
+        .iter()
+        .filter_map(|member| member.job_id)
+        .map(|id| store.job_record(id, actor.user_id).unwrap())
+        .collect::<Vec<_>>();
+    let retried = attempts.iter().find(|job| job.attempt == 2).unwrap();
+    assert_eq!(
+        retried.result.as_ref().unwrap()["prior_failures"][0]["attempt"],
+        1
+    );
+    assert!(
+        retried.result.as_ref().unwrap()["prior_failures"][0]["error"]
+            .as_str()
+            .is_some()
+    );
+
+    assert_eq!(encoder.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        Catalog::capture(store.as_ref(), imported.capture_id)
+            .unwrap()
+            .representations
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn album_cancellation_respects_later_direct_requests_and_last_shared_request() {
+    let clock = Arc::new(TestClock::new(chrono::Utc::now().timestamp()));
+    let (_root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let request = PrepareMusicAlbum {
+        source_representation_ids: vec![imported.representation_id],
+    };
+    let first = service
+        .prepare_music_album(&actor, saved.id, request.clone(), &command())
+        .unwrap();
+    clock.advance(2);
+    let second = service
+        .prepare_music_album(&actor, saved.id, request, &command())
+        .unwrap();
+    clock.advance(2);
+    service.run_next_job("first-batch").unwrap();
+    service.run_next_job("second-batch").unwrap();
+    clock.advance(8);
+    let direct = service
+        .prepare_configured_music_track(
+            &actor,
+            saved.id,
+            imported.capture_id,
+            PrepareMusicTrack {
+                source_representation_id: imported.representation_id,
+                profile: ConversionProfile::Flac,
+            },
+            first.members[0].track_position,
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(Some(direct), first.members[0].job_id);
+    service
+        .cancel_music_preparation_batch(&actor, first.batch_id, &command())
+        .unwrap();
+    assert_eq!(
+        store
+            .job_record(first.members[1].job_id.unwrap(), actor.user_id)
+            .unwrap()
+            .state,
+        JobState::Queued
+    );
+    service
+        .cancel_music_preparation_batch(&actor, second.batch_id, &command())
+        .unwrap();
+    assert_eq!(
+        store
+            .job_record(first.members[1].job_id.unwrap(), actor.user_id)
+            .unwrap()
+            .state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        store.job_record(direct, actor.user_id).unwrap().state,
+        JobState::Queued
+    );
+    service.cancel_job(&actor, direct, &command()).unwrap();
+    let fresh = service
+        .prepare_music_album(
+            &actor,
+            saved.id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![imported.representation_id],
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .run_next_job("fresh-batch-after-direct-cancel")
+        .unwrap();
+    service
+        .cancel_music_preparation_batch(&actor, fresh.batch_id, &command())
+        .unwrap();
+    assert_eq!(
+        store.job_record(direct, actor.user_id).unwrap().state,
+        JobState::Cancelled,
+        "an explicitly cancelled direct request cannot pin future batch work"
+    );
+}
+
+#[test]
+fn album_requests_from_another_curator_keep_job_details_private_and_respect_role_changes() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let request = PrepareMusicAlbum {
+        source_representation_ids: vec![imported.representation_id],
+    };
+    let owner_batch = service
+        .prepare_music_album(&actor, saved.id, request.clone(), &command())
+        .unwrap();
+    service.run_next_job("owner-admission").unwrap();
+    for _ in 1..collector_app::MAX_ACTIVE_MUSIC_PREPARATION_BATCHES {
+        service
+            .prepare_music_album(&actor, saved.id, request.clone(), &command())
+            .unwrap();
+    }
+    assert!(matches!(
+        service.prepare_music_album(&actor, saved.id, request.clone(), &command()),
+        Err(Error::Unavailable(_))
+    ));
+    service
+        .cancel_music_preparation_batch(&actor, owner_batch.batch_id, &command())
+        .unwrap();
+    service
+        .prepare_music_album(&actor, saved.id, request.clone(), &command())
+        .unwrap();
+    let oldest_live = service
+        .music_preparation_batches(&actor, saved.id)
+        .unwrap()
+        .into_iter()
+        .filter(|batch| !batch.cancelled_by_user)
+        .min_by_key(|batch| (batch.created_at, batch.batch_id))
+        .unwrap()
+        .batch_id;
+    let mut rolling = service.music_preparation_batches(&actor, saved.id).unwrap()[0].batch_id;
+    for _ in 0..52 {
+        service
+            .cancel_music_preparation_batch(&actor, rolling, &command())
+            .unwrap();
+        rolling = service
+            .prepare_music_album(&actor, saved.id, request.clone(), &command())
+            .unwrap()
+            .batch_id;
+    }
+    let history = service.music_preparation_batches(&actor, saved.id).unwrap();
+    assert_eq!(history.len(), 50);
+    assert!(
+        history.iter().any(|batch| batch.batch_id == oldest_live),
+        "cancelled shared history displaced unfinished work"
+    );
+    let user = store
+        .create_user("other-curator", "a long other password", false)
+        .unwrap();
+    store.grant(collection.id, user, Role::Curator).unwrap();
+    let curator = Principal {
+        user_id: user,
+        administrator: false,
+        device_id: None,
+    };
+    let other_batch = service
+        .prepare_music_album(&curator, saved.id, request, &command())
+        .unwrap();
+    assert_ne!(owner_batch.members[0].job_id, other_batch.members[0].job_id);
+    assert!(matches!(
+        service.music_preparation_batch(&curator, owner_batch.batch_id),
+        Err(Error::NotFound)
+    ));
+    assert_eq!(
+        service
+            .music_preparation_batches(&curator, saved.id)
+            .unwrap()
+            .len(),
+        1
+    );
+    AccessPort::set_grant(
+        store.as_ref(),
+        collection.id,
+        user,
+        Revision(1),
+        Some(Role::Viewer),
+    )
+    .unwrap();
+    let view = service
+        .music_preparation_batch(&curator, other_batch.batch_id)
+        .unwrap();
+    assert!(!view.can_cancel && !view.can_retry);
+    assert!(matches!(
+        service.cancel_music_preparation_batch(&curator, other_batch.batch_id, &command()),
+        Err(Error::Forbidden)
+    ));
+}
+
+#[test]
+fn album_failed_admission_is_visible_retryable_and_cancel_fences_late_children() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let batch = service
+        .prepare_music_album(
+            &actor,
+            saved.id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![imported.representation_id],
+            },
+            &command(),
+        )
+        .unwrap();
+    let claim = store
+        .claim_job("interrupted-admission", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.id, batch.batch_id);
+    store
+        .fail_job(claim.id, &claim.claim_token, "injected admission failure")
+        .unwrap();
+    let failed = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(failed.failed, 2);
+    assert_eq!(failed.queued, 0);
+    assert!(failed.can_retry);
+    service
+        .retry_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    let claim = store.claim_job("retried-admission", 30).unwrap().unwrap();
+    let Some(FrozenJobInput::DerivativeBatch(frozen)) = &claim.frozen_input else {
+        panic!("batch");
+    };
+    let FrozenPreparationMember::Prepare { job_id, input, .. } = &frozen.members[0] else {
+        panic!("member");
+    };
+    service
+        .cancel_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    let late = store.enqueue_preparation_member(claim.id, &claim.claim_token, JobSpec {
+        id: *job_id, user_id: actor.user_id, collection_id: Some(collection.id), item_id: None,
+        kind: "music_derivative".into(), phase: "queued".into(), total_units: 1,
+        request: serde_json::json!({"capture_id": input.capture_id, "representation_id": input.representation_id}),
+        frozen_input: Some(FrozenJobInput::Derivative(input.as_ref().clone())),
+    });
+    assert!(matches!(late, Err(Error::JobCancelled)));
+    assert!(matches!(
+        store.job_record(*job_id, actor.user_id),
+        Err(Error::NotFound)
+    ));
+}
+
+#[test]
+fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_missing_encoder() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let first = derivative_import(&service, &actor, collection.id);
+    let second = derivative_import(&service, &actor, collection.id);
+    for imported in [&first, &second] {
+        let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+        let revision = capture.revision;
+        capture.association.item_id = Some(saved.id);
+        Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    }
+    let unavailable = service
+        .music_album_preparation_plan(&actor, saved.id)
+        .unwrap();
+    assert_eq!(unavailable.discs.len(), 2);
+    assert!(!unavailable.can_submit);
+    assert_eq!(unavailable.maximum_members, 256);
+    assert!(
+        unavailable
+            .blockers
+            .iter()
+            .any(|reason| reason.contains("encoder"))
+    );
+    assert!(matches!(
+        service.prepare_music_album(
+            &actor,
+            saved.id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![first.representation_id, second.representation_id],
+            },
+            &command(),
+        ),
+        Err(Error::Unavailable(_))
+    ));
+
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let service = service.with_audio_converter(encoder);
+    let plan = service
+        .music_album_preparation_plan(&actor, saved.id)
+        .unwrap();
+    assert_eq!(plan.discs.len(), 2);
+    let first_disc = plan
+        .discs
+        .iter()
+        .find(|disc| disc.capture_id == first.capture_id)
+        .unwrap();
+    assert!(!first_disc.ambiguous);
+    assert!(first_disc.sources[0].default_selected);
+    let unambiguous = plan
+        .discs
+        .iter()
+        .find(|disc| disc.capture_id == second.capture_id)
+        .unwrap();
+    assert!(!unambiguous.ambiguous);
+    assert!(unambiguous.sources[0].default_selected);
+
+    let selected = service
+        .prepare_music_album(
+            &actor,
+            saved.id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![first.representation_id, second.representation_id],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(selected.members.len(), 4);
+    assert_eq!(
+        selected
+            .members
+            .iter()
+            .map(|member| member.capture_id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        2
+    );
+    assert!(matches!(
+        service.prepare_music_album(
+            &actor,
+            saved.id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![first.representation_id, first.representation_id],
+            },
+            &command(),
+        ),
+        Err(Error::Invalid(_))
+    ));
+    // Distinct captures of one known carrier are alternatives, not extra discs.
+    let inventory = service
+        .create_specimen(
+            &actor,
+            saved.id,
+            saved.revision,
+            SpecimenDetails {
+                label: "copy".into(),
+                condition: Condition::Unknown,
+                ownership: ActiveOwnership::Owned,
+                possession: Possession::Present,
+                acquisition: None,
+                private_notes: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let specimen_id = inventory.specimens[0].id;
+    let inventory = service
+        .create_component(
+            &actor,
+            saved.id,
+            specimen_id,
+            inventory.revision,
+            ComponentDetails {
+                label: "disc".into(),
+                position: 1,
+                kind: ComponentKind::OpticalDisc,
+                carrier: Some(CarrierDetails {
+                    label: "disc".into(),
+                    kind: CarrierKind::OpticalDisc,
+                }),
+            },
+            &command(),
+        )
+        .unwrap();
+    let component_id = inventory.specimens[0].components[0].id;
+    let carrier_id = inventory.specimens[0].components[0]
+        .carrier
+        .as_ref()
+        .unwrap()
+        .id;
+    for id in [first.capture_id, second.capture_id] {
+        let mut capture = Catalog::capture(store.as_ref(), id).unwrap();
+        let revision = capture.revision;
+        capture.association = CaptureAssociation {
+            item_id: Some(saved.id),
+            specimen_id: Some(specimen_id),
+            component_id: Some(component_id),
+            carrier_id: Some(carrier_id),
+        };
+        Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    }
+    let plan = service
+        .music_album_preparation_plan(&actor, saved.id)
+        .unwrap();
+    assert_eq!(plan.discs.len(), 1);
+    assert!(plan.discs[0].ambiguous);
+    assert!(
+        plan.discs[0]
+            .sources
+            .iter()
+            .all(|source| !source.default_selected)
+    );
+    assert!(matches!(
+        service.prepare_music_album(
+            &actor,
+            saved.id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![first.representation_id, second.representation_id],
+            },
+            &command()
+        ),
+        Err(Error::Invalid(_))
     ));
 }
 

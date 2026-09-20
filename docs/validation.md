@@ -2752,3 +2752,432 @@ These failed/interrupted intermediate runs are not counted as acceptance.
 Live MusicBrainz/CAA, user-owned dumps, target hosting, the LA3 backup drill and
 non-Chrome browsers remain unqualified. PlantUML sources were updated; no renderer
 was available. No sibling extraction was performed, and no user archive was touched.
+
+## LA2 local implementation validation — 2026-09-16
+
+LA2 album preparation and browser listening is implemented locally and submitted
+for integrated review. Focused permanent regressions cover application-owned
+ambiguous-source planning; two associated discs; missing encoder readiness; stable
+overlapping batch/member and child Job identities; shared-work-safe cancellation;
+deliberate one-track validation failure with another track published; partial state;
+retry; Store close/reopen recovery; import-time preparation; and reuse of an already
+valid output without another encoder call. Existing derivative suites cover source
+mutation, permission revocation, queued/running cancellation, publication fault
+recovery, recipe/tool-version changes and independent FLAC validation.
+
+Generated HTTP coverage contains plan, submit/list/detail, cancel and retry album
+routes, with curation-listener composition and checked OpenAPI/TypeScript output.
+The standard temporary-profile browser journey passed in Google Chrome
+153.0.8010.37 using FLAC 1.5.0 behind a three-second test-only delay wrapper. It
+submitted two overlapping Prepare album batches before completion, restored
+server-owned batch/member progress, kept refresh and inventory-title controls
+enabled, and played the first published track in a second browser page while another
+member was still queued/running. It then observed `2/2 ready`, received two real FLAC
+links and exercised actual pause/resume, seek, next/previous, natural-ended advance,
+clean reload, session expiry and grant revocation. Guided import exposed the optional FLAC preparation
+choice and its durable step. Artwork remained alongside album/player text. The
+same run retained deterministic provider, role, management, mobile-layout and
+virtual-WebAuthn coverage.
+
+Final integrated implementation gates:
+
+- `python3 scripts/check_architecture.py`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo test --workspace`: 289 passed, one ignored user-owned CD dump/oracle,
+  zero failures; all doc-tests passed. The long music-CD/AccurateRip test passed.
+- Focused LA2 tests passed again while iterating, including the album overlap/
+  partial/retry/restart case, guided preparation/reuse case, two-disc/missing-tool
+  case and ambiguity unit case.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `npm --prefix web run check:api`, `npm --prefix web run check` and
+  `npm --prefix web run build`: passed.
+- `cargo build -p collector-server`: passed after the final embedded asset build.
+- `npm --prefix web run test:smoke`: passed after rerunning outside the filesystem
+  sandbox so temporary-profile Chrome could launch. An initial sandboxed launch was
+  aborted by Chrome before a page opened and is not counted as product evidence.
+- `git diff --check`: passed before documentation finalization and is rerun with the
+  final documentation checks.
+
+The wrapper changes only timing: the real configured FLAC binary still encoded and
+decoded every accepted output. The durable Store overlap regression separately
+supplies deterministic evidence for stable shared identities, cancellation ownership
+and restart recovery. The broader U05 application-wide busy-state
+audit remains open. User-owned dumps, live MusicBrainz/CAA, Opus, non-Chrome
+browsers, target deployment, scale, native clients and the stopped-server LA3
+backup/restore drill were not run. No commit was made.
+
+## LA2 independent review validation — 2026-09-17
+
+Reviewed and corrected on Darwin arm64 with Rust 1.95.0, Node 24.3.0,
+Google Chrome 153.0.8010.37 and FLAC 1.5.0.
+
+Passed on the reviewed implementation:
+
+- Architecture/dependency, documentation-link and fixture checks:
+  python3 scripts/check_architecture.py.
+- Formatting: cargo fmt --all -- --check.
+- Full workspace: COLLECTOR_TEST_FLAC=1 cargo test --workspace --locked:
+  293 passed, one user-owned CD oracle test intentionally ignored because its
+  JUNK_COLLECTOR_W4_CD_DUMP_ROOT/oracle.toml inputs were not supplied.
+- Clippy: cargo clippy --workspace --all-targets --locked -- -D warnings.
+- Web type checking, generated OpenAPI/TypeScript agreement and embedded build:
+  npm --prefix web run check; npm --prefix web run check:api;
+  npm --prefix web run build; cargo build -p collector-server --locked.
+- Both complete temporary-profile Chrome journeys:
+  npm --prefix web run test:smoke and
+  LOCAL_SETUP=1 npm --prefix web run test:smoke.
+- git diff --check.
+
+New regressions exercise requests separated by clock advances, later direct-track
+ownership, last shared request cancellation, release of cancelled direct requests,
+atomic parent-claim admission, failed-admission outcomes and retry, preserved retry
+diagnostics, cross-curator privacy and role loss, bounded admission and cancellation
+capacity release, known-carrier alternative sources, guided cancellation with a
+missing historical intent pointer, and rejection of cancelled-import retry.
+
+Chrome used genuine encoded and independently validated FLAC, with deliberate
+conversion delays. It submitted a track command and overlapping album batches,
+preserved a deliberately unchecked disc across refresh, saved inventory during
+preparation, played a completed track while another was pending, and verified both
+downloads, play/pause/seek/next/previous/ended, reload and revocation. Guided intake
+preserved the master, applied deterministic provider metadata/artwork and completed
+optional preparation. The local setup variant additionally checked repaired
+origins, retained TLS/account identity and private management routing.
+
+The review found and fixed a stale browse-row graph when reopening curation.
+Harness corrections added bounded waits, used the actual Save inventory label,
+waited for independently polled media links, applied the unsupported-schema fixture
+to both list and detail reads, drained held metadata interception before the next
+bounded read, and delayed conversion rather than encoder version probes. An attempted change to explicit derivative-command identity was reverted
+after the archive revalidation regression correctly rejected it; existing
+revalidation behavior remains covered and passing.
+
+No user-owned corpus, live MusicBrainz/CAA, second physical LAN device, target Linux
+or NAS installation, stopped-server restore drill, Opus encoder, other browser,
+scale benchmark or broad P04/U05 audit was qualified here. LA3 owns the bounded
+local installation/corpus/backup qualification; later full-release criteria remain
+open. These results do not authorize wholesale adoption of an existing archive.
+
+## LA3 procedure and disposable restore rehearsal — 2026-09-17
+
+LA3 remains in progress. The operator procedure is recorded in
+`docs/local-alpha-installation.md`; README recovery guidance links to it. It covers
+the complete archive, complete private-state root (SQLite, TLS and pending scratch),
+configuration, quiescence through an exclusive Store open, stopped-copy manifests,
+empty isolated restore roots, projection rebuild, account/role checks and work
+resumption. It explicitly excludes portable export/change bundles and concurrent
+use of the copied server identity.
+
+The focused regression
+`stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch`
+passed. Its disposable profile contains a published synthetic original and integrity
+evidence, Owner and Viewer accounts with an explicit grant, and a browser Import
+stopped after two of four bytes. After closing every Store handle, it copies the
+complete archive and state into previously absent restore roots. Every file digest
+matches before open. The restored Store retains the same ServerId, both working
+passwords, Viewer role, original bytes and evidence records; the same Import resumes
+at byte two and reaches its checked four-byte digest. This is procedure coverage,
+not an owned-dump or live installation claim.
+
+A second CLI rehearsal created a real disposable `collector.toml`, account and TLS
+identity under `/private/tmp/junk-collector-la3-rehearsal.h44Cun`. With no server
+running, complete relative archive/state roots and config were copied through a
+backup directory into separate restore roots and compared recursively. The restored
+profile passed `doctor` and `reindex`. Before and after restore, `pairing` reported
+ServerId `01a0ad56-06d7-7fc2-9d7e-d941c4e5bf98` and certificate SHA-256
+`9098064e9512d52d1541c5fd4d7ead8ad714e33643608e8d115ebe8e7408d392`.
+The disposable directory was removed after these values and comparisons were
+recorded.
+
+Environment: macOS 26.6.2 arm64 (Darwin 25.6.0), Rust/Cargo 1.95.0, Node 24.3.0,
+npm 11.4.2, Google Chrome 153.0.8010.37 and FLAC 1.5.0. Focused results:
+
+- `cargo fmt --all -- --check`: passed before the rehearsal.
+- `cargo test -p collector-store --test archive
+  stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch
+  -- --exact`: one passed, zero failed.
+- `cargo build -p collector-server --locked`: passed.
+- Disposable source/backup/restore `diff -rq`: no differences.
+- Restored CLI `doctor`, `reindex` and identity comparison: passed.
+- `npm --prefix web run test:smoke`: passed outside the filesystem sandbox with
+  the temporary HTTPS profile and real FLAC 1.5.0. Chrome completed deterministic
+  provider metadata/artwork, guided import, album preparation, actual playback,
+  Viewer denial and revocation. The initial sandboxed Chrome process aborted before
+  opening a page and is not counted as product evidence.
+
+The intended server/storage roots, owned game/CD corpus and exact redumper/BIN+CUE
+variants, real provider configuration/responses, trusted second physical LAN device,
+and isolated actual restore destination were not supplied. The real browser journey,
+provider-outage/manual-authority cases and actual stopped-server drill therefore
+remain required. LA3 is not accepted and the complete repository gate is deferred
+until those external acceptance inputs are available.
+
+## LA3 owned-corpus and actual restore qualification — 2026-09-17
+
+LA3 remains partially qualified, not accepted. The exact roots, package digests,
+identities and repeatable recovery steps are recorded in
+`docs/local-alpha-installation.md`.
+
+Environment: macOS 26.6.2 build 25G83 arm64 (Darwin 25.6.0), Rust/Cargo 1.95.0,
+Node 24.3.0, npm 11.4.2 and FLAC 1.5.0. The owned-corpus browser journey used Codex
+26.623.81905 with bundled Chromium framework 149.0.7827.197. Repository smoke used
+Google Chrome 153.0.8010.37.
+
+Owned-corpus results:
+
+- Five explicit package directories were copied from `/Users/scott/dumps` into
+  `/private/tmp/junk-collector-la3-owned.YFRhnq/inbox`. Final `diff -rq` checks for
+  all five source/copy pairs returned no differences. The package set comprised 17
+  nested mixed-mode game files (1,090,422,259 bytes), a flat 13-file two-track CD
+  (334,449,135 bytes), 40 files including 16 existing FLAC sidecars
+  (2,455,327,621 bytes), and damaged 8-file/6-file packages (510,365,466 and
+  950,108,972 bytes). Direct-child selection and nested relative-path retention
+  passed; recursive package-root discovery beneath `bad`/`likely-valid` remains a
+  documented limitation.
+- The corrected two-track Import produced a retained Redumper layout, two tracks
+  and MusicBrainz disc identity `_QyyxioVRyBqTsJQKgyelNOp7rE-`; this is not catalog
+  or audio verification. FLAC 1.5.0 produced independently validated 33,799,412-byte
+  and 27,623,823-byte derivatives. The actual in-app browser played and paused the
+  first result, the Viewer played to 31 seconds, and the restored server played to
+  ten seconds. The 16 supplied FLAC sidecars remained in a 40-file
+  `preservation_master` and were not presented as Collector derivatives.
+- Manual title `LA3 Manual Album Title` survived restart and restore. The initial
+  provider-outage run showed `MusicBrainz is not configured; originals remain
+  preserved` and published no fabricated cover. With
+  `JunkCollector/0.1.0 (https://github.com/AberrantWolf/junk-collector)` configured,
+  a live refresh then identified MusicBrainz release
+  `99c5a9f0-2070-4738-b4db-05e60395f627` as `HOME` by `B’z` and published real CAA
+  cover Asset `d23de098-6923-5811-a842-22dcb7ce02db`. The manual title remained the
+  displayed authority, while the subtitle and cover came from the current provider
+  candidate. The restored in-app browser rendered cover plus text, loaded both
+  prepared FLACs, entered `Now playing`, advanced past three seconds and paused at
+  7.45 seconds. This is provider identity/artwork evidence, not catalog or audio
+  verification. The unsupported owned package preserved its originals and reported
+  `redumper mixed-mode or four-channel CD audio`.
+- Game staging Job `009048ea-49bd-58d6-b14c-b7f6e31ff7c5` was interrupted after
+  retaining 961,553,973 of 1,090,422,259 bytes, then resumed under the same identity
+  and attempt without another Capture. After correcting the shared-envelope defect,
+  fresh browser Import `37dafd9b-f1b5-5592-b591-e632ace8f366` preserved all 17
+  nested files and published raw-hash observation
+  `28fcd52a-9df7-5fb4-b5f2-00e56f5a1984`. It explicitly reported no active DAT;
+  no catalog identity or verification is claimed.
+- Local Owner/Viewer access passed collection filtering, Viewer FLAC playback and
+  HTTP 403 denied self-promotion. After restore, grant revocation returned an empty
+  collection list and HTTP 403 media; active browser-session revocation returned
+  the browser to login and a revoked API session returned HTTP 401. LAN TLS was
+  checked locally with the copied CA certificate and without disabling validation.
+  The intended second physical device remains unrun.
+
+Journey corrections and focused checks:
+
+- Explicit CUE/Redumper-TOC anchor selection is signed, persisted and retained for
+  analysis/preparation. `redumper_package_can_select_toc_without_splitting_its_cue_companion`,
+  `guided_ingest_persists_selected_redumper_anchor_from_signed_plan` and the updated
+  guided preparation regression passed in the full workspace.
+- A music-only anchor extension is no longer emitted as `null` to strict unrelated
+  module inputs. `guided_game_analysis_does_not_receive_the_music_anchor_extension`
+  passed focused and in the full workspace.
+- The open import panel now follows the server's published association until the
+  curator edits the selector. The repaired real browser showed `game mixed nested`
+  selected instead of the stale pre-publication `Leave capture unattached` value.
+- The live CAA path exposed three owning-layer defects. Production redirects now
+  narrowly admit observed `dn<digits>.ca.archive.org` HTTPS storage alongside the
+  existing archive origins; numeric and string image IDs normalize to the same
+  retained string type; and guided reconciliation reads a retried catalog Job's
+  nested completion receipt. Focused checks
+  `production_destinations_include_archive_storage_but_reject_private_addresses`,
+  `cover_art_listing_and_image_are_bounded_pinned_and_request_no_private_item_data`
+  and the retry-expanded
+  `guided_automatic_enrichment_applies_provider_title_and_front_art_without_manual_authority`
+  passed. Live metadata Job `317f6345-5f1c-57f0-a8e1-0476faf1ac61` completed on
+  attempt 1; listing Job `3d46548a-0dc4-530a-8519-783b47370e87` retained two failures
+  and completed on attempt 3; image Job `079c4db4-d8d5-5414-8d7f-ecb50e89a6fd`
+  completed on attempt 1. The JPEG was 560,318 bytes with SHA-256
+  `72cbbd8777f858e99de2892e5dced32c0fa983ec6918f5e048228d065f6eab6b`.
+
+Actual stopped-server drill:
+
+- Source roots were `/private/tmp/junk-collector-la3-owned.YFRhnq/archive` and
+  `state`; backup was `backup`; restore roots were
+  `restore-parent/archive` and `restore-parent/state`. Exclusive `pairing` opens
+  proved quiescence. Complete source, backup and pre-open restore manifests matched:
+  archive 88 files / manifest digest
+  `c49c3a0bf87ba8cc805e37c32fc33a5f4c4c7e73cd1594797ff8b3a03f1edf79`;
+  state 102 files / manifest digest
+  `15f41813f286e0bcf45986c90dbec0edf9f71c7eeaa12ee26009ed5ee81caeb4`.
+- Source and restore reported the same ServerId
+  `01a0adaf-1621-7152-9357-3a6387f04992` and certificate SHA-256
+  `eb73cbb34df45936e5593643ae42713f4fcdd9f679b996bce6f509f10d980111`.
+  Representative original, observation and metadata-authority record digests
+  matched exactly. Both accounts, the Viewer grant and four unfinished Jobs were
+  present before restored startup. Restored `doctor`, `reindex`, resumed publication,
+  both logins and FLAC playback passed. Original and restored server identities were
+  never concurrent.
+- After resumed work, the corrected game journey and access revocations, every Job
+  was terminal. Clean stop and exclusive reopen passed. At that pre-provider
+  checkpoint, manifests contained 218 archive and 120 state files, with digests
+  `d2e01ccfd72b5289f001397aee7589addba2d587820c55639b4b2a5a02035c91` and
+  `00350bbd8b175222616ae11c759b075279996e30e899922cadc1e6c6f1dd6f01`.
+- After live enrichment and playback, all Jobs were again terminal. All three
+  listeners were closed, and exclusive `pairing` returned the same ServerId and
+  certificate digest. Final manifests contain 235 archive and 120 state files,
+  with digests
+  `cf07586ba170f7c5a441f136e136cdb156544e29eeb52cea5db2f49cc3429216` and
+  `f31f3d0645b581dcf7554abc787357d7864672b34a5ed86099ab35ddf368b125`.
+
+Final repository gates on the corrected checkout:
+
+- `python3 scripts/check_architecture.py`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace`: 297 passed, zero failed, one
+  ignored owned-oracle test whose separate `oracle.toml` input was not configured;
+  all doc-tests passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `npm --prefix web run check`, `npm --prefix web run check:api` and
+  `npm --prefix web run build`: passed.
+- `cargo build -p collector-server`: passed after the final embedded web build.
+- `npm --prefix web run test:smoke`: passed outside the filesystem sandbox, including
+  actual Chrome/FLAC playback and revocation. An initial sandboxed Chrome launch
+  aborted before a page opened and is not product evidence.
+- `LOCAL_SETUP=1 npm --prefix web run test:smoke`: passed outside the sandbox,
+  including retained TLS/account identity and private-management routing.
+- `git diff --check`: passed after the final documentation update.
+
+Missing acceptance evidence is limited but blocking: no intended second physical
+LAN browser with trusted HTTPS was available. Its cover/text browsing, real FLAC
+playback, denied curation, grant revocation and active-session revocation remain
+unqualified. A configured DAT-backed game identity was also absent at that
+checkpoint; the 2026-09-19 continuation below supersedes that limitation. Live
+MusicBrainz/CAA cover/text passes. This drill does not claim P05 portable
+export/change bundles. No commit was made.
+
+## LA3 owned local-DAT qualification and bounded cache — 2026-09-19
+
+LA3 remains partially qualified and unaccepted. The source corpus at
+`/Users/scott/dumps` was not read for mutation or changed. Provider artifacts were
+stored only under
+`/private/tmp/junk-collector-la3-owned.YFRhnq/catalogs`, and only the restored
+qualification identity ran during catalog work.
+
+Cache and parser results:
+
+- The Redump PlayStation ZIP/XML were retained byte-for-byte with SHA-256
+  `7b2883f4398f9d0e3018649a0ef6e9701b281b30d9f11fedf7eab0a15301781e`
+  and `c698671d4fb304ce636352c245323b1f787d216c8f629f9aac1b328537241bb2`.
+  A separate manifest-recorded full-release view excluded 975 explicitly tagged
+  Alpha/Beta/Demo/Kiosk/Preview/Proto/Sample/Taikenban rows and retained 10,001.
+  The 11,993,736-byte derived DAT has SHA-256
+  `f3d24d5d394c6f248c6c479b892c67b382a315bdf39220ad4fdb14f3d8befabc`.
+- Collector archived and activated those exact derived bytes as snapshot
+  `7d61cc8d-eb58-53e7-ac00-f4f17cde7c92` for `sony-playstation` in
+  `org.junk.game.cd.raw-2352-track` v1. The first real comparison, observation
+  `a8f93fb8-968d-5118-8b44-d828399f37b6`, was partial: all four tracks matched
+  `Brave Fencer Musashi (USA)`, but the provider row also carried a CUE checksum.
+  No complete-match claim was made at that point.
+- The provider adapter now preserves every non-domain source file in
+  `excluded_files`; raw-2352 comparison includes only nonempty `.bin` files with
+  lengths divisible by 2352 and fails closed when a row has no qualified track.
+  Reindex reparsed the same immutable snapshot. The repeated real browser journey
+  produced unique complete-match observation
+  `1667ceb8-11ac-55a7-96a2-bae41a97ce2b`, provider record 920, with four SHA-1
+  matched units for `Brave Fencer Musashi (USA)`. The old partial observation
+  remains historical. Applying its title candidate changed descriptive metadata
+  only. This verifies the four analyzed catalog tracks, not the CUE text,
+  subchannel data, sidecars or whole preservation package.
+- DAT-o-MATIC generated a Headerless NES `20260918-104030` DAT after its own queue
+  delay using full-release, licensed and machine-life-span selections. It contains
+  2,661 rows and 1,107,207 bytes; ZIP SHA-256 is
+  `0b5861775b54940916affd77bd9566192bf8886fb869980df575b3fd1d0bbe78`
+  and DAT SHA-256 is
+  `4b7961f4737120e10cdd925b63a9ff1a84b73b078cd4088627787f8674a260fd`.
+  Collector parsed/indexed all rows as snapshot
+  `9e3645f9-e600-5ccc-8e30-030932e023d7` in the
+  `org.junk.game.nes.ines-payload` v1 domain. No owned NES dump was supplied, so no
+  match is claimed. The earlier Nintendo 3DS inspection file was not copied because
+  that platform is unsupported.
+- The later N64 form submission returned DAT-o-MATIC error 1260, `Unknown filter`,
+  followed by a provider network refusal. Requests stopped immediately after the
+  refusal was identified; no circumvention or alternate address was used. N64,
+  SNES and PC Engine remain uncached. The script now replays only controls present
+  in the exact system form and aborts the whole batch when refusal markers appear.
+
+`scripts/cache_game_dats.py` is a manual allowlisted acquisition aid, not a server
+refresh implementation. It performs no parallel requests, spaces ordinary requests
+by a jittered 10–18 seconds, uses multi-minute generation waits, honors bounded
+429/503/`Retry-After` backoff, caps HTML and ZIP responses, writes through `.part`,
+reuses complete cache entries, rejects repository-local output, and enforces both a
+cache-root process lock and a persistent cross-run request timestamp. Source Code,
+Unofficial and unsupported systems cannot be selected through its manifest.
+
+Checks and measured journey results on the corrected checkout:
+
+- Offline saved-form tests passed for dynamic Prepare/Download controls, exact
+  Headerless/full-release/licensed NES selection, Redump 975/10,976 filtering and
+  immediate provider-refusal detection.
+- `cargo test -p collector-providers --test dat`: eight passed, including explicit
+  CUE retention and no-qualified-track fail-closed coverage.
+- The two focused catalog module tests passed.
+- `python3 scripts/check_architecture.py` and `cargo fmt --all -- --check` passed.
+- `cargo test --workspace`: 299 passed, zero failed, one explicitly ignored owned
+  oracle test; all doc-tests passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `npm --prefix web run check` and `npm --prefix web run build` passed.
+- `cargo build -p collector-server` passed after the embedded web rebuild.
+- `git diff --check` passed before the validation documentation append.
+- The actual in-app browser showed the Redump snapshot, the honest historical
+  partial result, the new exact result and automatic title. It also showed the NES
+  snapshot's 2,661 parsed rows and exact digest. The restored server was stopped;
+  ports 21841–21843 were closed at handoff.
+
+The intended second physical LAN browser with trusted HTTPS remains absent, so its
+Viewer playback, denied curation, grant revocation and active-session revocation are
+still the blocking LA3 acceptance evidence. The DAT-o-MATIC refusal and incomplete
+additional cache coverage remain documented limitations. No commit was made.
+
+
+## Independent LA3 review — 2026-09-20
+
+Reviewed the LA3 module anchor selection, application reconciliation, provider
+repairs, catalog coverage, downloader and qualification records against the prior
+LA2 review. Corrected a false-completeness path: malformed BINs or unknown payload
+entries beside valid tracks could previously be excluded from catalog coverage.
+The module now owns the narrow CUE exclusion rule; provider normalization and
+matching both enforce it. Regressions cover malformed/empty/unknown tracks and
+forged exclusions in otherwise matching rows.
+
+The manual cache helper now requires explicit catalog selection, rejects new
+DAT-o-MATIC requests before network I/O, validates form values and records submitted
+controls rather than unconditional filter claims. It checks downloaded system/name
+and version, bounds ZIP expansion, verifies existing cache digests and publishes new
+entries from private staging. Existing snapshots cannot be force-overwritten;
+refreshes use a new cache root. HTML refusal pages at download and HTTP-error stages
+are checked too. Nine offline Python regressions pass, including a no-network
+paused-provider check, failed publication, wrong-system download, ZIP bounds and
+altered cache detection.
+
+Independent checks on the final Rust source:
+
+- `COLLECTOR_TEST_FLAC=1 cargo test --workspace`: 301 passed, zero failed, one
+  ignored separately configured owned-oracle test; doc-tests passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- Architecture/documentation checks, Rust formatting, web type check/build,
+  OpenAPI/TypeScript contract comparison and post-web server rebuild: passed.
+- Existing Redump and NES cache entries passed fresh length/SHA-256 verification.
+  Independent read-only XML inspection of the retained Redump catalog found 10,001
+  rows, 46,552 sector-aligned BINs and 10,001 CUEs, all consistent with the tightened
+  domain policy. This is catalog structure coverage, not a new owned-disc match.
+
+No DAT-o-MATIC or other live provider was contacted. The previous manual
+owned-dump/provider/restore runs remain dated evidence; they were not independently
+repeated here. Second-device trusted HTTPS and Viewer access/playback/revocation
+remain outstanding, so LA3 is still not accepted. No commit was made.
+
+Both Chrome journeys passed on the rebuilt server with FLAC 1.5.0 and Google Chrome
+153.0.8010.37: `npm --prefix web run test:smoke` and the sequential `LOCAL_SETUP=1`
+variant. These use isolated temporary profiles. Actual playback, pause/resume,
+seeking, track transitions, artwork rows, session expiry, grant revocation and
+private-management routing passed. Browser execution required the existing
+outside-sandbox launch permission. Final architecture/link checks and
+`git diff --check` passed. Review logs are `/tmp/la3-review-final-workspace.log`,
+`/tmp/la3-review-clippy.log`, `/tmp/la3-review-api.log`, `/tmp/la3-review-build.log`,
+`/tmp/la3-review-smoke.log` and `/tmp/la3-review-local-smoke.log`.

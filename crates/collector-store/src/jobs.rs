@@ -105,11 +105,11 @@ impl Store {
     pub(crate) fn active_derivative_job_records(
         &self,
         capture: CaptureId,
-    ) -> Result<Vec<collector_app::FrozenDerivativeJob>> {
+    ) -> Result<Vec<collector_app::ActiveDerivativeJob>> {
         let db = lock(&self.db)?;
         let mut statement = db
             .prepare(
-                "SELECT p.frozen_input
+                "SELECT j.id,j.user_id,p.frozen_input
                  FROM private.processing_jobs p
                  JOIN private.jobs j ON j.id=p.job_id
                  WHERE j.kind='music_derivative'
@@ -119,20 +119,249 @@ impl Store {
             )
             .map_err(storage)?;
         let rows = statement
-            .query_map([capture.to_string()], |row| row.get::<_, String>(0))
+            .query_map([capture.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
             .map_err(storage)?;
         let mut active = Vec::new();
         for value in rows {
-            let input: FrozenJobInput =
-                serde_json::from_str(&value.map_err(storage)?).map_err(storage)?;
+            let (id, user_id, value) = value.map_err(storage)?;
+            let input: FrozenJobInput = serde_json::from_str(&value).map_err(storage)?;
             if let FrozenJobInput::Derivative(job) = input
                 && job.capture_id == capture
             {
                 job.validate()?;
-                active.push(job);
+                active.push(collector_app::ActiveDerivativeJob {
+                    id: id.parse().map_err(storage)?,
+                    user_id: user_id.parse().map_err(storage)?,
+                    input: job,
+                });
             }
         }
         Ok(active)
+    }
+
+    pub(crate) fn frozen_job_input_record(
+        &self,
+        id: JobId,
+        user: UserId,
+    ) -> Result<Option<FrozenJobInput>> {
+        let value: Option<String> = lock(&self.db)?
+            .query_row(
+                "SELECT p.frozen_input FROM private.jobs j
+                 LEFT JOIN private.processing_jobs p ON p.job_id=j.id
+                 WHERE j.id=? AND j.user_id=?",
+                params![id.to_string(), user.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        value
+            .map(|value| serde_json::from_str(&value).map_err(storage))
+            .transpose()
+    }
+
+    pub(crate) fn preparation_batch_record_page(
+        &self,
+        user: UserId,
+        item: ItemId,
+        limit: u16,
+    ) -> Result<Vec<JobRecord>> {
+        if limit == 0 || limit > 100 {
+            return Err(Error::Invalid("batch list limit must be 1–100".into()));
+        }
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "SELECT id,user_id,collection_id,item_id,kind,state,phase,
+                   completed_units,total_units,attempt,created_at,updated_at,error,limitation,result
+                 FROM private.jobs
+                 WHERE user_id=? AND item_id=? AND kind='music_derivative_batch'
+                 ORDER BY (cancellation_requested=0 AND (state IN ('queued','running','cancel_requested') OR EXISTS(
+                   SELECT 1 FROM private.preparation_members m JOIN private.jobs child ON child.id=m.job_id
+                   WHERE m.batch_id=private.jobs.id AND child.state IN ('queued','running','cancel_requested')))) DESC,
+                   created_at DESC,id DESC LIMIT ?",
+            )
+            .map_err(storage)?;
+        let rows = statement
+            .query_map(
+                params![user.to_string(), item.to_string(), limit],
+                read_job_record,
+            )
+            .map_err(storage)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(parse_job_record)
+            .collect()
+    }
+
+    fn preparation_batch_input(
+        tx: &rusqlite::Transaction<'_>,
+        id: JobId,
+        user: UserId,
+    ) -> Result<collector_app::FrozenDerivativeBatchJob> {
+        let (kind, value): (String, String) = tx
+            .query_row(
+                "SELECT j.kind,p.frozen_input FROM private.jobs j
+                 JOIN private.processing_jobs p ON p.job_id=j.id
+                 WHERE j.id=? AND j.user_id=?",
+                params![id.to_string(), user.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        if kind != "music_derivative_batch" {
+            return Err(Error::NotFound);
+        }
+        let FrozenJobInput::DerivativeBatch(frozen) =
+            serde_json::from_str(&value).map_err(storage)?
+        else {
+            return Err(Error::Storage(
+                "batch frozen input has the wrong kind".into(),
+            ));
+        };
+        frozen.validate()?;
+        Ok(frozen)
+    }
+
+    pub(crate) fn cancel_preparation_batch_record(&self, id: JobId, user: UserId) -> Result<()> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        Self::cancel_preparation_batch_in_tx(&tx, id, user, self.clock.now().timestamp())?;
+        self.record_command(&tx, &())?;
+        tx.commit().map_err(storage)
+    }
+
+    pub(crate) fn cancel_preparation_batch_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        id: JobId,
+        user: UserId,
+        now: i64,
+    ) -> Result<()> {
+        let frozen = Self::preparation_batch_input(tx, id, user)?;
+        tx.execute(
+            "UPDATE private.jobs SET cancellation_requested=1,
+               state=CASE WHEN state='running' THEN 'cancel_requested'
+                          WHEN state='queued' THEN 'cancelled' ELSE state END,
+               phase=CASE WHEN state IN ('completed','failed','cancelled') THEN 'batch_cancelled'
+                          ELSE phase END,updated_at=?
+             WHERE id=? AND user_id=?",
+            params![now, id.to_string(), user.to_string()],
+        )
+        .map_err(storage)?;
+        for member in frozen.members {
+            let collector_app::FrozenPreparationMember::Prepare { job_id, .. } = member else {
+                continue;
+            };
+            let (direct, shared): (bool, bool) = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.derivative_direct_requests WHERE job_id=?1),
+                   EXISTS(SELECT 1 FROM private.preparation_members m JOIN private.jobs j ON j.id=m.batch_id
+                          WHERE m.job_id=?1 AND m.batch_id<>?2 AND j.cancellation_requested=0 AND j.state<>'cancelled')",
+                params![job_id.to_string(),id.to_string()], |row| Ok((row.get(0)?,row.get(1)?))
+            ).map_err(storage)?;
+            if !collector_app::may_cancel_preparation_child(direct, shared) {
+                continue;
+            }
+            tx.execute(
+                "UPDATE private.jobs SET
+                   state=CASE WHEN state='running' THEN 'cancel_requested'
+                              WHEN state='queued' THEN 'cancelled' ELSE state END,
+                   phase=CASE WHEN state='queued' THEN 'cancelled' ELSE phase END,
+                   cancellation_requested=CASE WHEN state IN ('queued','running','cancel_requested') THEN 1 ELSE cancellation_requested END,
+                   updated_at=?
+                 WHERE id=? AND user_id=? AND state IN ('queued','running','cancel_requested')",
+                params![now, job_id.to_string(), user.to_string()],
+            )
+            .map_err(storage)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn retry_preparation_batch_record(&self, id: JobId, user: UserId) -> Result<()> {
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let frozen = Self::preparation_batch_input(&tx, id, user)?;
+        ensure_album_admission_capacity(&tx, user, id)?;
+        let now = self.clock.now().timestamp();
+        let mut missing = false;
+        for member in &frozen.members {
+            let collector_app::FrozenPreparationMember::Prepare { job_id, .. } = member else {
+                continue;
+            };
+            let state: Option<String> = tx
+                .query_row(
+                    "SELECT state FROM private.jobs WHERE id=? AND user_id=?",
+                    params![job_id.to_string(), user.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(storage)?;
+            match state.as_deref() {
+                Some("failed" | "cancelled") => {
+                    requeue_failed_preparation(&tx, *job_id, user, now)?;
+                }
+                Some("cancel_requested") => return Err(Error::CommandInProgress),
+                None => missing = true,
+                _ => {}
+            }
+        }
+        let (parent_state, parent_request): (String, String) = tx
+            .query_row(
+                "SELECT state,request FROM private.jobs WHERE id=? AND user_id=?",
+                params![id.to_string(), user.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(storage)?;
+        let request: serde_json::Value = serde_json::from_str(&parent_request).map_err(storage)?;
+        ensure_import_allows_work(&tx, &request)?;
+        if parent_state == "cancel_requested" {
+            return Err(Error::CommandInProgress);
+        }
+        requeue_failed_preparation(&tx, id, user, now)?;
+        if missing || matches!(parent_state.as_str(), "failed" | "cancelled") {
+            tx.execute(
+                "UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,
+                   error=NULL,cancellation_requested=0,worker_instance=NULL,
+                   lease_expires=NULL,claim_token=NULL,updated_at=? WHERE id=? AND user_id=?",
+                params![now, id.to_string(), user.to_string()],
+            )
+            .map_err(storage)?;
+        } else {
+            tx.execute(
+                "UPDATE private.jobs SET cancellation_requested=0,
+                   phase=CASE WHEN phase='batch_cancelled' THEN 'completed' ELSE phase END,
+                   updated_at=? WHERE id=? AND user_id=?",
+                params![now, id.to_string(), user.to_string()],
+            )
+            .map_err(storage)?;
+        }
+        let parent_request: serde_json::Value =
+            serde_json::from_str(&parent_request).map_err(storage)?;
+        if let Some(import) = parent_request
+            .get("import_id")
+            .and_then(serde_json::Value::as_str)
+        {
+            tx.execute(
+                "UPDATE private.guided_ingest_intents
+                 SET settled=0,preparation_error=NULL,updated_at=? WHERE import_id=?",
+                params![now, import],
+            )
+            .map_err(storage)?;
+        }
+        self.record_command(&tx, &())?;
+        tx.commit().map_err(storage)
     }
 
     pub(crate) fn reconcile_job_publications(&self) -> Result<()> {
@@ -280,6 +509,14 @@ impl Store {
     }
 
     pub(crate) fn enqueue_job_record(&self, spec: JobSpec) -> Result<JobId> {
+        self.enqueue_job_record_with_batch(spec, None)
+    }
+
+    pub(crate) fn enqueue_job_record_with_batch(
+        &self,
+        spec: JobSpec,
+        batch: Option<(JobId, &str)>,
+    ) -> Result<JobId> {
         if spec.kind.is_empty()
             || spec.kind.len() > 120
             || spec.phase.is_empty()
@@ -293,7 +530,7 @@ impl Store {
         if let Some(input) = &spec.frozen_input {
             input.validate()?;
         }
-        let frozen_input = spec
+        let mut frozen_input = spec
             .frozen_input
             .as_ref()
             .map(serde_json::to_string)
@@ -307,6 +544,49 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        if let Some((parent, token)) = batch {
+            let allowed: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM private.jobs j
+                JOIN private.preparation_members m ON m.batch_id=j.id
+                WHERE j.id=? AND j.user_id=? AND j.state='running' AND j.cancellation_requested=0
+                  AND j.claim_token=? AND m.job_id=?)",
+                    params![
+                        parent.to_string(),
+                        spec.user_id.to_string(),
+                        token,
+                        spec.id.to_string()
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if !allowed {
+                return Err(Error::JobCancelled);
+            }
+        }
+        // Creation time belongs to the first durable request, not output identity.
+        if let Some(FrozenJobInput::Derivative(mut proposed)) = spec.frozen_input.clone() {
+            let retained: Option<String> = tx
+                .query_row(
+                    "SELECT frozen_input FROM private.processing_jobs WHERE job_id=?",
+                    [spec.id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(storage)?;
+            if let Some(retained) = retained {
+                let FrozenJobInput::Derivative(original) =
+                    serde_json::from_str(&retained).map_err(storage)?
+                else {
+                    return Err(Error::IdempotencyConflict);
+                };
+                proposed.created_at = original.created_at;
+                frozen_input = Some(
+                    serde_json::to_string(&FrozenJobInput::Derivative(proposed))
+                        .map_err(storage)?,
+                );
+            }
+        }
         let existing: Option<StoredJobIdentity> = tx
             .query_row(
                 "SELECT user_id,kind,collection_id,item_id,request FROM private.jobs WHERE id=?",
@@ -335,6 +615,9 @@ impl Store {
                 return Err(Error::IdempotencyConflict);
             }
         } else {
+            if spec.kind == "music_derivative_batch" {
+                ensure_album_admission_capacity(&tx, spec.user_id, spec.id)?;
+            }
             ensure_import_allows_work(&tx, &spec.request)?;
             tx.execute(
                 "INSERT INTO private.jobs(
@@ -378,6 +661,34 @@ impl Store {
                 params![spec.id.to_string(), frozen_input],
             )
             .map_err(storage)?;
+        }
+        if spec.kind == "music_derivative" && batch.is_none() {
+            tx.execute(
+                "INSERT OR IGNORE INTO private.derivative_direct_requests(job_id) VALUES(?)",
+                [spec.id.to_string()],
+            )
+            .map_err(storage)?;
+        }
+        if let Some(FrozenJobInput::DerivativeBatch(batch)) = &spec.frozen_input {
+            if let Some(import) = spec
+                .request
+                .get("import_id")
+                .and_then(serde_json::Value::as_str)
+            {
+                let changed = tx.execute("UPDATE private.guided_ingest_intents SET preparation_batch_id=?1 WHERE import_id=?2 AND user_id=?3 AND cancelled=0 AND (preparation_batch_id IS NULL OR preparation_batch_id=?1)",
+                    params![spec.id.to_string(), import, spec.user_id.to_string()]).map_err(storage)?;
+                if changed != 1 {
+                    return Err(Error::Conflict);
+                }
+            }
+            for member in &batch.members {
+                if let collector_app::FrozenPreparationMember::Prepare { job_id, .. } = member {
+                    tx.execute("INSERT OR IGNORE INTO private.preparation_members(batch_id,job_id) VALUES(?,?)", params![spec.id.to_string(),job_id.to_string()]).map_err(storage)?;
+                }
+            }
+        }
+        if spec.kind == "music_derivative" {
+            requeue_failed_preparation(&tx, spec.id, spec.user_id, now)?;
         }
         self.record_command(&tx, &spec.id)?;
         tx.commit().map_err(storage)?;
@@ -716,6 +1027,15 @@ impl Store {
         if state == "completed" || phase == "revision_committed" {
             return Err(Error::CancellationTooLate);
         }
+        if kind == "music_derivative" {
+            let shared: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.preparation_members m JOIN private.jobs j ON j.id=m.batch_id
+                 WHERE m.job_id=? AND j.cancellation_requested=0 AND j.state<>'cancelled')",
+                [id.to_string()], |row| row.get(0)).map_err(storage)?;
+            if shared {
+                return Err(Error::Conflict);
+            }
+        }
         if matches!(state.as_str(), "running" | "cancel_requested") && claim_token.is_some() {
             tx.execute(
                 "UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=?
@@ -732,6 +1052,13 @@ impl Store {
             )
             .map_err(storage)?;
             cancel_job_import(&tx, &kind, &request, self.clock.now().timestamp())?;
+        }
+        if kind == "music_derivative" {
+            tx.execute(
+                "DELETE FROM private.derivative_direct_requests WHERE job_id=?",
+                [id.to_string()],
+            )
+            .map_err(storage)?;
         }
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
@@ -948,6 +1275,59 @@ fn ensure_import_allows_work(
         if stopped {
             return Err(Error::Conflict);
         }
+    }
+    Ok(())
+}
+
+fn requeue_failed_preparation(
+    tx: &rusqlite::Transaction<'_>,
+    id: JobId,
+    user: UserId,
+    now: i64,
+) -> Result<()> {
+    let (state, prior, error, attempt, finished): (String, Option<String>, Option<String>, u32, i64) = tx.query_row(
+        "SELECT state,result,error,attempt,updated_at FROM private.jobs WHERE id=? AND user_id=?",
+        params![id.to_string(),user.to_string()], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))
+    ).map_err(storage)?;
+    if state == "cancel_requested" {
+        return Err(Error::CommandInProgress);
+    }
+    if !matches!(state.as_str(), "failed" | "cancelled") {
+        return Ok(());
+    }
+    let mut result: serde_json::Value = prior
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(storage)?
+        .unwrap_or_else(|| serde_json::json!({}));
+    let object = result
+        .as_object_mut()
+        .ok_or_else(|| Error::Storage("invalid preparation history".into()))?;
+    let failures = object
+        .entry("prior_failures")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .ok_or_else(|| Error::Storage("invalid preparation attempts".into()))?;
+    failures.push(
+        serde_json::json!({"attempt":attempt,"state":state,"error":error,"failed_at":finished}),
+    );
+    tx.execute("UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,attempt=attempt+1,error=NULL,result=?,
+        cancellation_requested=0,worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=? WHERE id=? AND user_id=?",
+        params![serde_json::to_string(&result).map_err(storage)?,now,id.to_string(),user.to_string()]).map_err(storage)?;
+    Ok(())
+}
+
+fn ensure_album_admission_capacity(
+    tx: &rusqlite::Transaction<'_>,
+    user: UserId,
+    id: JobId,
+) -> Result<()> {
+    let pending: u32 = tx.query_row("SELECT COUNT(*) FROM private.jobs j WHERE user_id=?1 AND id<>?2 AND kind='music_derivative_batch' AND cancellation_requested=0
+        AND (state IN ('queued','running','cancel_requested') OR EXISTS(SELECT 1 FROM private.preparation_members m JOIN private.jobs child ON child.id=m.job_id
+        WHERE m.batch_id=j.id AND child.state IN ('queued','running','cancel_requested')))", params![user.to_string(), id.to_string()], |row| row.get(0)).map_err(storage)?;
+    if pending >= collector_app::MAX_ACTIVE_MUSIC_PREPARATION_BATCHES {
+        return Err(Error::Unavailable("Too many album batches are pending; wait for one to finish or cancel outstanding work.".into()));
     }
     Ok(())
 }

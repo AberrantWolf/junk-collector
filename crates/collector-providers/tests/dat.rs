@@ -82,6 +82,10 @@ game (
 "#
 }
 
+fn redump_tracks() -> &'static [u8] {
+    br#"<datafile><header><name>Redump fixture</name><version>1</version></header><game name="Disc"><rom name="Disc.cue" size="81" crc="11111111" sha1="1111111111111111111111111111111111111111"/><rom name="Disc (Track 1).bin" size="2352" crc="22222222" sha1="2222222222222222222222222222222222222222"/><rom name="Disc (Track 2).BIN" size="4704" crc="33333333" sha1="3333333333333333333333333333333333333333"/></game></datafile>"#
+}
+
 #[test]
 fn equivalent_xml_and_text_dat_bytes_produce_equivalent_observations() {
     let source = source("unused".into());
@@ -91,6 +95,37 @@ fn equivalent_xml_and_text_dat_bytes_produce_equivalent_observations() {
     assert_eq!(xml_rows, text_rows);
     assert_eq!(xml_rows[0].label, "Title & More");
     assert_eq!(xml_rows[0].files[0].crc32.as_deref(), Some("9271ee57"));
+}
+
+#[test]
+fn raw_2352_catalog_rows_exclude_but_retain_non_track_provider_files() {
+    let source = LocalDatSource {
+        path: "unused".into(),
+        system: "sony-playstation".into(),
+        catalog: "fixture".into(),
+        byte_domain: "org.junk.game.cd.raw-2352-track".into(),
+        byte_domain_version: 1,
+    };
+    let (header, rows) = LocalDatProvider::parse_observation(&source, redump_tracks()).unwrap();
+    assert_eq!(header.game_count, 1);
+    assert_eq!(rows[0].files.len(), 2);
+    assert_eq!(rows[0].files[0].name, "Disc (Track 1).bin");
+    assert_eq!(rows[0].files[1].name, "Disc (Track 2).BIN");
+    assert_eq!(rows[0].excluded_files.len(), 1);
+    assert_eq!(rows[0].excluded_files[0].name, "Disc.cue");
+}
+
+#[test]
+fn raw_2352_catalog_rows_fail_closed_without_a_qualified_track() {
+    let source = LocalDatSource {
+        path: "unused".into(),
+        system: "sony-playstation".into(),
+        catalog: "fixture".into(),
+        byte_domain: "org.junk.game.cd.raw-2352-track".into(),
+        byte_domain_version: 1,
+    };
+    let cue_only = br#"<datafile><header><name>Fixture</name><version>1</version></header><game name="No track"><rom name="only.cue" size="81" crc="11111111"/></game></datafile>"#;
+    assert!(LocalDatProvider::parse_observation(&source, cue_only.as_slice()).is_err());
 }
 
 #[test]
@@ -225,4 +260,24 @@ fn snapshot_parser_checks_exact_bytes_even_when_metadata_is_unchanged() {
         provider.parse_snapshot(&record, &mut xml(), &mut || Ok(true)),
         Err(collector_core::Error::JobCancelled)
     ));
+}
+
+#[test]
+fn raw_2352_catalog_does_not_hide_bad_tracks_beside_a_valid_track() {
+    let source = LocalDatSource {
+        path: "unused".into(),
+        system: "sony-playstation".into(),
+        catalog: "fixture".into(),
+        byte_domain: "org.junk.game.cd.raw-2352-track".into(),
+        byte_domain_version: 1,
+    };
+    for (name, size) in [("bad.bin", 2353), ("empty.bin", 0), ("unknown.img", 2352)] {
+        let xml = format!(
+            r#"<datafile><header><name>Fixture</name><version>1</version></header><game name="Disc"><rom name="valid.bin" size="2352" crc="11111111"/><rom name="{name}" size="{size}" crc="22222222"/></game></datafile>"#
+        );
+        assert!(
+            LocalDatProvider::parse_observation(&source, xml.as_bytes()).is_err(),
+            "{name}"
+        );
+    }
 }

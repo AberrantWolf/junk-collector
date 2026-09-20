@@ -20,12 +20,55 @@ Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation
 
 D06.3 is committed as `3a6143b`. The accepted [local-alpha plan](local-alpha-plan.md)
 now takes precedence over the remaining wave order. LA1 guided ingestion and
-automatic enrichment is reviewed and corrected locally. LA2
-album preparation and usable browsing/playback and LA3 real local installation
-qualification remain planned; P05.1 remains paused.
+automatic enrichment is reviewed and corrected locally. LA2 album preparation and
+usable browsing/playback is reviewed and corrected locally (2026-09-17).
+LA3 real local installation qualification is in progress: its installation/restore
+runbook, owned-corpus journey, live MusicBrainz/CAA enrichment and actual
+stopped-copy/restore drill pass on the selected Mac. The intended second LAN device
+remains outstanding, so LA3 is only partially qualified. P05.1 remains paused.
 The full first release, native clients and public deployment remain later targets.
 
 ## Implemented
+
+- LA3 is partially qualified on macOS 26.6.2 arm64. Five isolated owned-package
+  copies cover flat and nested layouts, mixed-mode game data, Redumper/BIN+CUE,
+  existing FLAC sidecars and damaged input. Preservation, retained structure/raw
+  hash observations, manual title authority, provider outage, interrupted staging,
+  two-track FLAC preparation/real playback and local Owner/Viewer denial/revocation
+  were exercised. The actual stopped-server copy into separate empty roots matched
+  complete archive/state manifests before open, retained config/TLS/server identity,
+  accounts and a Viewer grant, resumed four unfinished Jobs and played restored
+  media. The source corpus remained unchanged and original/evidence/metadata record
+  digests matched. Explicit CUE/TOC selection now survives analysis and preparation;
+  shared game input omits the music-only field; the open import panel tracks the
+  published association until edited. Live MusicBrainz identified `HOME` by `B’z`,
+  CAA published a real cover, manual title authority survived, and the restored
+  browser rendered cover/text and played the existing FLAC. The journey fixed a
+  narrowly pinned Internet Archive CDN redirect, numeric CAA image IDs and retried
+  catalog-completion receipt projection. A cached 10,001-row full-release Redump
+  PlayStation view now parses and indexes from immutable local bytes. Explicit
+  raw-2352 row coverage retains provider CUE observations outside the matching
+  domain; the owned four-track disc produced a unique complete SHA-1 match for
+  `Brave Fencer Musashi (USA)` and supplied automatic descriptive text without
+  conflating it with preservation identity. A 2,661-row Headerless No-Intro NES DAT
+  is also cached for the implemented iNES-payload domain, but no owned NES dump was
+  supplied. DAT-o-MATIC refused the later N64 request as an unknown filter, so N64,
+  SNES and PC Engine caches remain absent and automatic retries are disabled. The
+  intended second physical LAN browser remains unavailable; LA3 is not accepted.
+
+- LA2 adds application-owned whole-album FLAC scope over the existing derivative
+  pipeline. A bounded frozen batch Job records selected associated-disc sources and
+  stable members, fans out existing per-track Jobs, converges active/identical work,
+  reports aggregate and per-track partial outcomes, retries unfinished members and
+  cancels only owned unshared children. Prepare album and the optional guided-import
+  checkbox use the same service. Generated plan/batch/cancel/retry contracts and the
+  curation UI restore progress across reopen/restart without globally disabling
+  independent controls; effective artwork remains beside album/player text. Focused
+  coverage includes multidisc scope, source ambiguity, missing tools, overlap,
+  partial failure, shared cancellation, retry, restart, permission revocation and
+  valid-output reuse. Chrome 153.0.8010.37 with FLAC 1.5.0 completed the two-track
+  album workflow and real player/revocation checks. LA2 review and both browser
+  configurations passed; broader U05/P04 and LA3 external qualification remain open.
 
 - LA1 adds collection-page guided intake without a pre-created Item for configured
   direct inbox packages and resumable browser uploads. Typed planning previews
@@ -73,7 +116,8 @@ The full first release, native clients and public deployment remain later target
   authorized Item Asset pipeline before candidates may reference them. Manual
   titles, inventory corrections, selected history and explicit artwork remain
   authoritative. Deterministic local fixtures cover provider failures and reindex;
-  live providers and deployment remain unqualified.
+  LA3 adds one live MusicBrainz/CAA disc-and-cover result, while deployment remains
+  unqualified.
 
 - Six-crate Rust workspace with a typed collection graph, compiled-module registry, application authorization boundary and a schema-2 third-module contract test.
 - Foundation types now include collection-owned Work/Edition records, exclusive Item identity links, ordered specimen Components with optional data-bearing Carriers, collection-level Capture associations, typed asset subjects, language/currency/coordinate validation, canonical digests, and graph/representation validation.
@@ -330,11 +374,10 @@ offline-library management and the Trash Amp provider remain later tickets.
 ## Required before the planned first release
 
 - **Album/background-queue gate, added 2026-09-15:**
-  [D07.4–D07.5](background-work-plan.md) are planned. Current FLAC jobs execute
-  asynchronously, but the music component disables other preparation controls
-  while its one tracked job runs. Whole-album submission and independent enqueueing
-  remain missing. U05 must audit all interfaces for unnecessary background-work
-  blocking before web completion; execution concurrency stays server-bounded.
+  [D07.4–D07.5](background-work-plan.md) are reviewed and corrected locally. Whole-album submission, durable per-member state, independent
+  enqueueing, retry/restart and shared-safe cancellation now use the existing bounded
+  Jobs. U05 must still audit all other interfaces for unnecessary background-work
+  blocking before web completion; LA2 does not claim that application-wide gate.
 
 - **Interface readiness gate, added 2026-09-15:** LA1 implements typed readiness,
   unique-anchor defaults and prerequisite guidance for its guided import journey.
@@ -358,8 +401,8 @@ offline-library management and the Trash Amp provider remain later tickets.
    Collector catalog verification is currently claimed.
 4. Complete the active local-alpha deliveries before returning to P05.1 portable
    export/change inventory. The local deterministic MusicBrainz/CAA workflow
-   passes with actual published artwork; live-provider, other-browser and deployment
-   qualification remain unclaimed.
+   passes with actual published artwork, and LA3 adds one live provider result;
+   other-browser and deployment qualification remain unclaimed.
 5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
 6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.
 7. Add authenticated endpoint discovery, mDNS, automatic health checks and actual transfer failover. Extend the tested enrolled LAN trust path to automatic discovery and full native-client failover.
@@ -517,3 +560,12 @@ not request conversion. The following bounded browser child is now implemented
 locally and is reviewed. It uses these rows directly for Capture/source-scoped
 in-memory queues and actual viewer FLAC playback without adding a backend player
 or conversion-on-read path.
+
+### LA3 independent review (2026-09-20)
+
+Catalog track coverage now rejects malformed BINs and unknown payloads rather than
+silently excluding them; only CUE metadata is excluded, through module-owned policy
+shared by the adapter and matcher. The manual cache helper validates existing
+digests, bounds expansion and stages complete new entries. New DAT-o-MATIC network
+requests are paused in code following error 1260; cached data remains usable.
+Second-device qualification remains outstanding.

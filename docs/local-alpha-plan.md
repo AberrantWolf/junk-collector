@@ -1,7 +1,10 @@
 # Local alpha: import, enrich, browse, listen
 
 Accepted direction 2026-09-16, after D06.3 commit `3a6143b`. **LA1 is reviewed and corrected
-locally; acceptance passed. LA2 has not started.** This remains the
+locally; acceptance passed. LA2 is reviewed and corrected locally; its bounded
+album-preparation and browser-playback acceptance passed. LA3 is in progress and
+partially qualified on the selected Mac; the intended second LAN device remains
+required.** This remains the
 active execution plan. It supersedes the
 serial Wave 4/P05.1 assignment and the earlier music-first scheduling proposal.
 It does not mark unfinished work implemented or erase the broader release target.
@@ -42,8 +45,8 @@ eligibility and independent lossless validation still apply.
 | Delivery | State | Complete user outcome | Existing work to reuse/close |
 |---|---|---|---|
 | LA1 — Guided ingestion and automatic enrichment | Reviewed and corrected; acceptance passed | Select packages, import, leave the page, return to preserved entries with metadata/artwork or actionable partial outcomes | P03/P04, U05 readiness on this journey, D04–D06, P02 jobs; import history and safe correction/discard |
-| LA2 — Album preparation and usable library | Ready for implementation; not started | Request whole albums, queue independent work, browse/play completed tracks while other work runs | D07.4–D07.5, existing browser player, remaining browse/music readiness defects |
-| LA3 — Local installation qualification | Planned; after LA2 review | Actual owned dumps and two accounts work on the intended host, including recovery and backup restore | Focused U05/P04 journey review, local deployment/oracles, bounded backup drill |
+| LA2 — Album preparation and usable library | Reviewed and corrected; acceptance passed | Request whole albums, queue independent work, browse/play completed tracks while other work runs | D07.4–D07.5, existing browser player, remaining browse/music readiness defects |
+| LA3 — Local installation qualification | Partially qualified: owned corpus, live providers, Redump identity, recovery, local roles/playback and actual restore passed; second device remains | Actual owned dumps and two accounts work on the intended host, including recovery and backup restore | Focused U05/P04 journey review, local deployment/oracles, bounded backup drill |
 
 These are integrated deliveries, not additional layers above all the old child
 checkpoints. Implement application, adapter, API and UI changes together. One
@@ -253,6 +256,41 @@ play/pause/seek/next/previous, and useful missing/unsupported states. Verify act
 FLAC playback and lossless validation; no fake player or assumed browser support.
 Metadata/artwork/verification outages must not prevent supported audio preparation.
 
+### LA2 implementation result — 2026-09-16
+
+LA2 is implemented across application policy, the existing Job/store mechanisms,
+generated HTTP contracts and React. One frozen `music_derivative_batch` Job records
+the selected associated-disc sources and stable member identities; its bounded
+fan-out enqueues the existing single-track derivative Jobs. Identical track/profile
+work converges across album, individual-track and guided-import requests. Batch
+views derive aggregate and per-track outcomes from the frozen scope, published
+Representations and child Jobs. Batch cancellation stops only owned, unshared work;
+generic child cancellation is fenced while a live batch owns it. Retry requeues
+unfinished members and reuses already published outputs.
+
+Prepare album defaults every unambiguous associated disc, requires an explicit
+source for alternatives, shows missing-tool/readiness blockers, and restores
+history/progress after reopen. The optional guided-import checkbox calls the same
+album service after publication and reports preparation as an independent durable
+step. The browser no longer holds one page-wide preparation Job: accepted encodes
+leave other controls and the viewer-safe player usable. Album artwork remains beside
+the preparation/player heading and track text rows.
+
+Focused regression coverage includes two-disc scope, ambiguous-source planning,
+missing encoders, overlapping batches, shared-work cancellation, partial failure,
+retry, restart recovery, guided preparation and valid-output reuse. The real
+temporary-profile Chrome journey used a delay wrapper around FLAC 1.5.0, submitted
+overlapping Prepare album batches, kept inventory controls enabled, played the first
+published track in a second page while another member remained active, downloaded
+the two separate FLAC tracks and exercised actual play/pause/seek/next/previous/ended
+playback plus reload and grant revocation. Exact
+gate results and limitations are recorded in
+[validation](validation.md#la2-local-implementation-validation--2026-09-16).
+
+This is an implementation submission, not an independent review. The broader U05
+application-wide interface audit, P04 history/bulk work and all LA3 owned-dump,
+live-provider, deployment and backup qualification remain open.
+
 ## LA3 acceptance: a usable installation
 
 Use representative user-owned game dumps and music CDs (including the actual
@@ -279,6 +317,37 @@ Walk import → automatic metadata → browse → album preparation → playback
 those dumps and two users, including an interrupted import and an optional-provider
 failure. Fix journey blockers in their owning layers. Record residual limits without
 claiming all web surfaces or the full release qualified. Checkpoint the usable result.
+
+### LA3 qualification progress — 2026-09-17
+
+The repeatable procedure and exact execution record are in the
+[LA3 installation runbook](local-alpha-installation.md). On the selected Mac,
+isolated copies of five owned packages covered nested mixed-mode game data, flat
+two-track Redumper/BIN+CUE, 16 existing FLAC sidecars and two damaged packages.
+The journey preserved originals, retained structure/hash observations, prepared
+and actually played two FLAC tracks, kept manual title authority across restart and
+restore, showed the provider-outage state, interrupted and resumed game staging,
+and exercised two local users through denial and revocation. The actual stopped
+copy into separate empty roots matched complete archive/state manifests before
+open, retained the server/TLS identity, accounts and grant, resumed four unfinished
+Jobs, and passed restored playback. Source and restored identities never ran
+concurrently.
+
+Qualification fixes add explicit CUE/TOC anchor selection and durable reuse, omit
+that music-only extension from unrelated game inputs, and keep a polled published
+association selector synchronized until the curator edits it. Focused regressions
+and the repaired real browser paths pass. The source corpus remained unchanged.
+
+Live MusicBrainz/CAA enrichment now passes with the project URL as contact. It
+identified the preserved disc as `HOME` by `B’z`, published real cover artwork,
+retained the existing manual title and passed cover/text browsing plus real FLAC
+playback from restored roots. Focused fixes cover the observed Archive.org CDN
+redirect, numeric CAA image identity and retried catalog completion receipt.
+
+LA3 is still not accepted. The intended second physical LAN browser with trusted
+HTTPS was not available, so second-device playback, denied curation, grant
+revocation and active-session revocation remain required. No game DAT was supplied;
+DAT-backed game identity remains outstanding only if it is part of adoption.
 
 ## Deferred from alpha, preserved in the release backlog
 
@@ -310,7 +379,8 @@ No automatic commits; recommend backup checkpoints after working deliveries.
 
 ## Ready-to-send LA1 review prompt
 
-Completed review assignment; use the LA2 implementation prompt below next.
+Completed review assignment; retained as historical context. Use the LA3
+prompt below next.
 
 ```text
 Review the integrated LA1 implementation against docs/local-alpha-plan.md and
@@ -333,32 +403,83 @@ after LA1 is reviewed and corrected; update the next prompt to LA2 only if revie
 acceptance passes. Do not commit or spawn agents.
 ```
 
-## Ready-to-send LA2 implementation prompt
+## Ready-to-send LA2 review prompt
+
+Completed 2026-09-17; retained as historical context. Use the LA3 prompt below next.
 
 ```text
-Implement LA2 from docs/local-alpha-plan.md as one complete delivery: optional album
-preparation and a usable browser library/player. Read AGENTS.md, architecture.md,
-implementation-status.md, release-requirements.md, local-alpha-review.md and
-la1-implementation-notes.md first, then D07.4–D07.5 in music-first-milestones.md.
-Begin only once the LA1 integrated review is accepted in the delivery ledger.
+Review the integrated LA2 implementation against docs/local-alpha-plan.md,
+docs/local-alpha-review.md and D07.4–D07.5 in docs/background-work-plan.md. Read
+AGENTS.md, architecture.md, implementation-status.md and release-requirements.md.
+Do not begin LA3, P05, native clients, public deployment or the broader P04/U05 audit.
 
-Reuse the existing guided import, durable Jobs, FLAC recipe/validation, availability
-queries and browser player. Application services own album scope, stable batch/member
-identities, bounded admission, partial failure, retry and cancellation of owned work.
-Expose the same preparation service from Prepare album and the optional import-time
-checkbox. Keep UI selection/progress below that policy; do not build a second queue,
-provider pipeline or encoder. Preserve masters and manual metadata authority.
+Trace Prepare album and guided-import preparation through application-owned album
+scope, frozen batch/member identities and the existing per-track Jobs/publication.
+Challenge bounded admission, source ambiguity, duplicate convergence, active/shared
+Job ownership, cancellation, retry history, missing encoders, permission loss,
+partial failure and restart at every fan-out/execution/publication boundary. Verify
+valid outputs are reused and neither cancellation nor failure can replace masters.
 
-Complete the backend, generated API, UI and end-to-end acceptance together. While an
-encode runs, another album/track can be queued and users can browse, edit unrelated
-items and play completed tracks. Recover accepted work after close/reload/restart;
-reuse valid outputs. Cover multidisc ambiguity, overlap/shared jobs, missing encoders,
-partial failure, cancellation and revocation. Keep cover art beside text rows.
+Inspect the generated API and React behavior for durable reopen, honest aggregate
+and per-track outcomes, cover art beside text, and the nonblocking rule: accepted
+work must not globally disable independent preparation, browsing, editing or player
+controls. Exercise actual browser playback and access revocation; do not accept a
+mock player or a completed Job without a published Representation.
 
-Use focused regression tests while implementing, then all repository gates and real
-temporary-profile browser playback. Record exact evidence and limitations; update the
-alpha ledger, status, mapped D07 tickets and review handoff together. Keep LA3 owned
-dumps/live-provider/deployment/backup qualification open. Do not implement P05, native
-clients, public deployment or broader P04/U05 work. Continue through the whole LA2
-delivery without routine checkpoint handoffs. Do not commit or spawn agents.
+Run focused regressions and all repository gates, rebuild embedded assets, and run
+the real temporary-profile browser journey. Record findings/corrections in
+docs/local-alpha-review.md and docs/validation.md. Keep owned dumps, live providers,
+target deployment, backup restore, Opus and non-Chrome qualification explicitly open
+unless actually supplied and run. Stop after LA2 is reviewed and corrected; update
+the next prompt to LA3 only if acceptance passes. Do not commit or spawn agents.
 ```
+
+## Ready-to-send LA3 prompt
+
+LA3 is partially qualified through 2026-09-19. The owned-corpus journey, live-provider
+enrichment, actual stopped-server copy/restore, local Owner/Viewer checks, FLAC
+preparation/playback, outage behavior and focused journey repairs are recorded in
+`docs/local-alpha-installation.md`. A cached full-release Redump PlayStation view
+also produced a unique complete match for the owned four-track disc after explicit
+CUE-versus-track domain correction. Continue only the remaining external gates; do
+not repeat the completed corpus or restore work unless its owning code changes.
+
+~~~text
+Finish LA3 qualification as one usable local installation, following
+docs/local-alpha-plan.md.
+Read AGENTS.md, architecture.md, implementation-status.md, release-requirements.md,
+local-alpha-review.md and validation.md. LA1 and LA2 provide the existing workflow;
+do not restart their design or resume the historical serial wave order.
+
+Use the existing partial-qualification record. Use the recorded project URL for the
+MusicBrainz/Cover Art Archive User-Agent and obtain the intended second LAN
+device/browser with a browser-trusted HTTPS management origin. Do not repeat the
+passing Redump qualification unless its owning code changes. The immutable
+full-release snapshot, explicit retained CUE exclusion, four-track complete match
+and applied automatic title are recorded in the installation runbook. The bounded
+cache also contains a Headerless No-Intro NES DAT; no owned NES dump was supplied.
+The reviewed cache helper disables new DAT-o-MATIC downloads in code.
+DAT-o-MATIC refused the subsequent N64 request with error 1260, so do not retry or
+attempt to evade it. Ask narrowly for restored provider access or manually supplied
+N64, SNES and PC Engine ZIPs only if those caches remain adoption inputs.
+
+The live-provider gate already passes; do not repeat it unless provider-owning code
+changes. Keep MusicBrainz identity distinct from catalog/audio verification and do
+not re-import the corpus merely to trigger provider work.
+
+From the intended second device, use the existing private/encrypted ingress and
+trusted certificate path. Verify Viewer login, cover/text browsing and real FLAC
+playback, denied curation, grant revocation and active-session revocation. Do not
+bypass certificate validation, expose the private listener, change public/private
+router composition or create a public tunnel.
+
+Run affected checks and the real browser path for any correction, then run all
+repository gates before acceptance. Append exact provider/device/browser results to
+the installation, validation, status, backlog and review ledgers together. Do not
+mark LA3 accepted while second-device evidence is absent. The
+completed stopped-server drill is not P05 portable export/change-bundle completion.
+
+Do not implement native clients, discovery, public tunnels, P05, broad P04/U05,
+new online game providers, or the full release backlog. Do not modify sibling
+projects, commit, or spawn agents without an explicit assignment to do so.
+~~~

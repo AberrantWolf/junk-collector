@@ -124,6 +124,8 @@ struct MusicImportAnalysisInput {
     _system: Option<String>,
     #[serde(default, rename = "domain")]
     _domain: Option<ModuleData>,
+    #[serde(default)]
+    anchor_file_index: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -132,6 +134,8 @@ pub struct MusicImportAnalysisOutput {
     candidates: Vec<serde_json::Value>,
     limitations: Vec<String>,
     pub observations: Vec<RawJson>,
+    #[serde(default)]
+    pub selection: Option<CdPackageSelection>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1825,7 +1829,11 @@ pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSel
 pub struct Music;
 
 impl CollectionModule for Music {
-    fn import_readiness(&self, names: &[PackageFileName]) -> crate::ImportReadiness {
+    fn import_readiness(
+        &self,
+        names: &[PackageFileName],
+        anchor_file_index: Option<usize>,
+    ) -> crate::ImportReadiness {
         use crate::{ImportReadiness, IngestAnchorChoice, IngestBlocker, IngestBlockerKind};
         let choices = package_anchors(names);
         let anchors = choices
@@ -1837,7 +1845,9 @@ impl CollectionModule for Music {
                     CdPackageKind::Redumper => "Redumper TOC",
                 }
                 .into(),
-                selected: choices.len() == 1,
+                selected: anchor_file_index
+                    .map(|selected| selected == *index)
+                    .unwrap_or(choices.len() == 1),
             })
             .collect();
         let mut blockers = vec![];
@@ -1849,7 +1859,24 @@ impl CollectionModule for Music {
                 blocks_preservation: false,
             })
         };
-        match choices.as_slice() {
+        let selected = match anchor_file_index {
+            Some(index) => choices
+                .iter()
+                .copied()
+                .find(|(candidate, _)| *candidate == index)
+                .map(|choice| vec![choice])
+                .unwrap_or_default(),
+            None => choices.clone(),
+        };
+        if anchor_file_index.is_some() && selected.is_empty() {
+            issue(
+                IngestBlockerKind::MissingAnchor,
+                "The selected CD anchor is not part of this package. Preview the package again."
+                    .into(),
+            );
+            return ImportReadiness { anchors, blockers };
+        }
+        match selected.as_slice() {
             [] => issue(IngestBlockerKind::MissingAnchor, "CD analysis needs a CUE or redumper TOC anchor. Originals can still be preserved.".into()),
             [(index, CdPackageKind::Redumper)] => {
                 let base = &names[*index].as_str()[..names[*index].as_str().len()-4];
@@ -1860,7 +1887,7 @@ impl CollectionModule for Music {
             }
             [(_, CdPackageKind::Cue)] if names.len()==1 => issue(IngestBlockerKind::MissingCompanion, "The CUE has no companion data file. Add its referenced files or preserve without analysis.".into()),
             [_] => {},
-            _ => issue(IngestBlockerKind::AmbiguousAnchors, "Multiple CD anchors: select separate packages. Preservation without analysis remains available.".into()),
+            _ => issue(IngestBlockerKind::AmbiguousAnchors, "Multiple CD anchors: choose the CUE or Redumper TOC to analyze. The whole package will be preserved either way.".into()),
         }
         ImportReadiness { anchors, blockers }
     }
@@ -2053,11 +2080,32 @@ impl CollectionModule for Music {
                 verify_selection(host, access, &inventory, &selection)?
             }
             "org.junk.music.import-analysis" => {
-                let _: MusicImportAnalysisInput = request
+                let input: MusicImportAnalysisInput = request
                     .input
                     .parse()
                     .map_err(|error| ModuleError::Invalid(error.to_string()))?;
-                let selection = detect_package(&inventory)?;
+                let selection = match input.anchor_file_index {
+                    Some(anchor_file_index) => {
+                        let names = inventory
+                            .files
+                            .iter()
+                            .map(|file| file.display_name.clone())
+                            .collect::<Vec<_>>();
+                        let package_kind = package_anchors(&names)
+                            .into_iter()
+                            .find_map(|(index, kind)| (index == anchor_file_index).then_some(kind))
+                            .ok_or_else(|| {
+                                ModuleError::Invalid(
+                                    "selected CD anchor is not part of the frozen package".into(),
+                                )
+                            })?;
+                        CdPackageSelection {
+                            package_kind,
+                            anchor_file_index,
+                        }
+                    }
+                    None => detect_package(&inventory)?,
+                };
                 let structure = analyze_selection(host, access, &inventory, &selection)?;
                 let limitations = match &structure {
                     CdProcessingResult::Layout { limitations, .. } => limitations.clone(),
@@ -2072,6 +2120,7 @@ impl CollectionModule for Music {
                                 serde_json::to_value(structure)
                                     .map_err(|error| ModuleError::Invalid(error.to_string()))?,
                             )],
+                            selection: Some(selection),
                         })
                         .map_err(|error| ModuleError::Invalid(error.to_string()))?,
                     ),

@@ -2014,3 +2014,43 @@ fn empty_raw_hash_remains_a_valid_integrity_observation() {
         )
         .unwrap();
 }
+
+#[test]
+fn redumper_package_can_select_toc_without_splitting_its_cue_companion() {
+    let registry = Registry::builtins();
+    let names = [
+        "disc.cue",
+        "disc.toc",
+        "disc.scram",
+        "disc.state",
+        "disc.subcode",
+        "disc.bin",
+    ]
+    .into_iter()
+    .map(PackageFileName::new)
+    .collect::<Result<Vec<_>>>()
+    .unwrap();
+
+    let ambiguous = registry
+        .import_readiness(&ModuleId("org.junk.music".into()), &names, None)
+        .unwrap();
+    assert!(
+        ambiguous
+            .blockers
+            .iter()
+            .any(|blocker| blocker.kind == IngestBlockerKind::AmbiguousAnchors)
+    );
+
+    let selected = registry
+        .import_readiness(&ModuleId("org.junk.music".into()), &names, Some(1))
+        .unwrap();
+    assert!(selected.blockers.is_empty());
+    assert_eq!(
+        selected
+            .anchors
+            .iter()
+            .find(|anchor| anchor.selected)
+            .map(|anchor| anchor.file_index),
+        Some(1)
+    );
+}

@@ -9,6 +9,16 @@ struct GuidedProviderStep {
     maximum_response_bytes: u64,
 }
 
+fn completed_snapshot_id(result: Option<&serde_json::Value>) -> Option<SnapshotId> {
+    let result = result?;
+    result
+        .get("completion")
+        .unwrap_or(result)
+        .get("snapshot_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.parse().ok())
+}
+
 fn safe_package_title(name: &str) -> Result<String> {
     if name.is_empty()
         || name.len() > 4096
@@ -176,6 +186,7 @@ impl CollectionService {
                         .iter()
                         .map(|file| PackageFileName::new(file.name.clone()))
                         .collect::<Result<Vec<_>>>()?,
+                    package.anchor_file_index,
                 )
                 .map_err(Error::from)?;
             let anchors = readiness.anchors;
@@ -211,6 +222,27 @@ impl CollectionService {
                 && self
                     .catalog_parsers
                     .contains_key(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID);
+            let analysis_blocked = blockers.iter().any(|issue| issue.blocks_analysis);
+            let (preparation_available, preparation_reason) = if eligibility.owner.0
+                == "org.junk.music"
+            {
+                if analysis_blocked {
+                    (
+                        false,
+                        Some("Choose a usable CD anchor before preparing this package.".into()),
+                    )
+                } else {
+                    match self.encoder_availability(&ConversionProfile::Flac) {
+                        EncoderAvailability::Available { .. } => (true, None),
+                        EncoderAvailability::Unavailable { reason } => (false, Some(reason)),
+                    }
+                }
+            } else {
+                (
+                    false,
+                    Some("Optional album preparation applies only to music collections.".into()),
+                )
+            };
             packages.push(IngestPlanPackage {
                 position: position
                     .try_into()
@@ -223,6 +255,8 @@ impl CollectionService {
                 analysis_available,
                 metadata_available,
                 artwork_available,
+                preparation_available,
+                preparation_reason,
             });
         }
         let token = Digest::sha256(
@@ -268,6 +302,11 @@ impl CollectionService {
                         .map(|package| IngestPackageSelection {
                             source: package.source.clone(),
                             files: package.files.clone(),
+                            anchor_file_index: package
+                                .anchors
+                                .iter()
+                                .find(|anchor| anchor.selected)
+                                .map(|anchor| anchor.file_index),
                         })
                         .collect(),
                 },
@@ -279,6 +318,18 @@ impl CollectionService {
                         .map_err(|error| Error::Invalid(error.to_string()))?
             {
                 return Err(Error::Conflict);
+            }
+            if command.prepare_music
+                && let Some(package) = replanned
+                    .packages
+                    .iter()
+                    .find(|package| !package.preparation_available)
+            {
+                return Err(Error::Unavailable(
+                    package.preparation_reason.clone().unwrap_or_else(|| {
+                        "Optional music preparation is unavailable for this package.".into()
+                    }),
+                ));
             }
             let now = self.authentication.now();
             let mut records = Vec::new();
@@ -371,8 +422,16 @@ impl CollectionService {
                     plan_token: command.plan.token.clone(),
                     target_item_id,
                     default_title: package.default_title.clone(),
+                    anchor_file_index: package
+                        .anchors
+                        .iter()
+                        .find(|anchor| anchor.selected)
+                        .map(|anchor| anchor.file_index),
                     enrichment: command.enrichment,
                     enrichment_error: None,
+                    prepare_music: command.prepare_music,
+                    preparation_batch_id: None,
+                    preparation_error: None,
                     settled: false,
                     cancelled: false,
                     created_at: now,
@@ -505,6 +564,7 @@ impl CollectionService {
                     .iter()
                     .map(|file| file.display_name.clone())
                     .collect::<Vec<_>>(),
+                intent.anchor_file_index,
             )
             .map_err(Error::from)?;
         if let Some(issue) = readiness
@@ -524,6 +584,16 @@ impl CollectionService {
             "guided.import.analysis",
             &record.view.id.to_string(),
         );
+        let mut selection = serde_json::json!({
+            "import_id":record.view.id,"representation_id":record.view.representation_id,
+            "files":record.view.files,"snapshot_id":snapshot_id,"system":null,"domain":null
+        });
+        if let Some(anchor_file_index) = intent.anchor_file_index {
+            selection
+                .as_object_mut()
+                .expect("guided analysis selection is an object")
+                .insert("anchor_file_index".into(), anchor_file_index.into());
+        }
         let frozen = FrozenProcessingJob {
             collection_id: record.view.collection_id,
             collection_binding: eligibility.binding,
@@ -533,10 +603,7 @@ impl CollectionService {
             source_fingerprint: fingerprint,
             snapshot_id,
             observation_id: ObservationId(job.0),
-            selection: RawJson::from_value(serde_json::json!({
-                "import_id":record.view.id,"representation_id":record.view.representation_id,
-                "files":record.view.files,"snapshot_id":snapshot_id,"system":null,"domain":null
-            })),
+            selection: RawJson::from_value(selection),
             created_at: intent.created_at,
         };
         self.jobs.enqueue_job(JobSpec {
@@ -672,26 +739,52 @@ impl CollectionService {
                     self.enqueue_guided_publication(&intent, &record)?;
                 }
             }
-            ImportPhase::Published if intent.enrichment == IngestEnrichmentPolicy::Automatic => {
-                match self.advance_guided_enrichment(&intent, &record) {
-                    Ok(done) => {
-                        intent.settled = done;
-                        intent.enrichment_error = None;
-                        intent.updated_at = self.authentication.now();
-                        self.provisional_imports.save_guided_ingest_intent(intent)?;
-                    }
-                    Err(error) => {
-                        intent.settled = true;
-                        intent.enrichment_error =
-                            Some(error.to_string().chars().take(512).collect());
-                        intent.updated_at = self.authentication.now();
-                        self.provisional_imports.save_guided_ingest_intent(intent)?;
-                    }
-                }
-            }
             ImportPhase::Published => {
-                intent.settled = true;
-                intent.enrichment_error = None;
+                let enrichment_done = if intent.enrichment == IngestEnrichmentPolicy::None
+                    || intent.enrichment_error.is_some()
+                {
+                    true
+                } else {
+                    match self.advance_guided_enrichment(&intent, &record) {
+                        Ok(done) => done,
+                        Err(error) => {
+                            intent.enrichment_error =
+                                Some(error.to_string().chars().take(512).collect());
+                            true
+                        }
+                    }
+                };
+                let preparation_done =
+                    if !intent.prepare_music || intent.preparation_error.is_some() {
+                        true
+                    } else {
+                        if intent.preparation_batch_id.is_none() {
+                            match self.enqueue_guided_music_preparation(
+                                intent.user_id,
+                                intent.target_item_id,
+                                intent.import_id,
+                            ) {
+                                Ok(batch) => intent.preparation_batch_id = Some(batch),
+                                Err(error) => {
+                                    intent.preparation_error =
+                                        Some(error.to_string().chars().take(512).collect());
+                                }
+                            }
+                        }
+                        match intent.preparation_batch_id {
+                            Some(batch) => {
+                                let (done, error) =
+                                    self.guided_music_preparation_outcome(intent.user_id, batch)?;
+                                if done {
+                                    intent.preparation_error = error;
+                                }
+                                done
+                            }
+                            None => true,
+                        }
+                    };
+                intent.settled = enrichment_done && preparation_done;
+                intent.updated_at = self.authentication.now();
                 self.provisional_imports.save_guided_ingest_intent(intent)?;
             }
             _ => {}
@@ -788,13 +881,8 @@ impl CollectionService {
         if let Some(job) = jobs.iter().find(|job| job.id == job_id) {
             return match job.state {
                 JobState::Completed => {
-                    let snapshot_id = job
-                        .result
-                        .as_ref()
-                        .and_then(|result| result.get("snapshot_id"))
-                        .and_then(serde_json::Value::as_str)
-                        .and_then(|value| value.parse().ok())
-                        .ok_or_else(|| {
+                    let snapshot_id =
+                        completed_snapshot_id(job.result.as_ref()).ok_or_else(|| {
                             Error::Storage("guided MusicBrainz job has no snapshot".into())
                         })?;
                     let authority = self.refresh_provider_metadata_for_job(
@@ -979,12 +1067,7 @@ impl CollectionService {
             JobState::Completed => {}
             _ => return Ok(false),
         }
-        let listing_snapshot: SnapshotId = listing
-            .result
-            .as_ref()
-            .and_then(|result| result.get("snapshot_id"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|value| value.parse().ok())
+        let listing_snapshot = completed_snapshot_id(listing.result.as_ref())
             .ok_or_else(|| Error::Storage("guided artwork listing has no snapshot".into()))?;
         let snapshot = self.processing.snapshot(SnapshotQuery {
             collection_id: item.collection_id,
@@ -1068,12 +1151,7 @@ impl CollectionService {
             JobState::Completed => {}
             _ => return Ok(false),
         }
-        let image_snapshot: SnapshotId = image
-            .result
-            .as_ref()
-            .and_then(|result| result.get("snapshot_id"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|value| value.parse().ok())
+        let image_snapshot = completed_snapshot_id(image.result.as_ref())
             .ok_or_else(|| Error::Storage("guided artwork image has no snapshot".into()))?;
         let asset_id = AssetId(super::deterministic_inventory_uuid(
             intent.user_id,
@@ -1154,7 +1232,8 @@ impl CollectionService {
             .provisional_imports
             .import_job_records(view.id, actor.user_id)?;
         let failed = jobs.iter().any(|job| job.state == JobState::Failed)
-            || intent.enrichment_error.is_some();
+            || intent.enrichment_error.is_some()
+            || intent.preparation_error.is_some();
         let active = jobs.iter().any(|job| {
             matches!(
                 job.state,
@@ -1194,6 +1273,7 @@ impl CollectionService {
             phase: view.phase,
             outcome,
             enrichment: intent.enrichment,
+            prepare_music: intent.prepare_music,
             updated_at: view.updated_at,
             permissions: IngestPermissions {
                 can_cancel: can_write
@@ -1396,6 +1476,43 @@ impl CollectionService {
                     .then(|| "No automatic artwork was selected".into()),
             )
         };
+        let preparation_step = if !intent.prepare_music {
+            job_step("preparation", None, true, None)
+        } else if let Some(error) = intent.preparation_error.clone() {
+            IngestStepView {
+                step: "preparation".into(),
+                state: IngestStepState::Failed,
+                job_id: intent.preparation_batch_id,
+                attempt: intent
+                    .preparation_batch_id
+                    .and_then(|id| jobs.iter().find(|job| job.id == id).map(|job| job.attempt)),
+                message: Some(error),
+                retryable: !intent.cancelled && intent.preparation_batch_id.is_some(),
+            }
+        } else if let Some(batch) = intent.preparation_batch_id {
+            let (done, error) = self.guided_music_preparation_outcome(intent.user_id, batch)?;
+            IngestStepView {
+                step: "preparation".into(),
+                state: if done {
+                    if error.is_some() {
+                        IngestStepState::Failed
+                    } else {
+                        IngestStepState::Succeeded
+                    }
+                } else {
+                    IngestStepState::Active
+                },
+                job_id: Some(batch),
+                attempt: jobs
+                    .iter()
+                    .find(|job| job.id == batch)
+                    .map(|job| job.attempt),
+                message: error,
+                retryable: false,
+            }
+        } else {
+            job_step("preparation", None, false, None)
+        };
         let staging_step = if let Some(job) = by_kind.get("import_staging") {
             job_step("staging", Some(job), false, intent.enrichment_error.clone())
         } else {
@@ -1436,6 +1553,7 @@ impl CollectionService {
             ),
             metadata_step,
             artwork_step,
+            preparation_step,
         ];
         Ok(IngestDetail {
             summary,
@@ -1539,6 +1657,11 @@ impl CollectionService {
                 .find(|job| job.id == job_id)
                 .ok_or(Error::NotFound)?;
             self.execute_command(actor, context, "ingest.retry", &(id, &command), |effects| {
+                if job.kind == "music_derivative_batch" {
+                    return effects
+                        .retry_preparation_batch(job_id, actor.user_id)
+                        .map(|()| job_id);
+                }
                 if job.state != JobState::Failed {
                     return Err(Error::Conflict);
                 }
@@ -1546,6 +1669,9 @@ impl CollectionService {
             })?;
         } else {
             intent.enrichment_error = None;
+            if intent.preparation_batch_id.is_none() {
+                intent.preparation_error = None;
+            }
             intent.settled = false;
             intent.updated_at = self.authentication.now();
             self.execute_command(actor, context, "ingest.retry", &(id, &command), |effects| {

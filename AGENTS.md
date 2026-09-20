@@ -13,6 +13,10 @@ Read `docs/architecture.md` before adding or changing a subsystem. `docs/impleme
 
 ## Lessons from implementation reviews
 
+- External download forms are not stable APIs. Validate advertised field values, not just names; stop the batch on refusal and do not retry a blocked provider. Bound expanded archives and validate cache digests before reuse. Use offline fixtures for repairs.
+
+- Shared background work needs durable request ownership, not a frozen “owned” boolean. Commit references with admission, fence child admission with the parent claim in the same transaction, retain the first immutable Job timestamp on convergent requests, and test later direct requests plus last-owner cancellation with an advancing clock.
+
 - Recover all pages of unfinished workflows periodically, not only the first page at startup. Commit the upstream Job outcome before advancing downstream work; preservation is not the end of enrichment. Persist terminal/cancelled state, fence generic Job retry as well as specialized commands, and keep UI polling until the whole requested workflow settles.
 
 - Bind command receipts to submitted inputs before resolving mutable server configuration. Share the actual effect implementation rather than nesting independently committed commands.

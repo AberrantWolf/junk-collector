@@ -5,15 +5,17 @@ LA2 integrates the relevant acceptance below across layers. Individual child
 assignments at the bottom are reference scope, not separate required handoffs.
 Keep unmet broader criteria open; alpha does not certify every web interface.
 
-User requirement, 2026-09-15. Planned, not implemented. Required before web UI
-completion alongside [P04](import-management-plan.md) and
-[U05](interface-readiness-plan.md). Scheduled by the local-alpha plan.
+User requirement, 2026-09-15. LA2 was reviewed and corrected on 2026-09-17;
+its bounded workflow acceptance passed. Required before web UI completion alongside
+[P04](import-management-plan.md) and [U05](interface-readiness-plan.md); broader
+application-wide U05 acceptance remains open.
 
 ## Finding and ownership
 
-The music component holds one jobId and disables every Prepare button while it
-is set. Encodes already run as durable background jobs, but the UI prevents
-submitting independent work. Worker concurrency and queue admission are distinct:
+Before LA2, the music component held one jobId and disabled every Prepare button
+while it was set. Encodes already ran as durable background jobs, but the UI
+prevented submitting independent work. LA2 removes that client-side serialization.
+Worker concurrency and queue admission are distinct:
 a bounded worker can run one encode while other accepted encodes wait. Unlimited
 concurrent execution is not required.
 
@@ -27,8 +29,8 @@ supplies identifiable history. No browser scheduler or parallel album encoder.
 
 | Child | State | Scope and dependencies |
 |---|---|---|
-| D07.4 — Album preparation and independent enqueueing | Planned | D07.1–D07.3/P02/A04: durable batch submission, eligibility, album/track controls |
-| D07.5 — Batch and queue workflow review | Planned | D07.4: actual UI, interruption, partial outcomes, duplicate/race and playback checks |
+| D07.4 — Album preparation and independent enqueueing | Reviewed and corrected; acceptance passed | D07.1–D07.3/P02/A04: durable batch submission, eligibility, album/track controls |
+| D07.5 — Batch and queue workflow review | Reviewed and corrected; acceptance passed | D07.4: actual UI, interruption, partial outcomes, duplicate/race and playback checks |
 
 ### D07.4 — Whole-album preparation
 
@@ -97,6 +99,25 @@ Across the U05 audit, prove independent actions stay available during real work
 and dependent/conflicting actions remain guarded. A spinner or a test that waits
 for each job before submitting the next does not establish this requirement.
 Record actual UI/server evidence and update the child ledger and status together.
+
+### LA2 submitted result — 2026-09-16
+
+The implementation uses a frozen, bounded durable batch Job over existing per-track
+derivative Jobs. It defaults unambiguous associated discs, requires explicit
+alternative sources, converges identical active/output work, derives partial state
+from child Jobs plus published Representations, retries only unfinished work, and
+cancels only owned unshared children. Prepare album and guided-import preparation
+call the same application service. React restores server-owned progress without a
+page-wide background busy lock.
+
+Permanent tests cover two-disc selection, ambiguity, missing encoders, overlap,
+shared cancellation, partial validation failure, retry, restart, revocation through
+the existing derivative checks, guided preparation and valid-output reuse. The
+temporary-profile Chrome workflow used a delay wrapper around real FLAC 1.5.0,
+submitted overlapping album batches, kept inventory controls enabled and played one
+completed track in a second page while another member remained active. Exact results and unqualified external
+inputs are recorded in [validation](validation.md). D07.5 passed independent integrated review on 2026-09-17; broader U05 interface
+auditing is not claimed. See the review corrections in local-alpha-review.md.
 
 ## Historical child assignment (use the local-alpha handoff instead)
 

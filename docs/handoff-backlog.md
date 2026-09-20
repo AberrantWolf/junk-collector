@@ -6,21 +6,31 @@ Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are im
 
 ## Active assignment — local alpha
 
+2026-09-20 review: new DAT-o-MATIC downloads are disabled pending reviewed
+restoration; do not resume them merely because site access returns. Cached catalogs
+remain usable. Continue the outstanding second-device qualification.
+
 Accepted 2026-09-16 after D06.3 commit `3a6143b`: follow the
 [local-alpha plan](local-alpha-plan.md). **LA1 guided ingestion and automatic
-enrichment is reviewed and corrected locally; P05.1 is paused.** LA2 completes album preparation/browsing;
-LA3 qualifies actual dumps, local users and backup/restore. The detailed acceptance
+enrichment and LA2 album preparation/listening are reviewed and corrected locally;
+LA3 is partially qualified; P05.1 is paused.** The selected Mac now passes the owned
+corpus, live-provider, local-DAT identity, local-user and actual backup/restore
+portions. The intended second LAN device remains. The detailed acceptance
 of old tickets remains useful, but their serial child handoffs no longer govern
 this work.
 
 | Active delivery | Mapped work | State |
 |---|---|---|
 | LA1 | P03/P04 intake/history/recovery, U05 journey readiness, D04–D06 integration | Reviewed and corrected; acceptance passed |
-| LA2 | D07.4–D07.5, browse/playback and nonblocking workflow | Ready for implementation; not started |
-| LA3 | Local real-dump/provider/user qualification and stopped-server recovery drill | Planned |
+| LA2 | D07.4–D07.5, browse/playback and nonblocking workflow | Reviewed and corrected; acceptance passed |
+| LA3 | Local real-dump/provider/user qualification and stopped-server recovery drill | Partially qualified; owned corpus, live providers, one owned Redump match, local roles/playback, interruption recovery and actual restore passed; second device pending |
 
-The [LA2 implementation prompt](local-alpha-plan.md#ready-to-send-la2-implementation-prompt) is the
-next assignment. LA1 is a recommended backup checkpoint; no commit was made by the review. Preserve the broader release backlog below; mark its
+Continue the [LA3 prompt](local-alpha-plan.md#ready-to-send-la3-prompt) with the
+intended trusted second device. The supported-platform cache currently contains
+PlayStation and NES; DAT-o-MATIC access must be restored or manually supplied ZIPs
+provided before N64/SNES/PC Engine can be cached. Do not
+repeat the passing owned-corpus or actual restore work unless its owning code
+changes. The integrated alpha checkout remains uncommitted. Preserve the broader release backlog below; mark its
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
 
@@ -43,7 +53,7 @@ Each ticket lists its owning layers, entry files, scope, acceptance and limits. 
 | 5 | C03, C04, C05, C06, C07, P06 | Client integration, offline use, Trash Amp and scale |
 | 6 | R01, R02, R03 | Deployment, performance and release evidence |
 
-For work resumed after alpha, follow explicit dependencies rather than table position. The table is not the next assignment: LA1 is current. Existing completion records do not qualify unavailable private fixtures, providers, hardware or target platforms. Do not assign the entire release table as one coding task.
+For work resumed after alpha, follow explicit dependencies rather than table position. The table is not the next assignment: LA3 installation qualification is in progress. Existing completion records do not qualify unavailable private fixtures, providers, hardware or target platforms. Do not assign the entire release table as one coding task.
 
 The [historical music-first proposal](music-first-milestones.md) retains useful
 Trash Amp/native design context. Its execution order is superseded by local alpha.
@@ -611,7 +621,7 @@ Define capability-based authorized media readers and extract decoding, integer-s
 
 ### D04 — Game analyzer and DAT verification integration
 
-**Status (2026-09-13): D04.1–D04.3 reviewed and corrected locally.** The configured local-DAT adapter archives exact bytes, rebuilds its index, supports explicit activation, and feeds source/snapshot-bound complete, ambiguous, partial or inconclusive game results. Qualified game operations now run through Import and committed-Capture jobs with admin/curation UI and historical evidence. Synthetic refresh/reindex coverage preserves the old snapshot and evidence. CHD runtime exposure and real dumps remain external; D05.1 is next; stop before D05.2. Preserve the guarantees in [the D04 review](wave-4-review.md). Follow the [Wave 4 child instructions](wave-4-plan.md#d041--qualified-reader-based-game-primitives) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-19): D04.1–D04.3 reviewed and corrected locally; one owned nested mixed-mode package was preserved, hashed and matched in LA3.** The configured local-DAT adapter archives exact bytes, rebuilds its index, supports explicit activation, and feeds source/snapshot-bound complete, ambiguous, partial or inconclusive game results. Qualified game operations now run through Import and committed-Capture jobs with admin/curation UI and historical evidence. Synthetic refresh/reindex coverage preserves the old snapshot and evidence. LA3 imported a 10,001-row full-release Redump PlayStation view and exposed a real domain-mapping defect: provider CUE checksums had been counted as raw-2352 tracks. The corrected adapter retains those source records explicitly in `excluded_files`, compares only length-qualified BIN tracks, and fails closed when no track belongs to the configured domain. Reindexing the same snapshot then gave the owned four-track package a unique complete SHA-1 match for `Brave Fencer Musashi (USA)`; the earlier partial observation remains historical. A Headerless No-Intro NES DAT is cached without an owned NES match. CHD runtime exposure and additional owned-platform matching remain external. Preserve the guarantees in [the D04 review](wave-4-review.md). Follow the [Wave 4 child instructions](wave-4-plan.md#d041--qualified-reader-based-game-primitives) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D02, A03, P02, P03. **Owner:** game module handlers; infrastructure catalog/provider adapters.
 
@@ -623,7 +633,7 @@ Integrate qualified game operations through host services; ingest versioned DAT/
 
 ### D05 — Music CD structural and AccurateRip verification
 
-**Status (2026-09-15): D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally.** Authorized frozen BIN/CUE and current raw-redumper packages produce strict typed layouts and exact bounded integer PCM. Registered music Import/structure/verification operations now use the existing durable jobs, snapshot and observation publication, reindex and web curation paths. Synthetic BIN/CUE and supported raw-redumper packages verify through the actual shared readers; an unsupported signed-coordinate redumper package remains structural-only without blocking preservation. Tests cover exact archived-byte rejection, outage/retry, cancellation, no-data, refresh and historical evidence. Live AccurateRip, owned redumper, real mixed-mode, and D05 external qualification remain unqualified. Follow the [Wave 4 child instructions](wave-4-plan.md#d051--exact-cd-reading-and-bounded-accuraterip-input) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-17): D05.1–D05.3 and D07.1–D07.2 are reviewed and corrected locally; LA3 exercised owned Redumper packages.** Authorized frozen BIN/CUE and current raw-redumper packages produce strict typed layouts and exact bounded integer PCM. Registered music Import/structure/verification operations use the existing durable jobs, snapshot and observation publication, reindex and web curation paths. Owned two-track, 16-track and one-track Redumper packages produced retained layouts; a separate owned package preserved originals with an explicit mixed-mode/four-channel unsupported result. This is structure evidence only: live AccurateRip and whole-disc audio verification remain unqualified. Tests cover exact archived-byte rejection, outage/retry, cancellation, no-data, refresh and historical evidence. Follow the [Wave 4 child instructions](wave-4-plan.md#d051--exact-cd-reading-and-bounded-accuraterip-input) and shared W4.0–W4.2 prerequisites in that plan.
 
 **Review · Dependencies:** D02, A03, P02, P03. **Owner:** music handlers, verification primitives and provider adapters.
 
@@ -648,7 +658,8 @@ D04-snapshot-backed DAT metadata without adding a second pipeline. Immutable
 digest versions, fixed provider priorities, fresh observation identities, exact
 raw history, cache/retry/redirect/resource policy, manual authority, image failure,
 restart and reindex have deterministic fixture coverage. Live-provider and
-deployment checks remain unrun. D06.3 adds curation-only typed review/acquisition/
+deployment checks were originally unrun; LA3 now adds one live MusicBrainz/CAA
+disc-and-cover result while deployment remains unrun. D06.3 adds curation-only typed review/acquisition/
 refresh/artwork routes, effective viewer-safe browse/search/detail projection and a
 reopenable provider-job review panel with manual authority and retained history.
 Deterministic Google Chrome workflow coverage uses local provider fixtures and real
@@ -667,13 +678,14 @@ Persist candidate alternatives/raw responses; rank strong identity before langua
 
 ### D07 — FLAC/Opus derivative jobs
 
-**Added scope (2026-09-15): D07.4–D07.5 planned and required for web completion.**
+**Added scope (2026-09-15): D07.4–D07.5 required for web completion; implemented
+locally on 2026-09-16 and reviewed/corrected on 2026-09-17.**
 Whole-album FLAC preparation and independently queued encodes are defined in the
 [background-work plan](background-work-plan.md). D07.1–D07.3 validation covers
 per-track behavior, not this batch/nonblocking requirement. P02 owns queue bounds;
-U05 applies the rule to all interfaces. The current D06 root review remains bounded.
+U05 applies the rule to all interfaces. LA2 covers this album workflow; the broader U05 audit remains separate.
 
-**Status (2026-09-15): D07.1–D07.2 reviewed and corrected locally; D07.3 reviewed and corrected locally; bounded browser-player child reviewed and corrected locally.** Immutable fixed FLAC/Opus profiles bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. D07.2 publishes one track per job through the existing Capture journal. D07.3 adds viewer-safe ordered availability, server-owned optional encoder probing, curation-only preparation, strong ETag/ranged reads and web preparation/progress controls. The browser child consumes that DTO on the client surface, keeps Capture/source queues distinct, and has actual Google Chrome 153.0.8010.37 FLAC play/pause/seek/transition qualification. FLAC 1.5.0 is locally qualified; `opusenc`, owned-disc, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external. The bounded child is reviewed; D06.3 is reviewed and corrected locally; LA1 is reviewed and corrected locally under the local-alpha plan. Follow the [Wave 4 child instructions](wave-4-plan.md#d071--recipes-and-exact-conversion) and shared W4.0–W4.2 prerequisites in that plan.
+**Status (2026-09-17): D07.1–D07.5 and the bounded browser-player child are reviewed and corrected locally; LA3 exercised an owned disc.** Immutable fixed FLAC/Opus profiles bind the frozen source, music-owned ordered PCM ranges and exact tool version/settings. Supported CUE conversion retains HTOA and stored-pregap ownership; the bounded optional process adapter independently validates FLAC integer PCM and rejects/cleans failed or cancelled scratch. D07.2 publishes one track per job through the existing Capture journal. D07.3 adds viewer-safe ordered availability, server-owned optional encoder probing, curation-only preparation, strong ETag/ranged reads and web preparation/progress controls. D07.4 adds one bounded durable album batch over those track Jobs, explicit associated-disc/source selection, stable overlap reuse, partial outcomes, retry/restart, shared-safe cancellation and the same optional guided-import preparation service. LA3 used FLAC 1.5.0 to prepare two tracks from the owned Redumper source, played them as Owner and Viewer, then played again from restored roots before revocation. The 16 supplied FLAC sidecars remained preservation masters. `opusenc`, gapless/sample-accurate playback, second-device playback and external mastering/deployment qualification remain unavailable/external. Broader U05 remains open. Follow the remaining [LA3 prompt](local-alpha-plan.md#ready-to-send-la3-prompt) next.
 
 **Review · Dependencies:** D03, D05, P02, A04. **Owner:** audio transforms, application derivative jobs, store representations.
 

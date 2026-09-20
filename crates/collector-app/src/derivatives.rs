@@ -287,6 +287,13 @@ pub struct MusicTrackAvailability {
     pub can_prepare: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct ActiveDerivativeJob {
+    pub id: JobId,
+    pub user_id: collector_core::UserId,
+    pub input: FrozenDerivativeJob,
+}
+
 /// One request always means one independently playable track file.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -487,7 +494,7 @@ impl CollectionService {
         )
     }
 
-    fn freeze_music_derivative(
+    pub(super) fn freeze_music_derivative(
         &self,
         capture: &collector_core::Capture,
         binding: CollectionBinding,
@@ -543,12 +550,20 @@ impl CollectionService {
     }
 
     fn enqueue_derivative(
-        effects: &dyn crate::CommandEffects,
+        effects: &(impl crate::JobPort + ?Sized),
         user: collector_core::UserId,
         id: JobId,
         frozen: FrozenDerivativeJob,
     ) -> Result<JobId> {
-        effects.enqueue_job(JobSpec {
+        effects.enqueue_job(Self::derivative_job_spec(user, id, frozen))
+    }
+
+    pub(super) fn derivative_job_spec(
+        user: collector_core::UserId,
+        id: JobId,
+        frozen: FrozenDerivativeJob,
+    ) -> JobSpec {
+        JobSpec {
             id,
             user_id: user,
             collection_id: Some(frozen.collection_id),
@@ -561,7 +576,7 @@ impl CollectionService {
                 "representation_id": frozen.representation_id,
             }),
             frozen_input: Some(FrozenJobInput::Derivative(frozen)),
-        })
+        }
     }
 
     /// Prepare one track using only server-owned encoder configuration and the
@@ -630,10 +645,12 @@ impl CollectionService {
                         encoder_version: version,
                     },
                 )?;
+                // A user's identical track/profile requests converge even when
+                // they arrive from an album batch, an import, or the track button.
                 let id = crate::deterministic_job_id(
                     actor.user_id,
-                    "music.track.prepare",
-                    context.key(),
+                    "music.derivative.output",
+                    &frozen.representation_id.to_string(),
                 );
                 Self::enqueue_derivative(effects, actor.user_id, id, frozen)
             },
@@ -650,6 +667,15 @@ impl CollectionService {
     ) -> Result<Vec<MusicTrackAvailability>> {
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, crate::Action::Browse)?;
+        self.music_track_availability_for_item(actor.user_id, &item)
+    }
+
+    pub(super) fn music_track_availability_for_item(
+        &self,
+        user_id: collector_core::UserId,
+        item: &collector_core::Item,
+    ) -> Result<Vec<MusicTrackAvailability>> {
+        let item_id = item.id;
         if item.deleted {
             return Err(Error::NotFound);
         }
@@ -659,11 +685,7 @@ impl CollectionService {
             && self.modules.inspect(&item.domain).is_ok();
         let writable_music = music_owner
             && self
-                .content_write_eligibility_for_job(
-                    actor.user_id,
-                    Some(item.collection_id),
-                    Some(item_id),
-                )
+                .content_write_eligibility_for_job(user_id, Some(item.collection_id), Some(item_id))
                 .is_ok();
         let titles = item
             .domain
@@ -788,10 +810,10 @@ impl CollectionService {
                                 digest: file.digest.clone(),
                             }
                         } else if active.iter().any(|job| {
-                            job.recipe.source_fingerprint.source
+                            job.input.recipe.source_fingerprint.source
                                 == PackageScope::Representation(source.id)
-                                && job.recipe.tracks.as_slice() == [track.clone()]
-                                && profile_for_recipe(&job.recipe) == profile
+                                && job.input.recipe.tracks.as_slice() == [track.clone()]
+                                && profile_for_recipe(&job.input.recipe) == profile
                         }) {
                             MusicTrackAvailabilityState::Preparing
                         } else {
@@ -836,7 +858,7 @@ impl CollectionService {
         Ok(rows)
     }
 
-    fn detect_music_selection(
+    pub(super) fn detect_music_selection(
         &self,
         collection_id: CollectionId,
         source: RepresentationId,
@@ -844,10 +866,35 @@ impl CollectionService {
         let inventory = self
             .processing
             .package_inventory(collection_id, PackageScope::Representation(source))?;
+        let source_fingerprint = self.fingerprint_inventory(&inventory)?;
+        let observations = self.processing.observations(&crate::ProcessingQuery {
+            collection_id,
+            source: PackageScope::Representation(source),
+            source_fingerprint,
+            operation: Some(collector_core::OperationId::new(
+                "org.junk.music.import-analysis",
+            )?),
+            after: None,
+            limit: 1,
+        })?;
+        if let Some(selection) = observations
+            .items
+            .first()
+            .and_then(|observation| {
+                observation
+                    .typed_result
+                    .payload
+                    .parse::<collector_modules::music::MusicImportAnalysisOutput>()
+                    .ok()
+            })
+            .and_then(|output| output.selection)
+        {
+            return Ok(selection);
+        }
         collector_modules::music::detect_package(&inventory).map_err(Into::into)
     }
 
-    fn encoder_availability(&self, profile: &ConversionProfile) -> EncoderAvailability {
+    pub(crate) fn encoder_availability(&self, profile: &ConversionProfile) -> EncoderAvailability {
         self.audio_converter.as_ref().map_or_else(
             || EncoderAvailability::Unavailable {
                 reason: match profile {
@@ -975,7 +1022,7 @@ impl CollectionService {
     }
 }
 
-fn profile_for_recipe(recipe: &ConversionRecipe) -> ConversionProfile {
+pub(super) fn profile_for_recipe(recipe: &ConversionRecipe) -> ConversionProfile {
     match recipe.settings {
         ConversionSettings::Flac { .. } => ConversionProfile::Flac,
         ConversionSettings::Opus { bitrate_kbps, .. } => ConversionProfile::Opus { bitrate_kbps },

@@ -2482,13 +2482,18 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 93); // Includes the seven guided-ingest contract paths.
+    assert_eq!(paths.len(), 98); // Includes guided ingest and LA2 album preparation.
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
         "/api/v1/items/{id}/specimens/{specimen_id}/components",
         "/api/v1/items/{id}/music-tracks",
         "/api/v1/items/{item}/captures/{capture}/music-tracks/{track}/prepare",
+        "/api/v1/items/{item}/music-preparation-plan",
+        "/api/v1/items/{item}/music-preparation-batches",
+        "/api/v1/music-preparation-batches/{batch}",
+        "/api/v1/music-preparation-batches/{batch}/cancel",
+        "/api/v1/music-preparation-batches/{batch}/retry",
         "/api/v1/items/{id}/specimens/{specimen_id}/components/{component_id}",
         "/api/v1/items/{id}/specimens/{specimen_id}/loans",
         "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return",

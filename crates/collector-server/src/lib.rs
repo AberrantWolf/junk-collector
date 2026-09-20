@@ -16,7 +16,8 @@ use collector_app::{
     CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView,
     ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary, ImportView, IngestDetail,
     IngestDiscardResult, IngestPlan, IngestSummary, JobView, MediaResource, MetadataArtworkOption,
-    MetadataReviewView, MusicTrackAvailability, NativeDeviceView, PasskeyView, PlanIngestCommand,
+    MetadataReviewView, MusicAlbumPreparationPlan, MusicPreparationBatchView,
+    MusicTrackAvailability, NativeDeviceView, PasskeyView, PlanIngestCommand, PrepareMusicAlbum,
     PrepareMusicTrack, PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem,
     ProcessingSummary, PublishProviderArtworkCommand, RetryIngestCommand, ReturnLoanCommand,
     ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails,
@@ -562,6 +563,11 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_job))
         .routes(routes!(retry_job))
         .routes(routes!(prepare_music_track))
+        .routes(routes!(music_album_preparation_plan))
+        .routes(routes!(prepare_music_album, music_preparation_batches))
+        .routes(routes!(music_preparation_batch))
+        .routes(routes!(cancel_music_preparation_batch))
+        .routes(routes!(retry_music_preparation_batch))
         .routes(routes!(metadata_review, update_metadata_authority))
         .routes(routes!(acquire_metadata))
         .routes(routes!(complete_metadata_acquisition))
@@ -1891,6 +1897,96 @@ async fn prepare_music_track(
         Json(serde_json::json!({"job_id": job_id})),
     )
         .into_response())
+}
+
+#[utoipa::path(get, path = "/api/v1/items/{item}/music-preparation-plan", params(("item" = ItemId, Path)), responses((status = 200, body = MusicAlbumPreparationPlan), (status = 403), (status = 404)))]
+async fn music_album_preparation_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item): Path<ItemId>,
+) -> ApiResult<Json<MusicAlbumPreparationPlan>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.music_album_preparation_plan(&actor, item)).await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{item}/music-preparation-batches", params(("item" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = PrepareMusicAlbum, responses((status = 202, body = MusicPreparationBatchView), (status = 400), (status = 403), (status = 404), (status = 409), (status = 503)))]
+async fn prepare_music_album(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item): Path<ItemId>,
+    Json(command): Json<PrepareMusicAlbum>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let batch = blocking(move || {
+        state
+            .service
+            .prepare_music_album(&actor, item, command, &context)
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(batch)).into_response())
+}
+
+#[utoipa::path(get, path = "/api/v1/items/{item}/music-preparation-batches", params(("item" = ItemId, Path)), responses((status = 200, body = Vec<MusicPreparationBatchView>), (status = 403), (status = 404)))]
+async fn music_preparation_batches(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item): Path<ItemId>,
+) -> ApiResult<Json<Vec<MusicPreparationBatchView>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.music_preparation_batches(&actor, item)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/music-preparation-batches/{batch}", params(("batch" = JobId, Path)), responses((status = 200, body = MusicPreparationBatchView), (status = 403), (status = 404)))]
+async fn music_preparation_batch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(batch): Path<JobId>,
+) -> ApiResult<Json<MusicPreparationBatchView>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.music_preparation_batch(&actor, batch)).await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/music-preparation-batches/{batch}/cancel", params(("batch" = JobId, Path), ("Idempotency-Key" = String, Header)), responses((status = 200, body = MusicPreparationBatchView), (status = 403), (status = 404), (status = 409)))]
+async fn cancel_music_preparation_batch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(batch): Path<JobId>,
+) -> ApiResult<Json<MusicPreparationBatchView>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .cancel_music_preparation_batch(&actor, batch, &context)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/music-preparation-batches/{batch}/retry", params(("batch" = JobId, Path), ("Idempotency-Key" = String, Header)), responses((status = 200, body = MusicPreparationBatchView), (status = 403), (status = 404), (status = 409), (status = 503)))]
+async fn retry_music_preparation_batch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(batch): Path<JobId>,
+) -> ApiResult<Json<MusicPreparationBatchView>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .retry_music_preparation_batch(&actor, batch, &context)
+        })
+        .await?,
+    ))
 }
 pub fn parse_range(value: &str, length: u64) -> Option<(u64, u64)> {
     if length == 0 {

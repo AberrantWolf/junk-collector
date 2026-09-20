@@ -269,6 +269,11 @@ pub struct DatCatalogEntryObservation {
     #[serde(default)]
     pub category: Option<String>,
     pub files: Vec<DatCatalogFileObservation>,
+    /// Provider files retained from the source row but excluded from matching
+    /// because they are outside the configured byte domain. For example, a
+    /// Redump CUE checksum is not a raw-2352 track checksum.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_files: Vec<DatCatalogFileObservation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -513,6 +518,18 @@ fn match_dat_catalog<'a>(
             .parse()
             .map_err(|error| ModuleError::Invalid(format!("invalid DAT catalog row: {error}")))?;
         validate_dat_entry(&entry)?;
+        for (file, included) in entry
+            .files
+            .iter()
+            .map(|file| (file, true))
+            .chain(entry.excluded_files.iter().map(|file| (file, false)))
+        {
+            if dat_file_in_byte_domain(file, &header.byte_domain)? != included {
+                return Err(ModuleError::Invalid(
+                    "DAT row has inconsistent byte-domain coverage".into(),
+                ));
+            }
+        }
         saw_usable_checksums |= entry.files.iter().any(has_usable_checksum);
 
         let ordered = entry.files.len() == units.len()
@@ -613,6 +630,30 @@ fn catalog_result(catalog: CatalogMatchResult) -> ModuleResult<GameProcessingRes
     Ok(result)
 }
 
+/// Domain policy for catalog coverage. Only CUE metadata may be excluded from
+/// raw-2352 track matching; a malformed or unknown payload must fail closed.
+pub fn dat_file_in_byte_domain(
+    file: &DatCatalogFileObservation,
+    domain: &str,
+) -> ModuleResult<bool> {
+    if domain != "org.junk.game.cd.raw-2352-track" {
+        return Ok(true);
+    }
+    let extension = file.name.rsplit_once('.').map(|(_, extension)| extension);
+    if extension.is_some_and(|value| value.eq_ignore_ascii_case("cue")) {
+        return Ok(false);
+    }
+    if !extension.is_some_and(|value| value.eq_ignore_ascii_case("bin"))
+        || file.bytes.0 == 0
+        || !file.bytes.0.is_multiple_of(2352)
+    {
+        return Err(ModuleError::Invalid(
+            "raw-2352 DAT contains an unsupported or malformed track".into(),
+        ));
+    }
+    Ok(true)
+}
+
 fn validate_dat_entry(entry: &DatCatalogEntryObservation) -> ModuleResult<()> {
     let safe = |value: &str, maximum| {
         !value.trim().is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
@@ -620,8 +661,8 @@ fn validate_dat_entry(entry: &DatCatalogEntryObservation) -> ModuleResult<()> {
     if !safe(&entry.record_id, 1024)
         || !safe(&entry.label, 4096)
         || entry.files.is_empty()
-        || entry.files.len() > 4096
-        || entry.files.iter().any(|file| {
+        || entry.files.len().saturating_add(entry.excluded_files.len()) > 4096
+        || entry.files.iter().chain(&entry.excluded_files).any(|file| {
             !safe(&file.name, 4096)
                 || file.serial.as_ref().is_some_and(|value| !safe(value, 4096))
                 || file
@@ -855,7 +896,11 @@ pub fn hash_cue_package(
 pub struct Games;
 
 impl CollectionModule for Games {
-    fn import_readiness(&self, _names: &[PackageFileName]) -> crate::ImportReadiness {
+    fn import_readiness(
+        &self,
+        _names: &[PackageFileName],
+        _anchor_file_index: Option<usize>,
+    ) -> crate::ImportReadiness {
         // Game analysis consumes the complete inventory; it has no mandatory
         // user-selected anchor. The registered analyzer reports format support.
         crate::ImportReadiness {
@@ -1542,6 +1587,44 @@ fn validate_catalog_match(result: &CatalogMatchResult) -> ModuleResult<()> {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+
+    #[test]
+    fn catalog_match_rejects_payloads_hidden_in_excluded_files() {
+        let header = RawJson::from_value(serde_json::json!({
+            "schema_version":1,"system":"psx","catalog":"fixture","version":"1",
+            "byte_domain":"org.junk.game.cd.raw-2352-track","byte_domain_version":1,"game_count":1
+        }));
+        let domain = NormalizedByteDomain {
+            name: "org.junk.game.cd.raw-2352-track".into(),
+            version: 1,
+        };
+        let digests = [Digest::new(HashAlgorithm::Crc32, "11111111").unwrap()];
+        let units = [CatalogInputUnit {
+            source_file_id: PackageFileId::new(),
+            track_number: Some(1),
+            bytes: ByteLength(2352),
+            domain: &domain,
+            digests: &digests,
+        }];
+        for name in ["missing.bin", "unknown.img"] {
+            let row = RawJson::from_value(serde_json::json!({
+                "record_id":"one","label":"One",
+                "files":[{"name":"one.bin","bytes":2352,"crc32":"11111111"}],
+                "excluded_files":[{"name":name,"bytes":2352,"crc32":"22222222"}]
+            }));
+            assert!(
+                match_dat_catalog(
+                    ModuleId("org.junk.providers.local-dat".into()),
+                    "psx",
+                    &header,
+                    [&row],
+                    &units,
+                    &mut || Ok(())
+                )
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn catalog_scan_stops_at_host_checkpoint() {

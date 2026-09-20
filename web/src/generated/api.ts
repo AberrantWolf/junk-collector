@@ -1220,6 +1220,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{item}/music-preparation-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["music_preparation_batches"];
+        put?: never;
+        post: operations["prepare_music_album"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{item}/music-preparation-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["music_album_preparation_plan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -1310,6 +1342,54 @@ export interface paths {
         get: operations["profile"];
         put: operations["update_profile"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/music-preparation-batches/{batch}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["music_preparation_batch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/music-preparation-batches/{batch}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_music_preparation_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/music-preparation-batches/{batch}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retry_music_preparation_batch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2029,6 +2109,7 @@ export interface components {
         /** @enum {string} */
         IngestEnrichmentPolicy: "automatic" | "none";
         IngestPackageSelection: {
+            anchor_file_index?: number | null;
             files: components["schemas"]["UploadFile"][];
             source: components["schemas"]["ImportSourceSummary"];
         };
@@ -2052,6 +2133,8 @@ export interface components {
             metadata_available: boolean;
             /** Format: int32 */
             position: number;
+            preparation_available: boolean;
+            preparation_reason?: string | null;
             source: components["schemas"]["ImportSourceSummary"];
         };
         IngestRejectedPackage: {
@@ -2082,6 +2165,7 @@ export interface components {
             package_name: string;
             permissions: components["schemas"]["IngestPermissions"];
             phase: components["schemas"]["ImportPhase"];
+            prepare_music: boolean;
             target_item_id?: null | components["schemas"]["ItemId"];
             total_bytes: components["schemas"]["ByteLength"];
             /** Format: date-time */
@@ -2370,6 +2454,79 @@ export interface components {
             /** Format: int64 */
             minor_units: number;
         };
+        MusicAlbumDiscPlan: {
+            ambiguous: boolean;
+            /** @description Stable representative capture for this disc group; sources retain their actual capture IDs. */
+            capture_id: components["schemas"]["CaptureId"];
+            message?: string | null;
+            sources: components["schemas"]["MusicAlbumSourcePlan"][];
+        };
+        MusicAlbumPreparationPlan: {
+            blockers: string[];
+            can_submit: boolean;
+            discs: components["schemas"]["MusicAlbumDiscPlan"][];
+            item_id: components["schemas"]["ItemId"];
+            /** Format: int32 */
+            maximum_members: number;
+            profile: components["schemas"]["ConversionProfile"];
+            /** Format: int32 */
+            total_tracks: number;
+        };
+        MusicAlbumSourcePlan: {
+            /** Format: int32 */
+            already_available: number;
+            capture_id: components["schemas"]["CaptureId"];
+            default_selected: boolean;
+            /** Format: int32 */
+            eligible: number;
+            /** Format: int32 */
+            preparing: number;
+            source_representation_id: components["schemas"]["RepresentationId"];
+            /** Format: int32 */
+            track_count: number;
+        };
+        MusicPreparationBatchView: {
+            admission_error?: string | null;
+            admission_state: components["schemas"]["JobState"];
+            batch_id: components["schemas"]["JobId"];
+            can_cancel: boolean;
+            can_retry: boolean;
+            /** Format: int32 */
+            cancelled: number;
+            cancelled_by_user: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            ineligible: number;
+            item_id: components["schemas"]["ItemId"];
+            members: components["schemas"]["MusicPreparationMemberView"][];
+            profile: components["schemas"]["ConversionProfile"];
+            /** Format: int32 */
+            queued: number;
+            /** Format: int32 */
+            running: number;
+            /** Format: int32 */
+            succeeded: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @enum {string} */
+        MusicPreparationMemberState: "already_available" | "queued" | "running" | "succeeded" | "failed" | "cancelled" | "ineligible";
+        MusicPreparationMemberView: {
+            /** Format: int32 */
+            attempt?: number | null;
+            capture_id: components["schemas"]["CaptureId"];
+            error?: string | null;
+            job_id?: null | components["schemas"]["JobId"];
+            member_id: components["schemas"]["JobId"];
+            source_representation_id: components["schemas"]["RepresentationId"];
+            state: components["schemas"]["MusicPreparationMemberState"];
+            title: string;
+            /** Format: int32 */
+            track_position: number;
+        };
         MusicTrackAvailability: {
             /** @description Current actor, module, source and encoder permit explicit preparation. */
             can_prepare: boolean;
@@ -2496,6 +2653,7 @@ export interface components {
                 package_name: string;
                 permissions: components["schemas"]["IngestPermissions"];
                 phase: components["schemas"]["ImportPhase"];
+                prepare_music: boolean;
                 target_item_id?: null | components["schemas"]["ItemId"];
                 total_bytes: components["schemas"]["ByteLength"];
                 /** Format: date-time */
@@ -2598,6 +2756,9 @@ export interface components {
         };
         /** @enum {string} */
         Possession: "present" | "lent" | "elsewhere" | "unknown";
+        PrepareMusicAlbum: {
+            source_representation_ids: components["schemas"]["RepresentationId"][];
+        };
         PrepareMusicTrack: {
             profile: components["schemas"]["ConversionProfile"];
             source_representation_id: components["schemas"]["RepresentationId"];
@@ -2904,6 +3065,7 @@ export interface components {
         StartIngestCommand: {
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
             plan: components["schemas"]["IngestPlan"];
+            prepare_music?: boolean;
         };
         StartLoan: {
             command: components["schemas"]["StartLoanCommand"];
@@ -6372,6 +6534,129 @@ export interface operations {
             };
         };
     };
+    music_preparation_batches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPreparationBatchView"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    prepare_music_album: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                item: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrepareMusicAlbum"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPreparationBatchView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    music_album_preparation_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicAlbumPreparationPlan"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     jobs: {
         parameters: {
             query?: never;
@@ -6601,6 +6886,127 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    music_preparation_batch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPreparationBatchView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancel_music_preparation_batch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                batch: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPreparationBatchView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    retry_music_preparation_batch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                batch: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPreparationBatchView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

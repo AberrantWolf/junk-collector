@@ -1,4 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod album_preparation;
+pub use album_preparation::*;
 mod collection_types;
 pub use collection_types::*;
 mod derivatives;
@@ -355,6 +357,8 @@ pub struct IngestPlanPackage {
     pub analysis_available: bool,
     pub metadata_available: bool,
     pub artwork_available: bool,
+    pub preparation_available: bool,
+    pub preparation_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -369,6 +373,8 @@ pub struct PlanIngestCommand {
 pub struct IngestPackageSelection {
     pub source: ImportSourceSummary,
     pub files: Vec<UploadFile>,
+    #[serde(default)]
+    pub anchor_file_index: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -383,6 +389,8 @@ pub struct IngestPlan {
 pub struct StartIngestCommand {
     pub plan: IngestPlan,
     pub enrichment: IngestEnrichmentPolicy,
+    #[serde(default)]
+    pub prepare_music: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -392,8 +400,12 @@ pub struct GuidedIngestIntent {
     pub plan_token: String,
     pub target_item_id: ItemId,
     pub default_title: String,
+    pub anchor_file_index: Option<usize>,
     pub enrichment: IngestEnrichmentPolicy,
     pub enrichment_error: Option<String>,
+    pub prepare_music: bool,
+    pub preparation_batch_id: Option<JobId>,
+    pub preparation_error: Option<String>,
     pub settled: bool,
     pub cancelled: bool,
     pub created_at: DateTime<Utc>,
@@ -465,6 +477,7 @@ pub struct IngestSummary {
     pub phase: ImportPhase,
     pub outcome: IngestStepState,
     pub enrichment: IngestEnrichmentPolicy,
+    pub prepare_music: bool,
     pub updated_at: DateTime<Utc>,
     pub permissions: IngestPermissions,
 }
@@ -688,6 +701,8 @@ impl From<JobRecord> for JobView {
                     | "import_publication"
                     | "catalog_acquisition"
                     | "processing_operation"
+                    | "music_derivative"
+                    | "music_derivative_batch"
             );
         let result = safe_job_result(&record.kind, record.result.as_ref());
         Self {
@@ -724,6 +739,12 @@ fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<Job
 
 pub trait JobPort: Send + Sync {
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId>;
+    fn enqueue_preparation_member(
+        &self,
+        batch: JobId,
+        claim_token: &str,
+        spec: JobSpec,
+    ) -> Result<JobId>;
     fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>>;
     fn renew_job_lease(&self, id: JobId, claim_token: &str, lease_seconds: i64) -> Result<()>;
     fn heartbeat_job(
@@ -750,7 +771,16 @@ pub trait JobPort: Send + Sync {
     /// Active derivative inputs are private mechanism records. Application code
     /// reduces them to a viewer-safe preparing state after collection access is
     /// authorized; job identity, submitter and diagnostics never cross the DTO.
-    fn active_derivative_jobs(&self, capture: CaptureId) -> Result<Vec<FrozenDerivativeJob>>;
+    fn active_derivative_jobs(&self, capture: CaptureId) -> Result<Vec<ActiveDerivativeJob>>;
+    fn frozen_job_input(&self, id: JobId, user: UserId) -> Result<Option<FrozenJobInput>>;
+    fn preparation_batch_records(
+        &self,
+        user: UserId,
+        item: ItemId,
+        limit: u16,
+    ) -> Result<Vec<JobRecord>>;
+    fn cancel_preparation_batch(&self, id: JobId, user: UserId) -> Result<()>;
+    fn retry_preparation_batch(&self, id: JobId, user: UserId) -> Result<()>;
 }
 
 pub trait AdministrationPort: Send + Sync {
@@ -1120,6 +1150,8 @@ struct ImportAnalysisOutput {
     limitations: Vec<String>,
     #[serde(default, rename = "observations")]
     _observations: Vec<RawJson>,
+    #[serde(default, rename = "selection")]
+    _selection: Option<RawJson>,
 }
 
 struct ProcessingHost<'a> {
@@ -4532,6 +4564,7 @@ impl CollectionService {
                 Ok(serde_json::json!({"snapshot_id":frozen.snapshot_id}))
             })(),
             "music_derivative" => self.run_music_derivative(&claim),
+            "music_derivative_batch" => self.run_music_derivative_batch(&claim),
             "processing_operation" => (|| {
                 let frozen = match claim.frozen_input.clone() {
                     Some(FrozenJobInput::Processing(value)) => value,
@@ -4734,9 +4767,13 @@ impl CollectionService {
         })
     }
     pub fn cancel_job(&self, actor: &Principal, id: JobId, context: &CommandContext) -> Result<()> {
-        self.jobs.job_record(id, actor.user_id)?;
+        let job = self.jobs.job_record(id, actor.user_id)?;
         self.execute_command(actor, context, "job.cancel", &id, |effects| {
-            effects.request_job_cancellation(id, actor.user_id)
+            if job.kind == "music_derivative_batch" {
+                effects.cancel_preparation_batch(id, actor.user_id)
+            } else {
+                effects.request_job_cancellation(id, actor.user_id)
+            }
         })
     }
     pub fn retry_job(
@@ -4746,9 +4783,6 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         let job = self.jobs.job_record(id, actor.user_id)?;
-        if job.state != JobState::Failed {
-            return Err(Error::Conflict);
-        }
         if matches!(
             job.kind.as_str(),
             "preservation_import"
@@ -4759,10 +4793,14 @@ impl CollectionService {
                 | "catalog_acquisition"
                 | "processing_operation"
                 | "music_derivative"
+                | "music_derivative_batch"
         ) {
             self.content_write_eligibility_for_job(actor.user_id, job.collection_id, job.item_id)?;
         }
         self.execute_command(actor, context, "job.retry", &id, |effects| {
+            if job.state != JobState::Failed {
+                return Err(Error::Conflict);
+            }
             match job.kind.as_str() {
                 "preservation_import" => effects.retry_upload(id),
                 "integrity_verification"
@@ -4772,6 +4810,9 @@ impl CollectionService {
                 | "catalog_acquisition"
                 | "music_derivative"
                 | "processing_operation" => effects.retry_failed_job(id, actor.user_id),
+                "music_derivative_batch" => effects
+                    .retry_preparation_batch(id, actor.user_id)
+                    .map(|()| id),
                 _ => Err(Error::Unavailable("this job kind cannot be retried".into())),
             }
         })

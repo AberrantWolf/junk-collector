@@ -306,19 +306,30 @@ fn normalized_dat(
             ));
         }
         let mut files = Vec::with_capacity(game.roms.len());
+        let mut excluded_files = Vec::new();
         for rom in game.roms {
             safe_text(&rom.name, "DAT file name")?;
             if let Some(serial) = &rom.serial {
                 safe_text(serial, "DAT file serial")?;
             }
-            files.push(DatCatalogFileObservation {
+            let file = DatCatalogFileObservation {
                 name: rom.name,
                 bytes: ByteLength(rom.size),
                 serial: rom.serial,
                 crc32: normalized_hash(&rom.crc, 8)?,
                 sha1: normalized_optional_hash(rom.sha1, 40)?,
                 md5: normalized_optional_hash(rom.md5, 32)?,
-            });
+            };
+            if collector_modules::games::dat_file_in_byte_domain(&file, &source.byte_domain)? {
+                files.push(file);
+            } else {
+                excluded_files.push(file);
+            }
+        }
+        if files.is_empty() {
+            return Err(Error::Invalid(
+                "DAT game has no files in the configured byte domain".into(),
+            ));
         }
         entries.push(DatCatalogEntryObservation {
             record_id: format!("{}:{index}", source.catalog),
@@ -328,6 +339,7 @@ fn normalized_dat(
             version: game.version,
             category: game.category,
             files,
+            excluded_files,
         });
     }
     Ok((

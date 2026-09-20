@@ -531,7 +531,7 @@ fn provider_redirects_reject_foreign_credentials_private_targets_and_excess_hops
 #[test]
 fn cover_art_listing_and_image_are_bounded_pinned_and_request_no_private_item_data() {
     let png = vec![0x89, b'P', b'N', b'G', 13, 10, 26, 10];
-    let listing = br#"{"release":"https://musicbrainz.org/release/00000000-0000-4000-8000-000000000001","images":[{"id":"12345","front":true,"back":false,"approved":true,"types":["Front"],"comment":"scan","edit":999,"image":"http://untrusted.invalid/image.jpg","thumbnails":{"250":"http://untrusted.invalid/thumb.jpg"}}]}"#.to_vec();
+    let listing = br#"{"release":"https://musicbrainz.org/release/00000000-0000-4000-8000-000000000001","images":[{"id":12345,"front":true,"back":false,"approved":true,"types":["Front"],"comment":"scan","edit":999,"image":"http://untrusted.invalid/image.jpg","thumbnails":{"250":"http://untrusted.invalid/thumb.jpg"}},{"id":"67890","front":false,"back":true,"approved":true,"types":["Back"],"comment":"back scan"}]}"#.to_vec();
     let server = serve(vec![
         reply("200 OK", listing),
         reply(
@@ -560,7 +560,13 @@ fn cover_art_listing_and_image_are_bounded_pinned_and_request_no_private_item_da
         )
         .unwrap();
     let images = provider.parse_listing(&listing_response).unwrap();
-    assert_eq!(images[0].image_id, "12345");
+    assert_eq!(
+        images
+            .iter()
+            .map(|image| image.image_id.as_str())
+            .collect::<Vec<_>>(),
+        ["12345", "67890"]
+    );
     assert!(images[0].front);
 
     let image_response = provider

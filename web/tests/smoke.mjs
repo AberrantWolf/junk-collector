@@ -1,11 +1,12 @@
 import {chromium} from '@playwright/test';
 import {spawn,spawnSync} from 'node:child_process';
-import {mkdir,mkdtemp,readFile,readdir,writeFile,rm} from 'node:fs/promises';
+import {chmod,mkdir,mkdtemp,readFile,readdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
+async function deadline(promise,label,millis=20000){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+' timed out')),millis);})]);}finally{clearTimeout(timer);}}
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-browser-'));
 const password=randomBytes(24).toString('hex');
@@ -18,6 +19,7 @@ const release=(id,title,language,disambiguation)=>({id,title,disambiguation,'tex
 const releases=[release(releaseIds.english,'Provider pressing','en','2001 fixture'),release(releaseIds.alternate,'Provider pressing alternate','en','2001 fixture'),release(releaseIds.japanese,'試験盤','ja','日本盤')];
 const providerPng=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 const hasFlac=spawnSync('flac',['--version'],{encoding:'utf8'}).status===0;
+const flacPath=hasFlac?spawnSync('which',['flac'],{encoding:'utf8'}).stdout.trim():'';
 const trackFrames=[225*588,226*588];const frames=trackFrames[0]+trackFrames[1];
 const sum32=(first,last)=>Number((BigInt(first+last)*BigInt(last-first+1)/2n)&0xffff_ffffn);
 const checksums=[sum32(2940,trackFrames[0]),sum32(1,trackFrames[1]-2940)];
@@ -34,7 +36,7 @@ const datPath=path.join(scratch,'fixture.dat');
 await writeFile(datPath,'<datafile><header><name>Browser fixture</name><version>1</version></header><game name="Browser game"><rom name="game.bin" size="5" crc="9271ee57"/></game></datafile>');
 const binary=path.join(root,'target/debug/collector-server');
 if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nallowed_origins = []\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
-if(hasFlac)await writeFile(config,'\n[encoders]\nflac = "flac"\n',{flag:'a'});
+if(hasFlac){const slowFlac=path.join(scratch,'slow-flac.sh');await writeFile(slowFlac,`#!/bin/sh\nif [ "$1" != "--version" ]; then sleep 3; fi\nexec "${flacPath}" "$@"\n`);await chmod(slowFlac,0o755);await writeFile(config,`\n[encoders]\nflac = "${slowFlac}"\n`,{flag:'a'});}
 await writeFile(config,`\n[dat_sources.browser]\npath = "${datPath}"\nsystem = "nes"\ncatalog = "Browser fixture"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`,{flag:'a'});
 await writeFile(config,'\n[providers]\nmusicbrainz_user_agent = "junk-collector-smoke/0.1 (test@example.invalid)"\n',{flag:'a'});
 const init=spawnSync(binary,['--config',config,localSetup?'setup':'init', '--username',localSetup?'collector':'owner'],{input:password,encoding:'utf8'});
@@ -68,6 +70,7 @@ try{
  browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
  const browserVersion=await browser.version();
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});
+ context.setDefaultTimeout(30000);context.setDefaultNavigationTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  if(localSetup){
   const doctor=spawnSync(binary,['--config',config,'doctor'],{encoding:'utf8'});assert.equal(doctor.status,0,doctor.stderr);
@@ -240,17 +243,21 @@ try{
  const sourceSelect=metadataReview.getByRole('combobox',{name:'Identifier or search source'});
  await sourceSelect.focus();await page.keyboard.press('Tab');
  assert.equal(await metadataReview.getByLabel('Request a fresh provider response').evaluate(node=>node===document.activeElement),true,'metadata source controls lost their keyboard order');
+ console.log('Checking detached metadata completion.');
  let completionHoldExpired=false;let releaseCompletion;const heldCompletion=new Promise(resolve=>{releaseCompletion=resolve;});
+ let finishCompletion;const completionStopped=new Promise(resolve=>{finishCompletion=resolve;});
  let sawCompletion;const completionStarted=new Promise(resolve=>{sawCompletion=resolve;});
- await page.route('**/metadata/acquisitions/complete',async route=>{sawCompletion();let timer;try{await Promise.race([heldCompletion,new Promise(resolve=>{timer=setTimeout(()=>{completionHoldExpired=true;resolve();},15000);})]);}finally{clearTimeout(timer);await route.abort().catch(()=>{});}},{times:1});
+ await page.route('**/metadata/acquisitions/complete',async route=>{sawCompletion();let timer;try{await Promise.race([heldCompletion,new Promise(resolve=>{timer=setTimeout(()=>{completionHoldExpired=true;resolve();},15000);})]);}finally{clearTimeout(timer);try{await route.abort().catch(()=>{});}finally{finishCompletion();}}},{times:1});
  await metadataReview.getByRole('button',{name:'Find metadata',exact:true}).click();
  await metadataReview.getByText('Metadata refresh',{exact:true}).waitFor();
  let completionTimeout;try{await Promise.race([completionStarted,new Promise((_,reject)=>{completionTimeout=setTimeout(()=>reject(new Error("metadata completion did not start within 30 seconds")),30000);})]);}finally{clearTimeout(completionTimeout);}
  page.once('dialog',dialog=>dialog.accept());
  await curator.getByRole('button',{name:'Close curator'}).click();
  releaseCompletion();
+ await deadline(completionStopped,'Releasing intercepted metadata completion');
  assert.equal(completionHoldExpired,false,'closing the metadata panel stalled while its completion request was held');
- const untouched=await page.evaluate(async()=>await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}/metadata`)).json());
+ const untouched=await deadline(page.evaluate(async()=>await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}/metadata`,{signal:AbortSignal.timeout(10000)})).json()),'Reading metadata after detach');
+ console.log('Detached metadata completion released.');
  assert.equal(untouched.revision,0,'closing a detached panel applied pending metadata');
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  await metadataReview.getByText('Metadata refresh completed.',{exact:false}).waitFor();
@@ -478,14 +485,39 @@ try{
  if(hasFlac){
   const preparation=cdCurator.getByRole('region',{name:'Music preparation'});await preparation.waitFor();
   assert.equal(await preparation.locator('.music-track').first().evaluate(element=>getComputedStyle(element).display),'grid','music stylesheet is not embedded');
+  assert.equal(await preparation.getByRole('img',{name:'A test pressing cover'}).count(),1,'album preparation separated cover art from its text rows');
   await page.route('**/music-tracks/*/prepare',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'tools_unavailable',message:'Test encoder unavailable'}})}),{times:1});
   await preparation.locator('.music-track').first().getByRole('button',{name:'Prepare FLAC',exact:true}).click();
   await preparation.getByRole('alert').getByText('Test encoder unavailable',{exact:true}).waitFor();
   await page.waitForTimeout(250);
   assert.match(await preparation.getByRole('alert').innerText(),/Test encoder unavailable/,'preparation failure was erased by refresh');
   await preparation.getByRole('button',{name:'Refresh music availability',exact:true}).click();
-  for(const track of await preparation.locator('.music-track').all()){await track.getByRole('button',{name:'Prepare FLAC',exact:true}).click();await track.getByRole('link',{name:/FLAC/}).waitFor({timeout:30000});}
-  const prepared=preparation.getByRole('link',{name:/FLAC/});assert.equal(await prepared.count(),2);
+  const includeDisc=preparation.getByLabel('Include this disc');
+  await includeDisc.uncheck();
+  const refreshedPlan=page.waitForResponse(response=>response.url().endsWith('/music-preparation-plan')&&response.status()===200);
+  await preparation.getByRole('button',{name:'Refresh music availability',exact:true}).click();
+  await refreshedPlan;await page.waitForTimeout(100);
+  assert.equal(await includeDisc.isChecked(),false,'polling restored a deliberately excluded disc');
+  await includeDisc.check();
+  // A separate track command remains available while album admission is independent.
+  await preparation.locator('.music-track').first().getByRole('button',{name:'Prepare FLAC',exact:true}).click();
+  await preparation.getByRole('button',{name:'Prepare selected album',exact:true}).click();
+  const albumBatch=preparation.getByRole('region',{name:'Album preparation progress'}).locator('article').first();await albumBatch.waitFor();
+  assert.equal(await preparation.getByRole('button',{name:'Refresh music availability',exact:true}).isDisabled(),false,'accepted encoding blocked unrelated browsing controls');
+  await preparation.getByRole('button',{name:'Prepare selected album',exact:true}).click();
+  await preparation.getByRole('region',{name:'Album preparation progress'}).locator('article').nth(1).waitFor();
+  assert.equal(await cdCurator.getByLabel('Title',{exact:true}).isDisabled(),false,'accepted encoding blocked unrelated inventory editing');
+  const [inventorySaved]=await Promise.all([
+   page.waitForResponse(response=>response.request().method()==='PUT'&&/\/items\/[^/]+$/.test(new URL(response.url()).pathname)),
+   cdCurator.getByRole('button',{name:'Save inventory',exact:true}).click(),
+  ]);
+  assert.equal(inventorySaved.status(),200,await inventorySaved.text());
+
+  await preparation.getByRole('link',{name:/FLAC/}).first().waitFor({timeout:30000});
+  assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}/music-preparation-batches`)).json()).some(batch=>batch.queued>0||batch.running>0);}),true,'all batch work settled before concurrent player acceptance could be observed');
+  const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.getByRole('button',{name:/A test pressing/}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
+  await albumBatch.getByText('2/2 ready',{exact:true}).waitFor({timeout:30000});
+  const prepared=preparation.getByRole('link',{name:/FLAC/});await prepared.nth(1).waitFor();assert.equal(await prepared.count(),2);
   const hrefs=await prepared.evaluateAll(links=>links.map(link=>link.getAttribute('href')));assert.ok(hrefs.every(href=>href?.startsWith('/api/v1/items/')));
   const media=await page.evaluate(async href=>{const full=await fetch(href);const bytes=new Uint8Array(await full.arrayBuffer());const partial=await fetch(href,{headers:{Range:'bytes=0-3'}});return {status:full.status,length:bytes.length,magic:String.fromCharCode(...bytes.slice(0,4)),etag:full.headers.get('etag'),partialStatus:partial.status,partialLength:(await partial.arrayBuffer()).byteLength};},hrefs[0]);
   assert.equal(media.status,200);assert.equal(media.magic,'fLaC');assert.ok(media.length>4);assert.match(media.etag,/^"[0-9a-f]{64}"$/);assert.equal(media.partialStatus,206);assert.equal(media.partialLength,4);
@@ -513,6 +545,7 @@ try{
    return {collectionId:collection.id,itemId:localStorage.getItem('primary-music-item-id')};
   },playbackPassword);
   const playbackContext=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1100,height:900}});
+  playbackContext.setDefaultTimeout(30000);
   const playbackPage=await playbackContext.newPage();const playbackErrors=[];playbackPage.on('pageerror',error=>playbackErrors.push(error.message));
   await playbackPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
   await playbackPage.evaluate(async({username,password})=>{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password,device_name:'Playback qualification'})});if(!response.ok)throw new Error(`viewer login: ${response.status} ${await response.text()}`);},{username:'playback-viewer',password:playbackPassword});
@@ -605,6 +638,7 @@ try{
  assert.match(await page.locator('.collection-row').innerText(),/Test ensemble/,'edition text hid the module artist summary');
  await page.getByRole('searchbox').fill('');
  await page.waitForTimeout(350);
+ await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
  const guidedForm=page.getByRole('dialog',{name:/Add or import/});
  const guided=guidedForm.getByRole('region',{name:'Import original packages'});
@@ -615,6 +649,7 @@ try{
  await guided.getByRole('button',{name:'Preview import',exact:true}).click();
  await guided.getByText('destination: new collection entry',{exact:false}).waitFor();
  assert.equal(await guided.getByLabel('Automatically gather available metadata and artwork').isChecked(),true);
+ if(hasFlac){assert.equal(await guided.getByLabel('Prepare supported music as FLAC after preservation').isDisabled(),false);await guided.getByLabel('Prepare supported music as FLAC after preservation').check();}
  await guided.getByRole('button',{name:'Start import',exact:true}).click();
  await guided.getByRole('button',{name:/Guided smoke master/}).waitFor();
  await guided.getByText('Import accepted. The server continues after all package bytes arrive.',{exact:true}).waitFor();
@@ -625,6 +660,7 @@ try{
  const guidedHistory=reopenedGuided.getByRole('button',{name:/Guided smoke master/});
  await guidedHistory.click();
  await guidedHistory.getByText('published · succeeded',{exact:false}).waitFor();
+ if(hasFlac)await reopenedGuided.locator('.ingest-steps').getByText('preparation',{exact:true}).waitFor();
  await reopenedGuided.getByText(/Capture [0-9a-f-]{36}/).waitFor();
  await reopenedGuidedForm.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('button',{name:/Provider pressing/}).first().waitFor();
@@ -641,6 +677,13 @@ try{
  await stampForm.getByRole('button',{name:'Close curator'}).click();
  // Descriptor availability alone must not enable an unsupported stored Item.
  await fixturePage.route('**/api/v1/items?*',async route=>{const response=await route.fetch();const body=await response.json();body.items=body.items.slice(0,1).map(item=>({...item,title:'Unsupported schema fixture',domain:{...item.domain,schema_version:99},effective_permissions:{...item.effective_permissions,can_curate:false},content_permissions:{can_edit:false,status:'item_schema_unsupported',message:'Unsupported stored schema fixture.'}}));await route.fulfill({response,json:body});});
+ // Curation now refreshes the Item instead of trusting a possibly stale browse row;
+ // keep this synthetic unsupported schema consistent on both read surfaces.
+ await fixturePage.route('**/api/v1/items/*',async route=>{
+  if(route.request().method()!=='GET')return route.fallback();
+  const response=await route.fetch();const item=await response.json();
+  await route.fulfill({response,json:{...item,title:'Unsupported schema fixture',domain:{...item.domain,schema_version:99},effective_permissions:{...item.effective_permissions,can_curate:false},content_permissions:{can_edit:false,status:'item_schema_unsupported',message:'Unsupported stored schema fixture.'}}});
+ });
  await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:/Edit entry/});assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).isDisabled(),true);assert.equal(await readOnlyForm.getByRole('button',{name:'Save inventory',exact:true}).isDisabled(),true);await readOnlyForm.getByText('Collection access',{exact:true}).waitFor();await readOnlyForm.getByRole('button',{name:'Close curator'}).click();
  await fixturePage.unroute('**/api/v1/collection-types');await fixturePage.route('**/api/v1/collection-types',route=>route.fulfill({json:[]}));await fixturePage.reload();await fixturePage.getByRole('button',{name:'Administration',exact:true}).waitFor();assert.equal(await fixturePage.getByRole('button',{name:'Administration',exact:true}).isEnabled(),true);assert.equal(await fixturePage.getByRole('button',{name:'Manage collections',exact:true}).isEnabled(),true);
  await fixturePage.close();

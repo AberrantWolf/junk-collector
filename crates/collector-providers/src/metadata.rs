@@ -58,13 +58,8 @@ impl OriginPolicy {
                     && url.port_or_known_default() == Some(443)
                     && url.host_str().is_some_and(|host| {
                         host == "s3.us.archive.org"
-                            || host
-                                .strip_suffix(".us.archive.org")
-                                .and_then(|prefix| prefix.strip_prefix("ia"))
-                                .is_some_and(|digits| {
-                                    !digits.is_empty()
-                                        && digits.bytes().all(|byte| byte.is_ascii_digit())
-                                })
+                            || archive_storage_host(host, "ia", "us")
+                            || archive_storage_host(host, "dn", "ca")
                     })))
     }
 
@@ -86,6 +81,14 @@ impl OriginPolicy {
         // under reqwest's request timeout; never resolve twice or use a proxy.
         Ok(())
     }
+}
+
+fn archive_storage_host(host: &str, prefix: &str, region: &str) -> bool {
+    host.strip_suffix(&format!(".{region}.archive.org"))
+        .and_then(|label| label.strip_prefix(prefix))
+        .is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        })
 }
 
 #[derive(Clone)]
@@ -1009,7 +1012,7 @@ struct CoverArtEnvelope {
 
 #[derive(Deserialize)]
 struct CoverArtImage {
-    id: String,
+    id: CoverArtImageId,
     #[serde(default)]
     front: bool,
     #[serde(default)]
@@ -1022,6 +1025,22 @@ struct CoverArtImage {
     comment: String,
     #[serde(default, rename = "edit")]
     edit_id: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CoverArtImageId {
+    Text(String),
+    Number(u64),
+}
+
+impl CoverArtImageId {
+    fn into_string(self) -> String {
+        match self {
+            Self::Text(value) => value,
+            Self::Number(value) => value.to_string(),
+        }
+    }
 }
 
 fn normalize_cover_art_listing(query: &CoverArtArchiveQuery, bytes: &[u8]) -> Result<Vec<RawJson>> {
@@ -1056,7 +1075,7 @@ fn normalize_cover_art_listing(query: &CoverArtArchiveQuery, bytes: &[u8]) -> Re
         .map(|image| {
             let observation = CoverArtObservation {
                 release_id: release_id.clone(),
-                image_id: image.id,
+                image_id: image.id.into_string(),
                 front: image.front,
                 back: image.back,
                 approved: image.approved,
@@ -1342,11 +1361,15 @@ mod tests {
         for url in [
             "https://s3.us.archive.org/x",
             "https://ia800123.us.archive.org/x",
+            "https://dn721500.ca.archive.org/x",
         ] {
             assert!(policy.allows(&Url::parse(url).unwrap()));
         }
         for url in [
             "https://ia800123.us.archive.org.evil.test/x",
+            "https://dn721500.ca.archive.org.evil.test/x",
+            "https://dn721500.us.archive.org/x",
+            "https://ia800123.ca.archive.org/x",
             "https://evil.archive.org/x",
             "http://archive.org/x",
             "https://user@archive.org/x",

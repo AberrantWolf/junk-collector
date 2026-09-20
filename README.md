@@ -165,7 +165,28 @@ and selects the active snapshot for future analysis. Curators can run explicit
 game hashing, structure, track and catalog operations against preserved captures;
 old results remain tied to their original source bytes and snapshot after refresh.
 
+For a manual, rate-limited cache of the currently supported Redump/No-Intro
+systems, run:
+
+```sh
+python3 scripts/cache_game_dats.py /path/outside/the/repository --catalog <key>
+```
+
+The script lists its allowlisted keys in `--help`, preserves raw
+provider ZIP/DAT bytes beside a digest manifest, and never performs automatic
+server refresh. See the [LA3 installation runbook](docs/local-alpha-installation.md)
+for filter, rate-limit and provider-refusal details. New DAT-o-MATIC downloads
+are currently paused after a provider refusal; existing verified caches and local
+DAT imports remain usable. Refreshes use a new cache root to retain old snapshots.
+
 ## Recovery
+
+For the bounded local-alpha installation and stopped-server copy/restore drill, use
+[the LA3 installation runbook](docs/local-alpha-installation.md). It covers the
+archive, complete private-state root (including TLS and pending scratch),
+configuration, digest manifests and the prohibition on running original and restored
+copies of one server identity concurrently. It is not the planned P05 portable
+export/change-bundle workflow.
 
 ```sh
 # Stop the server first: one process owns archive writes.

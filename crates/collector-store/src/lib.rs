@@ -12,13 +12,13 @@ mod provisional_imports;
 mod publication;
 use chrono::Utc;
 use collector_app::{
-    AccessPort, AccountView, AdministrationPort, AssetState, AuthenticatedPrincipal,
-    AuthenticationPort, Catalog, CollectionTypeAuthorityFact, CollectionTypePendingReference,
-    CollectionTypePort, CollectionTypeSnapshot, ContentPort, CreateAssetCommand, CredentialKind,
-    EnrollmentPort, EnrollmentStart, EnrollmentView, FrozenDerivativeJob, GrantView,
-    IdempotencyPort, ImportPort, JobClaim, JobPort, JobRecord, JobSpec, MediaResource,
-    MetadataAuthorityRecord, NativeCredentialIssue, NativeDeviceView, ReceiptDecision, SessionView,
-    StoredPasskey,
+    AccessPort, AccountView, ActiveDerivativeJob, AdministrationPort, AssetState,
+    AuthenticatedPrincipal, AuthenticationPort, Catalog, CollectionTypeAuthorityFact,
+    CollectionTypePendingReference, CollectionTypePort, CollectionTypeSnapshot, ContentPort,
+    CreateAssetCommand, CredentialKind, EnrollmentPort, EnrollmentStart, EnrollmentView,
+    FrozenJobInput, GrantView, IdempotencyPort, ImportPort, JobClaim, JobPort, JobRecord, JobSpec,
+    MediaResource, MetadataAuthorityRecord, NativeCredentialIssue, NativeDeviceView,
+    ReceiptDecision, SessionView, StoredPasskey,
 };
 pub use collector_app::{Upload, UploadFile};
 use collector_core::*;
@@ -1137,6 +1137,14 @@ impl JobPort for Store {
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId> {
         self.enqueue_job_record(spec)
     }
+    fn enqueue_preparation_member(
+        &self,
+        batch: JobId,
+        claim_token: &str,
+        spec: JobSpec,
+    ) -> Result<JobId> {
+        self.enqueue_job_record_with_batch(spec, Some((batch, claim_token)))
+    }
 
     fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>> {
         self.claim_job_record(worker_instance, lease_seconds)
@@ -1194,8 +1202,29 @@ impl JobPort for Store {
         self.retry_failed_job_record(id, user)
     }
 
-    fn active_derivative_jobs(&self, capture: CaptureId) -> Result<Vec<FrozenDerivativeJob>> {
+    fn active_derivative_jobs(&self, capture: CaptureId) -> Result<Vec<ActiveDerivativeJob>> {
         self.active_derivative_job_records(capture)
+    }
+
+    fn frozen_job_input(&self, id: JobId, user: UserId) -> Result<Option<FrozenJobInput>> {
+        self.frozen_job_input_record(id, user)
+    }
+
+    fn preparation_batch_records(
+        &self,
+        user: UserId,
+        item: ItemId,
+        limit: u16,
+    ) -> Result<Vec<JobRecord>> {
+        self.preparation_batch_record_page(user, item, limit)
+    }
+
+    fn cancel_preparation_batch(&self, id: JobId, user: UserId) -> Result<()> {
+        self.cancel_preparation_batch_record(id, user)
+    }
+
+    fn retry_preparation_batch(&self, id: JobId, user: UserId) -> Result<()> {
+        self.retry_preparation_batch_record(id, user)
     }
 }
 
@@ -1917,6 +1946,20 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             db.execute_batch(&format!("ALTER TABLE private.guided_ingest_intents ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")).map_err(storage)?;
         }
     }
+    for (column, declaration) in [
+        ("prepare_music", "INTEGER NOT NULL DEFAULT 0"),
+        ("preparation_batch_id", "TEXT"),
+        ("preparation_error", "TEXT"),
+        ("anchor_file_index", "INTEGER"),
+    ] {
+        let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('guided_ingest_intents','private') WHERE name=?)", [column], |row| row.get(0)).map_err(storage)?;
+        if !exists {
+            db.execute_batch(&format!(
+                "ALTER TABLE private.guided_ingest_intents ADD COLUMN {column} {declaration}"
+            ))
+            .map_err(storage)?;
+        }
+    }
     let cleanup_complete_column: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('import_cleanup','private') WHERE name='completed')", [], |row| row.get(0)).map_err(storage)?;
     if !cleanup_complete_column {
         db.execute_batch(
@@ -1924,6 +1967,30 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         )
         .map_err(storage)?;
     }
+    // Durable ownership, indexed independently of immutable batch descriptions.
+    // Recover preview-state ownership once; normal startup never scans batch history.
+    let tx = db.transaction().map_err(storage)?;
+    let has_preparation_members: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM private.sqlite_master WHERE type='table' AND name='preparation_members')", [], |row| row.get(0)).map_err(storage)?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS private.preparation_members (
+        batch_id TEXT NOT NULL, job_id TEXT NOT NULL, PRIMARY KEY(batch_id,job_id));
+        CREATE INDEX IF NOT EXISTS private.preparation_member_job ON preparation_members(job_id,batch_id);
+        CREATE TABLE IF NOT EXISTS private.derivative_direct_requests(job_id TEXT PRIMARY KEY);").map_err(storage)?;
+    if !has_preparation_members {
+        tx.execute_batch("INSERT OR IGNORE INTO private.preparation_members
+        SELECT j.id,json_extract(m.value,'$.job_id') FROM private.jobs j
+        JOIN private.processing_jobs p ON p.job_id=j.id,
+        json_each(p.frozen_input,'$.input.members') m
+        WHERE j.kind='music_derivative_batch' AND json_extract(m.value,'$.disposition')='prepare';
+        INSERT OR IGNORE INTO private.derivative_direct_requests
+        SELECT json_extract(m.value,'$.job_id') FROM private.jobs j
+        JOIN private.processing_jobs p ON p.job_id=j.id, json_each(p.frozen_input,'$.input.members') m
+        WHERE j.kind='music_derivative_batch' AND json_extract(m.value,'$.owned_job')=0;
+        INSERT OR IGNORE INTO private.derivative_direct_requests
+        SELECT j.id FROM private.jobs j WHERE j.kind='music_derivative'
+        AND NOT EXISTS(SELECT 1 FROM private.preparation_members m WHERE m.job_id=j.id);
+    ").map_err(storage)?;
+    }
+    tx.commit().map_err(storage)?;
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
@@ -2222,7 +2289,8 @@ impl CollectionTypePort for Store {
                     .map(|input| match input {
                         collector_app::FrozenJobInput::Processing(job) => job.operation,
                         collector_app::FrozenJobInput::Acquisition(job) => job.request.operation,
-                        collector_app::FrozenJobInput::Derivative(_) => {
+                        collector_app::FrozenJobInput::Derivative(_)
+                        | collector_app::FrozenJobInput::DerivativeBatch(_) => {
                             collector_core::OperationId::new("org.junk.music.derivative")
                                 .expect("static operation")
                         }

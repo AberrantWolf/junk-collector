@@ -15,7 +15,8 @@ deployment scope, not authorization or transport protections. A tested stopped-s
 backup/restore procedure is an alpha gate; complete portable export, native/offline
 clients, public deployment and scale qualification remain full-release work.
 LA1 guided ingestion and automatic enrichment is reviewed and corrected locally;
-LA2 is ready for implementation and LA3 remains planned. The alpha is a smaller delivery milestone,
+LA2 album preparation/listening is reviewed and corrected locally (2026-09-17),
+while LA3 installation qualification is next. The alpha is a smaller delivery milestone,
 not evidence that the requirements below are complete. Games initially use DAT
 metadata; general online game artwork remains an explicit follow-up. Actual
 supported dump formats require recorded qualification.

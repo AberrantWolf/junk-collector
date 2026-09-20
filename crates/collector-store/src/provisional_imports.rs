@@ -678,8 +678,8 @@ impl ProvisionalImportPort for Store {
             }
             insert_import(&tx, record)?;
             tx.execute(
-                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at) VALUES(?,?,?,?,?,?,NULL,?,?)",
-                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.default_title,enrichment(intent.enrichment),intent.created_at.timestamp(),intent.updated_at.timestamp()],
+                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,default_title,anchor_file_index,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
+                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.default_title,intent.anchor_file_index.map(|value| value as i64),enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
             )
             .map_err(storage)?;
             views.push(record.view.clone());
@@ -692,9 +692,9 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?)),
             )
             .optional()
             .map_err(storage)?
@@ -705,8 +705,15 @@ impl ProvisionalImportPort for Store {
                     plan_token: row.1,
                     target_item_id: row.2.parse().map_err(storage)?,
                     default_title: row.3,
+                    anchor_file_index: row
+                        .13
+                        .map(|value| usize::try_from(value).map_err(storage))
+                        .transpose()?,
                     enrichment: parse_enrichment(&row.4)?,
                     enrichment_error: row.5,
+                    prepare_music: row.10,
+                    preparation_batch_id: row.11.map(|value| value.parse().map_err(storage)).transpose()?,
+                    preparation_error: row.12,
                     settled: row.8,
                     cancelled: row.9,
                     created_at: chrono::DateTime::from_timestamp(row.6, 0).ok_or_else(|| Error::Storage("guided intent creation timestamp is invalid".into()))?,
@@ -795,7 +802,7 @@ impl ProvisionalImportPort for Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        let changed = tx.execute("UPDATE private.guided_ingest_intents SET enrichment_error=?,updated_at=?,settled=CASE WHEN cancelled=1 THEN 1 ELSE ? END,cancelled=MAX(cancelled,?) WHERE import_id=? AND user_id=? AND plan_token=? AND target_item_id=?", params![intent.enrichment_error,intent.updated_at.timestamp(),intent.settled,intent.cancelled,intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string()]).map_err(storage)?;
+        let changed = tx.execute("UPDATE private.guided_ingest_intents SET enrichment_error=?,prepare_music=?,preparation_batch_id=?,preparation_error=?,updated_at=?,settled=CASE WHEN cancelled=1 THEN 1 ELSE ? END,cancelled=MAX(cancelled,?) WHERE import_id=? AND user_id=? AND plan_token=? AND target_item_id=?", params![intent.enrichment_error,intent.prepare_music,intent.preparation_batch_id.map(|id| id.to_string()),intent.preparation_error,intent.updated_at.timestamp(),intent.settled,intent.cancelled,intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string()]).map_err(storage)?;
         if changed != 1 {
             return Err(Error::Conflict);
         }
@@ -921,6 +928,7 @@ impl ProvisionalImportPort for Store {
 
     fn cancel_guided_import(&self, id: ImportId, expected_revision: u64) -> Result<ImportRecord> {
         let _writer = lock(&self.writer)?;
+        let _publication_gate = lock(&self.job_publication_gate)?;
         let record = self.import_record(id)?;
         if record.view.revision != expected_revision {
             return Err(Error::Conflict);
@@ -932,6 +940,26 @@ impl ProvisionalImportPort for Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        // The durable Job request is authoritative even if an older interrupted
+        // coordinator did not yet save its intent-to-batch pointer.
+        let preparation_batches = {
+            let mut statement = tx.prepare("SELECT id FROM private.jobs WHERE user_id=? AND kind='music_derivative_batch' AND json_extract(request,'$.import_id')=?").map_err(storage)?;
+            let rows = statement
+                .query_map(params![record.user_id.to_string(), id.to_string()], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(storage)?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        for batch in preparation_batches {
+            Store::cancel_preparation_batch_in_tx(
+                &tx,
+                batch.parse().map_err(storage)?,
+                record.user_id,
+                now,
+            )?;
+        }
         tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',updated_at=? WHERE user_id=? AND state='queued' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
         tx.execute("UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=? WHERE user_id=? AND state='running' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
         tx.execute(

@@ -307,12 +307,14 @@ pub enum FrozenJobInput {
     Processing(FrozenProcessingJob),
     Acquisition(FrozenAcquisitionJob),
     Derivative(crate::FrozenDerivativeJob),
+    DerivativeBatch(crate::FrozenDerivativeBatchJob),
 }
 impl FrozenJobInput {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Processing(job) => job.validate(),
             Self::Derivative(job) => job.validate(),
+            Self::DerivativeBatch(job) => job.validate(),
             Self::Acquisition(job) => {
                 job.collection_binding.validate()?;
                 if !matches!(job.collection_binding, CollectionBinding::Assigned { .. }) {

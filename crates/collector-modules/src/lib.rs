@@ -421,7 +421,11 @@ pub struct ImportReadiness {
 }
 
 pub trait CollectionModule: Send + Sync {
-    fn import_readiness(&self, _names: &[PackageFileName]) -> ImportReadiness {
+    fn import_readiness(
+        &self,
+        _names: &[PackageFileName],
+        _anchor_file_index: Option<usize>,
+    ) -> ImportReadiness {
         ImportReadiness { anchors: vec![], blockers: vec![IngestBlocker { kind: IngestBlockerKind::UnsupportedPackage, message: "This module does not provide automatic import analysis; preservation is available.".into(), blocks_analysis: true, blocks_preservation: false }] }
     }
 
@@ -467,11 +471,12 @@ impl Registry {
         &self,
         owner: &ModuleId,
         names: &[PackageFileName],
+        anchor_file_index: Option<usize>,
     ) -> ModuleResult<ImportReadiness> {
         self.modules
             .get(&owner.0)
             .ok_or_else(|| ModuleError::UnavailableCapability(owner.0.clone()))
-            .map(|module| module.import_readiness(names))
+            .map(|module| module.import_readiness(names, anchor_file_index))
     }
 
     pub fn builtins() -> Self {

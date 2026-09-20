@@ -3970,6 +3970,134 @@
         }
       }
     },
+    "/api/v1/items/{item}/music-preparation-batches": {
+      "get": {
+        "operationId": "music_preparation_batches",
+        "parameters": [
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MusicPreparationBatchView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "prepare_music_album",
+        "parameters": [
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareMusicAlbum"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicPreparationBatchView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item}/music-preparation-plan": {
+      "get": {
+        "operationId": "music_album_preparation_plan",
+        "parameters": [
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicAlbumPreparationPlan"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/jobs": {
       "get": {
         "operationId": "jobs",
@@ -4221,6 +4349,130 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/music-preparation-batches/{batch}": {
+      "get": {
+        "operationId": "music_preparation_batch",
+        "parameters": [
+          {
+            "name": "batch",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicPreparationBatchView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/music-preparation-batches/{batch}/cancel": {
+      "post": {
+        "operationId": "cancel_music_preparation_batch",
+        "parameters": [
+          {
+            "name": "batch",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicPreparationBatchView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/music-preparation-batches/{batch}/retry": {
+      "post": {
+        "operationId": "retry_music_preparation_batch",
+        "parameters": [
+          {
+            "name": "batch",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicPreparationBatchView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         }
@@ -6774,6 +7026,13 @@
           "files"
         ],
         "properties": {
+          "anchor_file_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
           "files": {
             "type": "array",
             "items": {
@@ -6838,7 +7097,8 @@
           "blockers",
           "analysis_available",
           "metadata_available",
-          "artwork_available"
+          "artwork_available",
+          "preparation_available"
         ],
         "properties": {
           "analysis_available": {
@@ -6875,6 +7135,15 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "preparation_available": {
+            "type": "boolean"
+          },
+          "preparation_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/ImportSourceSummary"
@@ -6965,6 +7234,7 @@
           "phase",
           "outcome",
           "enrichment",
+          "prepare_music",
           "updated_at",
           "permissions"
         ],
@@ -7007,6 +7277,9 @@
           },
           "phase": {
             "$ref": "#/components/schemas/ImportPhase"
+          },
+          "prepare_music": {
+            "type": "boolean"
           },
           "target_item_id": {
             "oneOf": [
@@ -8207,6 +8480,286 @@
           }
         }
       },
+      "MusicAlbumDiscPlan": {
+        "type": "object",
+        "required": [
+          "capture_id",
+          "sources",
+          "ambiguous"
+        ],
+        "properties": {
+          "ambiguous": {
+            "type": "boolean"
+          },
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId",
+            "description": "Stable representative capture for this disc group; sources retain their actual capture IDs."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicAlbumSourcePlan"
+            }
+          }
+        }
+      },
+      "MusicAlbumPreparationPlan": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "profile",
+          "discs",
+          "total_tracks",
+          "blockers",
+          "can_submit",
+          "maximum_members"
+        ],
+        "properties": {
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "can_submit": {
+            "type": "boolean"
+          },
+          "discs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicAlbumDiscPlan"
+            }
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "maximum_members": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
+          "total_tracks": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MusicAlbumSourcePlan": {
+        "type": "object",
+        "required": [
+          "capture_id",
+          "source_representation_id",
+          "track_count",
+          "default_selected",
+          "already_available",
+          "preparing",
+          "eligible"
+        ],
+        "properties": {
+          "already_available": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "default_selected": {
+            "type": "boolean"
+          },
+          "eligible": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "preparing": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "track_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MusicPreparationBatchView": {
+        "type": "object",
+        "required": [
+          "batch_id",
+          "item_id",
+          "profile",
+          "members",
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "ineligible",
+          "cancelled_by_user",
+          "admission_state",
+          "can_cancel",
+          "can_retry",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "admission_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "admission_state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "batch_id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "can_retry": {
+            "type": "boolean"
+          },
+          "cancelled": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cancelled_by_user": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "ineligible": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicPreparationMemberView"
+            }
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
+          "queued": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MusicPreparationMemberState": {
+        "type": "string",
+        "enum": [
+          "already_available",
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "ineligible"
+        ]
+      },
+      "MusicPreparationMemberView": {
+        "type": "object",
+        "required": [
+          "member_id",
+          "capture_id",
+          "source_representation_id",
+          "track_position",
+          "title",
+          "state"
+        ],
+        "properties": {
+          "attempt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          },
+          "member_id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "source_representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MusicPreparationMemberState"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "MusicTrackAvailability": {
         "type": "object",
         "required": [
@@ -8679,6 +9232,7 @@
                 "phase",
                 "outcome",
                 "enrichment",
+                "prepare_music",
                 "updated_at",
                 "permissions"
               ],
@@ -8721,6 +9275,9 @@
                 },
                 "phase": {
                   "$ref": "#/components/schemas/ImportPhase"
+                },
+                "prepare_music": {
+                  "type": "boolean"
                 },
                 "target_item_id": {
                   "oneOf": [
@@ -9178,6 +9735,21 @@
           "elsewhere",
           "unknown"
         ]
+      },
+      "PrepareMusicAlbum": {
+        "type": "object",
+        "required": [
+          "source_representation_ids"
+        ],
+        "properties": {
+          "source_representation_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepresentationId"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "PrepareMusicTrack": {
         "type": "object",
@@ -10463,6 +11035,9 @@
           },
           "plan": {
             "$ref": "#/components/schemas/IngestPlan"
+          },
+          "prepare_music": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

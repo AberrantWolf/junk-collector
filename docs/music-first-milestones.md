@@ -1,13 +1,14 @@
 # Historical music-first delivery proposal
 
 **Superseded 2026-09-16 by the accepted [local-alpha plan](local-alpha-plan.md).**
-LA1 ingestion/enrichment is reviewed and corrected locally; LA2 completes album preparation
-and web listening, followed by local qualification. Native acceleration below is
+LA1 ingestion/enrichment is reviewed and corrected locally; LA2 album preparation
+and web listening is reviewed and corrected locally (2026-09-17),
+followed by local qualification. Native acceleration below is
 retained as future design context, not a prerequisite or active assignment.
 
 Planning assessment, 2026-09-14. This is a proposed scheduling change, not evidence
 of implemented playback or authorization to skip acceptance gates. D05.3 was reviewed on 2026-09-15. D07 now precedes D06 in the active Wave 4
-ledger; D07.1 and D07.2 are reviewed and corrected locally, D07.3 is reviewed and corrected locally, and its bounded browser-player child is reviewed and corrected locally. The later native-client acceleration remains proposed;
+ledger; D07.1 and D07.2 are reviewed and corrected locally, D07.3 is reviewed and corrected locally, and its bounded browser-player child is reviewed and corrected locally. D07.4–D07.5 are reviewed and corrected locally; LA3 qualification is next. The later native-client acceleration remains proposed;
 settle its bounded children before changing those assignments.
 
 ## Finding
@@ -31,8 +32,9 @@ Additional user requirement (2026-09-15):
 independent enqueueing. U05 audits the same nonblocking rule across the application:
 background work may limit execution concurrency, but must not prevent unrelated
 eligible submissions. Both are mandatory for web completion, not prerequisites
-for the already-reviewed early playback checkpoint. Scheduling remains unassigned;
-the next assignment is LA2 under the local-alpha plan; LA1 review passed.
+for the already-reviewed early playback checkpoint. LA2 now implements the bounded
+album batch and nonblocking music workflow; D07.5 review passed and the broader
+application-wide U05 audit remains unassigned.
 
 Additional user requirement (2026-09-15): [U05.1–U05.3](interface-readiness-plan.md)
 is a second mandatory web completion gate. Establish smart defaults and typed
