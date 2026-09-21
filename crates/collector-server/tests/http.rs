@@ -255,6 +255,33 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
                     "{path} curation={curation}, admin={admin}"
                 );
             }
+            let discovery = app.clone().oneshot(Request::builder()
+                .method("POST").uri("/api/v1/ingests/discover")
+                .header("origin", "https://collector.example")
+                .header("x-forwarded-for", "127.0.0.1")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"collection_id":"00000000-0000-4000-8000-000000000001","files":[]}"#)).unwrap()).await.unwrap();
+            assert_eq!(
+                discovery.status(),
+                if curation || admin {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::NOT_FOUND
+                }
+            );
+            let preview = app.clone().oneshot(Request::builder()
+                .uri("/api/v1/items/00000000-0000-4000-8000-000000000001/metadata/artwork/00000000-0000-4000-8000-000000000002/12345/thumbnail")
+                .header("x-forwarded-for", "127.0.0.1")
+                .header("forwarded", "for=127.0.0.1")
+                .body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(
+                preview.status(),
+                if curation || admin {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::NOT_FOUND
+                }
+            );
             let response = app
                 .clone()
                 .oneshot(
@@ -2482,7 +2509,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 98); // Includes guided ingest and LA2 album preparation.
+    assert_eq!(paths.len(), 100); // Includes provider previews and folder discovery.
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -2498,6 +2525,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/items/{id}/specimens/{specimen_id}/loans",
         "/api/v1/items/{id}/specimens/{specimen_id}/loans/{loan_id}/return",
         "/api/v1/items/{id}/specimens/{specimen_id}/dispose",
+        "/api/v1/ingests/discover",
         "/api/v1/imports",
         "/api/v1/imports/{id}",
         "/api/v1/captures/{id}/operations",
@@ -2524,6 +2552,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/items/{id}/metadata/acquisitions",
         "/api/v1/items/{id}/metadata/refresh",
         "/api/v1/items/{id}/metadata/artwork",
+        "/api/v1/items/{id}/metadata/artwork/{snapshot_id}/{image_id}/thumbnail",
     ] {
         assert!(
             paths.contains_key(path),

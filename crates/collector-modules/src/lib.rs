@@ -3,6 +3,8 @@
 pub mod games;
 pub mod music;
 
+pub mod import_discovery;
+
 use collector_core::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -421,6 +423,12 @@ pub struct ImportReadiness {
 }
 
 pub trait CollectionModule: Send + Sync {
+    fn discover_imports(
+        &self,
+        _names: &[PackageFileName],
+    ) -> Vec<import_discovery::DiscoveredImportPackage> {
+        Vec::new()
+    }
     fn import_readiness(
         &self,
         _names: &[PackageFileName],
@@ -467,6 +475,16 @@ pub struct Registry {
     capabilities: BTreeMap<CapabilityId, String>,
 }
 impl Registry {
+    pub fn discover_imports(
+        &self,
+        owner: &ModuleId,
+        names: &[PackageFileName],
+    ) -> ModuleResult<Vec<import_discovery::DiscoveredImportPackage>> {
+        self.modules
+            .get(&owner.0)
+            .ok_or_else(|| ModuleError::UnavailableCapability(owner.0.clone()))
+            .map(|module| module.discover_imports(names))
+    }
     pub fn import_readiness(
         &self,
         owner: &ModuleId,

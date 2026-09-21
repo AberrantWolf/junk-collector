@@ -27,7 +27,7 @@ const dbar=Buffer.alloc(31);dbar[0]=2;dbar.writeUInt32LE(676,1);dbar.writeUInt32
 for(let index=0;index<2;index++){const offset=13+index*9;dbar[offset]=17;dbar.writeUInt32LE(checksums[index],offset+1);dbar.writeUInt32LE(0,offset+5);}
 const accurateRipServer=createServer((_request,response)=>{response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
 await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
-const metadataProviderServer=createServer((request,response)=>{const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const body=Buffer.from(JSON.stringify({id:url.pathname.split('/').at(-1),releases:releases.map(value=>({...value,media:[{discs:[{id:url.pathname.split('/').at(-1)}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const body=Buffer.from(JSON.stringify({releases}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
+const metadataProviderServer=createServer((request,response)=>{const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const body=Buffer.from(JSON.stringify({id:url.pathname.split('/').at(-1),releases:releases.map(value=>({...value,media:[{discs:[{id:url.pathname.split('/').at(-1)}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const body=Buffer.from(JSON.stringify({releases}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
 await new Promise((resolve,reject)=>{metadataProviderServer.once('error',reject);metadataProviderServer.listen(metadataProviderPort,'127.0.0.1',resolve);});
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
@@ -109,6 +109,7 @@ try{
  await page.getByText('This collection has no entries yet.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
  const addForm=page.getByRole('dialog',{name:/Add or import/});
+ await addForm.getByRole('button',{name:'Enter inventory manually',exact:true}).click();
  await addForm.getByLabel('Collection').selectOption({label:'Cartridge shelf'});
  await addForm.getByLabel('Platform',{exact:true}).fill('Fixture console');
  await addForm.getByLabel('Collection').selectOption({label:'Shelf & stereo'});
@@ -279,14 +280,37 @@ try{
  const clearDraftTitle=metadataReview.getByRole('button',{name:'Clear title override',exact:true});
  await clearDraftTitle.click();await clearDraftTitle.waitFor({state:'detached'});
  assert.equal(await titleAuthority.inputValue(),'試験盤','clearing the override did not restore the effective candidate default');
- const artworkSelect=metadataReview.getByRole('combobox',{name:'Published image'});
- await artworkSelect.selectOption({label:'Private archival cover'});
+ await metadataReview.getByRole('radio',{name:'Private archival cover',exact:true}).check();
+ const archivedPreview=metadataReview.getByRole('img',{name:'Preview: Private archival cover',exact:true});
+ await archivedPreview.scrollIntoViewIfNeeded();
+ await page.waitForFunction(()=>{const image=document.querySelector('img[alt="Preview: Private archival cover"]');return image?.complete&&image.naturalWidth>0;});
  const useArtwork=metadataReview.getByRole('button',{name:'Use selected artwork',exact:true});
  await useArtwork.waitFor({state:'visible'});await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.textContent?.trim()==='Use selected artwork'&&!button.disabled));await useArtwork.click();
  const clearArtwork=metadataReview.getByRole('button',{name:'Clear artwork choice',exact:true});
  await clearArtwork.waitFor();await clearArtwork.click();await clearArtwork.waitFor({state:'detached'});
  await japaneseCandidate.getByRole('button',{name:'Find cover art',exact:true}).click();
  await metadataReview.getByRole('heading',{name:'Cover Art Archive choices'}).waitFor();
+ const providerPreview=metadataReview.getByRole('img',{name:'Front cover preview',exact:true});
+ await providerPreview.scrollIntoViewIfNeeded();
+ await page.waitForFunction(()=>{const image=document.querySelector('img[alt="Front cover preview"]');return image?.complete&&image.naturalWidth>0;});
+ const previewUrl=await providerPreview.getAttribute('src');
+ await page.evaluate(url=>sessionStorage.setItem('artwork-preview-url',url),previewUrl);
+ const previewChecks=await page.evaluate(async url=>{
+  const id=url.split('/')[4];
+  const before=await(await fetch(`/api/v1/items/${id}`)).json();
+  const response=await fetch(url);const after=await(await fetch(`/api/v1/items/${id}`)).json();
+  const invalid=await fetch(url.replace('/9001/thumbnail','/99999/thumbnail'));
+  return {status:response.status,type:response.headers.get('content-type'),before:before.assets.map(asset=>asset.id),after:after.assets.map(asset=>asset.id),invalid:invalid.status};
+ },previewUrl);
+ assert.equal(previewChecks.status,200);assert.equal(previewChecks.type,'image/png');assert.equal(previewChecks.invalid,404);assert.deepEqual(previewChecks.before,previewChecks.after,'preview archived an image before selection');
+ await page.route('**/metadata/artwork/**/thumbnail?attempt=*',route=>route.fulfill({status:503,body:'temporary preview failure'}));
+ // Remount the image as if its first network load failed, then exercise Retry.
+ await providerPreview.evaluate(image=>image.dispatchEvent(new Event('error')));
+ await metadataReview.getByRole('button',{name:'Retry front cover preview',exact:true}).click();
+ await metadataReview.getByRole('button',{name:'Retry front cover preview',exact:true}).waitFor();
+ await page.unroute('**/metadata/artwork/**/thumbnail?attempt=*');
+ await metadataReview.getByRole('button',{name:'Retry front cover preview',exact:true}).click();
+ await page.waitForFunction(()=>{const image=document.querySelector('img[alt="Front cover preview"]');return image?.complete&&image.naturalWidth>0;});
  await metadataReview.getByRole('button',{name:/Front cover/}).click();
  await metadataReview.getByText('Artwork acquired and preserved.',{exact:false}).waitFor();
  await metadataReview.getByRole('button',{name:'Use selected artwork',exact:true}).click();
@@ -326,12 +350,17 @@ try{
  await importWorkspace.getByLabel('This browser').check();
  const stageForm=importWorkspace.getByRole('form',{name:'Stage package'});
  const uploadBytes=Buffer.alloc(4*1024*1024+17,37);
- let interrupted=false;
+ let interrupted=false;let releaseUpload;const uploadHeld=new Promise(resolve=>{releaseUpload=resolve;});let heldUpload=false;
  await page.route('**/api/v1/imports/*/files/*',async route=>{
+  if(!heldUpload&&new URL(route.request().url()).searchParams.get('offset')==='0'){heldUpload=true;await uploadHeld;}
   if(new URL(route.request().url()).searchParams.get('offset')==='4194304'){interrupted=true;await route.abort('failed');}else await route.continue();
  });
  await stageForm.getByLabel('Original package files').setInputFiles({name:'browser-disc.bin',mimeType:'application/octet-stream',buffer:uploadBytes});
  await stageForm.getByRole('button',{name:'Stage package',exact:true}).click();
+ await importWorkspace.getByRole('progressbar',{name:'Uploading package',exact:true}).waitFor();
+ assert.equal(await importWorkspace.getByRole('form',{name:'Resume package'}).count(),0,'active upload was presented as interrupted');
+ assert.match(await importWorkspace.locator('.work-progress').innerText(),/browser-disc.bin.*file 1 of 1/);
+ releaseUpload();
  const resumeForm=importWorkspace.getByRole('form',{name:'Resume package'});
  await resumeForm.getByRole('button',{name:'Resume upload',exact:true}).waitFor({state:'visible'});
  await page.waitForFunction(()=>!document.querySelector('form[aria-label="Resume package"] button')?.disabled);
@@ -339,6 +368,9 @@ try{
  await page.unroute('**/api/v1/imports/*/files/*');
  const interruptedId=await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(key=>key.startsWith('collector.import.'))));
  await page.getByRole('button',{name:'Close curator'}).click();
+ // FX-01 retains search on reload. Explicitly leave the old provider-title search
+ // after overriding that title, so subsequent list selections use all entries.
+ await page.getByRole('searchbox').fill('');
  await page.reload();
  await page.getByRole('button',{name:/A test pressing/}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
@@ -355,8 +387,12 @@ try{
    lostFinalResponse=true;const received=await route.fetch();assert.equal(received.status(),200);await route.abort('failed');
   }else await route.continue();
  });
+ let releasePrefix;const prefixHeld=new Promise(resolve=>{releasePrefix=resolve;});
+ await page.route('**/api/v1/imports/*/files/*?offset=0',async route=>{await prefixHeld;await route.continue();},{times:1});
  await resumeForm.getByLabel('Original package files').setInputFiles({name:'browser-disc.bin',mimeType:'application/octet-stream',buffer:uploadBytes});
  await resumeForm.getByRole('button',{name:'Resume upload',exact:true}).click();
+ await importWorkspace.getByRole('progressbar',{name:'Checking retained upload',exact:true}).waitFor();
+ releasePrefix();
  await importWorkspace.getByText('Upload complete · analysis needed',{exact:true}).waitFor();
  const resumed=await page.evaluate(async id=>(await fetch(`/api/v1/imports/${id}`)).json(),interruptedId);
  assert.equal(resumed.files[0].received_bytes,uploadBytes.length);
@@ -481,7 +517,7 @@ try{
  assert.match(await cdDocket.innerText(), /Unavailable physical edge frames/);
  assert.match(await cdDocket.innerText(),/Track 1: verified, computed at 0 stereo sample frames/);
  assert.match(await cdDocket.innerText(),/Track 2: verified, computed at 0 stereo sample frames/);
- assert.equal(await cdCurator.getByRole('img',{name:'Private archival cover'}).count(),1,'music analysis displaced artwork from the text workflow');
+ assert.equal(await cdCurator.getByRole('img',{name:'Private archival cover',exact:true}).count(),1,'music analysis displaced artwork from the text workflow');
  if(hasFlac){
   const preparation=cdCurator.getByRole('region',{name:'Music preparation'});await preparation.waitFor();
   assert.equal(await preparation.locator('.music-track').first().evaluate(element=>getComputedStyle(element).display),'grid','music stylesheet is not embedded');
@@ -492,6 +528,12 @@ try{
   await page.waitForTimeout(250);
   assert.match(await preparation.getByRole('alert').innerText(),/Test encoder unavailable/,'preparation failure was erased by refresh');
   await preparation.getByRole('button',{name:'Refresh music availability',exact:true}).click();
+  const availabilityFailure=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'temporarily_unavailable',message:'Temporary availability failure'}})});
+  await page.route('**/music-tracks',availabilityFailure);
+  await preparation.getByRole('button',{name:'Refresh music availability',exact:true}).click();
+  await preparation.getByRole('alert').getByText('Temporary availability failure',{exact:true}).waitFor();
+  await page.unroute('**/music-tracks',availabilityFailure);
+  await page.waitForResponse(response=>response.url().endsWith('/music-tracks')&&response.status()===200,{timeout:15000});
   const includeDisc=preparation.getByLabel('Include this disc');
   await includeDisc.uncheck();
   const refreshedPlan=page.waitForResponse(response=>response.url().endsWith('/music-preparation-plan')&&response.status()===200);
@@ -507,11 +549,8 @@ try{
   await preparation.getByRole('button',{name:'Prepare selected album',exact:true}).click();
   await preparation.getByRole('region',{name:'Album preparation progress'}).locator('article').nth(1).waitFor();
   assert.equal(await cdCurator.getByLabel('Title',{exact:true}).isDisabled(),false,'accepted encoding blocked unrelated inventory editing');
-  const [inventorySaved]=await Promise.all([
-   page.waitForResponse(response=>response.request().method()==='PUT'&&/\/items\/[^/]+$/.test(new URL(response.url()).pathname)),
-   cdCurator.getByRole('button',{name:'Save inventory',exact:true}).click(),
-  ]);
-  assert.equal(inventorySaved.status(),200,await inventorySaved.text());
+  // Preparing publishes Capture outputs independently of an inventory save.
+  const inventoryRevision=await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}`)).json()).revision;});
 
   await preparation.getByRole('link',{name:/FLAC/}).first().waitFor({timeout:30000});
   assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}/music-preparation-batches`)).json()).some(batch=>batch.queued>0||batch.running>0);}),true,'all batch work settled before concurrent player acceptance could be observed');
@@ -522,6 +561,20 @@ try{
   const media=await page.evaluate(async href=>{const full=await fetch(href);const bytes=new Uint8Array(await full.arrayBuffer());const partial=await fetch(href,{headers:{Range:'bytes=0-3'}});return {status:full.status,length:bytes.length,magic:String.fromCharCode(...bytes.slice(0,4)),etag:full.headers.get('etag'),partialStatus:partial.status,partialLength:(await partial.arrayBuffer()).byteLength};},hrefs[0]);
   assert.equal(media.status,200);assert.equal(media.magic,'fLaC');assert.ok(media.length>4);assert.match(media.etag,/^"[0-9a-f]{64}"$/);assert.equal(media.partialStatus,206);assert.equal(media.partialLength,4);
   await page.evaluate(values=>sessionStorage.setItem('prepared-flac-urls',JSON.stringify(values)),hrefs);
+  assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}`)).json()).revision;}),inventoryRevision,'preparation unexpectedly needed an inventory revision');
+  await cdCurator.getByRole('button',{name:'Close curator'}).click();
+  const refreshedPlayer=page.getByRole('region',{name:'Music player'});
+  await refreshedPlayer.getByRole('link',{name:/FLAC/}).nth(1).waitFor();
+  await page.reload();
+  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
+  await page.getByRole('button',{name:/A test pressing/}).click();
+  await page.getByRole('region',{name:'Music player'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
+  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+  await cdCurator.waitFor();
+  await cdCurator.locator('.metadata-review').scrollIntoViewIfNeeded();
+  const sectionGap=await cdCurator.evaluate(element=>element.querySelector('.metadata-review').getBoundingClientRect().top-element.querySelector('.music-preparation').getBoundingClientRect().bottom);
+  assert.ok(sectionGap>=0&&sectionGap<60,`unexpected blank space after tracks: ${sectionGap}px`);
+
  }
  const restoredJobs=cdCurator.getByRole('region',{name:'Background work'});
  await page.context().setOffline(true);
@@ -591,7 +644,7 @@ try{
   await player.locator('audio').evaluate(element=>{element.currentTime=element.duration-0.25;});
   await playbackPage.waitForFunction(id=>{const audio=document.querySelector('.music-player audio');return audio?.dataset.representationId===id&&!audio.paused&&audio.currentTime>0.05;},expected[1].representation,{timeout:5000});
   assert.match(await player.getByRole('status').innerText(),/Now playing[\s\S]*Track 02/,'natural media end did not advance to the following track');
-  await playbackPage.reload();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.getByRole('button',{name:/A test pressing/}).click();const rebuiltPlayer=playbackPage.getByRole('region',{name:'Music player'});await rebuiltPlayer.waitFor();
+  await playbackPage.reload();await playbackPage.getByLabel('A test pressing details',{exact:true}).waitFor();const rebuiltPlayer=playbackPage.getByRole('region',{name:'Music player'});await rebuiltPlayer.waitFor();
   await rebuiltPlayer.locator('.now-playing').waitFor();
   assert.match(await rebuiltPlayer.locator('.now-playing').innerText(),/Ready[\s\S]*Track 01/);assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'refresh retained stale playback state');
   await playbackPage.setViewportSize({width:390,height:844});assert.equal(await playbackPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'viewer player has mobile horizontal overflow');await playbackPage.setViewportSize({width:1100,height:900});
@@ -644,15 +697,22 @@ try{
  const guided=guidedForm.getByRole('region',{name:'Import original packages'});
  const guidedBytes=Buffer.alloc(2352*10);
  const guidedCue=Buffer.from('FILE \"guided-original.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n');
+ await guided.getByText('Choose individual files instead',{exact:true}).click();
  await guided.getByLabel('Package files').setInputFiles([{name:'guided-original.bin',mimeType:'application/octet-stream',buffer:guidedBytes},{name:'guided.cue',mimeType:'text/plain',buffer:guidedCue}]);
  await guided.getByLabel('Package name').fill('Guided smoke master');
  await guided.getByRole('button',{name:'Preview import',exact:true}).click();
+ await guided.getByText('Package details and import options',{exact:true}).click();
  await guided.getByText('destination: new collection entry',{exact:false}).waitFor();
  assert.equal(await guided.getByLabel('Automatically gather available metadata and artwork').isChecked(),true);
  if(hasFlac){assert.equal(await guided.getByLabel('Prepare supported music as FLAC after preservation').isDisabled(),false);await guided.getByLabel('Prepare supported music as FLAC after preservation').check();}
+ let releaseGuided;const guidedHeld=new Promise(resolve=>{releaseGuided=resolve;});
+ await page.route('**/api/v1/imports/*/files/*',async route=>{await guidedHeld;await route.continue();},{times:1});
  await guided.getByRole('button',{name:'Start import',exact:true}).click();
+ await guided.getByRole('progressbar',{name:'Uploading package',exact:true}).waitFor();
+ assert.equal(await guided.getByRole('form',{name:'Resume guided package'}).count(),0);
+ releaseGuided();
  await guided.getByRole('button',{name:/Guided smoke master/}).waitFor();
- await guided.getByText('Import accepted. The server continues after all package bytes arrive.',{exact:true}).waitFor();
+ await guided.getByText('Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.',{exact:true}).waitFor();
  await guidedForm.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
  const reopenedGuidedForm=page.getByRole('dialog',{name:/Add or import/});
@@ -660,17 +720,67 @@ try{
  const guidedHistory=reopenedGuided.getByRole('button',{name:/Guided smoke master/});
  await guidedHistory.click();
  await guidedHistory.getByText('published · succeeded',{exact:false}).waitFor();
+ await reopenedGuided.locator('.ingest-detail').evaluate(element=>element.open=true);
  if(hasFlac)await reopenedGuided.locator('.ingest-steps').getByText('preparation',{exact:true}).waitFor();
  await reopenedGuided.getByText(/Capture [0-9a-f-]{36}/).waitFor();
  await reopenedGuidedForm.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('button',{name:/Provider pressing/}).first().waitFor();
+ // Folder intake needs no blank inventory form and handles every detected package.
+ let importAudio;
+ if(hasFlac){
+  await page.getByRole('button',{name:/Provider pressing/}).first().click();
+  const player=page.getByRole('region',{name:'Music player'});
+  importAudio=await player.locator('audio').elementHandle();await importAudio.evaluate(element=>{element.loop=true;});
+  await player.getByRole('button',{name:'Play',exact:true}).click();
+  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
+ }
+ const folderRoot=path.join(scratch,'Folder intake');
+ for(const name of ['Disc A','Disc B']){await mkdir(path.join(folderRoot,name),{recursive:true});await writeFile(path.join(folderRoot,name,'disc.cue'),'FILE "disc.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n');await writeFile(path.join(folderRoot,name,'disc.bin'),guidedBytes);}
+ await writeFile(path.join(folderRoot,'notes.txt'),'unassigned note');
+ await page.getByRole('button',{name:'Add / import',exact:true}).click();
+ const folderForm=page.getByRole('dialog',{name:/Add or import/});const folderImport=folderForm.getByRole('region',{name:'Import original packages'});
+ assert.equal(await folderForm.getByLabel('Title',{exact:true}).count(),0);
+ assert.equal(await folderForm.getByRole('button',{name:'Add inventory entry',exact:true}).count(),0);
+ await folderImport.getByLabel('Dump folder',{exact:true}).setInputFiles(folderRoot);
+ await folderImport.getByText('2 dump packages found.',{exact:true}).waitFor();
+ await folderImport.getByText('1 file is outside the detected packages and will not be uploaded',{exact:true}).waitFor();
+ await folderImport.getByText('Package details and import options',{exact:true}).click();
+ await folderImport.getByLabel('Automatically gather available metadata and artwork').uncheck();
+ await folderForm.screenshot({path:path.join(root,'web/test-results/folder-import.png')});
+ await folderImport.getByRole('button',{name:'Import 2 packages',exact:true}).click();
+ await folderImport.getByText('Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.',{exact:true}).waitFor();
+ await folderForm.getByRole('button',{name:'Close curator'}).click();
+ await page.getByRole('button',{name:'Add / import',exact:true}).click();
+ for(const name of ['Disc A','Disc B'])await page.getByRole('region',{name:'Import original packages'}).getByRole('button',{name:new RegExp(name)}).getByText('published · succeeded',{exact:false}).waitFor();
+ const associationPanel=page.getByRole('region',{name:'Import original packages'});
+ await associationPanel.getByRole('button',{name:/Disc A/}).click();
+ await associationPanel.getByText('Attach this dump to an existing entry',{exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.ingest-detail select')?.selectedOptions[0]?.textContent==='Disc A');
+ const sourceItem=await associationPanel.getByLabel('Published association').inputValue();
+ assert.match(sourceItem,/^[0-9a-f-]{36}$/);
+ await associationPanel.getByLabel('Published association').selectOption({label:'Disc B'});
+ const targetItem=await associationPanel.getByLabel('Published association').inputValue();
+ await associationPanel.getByRole('button',{name:'Correct association',exact:true}).click();
+ await associationPanel.getByText(/Dump attached to Disc B/).waitFor();
+ const mergedDiscs=await page.evaluate(async({sourceItem,targetItem})=>{
+  const read=async path=>{const response=await fetch(`/api/v1${path}`);if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
+  const sourceStatus=(await fetch(`/api/v1/items/${sourceItem}`)).status;
+  const target=await read(`/items/${targetItem}`);
+  const page=await read(`/items?collection_id=${target.collection_id}&limit=100`);
+  return {sourceStatus,listed:page.items.some(item=>item.id===sourceItem),captures:target.captures.length};
+ },{sourceItem,targetItem});
+ assert.equal(mergedDiscs.sourceStatus,404,'retired placeholder remained available as an active item');
+ assert.equal(mergedDiscs.listed,false,'reassociation left its automatic placeholder in browsing');
+ assert.equal(mergedDiscs.captures,2,'reassociation replaced the destination disc');
+ if(importAudio){assert.deepEqual(await importAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'background imports displaced the playing album');await importAudio.evaluate(element=>{element.pause();element.loop=false;});}
+ await page.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('searchbox').fill('pressing');
  await page.waitForTimeout(350);
  // The generic renderer must accept a third descriptor without a frontend ID branch.
  const fixturePage=await context.newPage();const fixtureCollection=crypto.randomUUID();
  await fixturePage.route('**/api/v1/collection-types',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:'org.example.stamps',schema_version:1,display_name:'Stamp fixture module',collection_type_label:'Postage stamps',fields:[{key:'denomination',label:'Denomination',required:true,editable:true,kind:{type:'integer',minimum:1,maximum:10000}},{key:'unit',label:'Currency unit',required:true,editable:true,kind:{type:'text',maximum_bytes:16}},{key:'perforations',label:'Perforation observations',required:false,editable:false,kind:{type:'structured'}}],capabilities:[]});await route.fulfill({response,json:body});});
  await fixturePage.route('**/api/v1/collections',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:fixtureCollection,revision:1,name:'Browser stamp fixture',created_at:'2026-09-13T00:00:00Z',binding:{state:'assigned',module:'org.example.stamps'},effective_permissions:{role:'owner',can_browse:true,can_curate:true,can_manage_access:true},content_permissions:{can_edit:true,status:'available'}});await route.fulfill({response,json:body});});
- await fixturePage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByLabel('Collection').selectOption(fixtureCollection);await stampForm.getByText('Postage stamps fields are supplied by Stamp fixture module.',{exact:true}).waitFor();assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('Structured module data is preserved and read-only here.',{exact:true}).waitFor();
+ await fixturePage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByRole('button',{name:'Enter inventory manually',exact:true}).click();await stampForm.getByLabel('Collection').selectOption(fixtureCollection);await stampForm.getByText('Postage stamps fields are supplied by Stamp fixture module.',{exact:true}).waitFor();assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('Structured module data is preserved and read-only here.',{exact:true}).waitFor();
  let submittedStamp;
  await fixturePage.route('**/api/v1/items/*',async route=>{if(route.request().method()!=='PUT')return route.continue();submittedStamp=route.request().postDataJSON();await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{code:'invalid_request',message:'Renderer fixture: submission inspected without persistence.'}})});});
  await stampForm.getByLabel('Title',{exact:true}).fill('Synthetic stamp');await stampForm.getByLabel('Denomination',{exact:true}).fill('20');await stampForm.getByRole('button',{name:'Add inventory entry',exact:true}).click();await stampForm.getByRole('alert').waitFor();assert.deepEqual(submittedStamp.edit.domain_edit,{module:'org.example.stamps',fields:{unit:'cents',denomination:20}});
@@ -705,7 +815,7 @@ try{
  await stopServer();await archiveUnavailableOwnerFixture(unavailableFixture.collectionId,unavailableFixture.itemId);server=startServer();await waitForServer();await page.reload();
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
  await page.getByText('Collection content is read-only.',{exact:true}).waitFor();
- await page.getByText('org.example.absent',{exact:false}).waitFor();
+ await page.getByRole('note').filter({hasText:'org.example.absent'}).waitFor();
  await page.getByRole('searchbox').fill('Opaque module');await page.waitForTimeout(350);
  const opaqueRow=page.getByRole('button',{name:/Opaque module fixture/});await opaqueRow.waitFor();assert.match(await opaqueRow.innerText(),/Unavailable type · org\.example\.absent/);await opaqueRow.click();
  await page.getByText('Module is not installed; preserved data is not executable.',{exact:false}).waitFor();
@@ -760,8 +870,13 @@ try{
  await page.getByRole('button',{name:/Opaque module fixture/}).waitFor();
  const isolation=await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const importId=sessionStorage.getItem('owner-import-id');const jobId=sessionStorage.getItem('owner-job-id');return {importStatus:(await fetch(`/api/v1/imports/${importId}`)).status,jobStatus:(await fetch(`/api/v1/jobs/${jobId}`)).status,collectionStatus:(await fetch('/api/v1/imports',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({collection_id:collection.id,package_name:'forbidden',files:[{name:'empty.bin',bytes:0,sha256:null}]})})).status};});
  assert.deepEqual(isolation,{importStatus:404,jobStatus:404,collectionStatus:403},'viewer crossed Import/Job ownership or collection curation scope');
+ assert.equal(await page.evaluate(async()=>{const url=sessionStorage.getItem('artwork-preview-url');return (await fetch(url)).status;}),403,'viewer accessed a curator-only provider preview');
+ // The artwork-isolation assertion covers the whole collection, not the
+ // persisted opaque-module search used above.
+ await page.getByRole('searchbox').fill('');
+ await page.waitForFunction(()=>document.querySelectorAll('.collection-row img').length===2);
  assert.equal(await page.locator('.collection-row img').count(),2,'viewer lost existing or automatically imported shared artwork after reindex');
- assert.equal(await page.getByRole('img',{name:'Private archival cover'}).count(),0,'viewer loaded curator-only artwork');
+ assert.equal(await page.getByRole('img',{name:'Private archival cover',exact:true}).count(),0,'viewer loaded curator-only artwork');
  await page.getByRole('img',{name:'No artwork attached'}).first().waitFor();
  assert.equal(await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false},expected_revision:0})});return response.status;}),403);
  await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});

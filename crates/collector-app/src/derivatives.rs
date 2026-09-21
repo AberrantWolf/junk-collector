@@ -866,7 +866,13 @@ impl CollectionService {
         let inventory = self
             .processing
             .package_inventory(collection_id, PackageScope::Representation(source))?;
-        let source_fingerprint = self.fingerprint_inventory(&inventory)?;
+        // Selection and availability are catalog reads, not integrity checks.
+        // Rehashing here rereads the entire disc on every poll and once per
+        // track during album admission. Workers validate actual bytes before
+        // encoding and again before publication.
+        let source_fingerprint = self
+            .processing
+            .recorded_source(collection_id, PackageScope::Representation(source))?;
         let observations = self.processing.observations(&crate::ProcessingQuery {
             collection_id,
             source: PackageScope::Representation(source),

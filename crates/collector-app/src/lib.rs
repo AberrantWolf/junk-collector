@@ -25,6 +25,32 @@ use sha2::Digest as _;
 use std::io::{Read, Seek};
 use std::sync::Arc;
 
+/// Module-owned descriptive fields used by the rebuildable browse projection.
+/// Unknown schemas keep their generic, authorized browsing behavior.
+pub fn browse_sort_fields(item: &Item) -> (String, String) {
+    match (item.domain.module.0.as_str(), item.domain.schema_version) {
+        ("org.junk.music", 1) => (
+            item.domain
+                .payload
+                .parse::<collector_modules::music::MusicItemData>()
+                .ok()
+                .and_then(|v| v.artist)
+                .unwrap_or_default(),
+            String::new(),
+        ),
+        ("org.junk.games", 1) => (
+            String::new(),
+            item.domain
+                .payload
+                .parse::<collector_modules::games::GameItemData>()
+                .ok()
+                .and_then(|v| v.platform)
+                .unwrap_or_default(),
+        ),
+        _ => (String::new(), String::new()),
+    }
+}
+
 /// Transitional combined Wave 1 adapter. Application services consume the
 /// narrow ports below; A04.2 removes this compatibility surface after moving
 /// the remaining command families behind application policy.
@@ -37,6 +63,12 @@ pub trait Catalog: Send + Sync {
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>>;
     fn item(&self, id: ItemId) -> Result<Item>;
     fn save(&self, item: Item, expected: Revision) -> Result<Item>;
+    /// Compare the complete hydrated item and authority revision under the writer lock.
+    fn retire_item_if_unchanged(
+        &self,
+        item: Item,
+        authority_revision: Option<Revision>,
+    ) -> Result<()>;
     fn work(&self, id: WorkId) -> Result<Work>;
     fn save_work(&self, work: Work, expected: Revision) -> Result<Work>;
     fn edition(&self, id: EditionId) -> Result<Edition>;
@@ -93,6 +125,12 @@ impl<T: Catalog + ?Sized> CollectionReadPort for T {
 pub trait CollectionWritePort: Send + Sync {
     fn create_collection(&self, user: UserId, collection: Collection) -> Result<Collection>;
     fn save(&self, item: Item, expected: Revision) -> Result<Item>;
+    /// Compare the complete hydrated item and authority revision under the writer lock.
+    fn retire_item_if_unchanged(
+        &self,
+        item: Item,
+        authority_revision: Option<Revision>,
+    ) -> Result<()>;
     fn save_work(&self, work: Work, expected: Revision) -> Result<Work>;
     fn save_edition(&self, edition: Edition, expected: Revision) -> Result<Edition>;
     fn save_capture(&self, capture: Capture, expected: Revision) -> Result<Capture>;
@@ -359,6 +397,18 @@ pub struct IngestPlanPackage {
     pub artwork_available: bool,
     pub preparation_available: bool,
     pub preparation_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoverIngestCommand {
+    pub collection_id: CollectionId,
+    pub files: Vec<UploadFile>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DiscoveredIngestPlan {
+    pub plan: Option<IngestPlan>,
+    pub unassigned_files: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1094,6 +1144,13 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
     fn save(&self, item: Item, expected: Revision) -> Result<Item> {
         Catalog::save(self, item, expected)
     }
+    fn retire_item_if_unchanged(
+        &self,
+        item: Item,
+        authority_revision: Option<Revision>,
+    ) -> Result<()> {
+        Catalog::retire_item_if_unchanged(self, item, authority_revision)
+    }
     fn save_work(&self, work: Work, expected: Revision) -> Result<Work> {
         Catalog::save_work(self, work, expected)
     }
@@ -1121,6 +1178,7 @@ pub struct CollectionService {
     jobs: Arc<dyn JobPort>,
     processing: Arc<dyn ProcessingPort>,
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
+    artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
     modules: Arc<Registry>,
@@ -1802,6 +1860,7 @@ impl CollectionService {
             jobs,
             processing,
             audio_converter: None,
+            artwork_preview: None,
             streaming_providers: Arc::new(Default::default()),
             catalog_parsers: Arc::new(Default::default()),
             modules,

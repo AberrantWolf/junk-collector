@@ -65,6 +65,7 @@ pub struct AppState {
     pub allowed_origins: Arc<Vec<String>>,
     pub passkeys: Option<Arc<passkeys::Passkeys>>,
     pub rate_limits: Arc<RateLimits>,
+    artwork_preview_slots: Arc<tokio::sync::Semaphore>,
 }
 impl AppState {
     pub fn new(store: Arc<Store>, pairing: Pairing) -> Self {
@@ -85,6 +86,7 @@ impl AppState {
             catalog_sources: Arc::new(Vec::new()),
             allowed_origins: Arc::new(vec![]),
             rate_limits: Arc::new(RateLimits::default()),
+            artwork_preview_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             passkeys: None,
         }
     }
@@ -541,6 +543,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_upload))
         .routes(routes!(create_provisional_import))
         .routes(routes!(plan_ingest))
+        .routes(routes!(discover_ingest))
         .routes(routes!(start_ingest, list_ingests))
         .routes(routes!(ingest_detail))
         .routes(routes!(discard_ingest))
@@ -573,6 +576,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(complete_metadata_acquisition))
         .routes(routes!(apply_metadata_snapshot))
         .routes(routes!(metadata_artwork_options))
+        .routes(routes!(metadata_artwork_preview))
         .routes(routes!(publish_metadata_artwork))
         .routes(routes!(create_asset).layer(DefaultBodyLimit::max(20 * 1024 * 1024)))
         .routes(routes!(update_asset, tombstone_asset))
@@ -1123,7 +1127,7 @@ async fn collections(
         blocking(move || state.service.collections(&actor)).await?,
     ))
 }
-#[utoipa::path(get, path = "/api/v1/items", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<PresentedItem>), (status = 401)))]
+#[utoipa::path(get, path = "/api/v1/items", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<PresentedItem>), (status = 401)))]
 async fn browse(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1260,6 +1264,49 @@ async fn metadata_artwork_options(
         })
         .await?,
     ))
+}
+
+#[utoipa::path(get, path = "/api/v1/items/{id}/metadata/artwork/{snapshot_id}/{image_id}/thumbnail", params(("id" = ItemId, Path), ("snapshot_id" = SnapshotId, Path), ("image_id" = String, Path)), responses((status = 200, content_type = "image/jpeg"), (status = 403), (status = 404), (status = 503)))]
+async fn metadata_artwork_preview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, snapshot_id, image_id)): Path<(ItemId, SnapshotId, String)>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    struct CancelOnDrop(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _cancel = CancelOnDrop(cancelled.clone());
+    let permit = state
+        .artwork_preview_slots
+        .acquire_owned()
+        .await
+        .map_err(|_| Error::Unavailable("Artwork preview service stopped".into()))?;
+    let preview = blocking(move || {
+        // Keep the permit until the blocking read actually exits, even when the
+        // HTTP future disconnects. Never release concurrency bounds prematurely.
+        let _permit = permit;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        state
+            .service
+            .metadata_artwork_preview(&actor, id, snapshot_id, &image_id, &|| {
+                Ok(cancelled.load(std::sync::atomic::Ordering::Relaxed)
+                    || std::time::Instant::now() >= deadline)
+            })
+    })
+    .await?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, preview.media_type),
+            (header::CACHE_CONTROL, "private, no-store".into()),
+        ],
+        preview.bytes,
+    )
+        .into_response())
 }
 
 #[utoipa::path(post, path = "/api/v1/items/{id}/metadata/artwork", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = PublishProviderArtworkCommand, responses((status = 200, body = PresentedAsset), (status = 403), (status = 404), (status = 409), (status = 422)))]
@@ -2170,6 +2217,18 @@ struct NewUpload {
     item_id: ItemId,
     expected_revision: Revision,
     files: Vec<UploadFile>,
+}
+
+#[utoipa::path(post, path = "/api/v1/ingests/discover", request_body = collector_app::DiscoverIngestCommand, responses((status = 200, body = collector_app::DiscoveredIngestPlan), (status = 403), (status = 422)))]
+async fn discover_ingest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::DiscoverIngestCommand>,
+) -> ApiResult<Json<collector_app::DiscoveredIngestPlan>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.discover_ingest(&actor, command)).await?,
+    ))
 }
 
 #[utoipa::path(post, path = "/api/v1/ingests/plan", request_body = PlanIngestCommand, responses((status = 200, body = IngestPlan), (status = 403), (status = 409), (status = 422)))]

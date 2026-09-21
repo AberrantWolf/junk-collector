@@ -1,5 +1,11 @@
 # Album preparation and nonblocking background work
 
+**Planning update 2026-09-21:** [FX-02–FX-05 and FX-07](ux-fix-plan.md) applies the
+remaining whole-application nonblocking rule to scan lifecycle, durable progress,
+cleanup and reimport. Equivalent active scans must converge; completed results
+become the primary view, with equivalent actual rechecks recorded as lightweight
+occurrences. This is proposed scope and reuses the completed LA2 patterns below.
+
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA2 integrates the relevant acceptance below across layers. Individual child
 assignments at the bottom are reference scope, not separate required handoffs.

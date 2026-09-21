@@ -6,6 +6,26 @@ Junk Collector preserves evidence and owned collection history independently of 
 
 ## Local-alpha guided ingestion
 
+Reassociation can retire an otherwise unused, automatically created intake Item.
+Application policy distinguishes placeholders from independent inventory/manual
+information. The committed Capture association and original guided intent form a
+durable cleanup request; paginated reconciliation recovers an interruption after
+that command's receipt. Retirement uses the existing Item tombstone, with a writer-
+locked comparison of the hydrated Item and authority revision to fence independent
+Capture, Asset and metadata changes. Archive history and payloads remain intact.
+Cleanup waits for the original workflow to settle so it cannot race its own jobs.
+
+
+Folder discovery is a read-only application command over validated logical names
+and sizes. Each collection module proposes disjoint package memberships; the
+application checks their indices and builds ordinary signed ingest plans. Native
+filesystem traversal stays in adapters. The browser uploads every accepted package
+through the shared resumable chunk transport; durable server intents own all
+subsequent publication, identification, metadata and preparation. Name-level
+redumper/CUE boundaries are provisional, not structural validation. Unassigned
+files are listed explicitly and never silently uploaded.
+
+
 The accepted [local-alpha plan](local-alpha-plan.md) schedules complete ingestion,
 enrichment and listening journeys before native/public deployment work. LA1 is
 implemented locally: application services coordinate existing Import, Job,
@@ -15,7 +35,7 @@ browser-owned pipeline or generic workflow engine was added.
 Automatic metadata protects manual authority; filename-derived defaults remain
 provisional. Optional provider/preparation outcomes are independent of preservation.
 Existing low-level/manual imports retain their behavior; only the new guided import
-intent requests automatic enrichment. Optional preparation is LA2 work.
+intent requests automatic enrichment. Optional preparation uses the LA2 durable album service.
 Module-owned readiness describes name-level anchor/companion constraints; staged
 structural analysis validates actual contents. Failed analysis retains the package
 for unidentified preservation. Worker reconciliation paginates all unsettled intents
@@ -57,6 +77,10 @@ Cancellation wins until the final gated revision rename. Committed recovery uses
 retained bytes/evidence without re-encoding or re-authorizing; current Capture
 associations and Item edits survive. Reindex validates derivative references and
 stored payload identity, without claiming a fresh codec or catalog verification.
+Music layout selection for availability and admission uses the committed source
+fingerprint to find observations; it is not a live integrity check. It must not
+rehash preservation payloads during browsing or once per track during admission.
+The conversion worker checks actual bytes before encoding and before publication.
 The viewer-safe ordered availability contract carries source Representation,
 track position and integer PCM coordinates, safe title, profile and only
 preparing/unavailable/available state, plus a typed actor-specific preparation
@@ -106,6 +130,30 @@ Collection, item, work, edition, specimen, component, carrier, capture, represen
 Game and music data, processing results and domain metadata overrides live in module-owned types. Core retains common title/subtitle/artwork authority and genuinely shared CD/PCM coordinates and layout. Unknown historical field overrides are retained verbatim in `preserved_field_overrides`, including language and unknown values; they are not applied as active authority until explicit owner-aware conversion. Reading/reindexing does not rewrite their original archive records. The collection-binding contract is Assigned to a ModuleId or LegacyUnassigned. New creation persists an Assigned owner; a missing historical field becomes LegacyUnassigned. Graph publication rejects that holding state. Application content writes centrally require Curate authority, an Assigned binding, an installed owner and supported schema; collection-domain operations must belong to that owner, while explicitly shared-media operations need not. Durable processing inputs freeze and recheck the binding, but already committed recovery completes without module availability or grants. Collection write helpers live in `collection_types.rs`; stored unsupported Item schemas cannot be overwritten through ordinary edits. Long import adapters invoke application policy after payload staging and before a new Capture commit. A denied guard clears provisional publication copies and retains source uploads. Integrity progress also rechecks eligibility; committed integrity recovery never rehashes payloads. These checks are not a serializable transaction with concurrent grant changes. Explicit local assignment is application policy in `collection_types.rs` and publishes a journaled collection-metadata sidecar without changing the creation manifest. Its caller holds exclusive stopped-server access throughout inspection and assignment. Module validators check active authority; shared-media operations do not imply collection ownership, and unknown pending jobs block assignment. Core inventory remains useful without a dump or definitive identity. Metadata candidate ranking uses identity strength before preferred language. Manual choices and overrides are separate from observations. A provisional display selection never becomes checksum evidence.
 
 ## Archive and publication
+
+### Browse navigation and query projection (FX-01)
+
+BrowseQuery carries typed sorting and a single typed filter. Application services
+retain collection authorization and role redaction; module-owned descriptive
+fields supply artist/platform keys. Catalog schema 7 adds disposable indexed
+browse keys for effective title, artist, platform and first retained revision
+time. Metadata publication updates the effective-title key with search. Reindex
+reconstructs creation order from digest-checked earliest metadata revisions,
+never filesystem timestamps or the latest edit. No archive schema changes.
+
+Cursor tuples include the sort key, title and stable item identity and are bound
+to the user, collection, search, sorting and filter. Paging is a live keyset view,
+not a frozen snapshot across concurrent edits. Reads hydrate only the returned
+bounded page. Files-attached means published Capture files. Playable means a
+published supported audio master or prepared track with its retained recipe;
+browser codec support is still a playback concern. Needs-attention means the
+requester's failed Jobs or Imports awaiting review, without exposing other users'
+private work. These filters query committed metadata only; they do not scan or
+hash payloads. UI query parameters identify scope and selected item; history
+state stores page count, scroll and focus identity, never private item contents.
+The mounted browser caches loaded pages for incremental Load more; a scope change,
+session clear or explicit refresh invalidates reuse. Reload restores only the
+number of pages previously requested, using bounded cursor reads.
 
 The archive is portable and contains no credentials or access grants:
 
@@ -182,7 +230,7 @@ Durable publication journals contain transaction/entity identities, expected/tar
 
 Collection creation writes an immutable collection manifest and a private recovery intent for the owner grant before archive mutation. Startup completes the intended grant when the collection commit exists or removes the abandoned intent when it does not. Copying only the archive never reconstructs a grant.
 
-SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v6 and `private.sqlite` is schema v13. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
+SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v7 and `private.sqlite` is schema v13. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
 
 The first implementation reindexes metadata at startup; incremental startup/rebuild optimization remains in the performance milestone. Payloads are never read merely to browse. Writes are single-server; independent clones must not reuse operational identity. Replication requires additional protocol work, although IDs, revisions, immutable payloads and tombstones do not assume a server location.
 
@@ -224,3 +272,17 @@ Client connection/cache logic stays below Slint and SwiftUI. LAN preference is i
 ## Extension discipline
 
 Before adding a module: identify its owned data, invariants, capabilities, persistence needs, and presentation contribution. If its implementation would bypass an existing boundary, change this architecture and its contract tests first. Avoid a second importer, authorization policy, parser or playback queue inside a frontend.
+
+### Ephemeral provider artwork previews
+
+Cover Art Archive listing options carry their retained Snapshot identity. The
+curation-only preview API resolves that verified listing and enforces collection
+Curate access before passing its release/image IDs to `ArtworkPreviewPort`.
+The existing CAA adapter implements the port using its pinned redirect/DNS policy
+and bounded reader, requesting the provider's [250px endpoint](https://musicbrainz.org/doc/Cover_Art_Archive/API).
+Previews are transient image bytes, not Assets, provider observations or evidence;
+only explicit acquisition archives the original. The HTTP adapter limits concurrent
+reads to four, propagates disconnect cancellation and keeps the permit until the
+blocking read exits. Bodies are limited to 1 MiB and raster image MIME types; the
+browser uses authenticated same-origin image URLs and retry placeholders. CSP
+remains same-origin and previews are not stored in browser HTTP caches.

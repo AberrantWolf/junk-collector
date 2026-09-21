@@ -562,7 +562,8 @@ async fn main() -> Result<()> {
                         cover_art_id.clone(),
                         Arc::new(collector_app::BoundedProviderAdapter(cover_art.clone())),
                     )?
-                    .with_catalog_parser(cover_art_id, cover_art)?;
+                    .with_catalog_parser(cover_art_id, cover_art.clone())?
+                    .with_artwork_preview(cover_art);
             }
             state.catalog_sources = Arc::new(
                 dat_provider

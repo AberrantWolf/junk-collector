@@ -1,5 +1,53 @@
 # Validation recorded for the foundation
 
+## FX-01 browsing/navigation — 2026-09-21
+
+Local acceptance passed. This delivery adds a typed, bounded browse query and
+catalog 7 projection, URL/history navigation, responsive detail focus, fenced
+asynchronous reads and explicit retry states. It does not change scan admission,
+retention, item removal or reimport policy.
+
+- Store regression fixture: 105 entries, 17-entry keyset pages, unique coverage,
+  effective-title override, artist search, wishlist filtering, creation order
+  after edits/reindex, requester-private attention and denied collection access.
+- A committed WAV fixture remains browseable after its payload is removed from
+  the temporary archive: filters read recorded metadata rather than hashing or
+  opening media. Prepared-track filtering is exercised through real derivative
+  publication in the existing archive integration test.
+- `npm --prefix web run test:browse` uses a temporary real server and 62 entries.
+  It covers second-page selection, list scroll/focus restoration, Back/Forward,
+  reload, inventory/artwork edits, collection/search changes, sort/filter controls,
+  a single cursor request for Load more (no refetch of earlier pages),
+  390px keyboard navigation, delayed evidence, artwork/evidence/list retry,
+  missing-item reads and denied-detail recovery. Controlled transport faults are
+  used for error/race cases, not successful-looking substitutes for app services.
+- Reviewed [mobile](reviews/ux-2026-09-20/fx01/mobile-detail.png) and
+  [desktop](reviews/ux-2026-09-20/fx01/desktop-detail.png) captures retain artwork beside text. Same-item refresh
+  keeps details visible; failed authorized reads clear details. The test checks
+  that served assets exactly match the built bundle.
+
+Check record: architecture/link checks, formatting, strict workspace Clippy,
+TypeScript, generated API comparison, web build and embedded-server rebuild passed.
+The workspace run reported 303 passed, one expected-schema assertion failure and
+one explicitly ignored owned-corpus oracle. The catalog assertion was corrected
+from 6 to 7 (the archive-byte preservation assertions remain unchanged) and its
+focused rerun passed. A second overlapping workspace attempt hit the existing
+five-second encoder-probe timeout; the complete provider unit suite subsequently
+passed alone (7 tests). No timeout threshold or production encoder code changed.
+The final FX-01 Chrome 153.0.8010.37 journey passed. Existing smoke tests now
+explicitly clear an obsolete search and expect selection to survive reload;
+the missing-module notice assertion is scoped to the notice instead of matching
+both it and immediately restored rows. Workspace doctests, HTTPS smoke, LOCAL_SETUP=1 smoke and the final
+incremental-pagination browser run passed. Both smoke modes exercised actual
+FLAC start, pause/resume, seek, track changes, natural ended advance, clean reload
+and grant revocation. The final browser run also checks the rebuilt served assets
+byte-for-byte and bounds next-frame keyboard focus restoration to one second.
+
+Remaining external gates are unchanged: physical second-device LA3 qualification,
+independent accessibility/security, 100k scale and other deployment qualification.
+Live keyset pages are stable for unchanged data, not a frozen snapshot during
+concurrent edits. FX-02–FX-07 and the broader U05/P04 completion gates remain open.
+
 ## D04 root review corrections — 2026-09-13
 
 See [review findings and next checkpoint](wave-4-review.md). Review fixes cover
@@ -3181,3 +3229,124 @@ outside-sandbox launch permission. Final architecture/link checks and
 `git diff --check` passed. Review logs are `/tmp/la3-review-final-workspace.log`,
 `/tmp/la3-review-clippy.log`, `/tmp/la3-review-api.log`, `/tmp/la3-review-build.log`,
 `/tmp/la3-review-smoke.log` and `/tmp/la3-review-local-smoke.log`.
+
+## Web album follow-up — 2026-09-20
+
+Read-only inspection of the local installation found album command receipts taking
+707 and 722 seconds between creation and completion before their batches appeared.
+Those requests subsequently produced durable track Jobs/outputs. The single FLAC
+initially present predated the album button; it was not evidence that these newer
+requests had already completed. The live server was not restarted during its work.
+
+Music source selection was hashing the entire package on availability polls and
+again per track during batch admission. It now resolves observations using the
+committed source fingerprint. Actual source validation remains in the background
+worker before encoding and publication. A regression admits an album with altered
+payload bytes, then verifies that every track fails before encoder invocation and
+no output is published. The existing cancellation/source-change/scratch-corruption
+regression and eight album workflow tests pass.
+
+Archived image choices now render authorized lazy thumbnails with labels and an
+explicit unavailable-preview fallback. Remote CAA images still require the existing
+acquisition action before an archived preview is available; listing a provider's
+options does not silently download all originals. Preparation refreshes parent
+Capture/Item displays, retries transient polling failures, and displays errors near
+the preparation controls. Sticky close buttons no longer float across cleared
+sections. Browser regression checks assert compact spacing after the track list;
+the user's exact transient blank rendering was not independently reproduced.
+
+The Chrome HTTPS smoke passed with actual FLAC playback, loaded archived previews,
+a simulated transient availability failure, album preparation without an inventory
+save, immediate sidebar refresh, reload persistence, and layout measurements. Web
+type/build, generated contract comparison, architecture/links, Rust formatting,
+Clippy across all targets, and post-assets server build passed. Logs are under
+`/tmp/collector-web-fixes-*.log`. Live post-restart latency has not been measured;
+second-device LA3 qualification remains outstanding.
+
+Final checks: `COLLECTOR_TEST_FLAC=1 cargo test --workspace` passed 302 tests,
+zero failed, one separately configured owned-oracle test ignored; doc-tests passed.
+The sequential `LOCAL_SETUP=1 npm --prefix web run test:smoke` also passed,
+including the same real playback and regression checks over localhost HTTP.
+
+
+### Cover Art Archive chooser correction — 2026-09-20
+
+The user's screenshot identified the provider-option cards, rather than the
+already-archived image selector. Those cards now lazy-load 250px previews through
+a new curation-only endpoint. The service verifies membership in the retained
+listing before provider I/O. The existing CAA adapter supplies bounded transient
+bytes, retaining the same redirect/DNS rules; four concurrent reads, disconnect
+cancellation, a deadline, 1 MiB body limit and raster MIME restrictions apply.
+Neither previews nor retrying them archive originals. Failed previews expose a
+labelled Retry action, and explicit selection remains the acquisition command.
+The generated API gains one endpoint (98 to 99 paths) and listing options carry
+Snapshot identity; no archive schema or migration changes are needed.
+
+Eight provider tests and all 28 HTTP tests passed, including preview endpoint
+selection, oversized/non-image responses, cancellation during reading, redirect
+rejection, and public/private exposure with spoofed proxy headers. Provider fixture
+teardown now stops unused listeners and bounds socket reads/writes, so a setup
+assertion cannot leave a test hanging. The local-HTTP Chrome smoke passed with
+actual loaded thumbnails before acquisition, no Asset creation during preview,
+unknown-image rejection, failed-image retry, Viewer denial, and the prior album
+preparation/playback checks. These use local fixture providers, not live CAA or
+DAT-o-Matic. Web type/build and regenerated contract comparison passed, and the
+server binary was rebuilt. Logs: `/tmp/collector-caa-*.log`.
+Final workspace Clippy (`--all-targets -- -D warnings`), formatting,
+architecture/link and diff checks also passed.
+
+## Folder intake, upload feedback and playback selection — 2026-09-20
+
+The module tests cover nested CUE folders, multiple same-directory redumper dumps,
+overlapping filename stems, uppercase TOCs, preserved sidecars, ambiguous CUE
+ownership and missing companions. The application test exercises authorization,
+disjoint discovery and unsafe/duplicate logical paths. HTTP coverage includes the
+new discovery route and all public/private exposure combinations with spoofed
+proxy headers. The exposure fixture supplies a valid Origin so it measures router
+composition rather than the independent CSRF rejection.
+
+Chrome 153.0.8010.37 passed the HTTPS/WebAuthn smoke with real two-package folder
+selection, explicit unassigned files, no manual inventory form, automatic
+publication, reopening durable history, and uninterrupted audio playback during
+another import. Both upload interfaces show live progress; retained-prefix checking,
+wrong-source rejection, interrupted transfer resume and lost-acknowledgement retry
+passed. The earlier local-HTTP smoke passed the upload/progress regressions. A later
+local run stopped because the configured FLAC probe timed out at startup; the final
+HTTPS run qualified actual FLAC playback and the completed folder journey.
+
+Web type/build, generated API comparison, architecture/link checks, formatting,
+diff checks and workspace Clippy passed. The embedded server binary was rebuilt.
+The folder screenshot exposed oversized checkbox layout; checkbox labels were
+aligned afterward, and small transfers now display KiB rather than rounded zero
+MiB. Logs: `/tmp/collector-folder-*.log`, `/tmp/collector-upload-smoke.log`.
+
+Read-only inspection of the local OT0 archive found separate disc captures and
+original packages, with prepared tracks retained on both. No real archive data was
+changed by this work. Association changes retain the original inventory entry;
+background notifications now refresh data without selecting another item and
+unmounting its player.
+
+Final Rust validation: the workspace run passed the client, core, module and provider
+suites; after correcting the new exposure test's Origin, the server/store rerun
+passed all 196 tests, including 28 HTTP and 152 archive tests. The long AccurateRip
+workflow completed successfully. No test remains failing.
+
+## Retire reassigned automatic placeholders — 2026-09-20
+
+The ten guided-ingest archive tests passed. The association regression now checks
+portable tombstones through reindex, recovery of the association/cleanup gap,
+retention of wishlists and manual titles/authority, preservation of another Capture,
+and writer-locked rejection of a stale item snapshot after an independent Capture
+or authority change. Workspace Clippy, web type/build, formatting and architecture
+checks passed. Cleanup uses existing archive publication and schema; it never
+removes payloads. Original user data was not edited during validation.
+
+The UI refreshes destination choices after reassociation and disables correction
+until the choices load. The browser regression waits for the selected source option
+before reading its ID, avoiding an empty select value during asynchronous loading.
+
+Final local-HTTP Chrome smoke passed: reassociation returned a tombstone-backed
+404 for the retired source, excluded it from browse results, kept both Captures on
+the destination, and left unrelated real audio playing. The existing reindex and
+Viewer checks passed afterward. Log: `/tmp/collector-retirement-smoke-verified.log`.
+The rebuilt server includes the final chooser and retired-selection handling.

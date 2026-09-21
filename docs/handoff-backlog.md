@@ -4,7 +4,7 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
-## Active assignment — local alpha
+## Local alpha — remaining external qualification
 
 2026-09-20 review: new DAT-o-MATIC downloads are disabled pending reviewed
 restoration; do not resume them merely because site access returns. Cached catalogs
@@ -33,6 +33,17 @@ repeat the passing owned-corpus or actual restore work unless its owning code
 changes. The integrated alpha checkout remains uncommitted. Preserve the broader release backlog below; mark its
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
+
+## Usability fixes — FX-01 complete, FX-02 next
+
+The user requested a combined set of UX/lifecycle fixes drawing on unfinished
+milestone work. [FX-01–FX-07](ux-fix-plan.md) maps the 18 audit findings and manual
+removal/clean-reimport/scan-consolidation requirements to complete deliveries,
+pulling forward the remaining U05 and P04.4–P04.6 criteria and broader nonblocking
+work. FX-01 is implemented and locally accepted on 2026-09-21; FX-02–FX-07 remain proposed. Completed D06/D07/LA1/LA2
+are reused; P05, native clients and large-scale indexing are not prerequisites.
+The plan includes the child ledger and ready-to-send FX-02 handoff. FX-01 does not claim LA3's
+second-device gate or the broader U05/P04/background-work gates complete.
 
 ## How to use this backlog
 

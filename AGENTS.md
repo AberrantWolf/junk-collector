@@ -13,6 +13,8 @@ Read `docs/architecture.md` before adding or changing a subsystem. `docs/impleme
 
 ## Lessons from implementation reviews
 
+- Keep browsing, availability polling, and album admission free of full-payload hashing. Resolve recorded observations with committed source fingerprints; validate actual bytes in cancellable background processing before encoding/publication. Reusing a helper must not accidentally turn a catalog query into a disc-sized integrity scan per poll or per track.
+
 - External download forms are not stable APIs. Validate advertised field values, not just names; stop the batch on refusal and do not retry a blocked provider. Bound expanded archives and validate cache digests before reuse. Use offline fixtures for repairs.
 
 - Shared background work needs durable request ownership, not a frozen “owned” boolean. Commit references with admission, fence child admission with the parent claim in the same transaction, retain the first immutable Job timestamp on convergent requests, and test later direct requests plus last-owner cancellation with an advancing clock.

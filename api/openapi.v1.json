@@ -2209,6 +2209,40 @@
         }
       }
     },
+    "/api/v1/ingests/discover": {
+      "post": {
+        "operationId": "discover_ingest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverIngestCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveredIngestPlan"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/ingests/plan": {
       "post": {
         "operationId": "plan_ingest",
@@ -2506,6 +2540,35 @@
       "get": {
         "operationId": "browse",
         "parameters": [
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "title",
+                "recently_added",
+                "artist",
+                "platform"
+              ]
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "wishlist",
+                "files_attached",
+                "playable",
+                "needs_attention"
+              ]
+            }
+          },
           {
             "name": "collection_id",
             "in": "query",
@@ -3167,6 +3230,54 @@
             "description": ""
           },
           "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/metadata/artwork/{snapshot_id}/{image_id}/thumbnail": {
+      "get": {
+        "operationId": "metadata_artwork_preview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SnapshotId"
+            }
+          },
+          {
+            "name": "image_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         }
@@ -6135,6 +6246,49 @@
         },
         "additionalProperties": false
       },
+      "DiscoverIngestCommand": {
+        "type": "object",
+        "required": [
+          "collection_id",
+          "files"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadFile"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "DiscoveredIngestPlan": {
+        "type": "object",
+        "required": [
+          "unassigned_files"
+        ],
+        "properties": {
+          "plan": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IngestPlan"
+              }
+            ]
+          },
+          "unassigned_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "DisposeSpecimen": {
         "type": "object",
         "required": [
@@ -7707,6 +7861,7 @@
       "MetadataArtworkOption": {
         "type": "object",
         "required": [
+          "snapshot_id",
           "release_id",
           "image_id",
           "front",
@@ -7729,6 +7884,9 @@
           },
           "release_id": {
             "type": "string"
+          },
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
           },
           "types": {
             "type": "array",

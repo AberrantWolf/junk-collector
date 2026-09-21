@@ -1,0 +1,47 @@
+{
+  "browserVersion": "153.0.8010.37",
+  "servedAssets": {
+    "app.js": true,
+    "curation.js": true,
+    "app.css": true
+  },
+  "editor": {
+    "height": 900,
+    "contentHeight": 4671,
+    "headings": [
+      "Inventory",
+      "Music preparation",
+      "Metadata review",
+      "Physical inventory",
+      "Supporting images",
+      "Capture accession",
+      "Background work",
+      "Collection access"
+    ]
+  },
+  "manageWithSelection": "×\n\nCollection curation\n\nEdit entry\nInventory\n♪\nMusic preparation\nA test pressing\nJapan · CD\n\nNo dump is attached to this album yet. Use Edit / attach files to upload the complete dump package, review it, and publish it before preparing tracks.\n\nEncoder setup is explained in Administration → Audio encoders. Preparation requires a configured server encoder.\n\nPrepared tracks are saved automatically; Save inventory is not required. FLAC preserves the audio exactly; Opus makes a smaller copy.\n\nPrepare album as FLAC\n\nOne durable batch prepares separate validated files for every selected track. Closing this window does not cancel it.\n\n0 tracks by default\n\nNo supported music-disc source is associated with this album. Preserve and analyze a complete supported package first.\n\nPrepare selected album\nRefresh music availability\n\nLoading metadata review…\n\nCollection\nShelf & stereo\nCartridge shelf\n\nMusic CDs fields are supplied by Music CDs.\n\nTitle\nEdition / variant details\nArtist\nLabel\nRelease year\nTracks\nStructured module data is preserved and read-only here.\nWishlist\nSave inventory\n\nCopy-level records\n\nPhysical inventory\nAdd physical copy\n\nNo physical copies recorded. This item can remain wishlist-only.\n\nSupporting images\n\nPreserve covers, photos, and scans beside the record they describe.\n\nAttachment\nItem · A test pressing\nImage role\nCover\nPhoto\nScan\nVisibility\nShared with viewers\nCurators only\nAlternative text\nArtwork image\nAttach image\n\nNo artwork attached.\nThis is separate from whether the catalog identity is unidentified or tentative.\n\nCapture accession\n\nStage original package bytes, inspect the record, then choose what—if anything—they belong to.\n\nPackage source\nThis browser\nConfigured inbox\nOriginal package files\nStage package\nBackground work\n\nYour package, publication, and integrity jobs stay here across refreshes.\n\nRefresh jobs\nActive\n\nNo active jobs.\n\nHistory\ncatalog acquisition\ncompleted\ncompleted\n\n100% · attempt 1\n\nCollection access\nExact username\nRole\nViewer\nCurator\nOwner\nAdd or update access\n\nowner · owner\nRemove",
+  "manageWithoutSelection": "×\n\nCollection curation\n\nAdd or import\nImport dumps\nEnter inventory manually\nCollection\nShelf & stereo\nCartridge shelf\nImport original packages\n\nChoose a folder of dumps. We find packages in its subfolders, create entries, preserve the originals, and gather available metadata and artwork.\n\nImport from\nThis browser\nConfigured inbox\nDump folder\nChoose individual files instead\n\nKeep this window open while uploading. Once uploads finish, you can close it: saved entries and server processing are independent of this window. No separate inventory save is needed.\n\nImports\n\nNo imports yet.",
+  "importPreview": "×\n\nCollection curation\n\nAdd or import\nImport dumps\nEnter inventory manually\nCollection\nShelf & stereo\nCartridge shelf\nImport original packages\n\nChoose a folder of dumps. We find packages in its subfolders, create entries, preserve the originals, and gather available metadata and artwork.\n\nImport from\nThis browser\nConfigured inbox\nDump folder\nChoose individual files instead\nPackage name\nPackage files\n\n1 files selected · 61 B\n\n1 dump packages found. An entry will be created automatically for each package.\n\nPackage details and import options\nPrepare supported music as FLAC after preservation\nStart import\n\nKeep this window open while uploading. Once uploads finish, you can close it: saved entries and server processing are independent of this window. No separate inventory save is needed.\n\nImports\n\nNo imports yet.",
+  "previewHiddenBlockers": {
+    "open": false,
+    "text": "Package details and import optionsmissing1 files · destination: new collection entryMetadata: available · Artwork: available · FLAC: Choose a usable CD anchor before preparing this package.The CUE has no companion data file. Add its referenced files or preserve without analysis. Automatically gather available metadata and artwork"
+  },
+  "previewAfterModeSwitch": "×\n\nCollection curation\n\nAdd or import\nImport dumps\nEnter inventory manually\nCollection\nShelf & stereo\nCartridge shelf\nImport original packages\n\nChoose a folder of dumps. We find packages in its subfolders, create entries, preserve the originals, and gather available metadata and artwork.\n\nImport from\nThis browser\nConfigured inbox\nDump folder\nChoose individual files instead\n\nKeep this window open while uploading. Once uploads finish, you can close it: saved entries and server processing are independent of this window. No separate inventory save is needed.\n\nImports\n\nNo imports yet.",
+  "mobile": {
+    "scrollY": 0,
+    "viewport": 844,
+    "detailTop": 2521.65625,
+    "focus": "collection-row selected",
+    "rows": 21,
+    "documentWidth": 390,
+    "viewportWidth": 390
+  },
+  "collectionSwitch": {
+    "heading": "Cartridge shelf",
+    "detail": "A test pressing",
+    "url": "https://localhost:19843/"
+  },
+  "evidenceRace": "×\n◇\nNO ART\nAlbum 00\n\nAudit fixture\n\nPhysical copies\n0\nCaptures\n0\nIdentity\nunidentified\nEdit / attach files\n♪\nDisc player\nAlbum 00\nAudit fixture\n\nNo dump is attached to this album yet. Use Edit / attach files to upload the complete dump package, review it, and publish it before preparing tracks.\n\nPlay prepared tracks in this browser, or download a copy to use another player.\n\nRefresh music availability\nModule details\n\nCollection type: Music CDs\n\nEvidence\n\nintegrity verification\nFIRST ITEM EVIDENCE\n\nStored files",
+  "securityText": "×\n\nAccount & security\n\nYour durable profile.\nDisplay name\nSave profile\nRecovery codes\n\nReplacing codes invalidates every previous recovery code. A used code replaces your password and browser sessions.\n\nGenerate replacement codes\nBrowser sessions\n\nWeb browser · Current\nRevoke\n\nPasskeys\n\nNo passkeys registered.\n\nPaired devices\n\nNo native clients are paired.",
+  "loginText": "Junk Collector\n\nYour collection,\nwith its story intact.\n\nGames, records, original files, and the evidence that connects them.\n\nOpen your collection\n\nUse the password created by the server’s setup command.\n\nPassword\nSign inSign in with a passkey"
+}

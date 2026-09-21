@@ -15,6 +15,21 @@ use crate::{
     MetadataAuthorityRecord, Principal, ProcessingPort, ProviderRequest, SnapshotQuery,
 };
 
+/// Ephemeral provider thumbnail; never an archived Asset or verification evidence.
+pub struct ArtworkPreview {
+    pub bytes: Vec<u8>,
+    pub media_type: String,
+}
+pub const MAX_ARTWORK_PREVIEW_BYTES: u64 = 1024 * 1024;
+pub trait ArtworkPreviewPort: Send + Sync {
+    fn preview(
+        &self,
+        release_id: &str,
+        image_id: &str,
+        cancelled: &dyn Fn() -> Result<bool>,
+    ) -> Result<ArtworkPreview>;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "change", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MetadataAuthorityChange {
@@ -200,6 +215,7 @@ pub struct ApplyMetadataSnapshotCommand {
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MetadataArtworkOption {
+    pub snapshot_id: SnapshotId,
     pub release_id: String,
     pub image_id: String,
     pub front: bool,
@@ -1190,6 +1206,54 @@ impl CollectionService {
         self.metadata_review(actor, item_id)
     }
 
+    pub fn with_artwork_preview(
+        mut self,
+        provider: std::sync::Arc<dyn ArtworkPreviewPort>,
+    ) -> Self {
+        self.artwork_preview = Some(provider);
+        self
+    }
+
+    pub fn metadata_artwork_preview(
+        &self,
+        actor: &Principal,
+        item_id: ItemId,
+        snapshot_id: SnapshotId,
+        image_id: &str,
+        cancelled: &dyn Fn() -> Result<bool>,
+    ) -> Result<ArtworkPreview> {
+        // Reuse collection authorization and verified listing parsing. A caller
+        // cannot turn this into an arbitrary URL/image proxy.
+        let option = self
+            .metadata_artwork_options(actor, item_id, snapshot_id)?
+            .into_iter()
+            .find(|option| option.image_id == image_id)
+            .ok_or(Error::NotFound)?;
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
+        let preview = self
+            .artwork_preview
+            .as_ref()
+            .ok_or_else(|| Error::Unavailable("Artwork previews are not configured.".into()))?
+            .preview(&option.release_id, &option.image_id, cancelled)?;
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
+        if preview.bytes.is_empty()
+            || preview.bytes.len() as u64 > MAX_ARTWORK_PREVIEW_BYTES
+            || !matches!(
+                preview.media_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp"
+            )
+        {
+            return Err(Error::Unavailable(
+                "Invalid or oversized artwork preview.".into(),
+            ));
+        }
+        Ok(preview)
+    }
+
     pub fn metadata_artwork_options(
         &self,
         actor: &Principal,
@@ -1233,6 +1297,7 @@ impl CollectionService {
                 let option: collector_modules::music::CoverArtObservation = raw.parse()?;
                 option.validate()?;
                 Ok(MetadataArtworkOption {
+                    snapshot_id,
                     release_id: option.release_id,
                     image_id: option.image_id,
                     front: option.front,

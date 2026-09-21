@@ -61,10 +61,12 @@ struct FixtureServer {
     origin: String,
     requests: Arc<Mutex<Vec<(Instant, String)>>>,
     join: Option<thread::JoinHandle<()>>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Drop for FixtureServer {
     fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
         if let Some(join) = self.join.take() {
             join.join().unwrap();
         }
@@ -74,11 +76,31 @@ impl Drop for FixtureServer {
 fn serve(replies: Vec<Reply>) -> FixtureServer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopping = stop.clone();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&requests);
     let join = thread::spawn(move || {
         for reply in replies {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = loop {
+                if stopping.load(Ordering::Relaxed) {
+                    return;
+                }
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10))
+                    }
+                    Err(error) => panic!("fixture accept: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
             let mut request = vec![0_u8; 16 * 1024];
             let read = stream.read(&mut request).unwrap();
             seen.lock().unwrap().push((
@@ -99,6 +121,7 @@ fn serve(replies: Vec<Reply>) -> FixtureServer {
         origin: format!("http://{address}"),
         requests,
         join: Some(join),
+        stop,
     }
 }
 
@@ -670,4 +693,75 @@ fn cached_bounds_candidate_versions_and_malformed_successes_are_checked() {
                 .is_err()
         );
     }
+}
+
+#[test]
+fn artwork_previews_use_small_endpoint_and_bound_redirects_bytes_types_and_cancellation() {
+    use collector_app::ArtworkPreviewPort;
+    let release = "00000000-0000-4000-8000-000000000001";
+    let server = serve(vec![reply("200 OK\r\nContent-Type: image/png", b"preview")]);
+    let provider = CoverArtArchiveProvider::with_test_origins(
+        "collector-test/1 (test@example.invalid)",
+        &server.origin,
+        &[],
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    let preview = provider.preview(release, "12345", &|| Ok(false)).unwrap();
+    assert_eq!(preview.bytes, b"preview");
+    assert_eq!(preview.media_type, "image/png");
+    assert!(
+        server.requests.lock().unwrap()[0]
+            .1
+            .contains(&format!("GET /release/{release}/12345-250 "))
+    );
+    assert!(
+        provider
+            .preview(release, "../private", &|| Ok(false))
+            .is_err()
+    );
+    assert!(matches!(
+        provider.preview(release, "12345", &|| Ok(true)),
+        Err(collector_core::Error::JobCancelled)
+    ));
+    for response in [
+        reply(
+            "200 OK\r\nContent-Type: image/png",
+            vec![0; collector_app::MAX_ARTWORK_PREVIEW_BYTES as usize + 1],
+        ),
+        reply("200 OK\r\nContent-Type: text/html", b"not an image"),
+        reply(
+            "307 Temporary Redirect\r\nLocation: http://untrusted.invalid/image",
+            Vec::new(),
+        ),
+        reply("404 Not Found", Vec::new()),
+    ] {
+        let server = serve(vec![response]);
+        let provider = CoverArtArchiveProvider::with_test_origins(
+            "collector-test/1 (test@example.invalid)",
+            &server.origin,
+            &[],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert!(provider.preview(release, "12345", &|| Ok(false)).is_err());
+    }
+    let server = serve(vec![reply(
+        "200 OK\r\nContent-Type: image/png",
+        vec![0; 128 * 1024],
+    )]);
+    let provider = CoverArtArchiveProvider::with_test_origins(
+        "collector-test/1 (test@example.invalid)",
+        &server.origin,
+        &[],
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    let checks = AtomicUsize::new(0);
+    assert!(matches!(
+        provider.preview(release, "12345", &|| Ok(checks
+            .fetch_add(1, Ordering::SeqCst)
+            >= 2)),
+        Err(collector_core::Error::JobCancelled)
+    ));
 }

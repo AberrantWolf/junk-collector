@@ -7,7 +7,9 @@ export function useDialogDismiss(onClose:()=>void){
  const close=useRef(onClose);close.current=onClose;
  function dismiss(){
   const element=ref.current;if(!element)return;
-  if(element.matches('[data-unsaved="true"]')||element.querySelector('[data-unsaved="true"]')){
+  if(element.querySelector('[data-uploading="true"]')){
+   if(!window.confirm('Pause this upload and close? Saved entries and received bytes are kept. Reopen Import dumps and select the same folder or files to resume.'))return;
+  }else if(element.matches('[data-unsaved="true"]')||element.querySelector('[data-unsaved="true"]')){
    if(!window.confirm('Discard unsaved changes and close? Saved records and uploaded files will be kept.'))return;
   }else if(element.getAttribute('aria-busy')==='true'&&!window.confirm('Work is still in progress. Close this window? Submitted work may continue on the server.'))return;
   close.current();

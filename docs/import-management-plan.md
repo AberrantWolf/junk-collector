@@ -1,5 +1,10 @@
 # Import history and cleanup — P04 completion follow-up
 
+**Planning update 2026-09-21:** [FX-03/04/05/07](ux-fix-plan.md) incorporates the
+remaining searchable history, bulk cleanup, dismiss/restore and completion scope,
+plus newly requested manual item removal and clean reimport. These are proposed
+deliveries, not completed P04 criteria; retain the implemented LA1 subset below.
+
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA1 integrates the relevant acceptance below across layers. Individual child
 assignments at the bottom are reference scope, not separate required handoffs.

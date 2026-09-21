@@ -602,7 +602,9 @@ impl CoverArtArchiveProvider {
         }
         let mut last_error = None;
         for attempt in 0..MAX_ATTEMPTS {
-            let response = match self.send_redirects(self.request_url(&query)?, execution) {
+            let response = match self.send_redirects(self.request_url(&query)?, &|| {
+                execution.cancellation_requested()
+            }) {
                 Ok(response) => response,
                 Err(Error::JobCancelled) => return Err(Error::JobCancelled),
                 Err(error) => {
@@ -646,10 +648,12 @@ impl CoverArtArchiveProvider {
     fn send_redirects(
         &self,
         mut url: Url,
-        execution: &dyn ProcessingExecutionContext,
+        cancelled: &dyn Fn() -> Result<bool>,
     ) -> Result<Response> {
         for redirects in 0..=MAX_REDIRECTS {
-            checkpoint(execution)?;
+            if cancelled()? {
+                return Err(Error::JobCancelled);
+            }
             self.policy.validate_destination(&url)?;
             let response = self
                 .client
@@ -700,6 +704,54 @@ impl Drop for CoverArtArchiveProvider {
         if let Some(client) = self.client.take() {
             let _ = thread::spawn(move || drop(client)).join();
         }
+    }
+}
+
+impl collector_app::ArtworkPreviewPort for CoverArtArchiveProvider {
+    fn preview(
+        &self,
+        release_id: &str,
+        image_id: &str,
+        cancelled: &dyn Fn() -> Result<bool>,
+    ) -> Result<collector_app::ArtworkPreview> {
+        let query = CoverArtArchiveQuery::Image {
+            release_id: release_id.into(),
+            image_id: image_id.into(),
+        };
+        let mut url = self.request_url(&query)?;
+        url.set_path(&format!("/release/{release_id}/{image_id}-250"));
+        let response = self.send_redirects(url, cancelled)?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err(Error::NotFound);
+        }
+        if response.status() != StatusCode::OK {
+            return Err(Error::Unavailable(format!(
+                "Artwork preview returned HTTP {}",
+                response.status()
+            )));
+        }
+        let media_type = content_type(&response);
+        if !matches!(
+            media_type.as_str(),
+            "image/png" | "image/jpeg" | "image/webp"
+        ) {
+            return Err(Error::Unavailable(
+                "Unsupported artwork preview type".into(),
+            ));
+        }
+        let bytes = read_bounded_with_progress(
+            response,
+            collector_app::MAX_ARTWORK_PREVIEW_BYTES,
+            &mut |_| {
+                if cancelled()? {
+                    Err(Error::JobCancelled)
+                } else {
+                    Ok(())
+                }
+            },
+            "Artwork preview",
+        )?;
+        Ok(collector_app::ArtworkPreview { bytes, media_type })
     }
 }
 
@@ -1134,9 +1186,26 @@ fn read_snapshot(
 }
 
 fn read_bounded(
-    mut response: Response,
+    response: Response,
     limit: u64,
     execution: &mut dyn ProcessingExecutionContext,
+    label: &str,
+) -> Result<Vec<u8>> {
+    read_bounded_with_progress(
+        response,
+        limit,
+        &mut |completed| {
+            checkpoint(execution)?;
+            execution.report_progress("downloading_provider_response", completed, limit)
+        },
+        label,
+    )
+}
+
+fn read_bounded_with_progress(
+    mut response: Response,
+    limit: u64,
+    progress: &mut dyn FnMut(u64) -> Result<()>,
     label: &str,
 ) -> Result<Vec<u8>> {
     if response
@@ -1157,7 +1226,7 @@ fn read_bounded(
     );
     let mut buffer = [0_u8; READ_CHUNK_BYTES];
     loop {
-        checkpoint(execution)?;
+        progress(bytes.len() as u64)?;
         let read = response
             .read(&mut buffer)
             .map_err(|error| Error::Unavailable(format!("{label} response read: {error}")))?;
@@ -1170,7 +1239,7 @@ fn read_bounded(
             )));
         }
         bytes.extend_from_slice(&buffer[..read]);
-        execution.report_progress("downloading_provider_response", bytes.len() as u64, limit)?;
+        progress(bytes.len() as u64)?;
     }
     Ok(bytes)
 }

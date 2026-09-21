@@ -30,6 +30,17 @@ The full first release, native clients and public deployment remain later target
 
 ## Implemented
 
+- Web album follow-up (2026-09-20): archived cover choices have authenticated
+  thumbnail previews. Cover Art Archive options also show lazy provider previews
+  before acquisition, with unavailable/retry states and no automatic archival.
+  A curator-only, bounded server adapter fetches 250px thumbnails; editor close controls no longer float across cleared
+  sections. Preparation updates refresh the parent Item/Capture display and
+  transient polling errors retry. Album preparation saves independently of
+  inventory; its error is shown beside the preparation controls. Music selection
+  uses recorded source fingerprints for browsing/admission rather than hashing
+  the whole disc on every poll and per album track. Background conversion retains
+  actual-byte validation before encoding and publication.
+
 - LA3 is partially qualified on macOS 26.6.2 arm64. Five isolated owned-package
   copies cover flat and nested layouts, mixed-mode game data, Redumper/BIN+CUE,
   existing FLAC sidecars and damaged input. Preservation, retained structure/raw
@@ -350,7 +361,7 @@ recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
 D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. D06.1 durable metadata authority and deterministic resolution are reviewed and corrected locally; D06.2 providers and artwork are reviewed and corrected locally; D06.3 metadata review and effective presentation are reviewed and corrected locally.
-Archive schema 4 and catalog schema 6 cover processing observations,
+Archive schema 4 and catalog schema 7 cover processing observations,
 streamed snapshots, metadata authority, and conversion recipes; private schema 13
 persists frozen Job input, provisional Import observations, active catalog
 selection, guided-ingest intent and restartable staging cleanup. Import publication
@@ -370,6 +381,20 @@ consumers use the same algorithms. The validation
 evidence and remaining limits are recorded in [validation](validation.md).
 The native user-testable surface in this wave is a diagnostic CLI; Slint,
 offline-library management and the Trash Amp provider remain later tickets.
+
+## Usability/lifecycle fixes — 2026-09-21
+
+FX-01 in [the fix plan](ux-fix-plan.md) implements URL-backed browsing,
+immediately visible responsive details, fenced evidence reads, explicit read-error
+recovery, and server-paginated title/recent/artist/platform sorting with wishlist,
+files-attached, playable-audio and requester-scoped attention filters. Catalog 7
+adds rebuildable browse keys; browsing does not hash payloads. Local acceptance passed on 2026-09-21; see the [validation record](validation.md#fx-01-browsingnavigation--2026-09-21)
+for browser evidence and exact Rust check/rerun outcomes.
+
+FX-02–FX-07 remain proposed: equivalent-scan admission and compact result
+occurrences, searchable history/bulk cleanup, focused editing/intake, manual
+removal/restore/clean reimport, account recovery and the whole-interface review.
+LA3's second-device qualification and broader release gates remain open.
 
 ## Required before the planned first release
 
@@ -569,3 +594,30 @@ shared by the adapter and matcher. The manual cache helper validates existing
 digests, bounds expansion and stages complete new entries. New DAT-o-MATIC network
 requests are paused in code following error 1260; cached data remains usable.
 Second-device qualification remains outstanding.
+
+### Folder intake and upload feedback (2026-09-20)
+
+- Add / import defaults to folder intake, with manual inventory as a separate mode.
+  Modules group same-stem redumper packages, CUE directory packages, and supported
+  game single-file formats. Nested anchored CUE folders remain separate; multiple
+  CUEs in one directory stay together for review. Unassigned files are listed.
+- Every accepted browser package uploads in sequence and has a durable entry and
+  import record before bytes transfer. Closing interrupts browser transfer, not
+  saved entries or subsequent server jobs; selecting the same originals resumes.
+- Both upload UIs share actual request-body progress, server acknowledgement,
+  retained-prefix checks, abort handling and safe lost-response retry. Server work
+  without measurable units uses an indeterminate bar rather than invented percent.
+- Background import notifications refresh the collection without selecting another
+  entry and unmounting its player. Association details show the current destination;
+  correcting an association retires an unused automatic placeholder while retaining independent inventory, manual information and other discs.
+
+- Placeholder retirement is an application-owned, recoverable follow-up to a committed
+  guided association change. Settled/cancelled intent plus the current association
+  identify cleanup candidates, including gaps from earlier server versions. The
+  adapter compares the whole hydrated item and metadata-authority revision under
+  the archive writer lock before publishing the existing portable tombstone.
+  Other captures, assets, specimens, wishlists, identity/domain edits and manual
+  metadata authority prevent automatic retirement. The original guided workflow settles
+  before retirement; no payloads are deleted. Browser refresh clears retired
+  selections, and explicit reassociation follows the destination only if the moved
+  source was selected, preserving unrelated playback.

@@ -1,6 +1,7 @@
 //! Portable immutable revisions plus local SQLite projections and private operational state.
 mod archive_v3;
 mod auth;
+mod browse;
 mod commands;
 mod derivatives;
 mod files;
@@ -527,7 +528,7 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
-            "DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
+            "DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
         )
         .map_err(storage)?;
         for (collection, path) in collections {
@@ -603,6 +604,8 @@ impl Store {
         }
         for (record, path) in records {
             project(&tx, &record, &relative(&self.archive, &path)?)?;
+            let added = browse::first_record_time(&path, record.item.collection_id)?;
+            browse::set_added(&tx, record.item.id, added)?;
         }
         self.project_v4_records(&tx)?;
         self.validate_derivative_projection(&tx)?;
@@ -1994,7 +1997,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 6 {
+    if catalog_version > 7 {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -2111,6 +2114,17 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
+    db.execute_batch("CREATE TABLE IF NOT EXISTS browse_items (
+        id TEXT PRIMARY KEY, collection_id TEXT NOT NULL, title_key TEXT NOT NULL,
+        artist_key TEXT NOT NULL, platform_key TEXT NOT NULL, recent_key TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS browse_title ON browse_items(title_key,id);
+        CREATE INDEX IF NOT EXISTS browse_recent ON browse_items(recent_key,id);
+        CREATE INDEX IF NOT EXISTS browse_artist ON browse_items(artist_key,title_key,id);
+        CREATE INDEX IF NOT EXISTS browse_platform ON browse_items(platform_key,title_key,id);
+        CREATE INDEX IF NOT EXISTS captures_item ON captures(item_id,id);
+        CREATE INDEX IF NOT EXISTS private.jobs_item_owner_state ON jobs(item_id,user_id,state);
+        CREATE INDEX IF NOT EXISTS private.imports_item_owner_phase ON imports(item_id,user_id,phase);
+        PRAGMA main.user_version = 7;").map_err(storage)?;
     Ok(())
 }
 
@@ -2623,71 +2637,7 @@ impl Catalog for Store {
         Ok(())
     }
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>> {
-        let db = lock(&self.db)?;
-        let limit = query.limit.unwrap_or(50).clamp(1, 200) as usize;
-        if query
-            .cursor
-            .as_ref()
-            .is_some_and(|c| c.parse::<ItemId>().is_err())
-        {
-            return Err(Error::Invalid("invalid cursor".into()));
-        }
-        let collection = query.collection_id.map(|c| c.to_string());
-        let search = query.search.unwrap_or_default();
-        if search.len() > 256 {
-            return Err(Error::Invalid("search is too long".into()));
-        }
-        let terms = search
-            .split_whitespace()
-            .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
-            .collect::<Vec<_>>()
-            .join(" AND ");
-        let base = "SELECT i.record FROM items i JOIN private.grants g ON g.collection_id=i.collection_id WHERE g.user_id=?1 AND i.deleted=0 AND (?2 IS NULL OR i.collection_id=?2) AND i.id > ?3";
-        let sql = if terms.is_empty() {
-            format!("{base} ORDER BY i.id LIMIT ?4")
-        } else {
-            format!(
-                "{base} AND i.id IN (SELECT id FROM search WHERE search MATCH ?5) ORDER BY i.id LIMIT ?4"
-            )
-        };
-        let mut stmt = db.prepare(&sql).map_err(storage)?;
-        let cursor = query.cursor.unwrap_or_default();
-        let mut rows = if terms.is_empty() {
-            stmt.query(params![
-                user.to_string(),
-                collection,
-                cursor,
-                (limit + 1) as i64
-            ])
-        } else {
-            stmt.query(params![
-                user.to_string(),
-                collection,
-                cursor,
-                (limit + 1) as i64,
-                terms
-            ])
-        }
-        .map_err(storage)?;
-        let mut items: Vec<Item> = Vec::new();
-        while let Some(row) = rows.next().map_err(storage)? {
-            items.push(
-                serde_json::from_str(&row.get::<_, String>(0).map_err(storage)?)
-                    .map_err(storage)?,
-            );
-        }
-        drop(rows);
-        drop(stmt);
-        for item in &mut items {
-            hydrate_captures(&db, item)?;
-        }
-        let next_cursor = if items.len() > limit {
-            items.truncate(limit);
-            items.last().map(|i| i.id.to_string())
-        } else {
-            None
-        };
-        Ok(Page { items, next_cursor })
+        browse::browse(&*lock(&self.db)?, user, query)
     }
     fn item(&self, id: ItemId) -> Result<Item> {
         let record: String = lock(&self.db)?
@@ -2706,6 +2656,32 @@ impl Catalog for Store {
     fn save(&self, item: Item, expected: Revision) -> Result<Item> {
         self.publish(item, expected, vec![])
     }
+    fn retire_item_if_unchanged(
+        &self,
+        mut item: Item,
+        authority_revision: Option<Revision>,
+    ) -> Result<()> {
+        let _writer = lock(&self.writer)?;
+        let current = Catalog::item(self, item.id)?;
+        let authority =
+            collector_app::ProcessingPort::metadata_authority(self, item.collection_id, item.id)?;
+        // Captures, assets and authority have independent revisions. Item revision
+        // alone cannot fence a concurrent attachment or manual metadata override.
+        if serde_json::to_value(&current).map_err(storage)?
+            != serde_json::to_value(&item).map_err(storage)?
+            || authority.map(|value| value.revision) != authority_revision
+        {
+            return Err(Error::Conflict);
+        }
+        if !item.captures.is_empty() {
+            return Err(Error::Conflict);
+        }
+        let expected = item.revision;
+        item.deleted = true;
+        self.publish_under_writer(item, expected, vec![])?;
+        Ok(())
+    }
+
     fn work(&self, id: WorkId) -> Result<Work> {
         projected_record(&*lock(&self.db)?, "works", &id.to_string())
     }
@@ -3086,12 +3062,22 @@ fn project(tx: &Connection, record: &RevisionRecord, path: &str) -> Result<()> {
     let item = &record.item;
     item.validate()?;
     tx.execute("INSERT INTO items VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,title=excluded.title,subtitle=excluded.subtitle,record=excluded.record,path=excluded.path,deleted=excluded.deleted", params![item.id.to_string(),item.collection_id.to_string(),item.revision.0,item.title,item.subtitle,serde_json::to_string(item).map_err(storage)?,path,item.deleted]).map_err(storage)?;
+    browse::project(tx, item)?;
     tx.execute("DELETE FROM search WHERE id=?", [item.id.to_string()])
         .map_err(storage)?;
     if !item.deleted {
         tx.execute(
             "INSERT INTO search VALUES (?,?,?)",
-            params![item.id.to_string(), item.title, item.subtitle],
+            params![
+                item.id.to_string(),
+                item.title,
+                format!(
+                    "{} {} {}",
+                    item.subtitle,
+                    collector_app::browse_sort_fields(item).0,
+                    collector_app::browse_sort_fields(item).1
+                )
+            ],
         )
         .map_err(storage)?;
     }

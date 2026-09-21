@@ -8,7 +8,8 @@
     "check": "tsc --noEmit",
     "check:api": "python3 ../scripts/api_contract.py",
     "generate:api": "python3 ../scripts/api_contract.py --write",
-    "test:smoke": "node tests/smoke.mjs"
+    "test:smoke": "node tests/smoke.mjs",
+    "test:browse": "node tests/browse.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

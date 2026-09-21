@@ -5,7 +5,7 @@ type Availability=components['schemas']['MusicTrackAvailability'];
 type AlbumPlan=components['schemas']['MusicAlbumPreparationPlan'];
 type Batch=components['schemas']['MusicPreparationBatchView'];
 type Item=components['schemas']['PresentedItem'];
-type Props={item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:()=>void};
+type Props={item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:(item:Item)=>void};
 
 function profileLabel(profile:Availability['profile']):string{
  return profile.codec==='flac'?'FLAC':`Opus ${profile.bitrate_kbps} kbps`;
@@ -52,6 +52,7 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
  const requests=useRef(new AbortController());
  const commandKeys=useRef(new Map<string,string>());
  const initializedDiscs=useRef(new Set<string>());
+ const notifiedOutputs=useRef<string|undefined>(undefined);
  function commandKey(scope:string){const keys=commandKeys.current;const key=keys.get(scope)||crypto.randomUUID();keys.set(scope,key);return key;}
  const audio=useRef<HTMLAudioElement|null>(null);
  const playbackGeneration=useRef(0);
@@ -77,7 +78,7 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
   else setError(requestErrorMessage(value,'Access to this music is no longer available. Ask a collection owner to restore Viewer access.'));
  }
  useEffect(()=>{
-  requests.current=new AbortController();commandKeys.current.clear();initializedDiscs.current.clear();
+  requests.current=new AbortController();commandKeys.current.clear();initializedDiscs.current.clear();notifiedOutputs.current=undefined;
   setRows([]);setError('');setPlaybackError('');setPendingTracks(new Set());setPlan(undefined);setBatches([]);setDiscSources({});setIncludedDiscs(new Set());setBusy(false);setActiveDisc('');setCurrentIndex(0);stopAudio();
   return()=>{requests.current.abort();const element=audio.current;if(element){element.pause();element.removeAttribute('src');element.load();}};
  },[item.id]);
@@ -89,8 +90,14 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
    try{
     const next=await api<Availability[]>(`/items/${item.id}/music-tracks`,{signal:controller.signal});
     if(controller.signal.aborted)return;setRows(next);setLoading(false);
+    const outputs=JSON.stringify(next.flatMap(row=>row.state.status==='available'?[row.state.representation_id]:[]).sort());
+    if(callbacks.current.onPrepared&&outputs!==notifiedOutputs.current&&outputs!=='[]'){
+     const saved=await api<Item>(`/items/${item.id}`,{signal:controller.signal});
+     if(controller.signal.aborted)return;
+     notifiedOutputs.current=outputs;callbacks.current.onPrepared(saved);
+    }
     timer=setTimeout(load,next.some(row=>row.state.status==='preparing')?1500:5000);
-   }catch(value){if(!controller.signal.aborted){setLoading(false);if(isApiRequestError(value)&&(value.code==='forbidden'||value.code==='unauthenticated'||value.status===404)){setRows([]);stopAudio();}report(value);}}
+   }catch(value){if(!controller.signal.aborted){setLoading(false);if(isApiRequestError(value)&&(value.code==='forbidden'||value.code==='unauthenticated'||value.status===404)){setRows([]);stopAudio();}report(value);if(!isApiRequestError(value)||!['forbidden','unauthenticated'].includes(value.code)&&value.status!==404)timer=setTimeout(load,5000);}}
   }
   void load();return()=>{controller.abort();clearTimeout(timer);};
  },[item.id,item.revision,captureRevisions,availabilityRefresh]);
@@ -109,7 +116,7 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
     for(const id of added)initializedDiscs.current.add(id);
     if(added.length)setIncludedDiscs(current=>new Set([...current,...added]));
     if(nextBatches.some(batch=>batch.queued>0||batch.running>0))timer=setTimeout(load,1200);
-   }catch(value){if(!controller.signal.aborted)report(value);}
+   }catch(value){if(!controller.signal.aborted){report(value);if(!isApiRequestError(value)||(!['forbidden','unauthenticated'].includes(value.code)&&value.status!==404))timer=setTimeout(load,5000);}}
   }
   void load();return()=>{controller.abort();clearTimeout(timer);};
  },[canPrepare,item.id,item.revision,captureRevisions,refresh]);
@@ -192,7 +199,8 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
   {loading&&<p role="status">Checking music availability…</p>}
   {!loading&&!discs.length&&!error&&<p className="notice">{item.captures.length?'No supported audio tracks were found in the attached captures. Use Music CD analysis in Edit / attach files to inspect the package layout and its limitations. Check that the complete BIN/CUE or supported redumper package was published. Original files remain available below.':'No dump is attached to this album yet. Use Edit / attach files to upload the complete dump package, review it, and publish it before preparing tracks.'}</p>}
   {canPrepare&&<p className="muted">Encoder setup is explained in Administration → Audio encoders. Preparation requires a configured server encoder.</p>}
-  <p className="muted">{canPrepare?'Prepare a separate file for each track. FLAC preserves the audio exactly; Opus makes a smaller copy.':'Play prepared tracks in this browser, or download a copy to use another player.'}</p>
+  <p className="muted">{canPrepare?'Prepared tracks are saved automatically; Save inventory is not required. FLAC preserves the audio exactly; Opus makes a smaller copy.':'Play prepared tracks in this browser, or download a copy to use another player.'}</p>
+  {error&&<p role="alert" className="error">{error}</p>}
   {canPrepare&&plan&&<section className="album-preparation" aria-label="Prepare album"><div className="section-heading"><div><h4>Prepare album as FLAC</h4><p className="muted">One durable batch prepares separate validated files for every selected track. Closing this window does not cancel it.</p></div><span>{plan.total_tracks} tracks by default</span></div>
    {plan.discs.map((disc,index)=><fieldset key={disc.capture_id}><legend>Associated disc {index+1}</legend><label><input type="checkbox" checked={includedDiscs.has(disc.capture_id)} onChange={event=>setIncludedDiscs(current=>{const next=new Set(current);event.target.checked?next.add(disc.capture_id):next.delete(disc.capture_id);return next;})}/> Include this disc</label>{disc.sources.length===1?<p className="muted">{disc.sources[0].track_count} tracks · {disc.sources[0].already_available} ready · {disc.sources[0].preparing} preparing</p>:<>{disc.message&&<p className="notice">{disc.message}</p>}{disc.sources.map((source,sourceIndex)=><label key={source.source_representation_id}><input type="radio" name={`album-source-${disc.capture_id}`} checked={discSources[disc.capture_id]===source.source_representation_id} onChange={()=>setDiscSources(current=>({...current,[disc.capture_id]:source.source_representation_id}))}/> Source {sourceIndex+1}: {source.track_count} tracks · {source.already_available} ready</label>)}</>}</fieldset>)}
    {plan.blockers.map(message=><p className="notice" key={message}>{message}</p>)}
@@ -218,7 +226,6 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
    <div className="transport"><button aria-label="Previous track" disabled={currentIndex===0} onClick={()=>void move(-1)}>Previous</button><button className="primary" aria-label={playbackState==='playing'?'Pause':'Play'} disabled={!selected} onClick={()=>void togglePlayback()}>{playbackState==='playing'?'Pause':'Play'}</button><button aria-label="Next track" disabled={currentIndex>=queue.length-1} onClick={()=>void move(1)}>Next</button></div>
    <label className="seek"><span>{Math.floor(position)}s</span><input aria-label={`Seek in ${selectedGroup[0].title}`} type="range" min="0" max={duration||0} step="0.05" value={Math.min(position,duration||0)} disabled={!loadedIdentity||duration<=0} onChange={event=>seek(Number(event.target.value))}/><span>{Math.floor(duration)}s</span></label>
   </div>}
-  {error&&<p role="alert" className="error">{error}</p>}
   {playbackError&&<p role="alert" className="error">{playbackError}</p>}
   <button disabled={busy} onClick={()=>{setError('');setAvailabilityRefresh(value=>value+1);setRefresh(value=>value+1);}}>Refresh music availability</button>
  </section>;

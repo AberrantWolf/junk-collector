@@ -1355,8 +1355,31 @@ pub struct Page<T> {
     pub items: Vec<T>,
     pub next_cursor: Option<String>,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowseSort {
+    #[default]
+    Title,
+    RecentlyAdded,
+    Artist,
+    Platform,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowseFilter {
+    #[default]
+    All,
+    Wishlist,
+    FilesAttached,
+    Playable,
+    NeedsAttention,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BrowseQuery {
+    #[serde(default)]
+    pub sort: BrowseSort,
+    #[serde(default)]
+    pub filter: BrowseFilter,
     pub collection_id: Option<CollectionId>,
     pub search: Option<String>,
     pub cursor: Option<String>,

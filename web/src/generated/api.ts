@@ -772,6 +772,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingests/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["discover_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ingests/plan": {
         parameters: {
             query?: never;
@@ -1022,6 +1038,22 @@ export interface paths {
         get: operations["metadata_artwork_options"];
         put?: never;
         post: operations["publish_metadata_artwork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/metadata/artwork/{snapshot_id}/{image_id}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metadata_artwork_preview"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1883,6 +1915,14 @@ export interface components {
             /** Format: int64 */
             expected_revision: number;
         };
+        DiscoverIngestCommand: {
+            collection_id: components["schemas"]["CollectionId"];
+            files: components["schemas"]["UploadFile"][];
+        };
+        DiscoveredIngestPlan: {
+            plan?: null | components["schemas"]["IngestPlan"];
+            unassigned_files: string[];
+        };
         DisposeSpecimen: {
             command: components["schemas"]["DisposeSpecimenCommand"];
             expected_revision: components["schemas"]["Revision"];
@@ -2276,6 +2316,7 @@ export interface components {
             front: boolean;
             image_id: string;
             release_id: string;
+            snapshot_id: components["schemas"]["SnapshotId"];
             types: string[];
         };
         MetadataAuthority: {
@@ -5083,6 +5124,41 @@ export interface operations {
             };
         };
     };
+    discover_ingest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscoverIngestCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscoveredIngestPlan"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     plan_ingest: {
         parameters: {
             query?: never;
@@ -5346,6 +5422,8 @@ export interface operations {
     browse: {
         parameters: {
             query?: {
+                sort?: "title" | "recently_added" | "artist" | "platform";
+                filter?: "all" | "wishlist" | "files_attached" | "playable" | "needs_attention";
                 collection_id?: components["schemas"]["CollectionId"];
                 search?: string;
                 cursor?: string;
@@ -5897,6 +5975,47 @@ export interface operations {
                 content?: never;
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metadata_artwork_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+                snapshot_id: components["schemas"]["SnapshotId"];
+                image_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

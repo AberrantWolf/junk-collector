@@ -1829,6 +1829,12 @@ pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSel
 pub struct Music;
 
 impl CollectionModule for Music {
+    fn discover_imports(
+        &self,
+        names: &[PackageFileName],
+    ) -> Vec<crate::import_discovery::DiscoveredImportPackage> {
+        crate::import_discovery::discover(names, false)
+    }
     fn import_readiness(
         &self,
         names: &[PackageFileName],

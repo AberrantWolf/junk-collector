@@ -1270,6 +1270,11 @@ pub(crate) fn project_effective_metadata_search(
         .collect::<Result<Vec<_>>>()?;
     let display = collector_app::resolve_record_metadata(&item, record, &candidates)?;
     tx.execute(
+        "UPDATE browse_items SET title_key=? WHERE id=?",
+        params![display.title.value.to_lowercase(), item.id.to_string()],
+    )
+    .map_err(storage)?;
+    tx.execute(
         "DELETE FROM search WHERE id=?",
         [record.item_id.to_string()],
     )
@@ -1280,11 +1285,16 @@ pub(crate) fn project_effective_metadata_search(
             params![
                 item.id.to_string(),
                 display.title.value,
-                display
-                    .subtitle
-                    .as_ref()
-                    .map(|value| value.value.as_str())
-                    .unwrap_or("")
+                format!(
+                    "{} {} {}",
+                    display
+                        .subtitle
+                        .as_ref()
+                        .map(|value| value.value.as_str())
+                        .unwrap_or(""),
+                    collector_app::browse_sort_fields(&item).0,
+                    collector_app::browse_sort_fields(&item).1
+                )
             ],
         )
         .map_err(storage)?;

@@ -166,6 +166,68 @@ impl CollectionService {
         })
     }
 
+    pub fn discover_ingest(
+        &self,
+        actor: &Principal,
+        command: DiscoverIngestCommand,
+    ) -> Result<DiscoveredIngestPlan> {
+        let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
+        validate_plan_files(&command.files)?;
+        let names = command
+            .files
+            .iter()
+            .map(|file| PackageFileName::new(file.name.clone()))
+            .collect::<Result<Vec<_>>>()?;
+        let discovered = self.modules.discover_imports(&eligibility.owner, &names)?;
+        let mut used = BTreeSet::new();
+        let mut packages = Vec::new();
+        for package in discovered {
+            let mut files = Vec::new();
+            for index in package.file_indices {
+                let file = command.files.get(index).ok_or_else(|| {
+                    Error::Invalid("module returned an invalid package member".into())
+                })?;
+                if !used.insert(index) {
+                    return Err(Error::Invalid(
+                        "module returned overlapping packages".into(),
+                    ));
+                }
+                files.push(file.clone());
+            }
+            packages.push(IngestPackageSelection {
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: package.label,
+                },
+                files,
+                anchor_file_index: None,
+            });
+        }
+        let unassigned_files = command
+            .files
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !used.contains(index))
+            .map(|(_, file)| file.name.clone())
+            .collect();
+        let plan = if packages.is_empty() {
+            None
+        } else {
+            Some(self.plan_ingest(
+                actor,
+                PlanIngestCommand {
+                    collection_id: command.collection_id,
+                    packages,
+                },
+            )?)
+        };
+        Ok(DiscoveredIngestPlan {
+            plan,
+            unassigned_files,
+        })
+    }
+
     pub fn plan_ingest(&self, actor: &Principal, command: PlanIngestCommand) -> Result<IngestPlan> {
         if command.packages.is_empty() || command.packages.len() > 64 {
             return Err(Error::Invalid(
@@ -645,7 +707,72 @@ impl CollectionService {
             intent.updated_at = self.authentication.now();
             self.provisional_imports.save_guided_ingest_intent(intent)?;
         }
+        if let Some(intent) = self.provisional_imports.guided_ingest_intent(id)? {
+            self.retire_reassigned_placeholder(&intent)?;
+        }
         Ok(())
+    }
+
+    /// The committed association and original intent are the durable cleanup
+    /// request. Reconciliation retries the gap after the association receipt.
+    fn retire_reassigned_placeholder(&self, intent: &GuidedIngestIntent) -> Result<()> {
+        if !intent.settled && !intent.cancelled {
+            return Ok(());
+        }
+        let record = self.provisional_imports.import_record(intent.import_id)?;
+        if record.view.phase != ImportPhase::Published {
+            return Ok(());
+        }
+        let capture = self.reader.capture(record.view.capture_id)?;
+        if capture.association.item_id.is_none()
+            || capture.association.item_id == Some(intent.target_item_id)
+        {
+            return Ok(());
+        }
+        if self
+            .content_write_eligibility_for_user(intent.user_id, record.view.collection_id)
+            .is_err()
+        {
+            return Ok(());
+        }
+        let item = self.reader.item(intent.target_item_id)?;
+        if item.deleted
+            || !item.captures.is_empty()
+            || !item.specimens.is_empty()
+            || item.wishlist
+            || !item.assets.is_empty()
+            || item.title != intent.default_title
+            || !item.subtitle.is_empty()
+            || item.identity_link != ItemIdentityLink::None
+            || item.identity != IdentityState::Unidentified
+            || !item.translations.is_empty()
+            || !item.identifiers.is_empty()
+            || item.domain.payload.parse::<serde_json::Value>()? != serde_json::json!({})
+            || serde_json::to_value(&item.metadata).map_err(|e| Error::Storage(e.to_string()))?
+                != serde_json::to_value(MetadataState::default())
+                    .map_err(|e| Error::Storage(e.to_string()))?
+        {
+            return Ok(());
+        }
+        let authority = self
+            .processing
+            .metadata_authority(item.collection_id, item.id)?;
+        if let Some(record) = &authority {
+            let authority = metadata::metadata_authority_for_inventory(&item, record)?;
+            if serde_json::to_value(authority).map_err(|e| Error::Storage(e.to_string()))?
+                != serde_json::to_value(MetadataAuthority::default())
+                    .map_err(|e| Error::Storage(e.to_string()))?
+            {
+                return Ok(());
+            }
+        }
+        match self
+            .writer
+            .retire_item_if_unchanged(item, authority.map(|value| value.revision))
+        {
+            Ok(()) | Err(Error::Conflict) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) fn advance_guided_ingest(&self, id: ImportId) -> Result<()> {
@@ -1726,6 +1853,9 @@ impl CollectionService {
                 effects.save_capture(capture, command.expected_capture_revision)
             },
         )?;
+        if let Some(intent) = self.provisional_imports.guided_ingest_intent(id)? {
+            self.retire_reassigned_placeholder(&intent)?;
+        }
         self.ingest_detail(actor, id)
     }
 }

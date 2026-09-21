@@ -75,6 +75,20 @@ Authenticated clients obtain bounded collection-type descriptors and server-comp
 
 ## Release acceptance
 
+- User clarification (2026-09-21): provide manual item removal with clear retained
+  history/originals semantics and restoration, plus clean reimport of an existing
+  item without duplicate visible entries or obsolete work becoming current again.
+  Allow selected cleanup of failed/cancelled and unfinished work, with durable
+  cancellation and actual staging reclamation where applicable. Preserve manual
+  information by default and make explicit reset choices reviewable.
+- User clarification (2026-09-21): prevent equivalent active scans server-side as
+  well as in the UI, show completed results as the primary action, and consolidate
+  equivalent results with lightweight actual-recheck dates/counts. Equivalence
+  includes source, algorithm/version, settings, reference content and coverage;
+  identical outcome labels alone do not suffice. Cached reuse is not a fresh
+  verification. [The proposed UX fix set](ux-fix-plan.md) maps these requirements
+  and related unfinished U05/P04 criteria to implementation deliveries.
+
 - User clarification (2026-09-15): explicitly prepare an entire album as separate
   FLAC tracks, including selected associated discs, using durable batch submission
   and existing per-track jobs. Independent work remains queueable while earlier

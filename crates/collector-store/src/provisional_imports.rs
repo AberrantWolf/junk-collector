@@ -739,7 +739,12 @@ impl ProvisionalImportPort for Store {
                 "SELECT g.import_id
                  FROM private.guided_ingest_intents g
                  JOIN private.imports i ON i.id=g.import_id
-                 WHERE i.phase IN ('analyzing','awaiting_review','published') AND g.settled=0 AND g.cancelled=0 AND (? IS NULL OR g.import_id>?)
+                 LEFT JOIN captures c ON c.id=i.capture_id
+                 LEFT JOIN items original ON original.id=g.target_item_id
+                 WHERE i.phase IN ('analyzing','awaiting_review','published')
+                   AND ((g.settled=0 AND g.cancelled=0) OR
+                        (i.phase='published' AND c.item_id IS NOT NULL AND c.item_id<>g.target_item_id AND original.deleted=0))
+                   AND (? IS NULL OR g.import_id>?)
                  ORDER BY g.import_id
                  LIMIT ?",
             )

@@ -1,134 +1,306 @@
 # Junk Collector
 
-Current delivery target: [local web alpha](docs/local-alpha-plan.md) — guided raw-dump
-imports, automatic metadata, browsing, CD playback and trusted local users. The
-integration is planned; [implementation status](docs/implementation-status.md)
-distinguishes current capabilities from remaining work.
+Junk Collector is a self-hosted archive for physical video games and music CDs: inventory, original dumps, artwork, metadata, and verification evidence in one place.
 
+The web app supports collections with or without attached dumps, guided imports, optional metadata and artwork acquisition, game DAT matching, AccurateRip checks, and playback of prepared CD tracks. Each collection has one type—games or music CDs. Original files are retained alongside derived files and recorded evidence.
 
-A homelab collection archive for physical games and music CDs, their original dumps, artwork, and verification evidence.
+## Quick start
 
-**Development foundation — not yet the complete first release.** The server, portable archive, upload/thumbnail workflows, authentication, and artwork/text WebUI are executable. Native apps, shared audio, catalog verification and several curation workflows remain unfinished. See [implementation status](docs/implementation-status.md) and [architecture](docs/architecture.md). Remaining work is organized in the [handoff backlog](docs/handoff-backlog.md), with the [accepted release requirements](docs/release-requirements.md) preserved alongside it.
+### Requirements
 
-## Run locally
+- Rust 1.95 or newer, a C/C++ build toolchain, CMake, and pkg-config. Linux builds also need OpenSSL development headers.
+- A compatible `junk-libs` checkout beside this repository; Cargo uses its individual crates through local path dependencies:
 
-Requires Rust 1.95+; Node 22+ is needed only when changing the WebUI. Built web assets are included, so the server has no Node runtime requirement.
+  ```text
+  projects/
+  ├── junk-collector/
+  └── junk-libs/
+  ```
 
-```sh
-cargo build --workspace
-# Prompts for a password without echoing it. Existing accounts are preserved.
-cargo run -p collector-server -- setup
-cargo run -p collector-server -- serve
-```
+- Writable storage for the archive and private server state.
+- Optional: `flac` for lossless CD preparation; `opusenc` for smaller audio copies.
 
-Open the exact local management address printed by setup—by default **http://localhost:9842**—on the server computer. Sign in with the password from setup, choose **Create collection** (or open **Administration**), enter a name and choose its collection type, then choose **Add item**. Attach artwork and original files after saving the inventory item. The public and direct-LAN addresses are client surfaces by default and cannot perform initial management.
+Built web assets are included. Node.js 22+ is needed only to rebuild the WebUI, not to run the server.
 
-`setup` creates `collector.toml`, archive/state directories, a local TLS identity and the default account. Re-running it repairs the local browser origin while keeping accounts, passwords, data, exposure settings and existing certificates. It backs up an existing configuration before rewriting it. Stop the server before running setup. Passwords can also be piped through stdin; never put them in command arguments. `init` remains available for scripted first-time initialization.
+### Build and initialize
 
-For an existing installation showing access errors:
-
-```sh
-# Stop the running server with Ctrl-C first.
-cargo run -p collector-server -- setup
-cargo run -p collector-server -- doctor
-cargo run -p collector-server -- serve
-```
-
-`doctor` checks configuration without acquiring the archive lock, so it also works while the server runs. An `origin_not_allowed` error means the browser address is missing from `allowed_origins`; it is distinct from an expired session and from a collection-role denial. Use `localhost` exactly for this local setup—`127.0.0.1` is a different browser origin. If the browser cannot retain a Secure cookie on localhost, the UI reports that explicitly; use trusted HTTPS as described below. Local HTTP onboarding is covered by the Chromium smoke test; other browsers remain to be qualified and may require trusted HTTPS.
-
-### Existing collections without an assigned type
-
-Older collections stay readable and retain their files. Before adding more inventory,
-stop the server and inspect the collection using its ID from the collections API
-(`GET /api/v1/collections` while signed in):
+Run these commands from the repository root. A release build is recommended for normal use, especially hashing and audio processing.
 
 ```sh
-cargo run -p collector-server -- inspect-collection-type --collection-id <COLLECTION_ID>
-# Use the revision and an eligible module from that report; choose explicitly.
-cargo run -p collector-server -- assign-collection-type --collection-id <COLLECTION_ID> --expected-revision <REVISION> --module org.junk.music
-# For games, the built-in module is org.junk.games.
-cargo run -p collector-server -- serve
+cargo build --locked --release -p collector-server
+./target/release/collector-server setup
+./target/release/collector-server doctor
+./target/release/collector-server serve
 ```
 
-Both inspection and assignment require exclusive store access. Add `--config PATH`
-before the subcommand when using a non-default configuration. Assignment preserves
-the original manifest and records a new revision. Mixed or unavailable item types,
-incompatible pending work, or invalid active metadata block assignment; inspection
-reports the reason. Splitting mixed collections is not implemented. Historical
-metadata overrides are preserved without automatically activating them. Full
-application/job write gating and legacy UI notices are still being completed in
-CT.3–CT.4; graph publication already rejects unassigned collections.
+`setup` prompts for a password of at least 12 characters and creates:
 
-Default listeners:
+- `collector.toml`, the server configuration;
+- `.collector/archive`, containing preserved files and collection records;
+- `.collector/state`, containing databases, accounts, TLS identity, jobs, and temporary work;
+- the initial administrator account, named `owner` by default.
 
-| Address | Purpose |
-|---|---|
-| `127.0.0.1:9841` | Public HTTP origin for a tunnel/proxy; client routes only by default |
-| `127.0.0.1:9842` | Private management HTTP origin for a private proxy/Tailscale Serve |
-| `0.0.0.0:9843` | Direct LAN HTTPS client endpoint using the enrolled local certificate |
+To choose a different account name, use `setup --username YOUR_NAME`. Passwords can also be supplied through standard input; do not put them in command arguments.
 
-For direct private management HTTPS, set `private_tls_bind = "192.168.1.20:9844"` to an explicit LAN/tailnet interface. This listener includes management routes regardless of public exposure. Its certificate must be trusted by the browser; wildcard bindings are rejected.
+Open **http://localhost:9842** on the server computer and sign in. Use `localhost` exactly: `127.0.0.1` is a different browser origin. Local HTTP sign-in is tested with Chromium-based browsers; use browser-trusted HTTPS for remote browsers.
 
-For browser use, configure a browser-trusted HTTPS proxy and add its exact origin to `allowed_origins`. Point public Cloudflare Tunnel traffic at port 9841 and private Tailscale Serve at port 9842. Do not publish the private origin through a public tunnel. Browser sessions use Secure cookies; remote browser access requires HTTPS. Localhost is the tested local-browser exception. Do not bypass certificate checks. A locally trusted CA or Tailscale HTTPS is suitable for private management.
-
-Set `authentication_origin = "https://your-authentication-hostname"` to enable WebAuthn passkeys, and include that origin in `allowed_origins`. Registration and login must happen on that origin. The browser must support the standard WebAuthn JSON conversion APIs. Registration/login pass a Chromium virtual-authenticator test; real password-manager/hardware validation remains a release gate.
-
-The native client trust helper accepts a certificate from trusted pairing and connects directly over LAN. Export enrollment material with:
+For permanent storage locations or custom certificate names, create `collector.toml` using the [configuration reference](#configuration-reference) **before running setup**. Supply a custom configuration path before the command:
 
 ```sh
-cargo run -p collector-server -- pairing > pairing.json
+./target/release/collector-server --config /absolute/path/collector.toml setup
+./target/release/collector-server --config /absolute/path/collector.toml serve
 ```
 
-Transfer the pairing file through a trusted channel. A pairing file contains a public certificate, not an authentication token. The certificate's `tls_names` must cover the local names/IPs you use; configure these before `init`. Automatic discovery and key rotation are not yet implemented.
+Run the server as an ordinary user with access to its storage and configured inboxes. Only one server process may write an archive.
 
-## Configuration
+## Add your first collection
+
+1. Sign in at the private management address and choose **Create collection** or **Administration**. Choose **Games** or **Music CDs** and give the collection a name.
+2. Open the collection and choose **Add / import → Dump folder**. Select a folder containing complete dumps; subfolders are scanned for packages. Unrecognized files are listed separately and are not uploaded. To track an item without files, choose **Enter inventory manually**.
+3. Review the package count. **Package details and import options** shows missing companions or unsupported operations and lets you change an ambiguous analysis anchor. Metadata and artwork gathering is enabled by default.
+4. For supported CDs, optionally select **Prepare supported music as FLAC after preservation**. Choose **Import … packages**. Each package gets its own saved entry automatically; no title or separate inventory save is required.
+5. Keep the page open while uploading. Progress shows bytes sent and bytes saved on the server. After uploads finish, server processing continues even if you close the page. If interrupted, reopen an import and select the same folder to resume. You can also choose individual files or configured inbox packages, then **Preview import → Start import**.
+6. Open the item to inspect its files, metadata, artwork, and evidence. Use **Edit / attach files** to correct metadata, manage physical copies and loans, add images, or attach another capture.
+
+Folder intake accepts up to 10,000 files and 64 detected packages at a time; select smaller subfolders for larger archives.
+
+When attaching an imported disc to an existing album, its unused automatic placeholder is removed from browsing. Entries with other captures, physical inventory, wishlists, artwork, or manual information are kept. Archived files and history are retained.
+
+Keep complete dump packages together: BIN/CUE sets need their referenced BIN files, and supported redumper CD packages need their TOC, SCRAM, STATE, and SUBCODE companions. Preservation and identification are separate: a package can be retained even when it cannot be identified or verified. The preview and recorded results explain what analysis is available.
+
+### Play a music CD
+
+With the [FLAC encoder configured](#audio-encoders), open the CD's editor and choose **Music preparation → Prepare selected album**. Select the intended disc sources when necessary. You can also prepare individual tracks or an available Opus profile.
+
+Preparation runs as durable background work. Prepared tracks are saved automatically—**Save inventory is not required**. Once available, close the editor and use the **Disc player** in the item details, or download a track. Viewers can play prepared tracks. Closing the item details stops browser playback; browser codec support determines which formats play directly.
+
+## Configuration reference
+
+Edit `collector.toml` and restart the server to apply changes. Unknown configuration keys are rejected. Relative filesystem paths are relative to the process's working directory, so absolute paths are recommended for a permanent installation or service.
+
+### Storage and accounts
+
+| Option | Default | Effect |
+|---|---|---|
+| `archive` | `".collector/archive"` | Original files, collection manifests, revisions, artwork, derivatives, and evidence. |
+| `state` | `".collector/state"` | Local SQLite databases, accounts, credentials, TLS keys, jobs, and upload/processing scratch. |
+| `multi_user` | `false` | When `false`, login uses the default profile and hides username selection. When `true`, users sign in to separate accounts. Authentication remains required in either mode. |
+
+Keep `state` on local disk, even if `archive` is on a NAS. Allow space for retained originals, prepared audio, uploads, and temporary conversion work. Keep the complete state directory private to the server account; it contains credentials and TLS keys.
+
+### Listeners and browser access
+
+| Option | Default | Effect |
+|---|---|---|
+| `public_bind` | `"127.0.0.1:9841"` | HTTP upstream for a public HTTPS proxy or tunnel. Must bind loopback. |
+| `private_bind` | `"127.0.0.1:9842"` | HTTP management listener for local use or a private HTTPS proxy. Must bind loopback. |
+| `lan_bind` | `"0.0.0.0:9843"` | Direct TLS listener, using the public route composition. The default listens on all IPv4 interfaces; choose a specific interface to narrow it. |
+| `private_tls_bind` | Unset | Optional direct TLS management listener. Must name an explicit interface address, such as `"192.168.1.20:9844"`; wildcard addresses are rejected. |
+| `tls_names` | `["localhost", "junk-collector.local", "127.0.0.1"]` | DNS names/IP addresses included in the server-managed certificate when setup creates it. Choose these before initialization. Changing this list does not replace an existing certificate. |
+| `allowed_origins` | HTTPS origins for `localhost:9843` and `junk-collector.local:9843`; setup adds the local management origin | Exact browser origins allowed for session operations. Include the scheme, hostname, and non-default port. This does not establish certificate trust or grant access. |
+| `authentication_origin` | Unset | Stable HTTPS origin for WebAuthn passkey registration/login. Also include it in `allowed_origins`. |
+| `endpoints` | `["https://junk-collector.local:9843"]` | Addresses included in exported pairing material. Does not bind listeners, create DNS records, or advertise an mDNS service. |
+
+A `.local` name must resolve on your network independently of Junk Collector. Merely listing it in `tls_names` or `endpoints` does not make it reachable.
+
+### Public exposure
+
+These settings apply to both the public HTTP upstream and the direct LAN TLS listener. Private listeners include all management surfaces; users still need the appropriate permissions.
+
+| Option | Default | Effect |
+|---|---|---|
+| `[exposure].public_curation` | `false` | Exposes collection editing, imports, metadata review, and their backing APIs on public routes. |
+| `[exposure].public_administration` | `false` | Exposes server/account/access administration on public routes. Also enables public curation. |
+
+Login, authorized browsing, prepared media, and downloads are available on client routes without enabling either management setting. Exposure never grants a collection role. Disabled management pages, JavaScript bundles, and APIs are absent from the public router; forwarded headers cannot make a public request private.
+
+### Example: local installation with music support
+
+Change the storage and executable paths for your machine. Omit the optional provider section if you do not want online metadata acquisition.
 
 ```toml
 archive = "/srv/junk-collector/archive"
 state = "/var/lib/junk-collector"
+multi_user = false
+
 public_bind = "127.0.0.1:9841"
 private_bind = "127.0.0.1:9842"
 lan_bind = "0.0.0.0:9843"
-multi_user = false
-tls_names = ["junk-collector.local", "192.168.1.20", "localhost", "127.0.0.1"]
-endpoints = ["https://junk-collector.local:9843", "https://192.168.1.20:9843"]
-allowed_origins = ["https://collector.example.net", "https://collector.example-tailnet.ts.net"]
-authentication_origin = "https://collector.example.net"
+tls_names = ["localhost", "junk-collector.local", "127.0.0.1"]
+allowed_origins = ["http://localhost:9842"]
+endpoints = ["https://junk-collector.local:9843"]
 
 [exposure]
 public_curation = false
 public_administration = false
 
-# Optional. Paths or executable names are probed at server startup and by doctor.
 [encoders]
 flac = "/usr/bin/flac"
 # opus = "/usr/bin/opusenc"
 
-# Optional MusicBrainz and Cover Art Archive enrichment. MusicBrainz requires a
-# meaningful versioned application name and a real maintainer contact.
 [providers]
 musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
+
+[inboxes]
+rips = "/srv/incoming"
 ```
 
-Administration exposure implies curation exposure; neither grants a role. Disabled management routes and JavaScript entrypoints are absent from the public router. Proxy headers never grant private status. Exposure changes currently require editing configuration and restarting.
+### Audio encoders
 
-Edit the existing `[encoders]` section (or create it if absent), set the path to
-your installed tool, then restart the server. Open a CD item’s editor and use
-**Music preparation → Prepare FLAC**; the completed track becomes a download link.
-Close the editor to use the **Disc player** in item details. Viewers can play
-prepared tracks without curation access; playback currently stops when details close.
+| Option | Effect |
+|---|---|
+| `[encoders].flac` | Path or executable name for `flac`. Enables validated lossless track preparation. |
+| `[encoders].opus` | Path or executable name for `opusenc`. Enables explicit 96, 128, and 192 kbps track preparation. |
 
-Music derivatives are prepared only when a curator requests one. FLAC is the
-default choice and Opus is available at explicit 96/128/192-kbps presets when its
-encoder is configured. Missing tools do not block import, preservation, analysis,
-or original downloads, and neither import nor a media request starts conversion.
+Both are optional and are probed at startup and by `doctor`. Use absolute executable paths when running as a service, whose `PATH` may differ from your shell. Unavailable tools do not prevent preservation or original-file downloads.
 
-MusicBrainz metadata and Cover Art Archive acquisition are optional. If
-`providers.musicbrainz_user_agent` is absent, preservation, imports and manual
-metadata continue normally; provider Jobs report the missing provider rather than
-inventing results. Configure a real contact before enabling it. Provider responses
-and images are bounded and archived as immutable observations; MusicBrainz identity
-is descriptive metadata and never audio verification.
+Preparation stores separate audio files in the archive; it does not replace the raw dump. It runs only when requested, either through the optional guided-import checkbox or the music preparation controls. Browsing and playback requests do not start conversion.
+
+### Online metadata and artwork
+
+`[providers].musicbrainz_user_agent` enables MusicBrainz and Cover Art Archive acquisition. Set it to a versioned application name with a real contact address, for example `"JunkCollector/0.1.0 (your-real-address@example.org)"`.
+
+Guided imports can automatically gather available metadata and artwork. In an item's editor, you can also request metadata, inspect alternatives, set manual overrides, and choose cover art. Cover Art Archive choices show small previews before you archive an image. Manual overrides survive provider refreshes.
+
+Without this setting, imports and manual curation still work. MusicBrainz identity is descriptive metadata, **not audio verification**. AccurateRip checks are a separate music operation and do not use this user-agent setting.
+
+### Server inboxes
+
+Each entry in `[inboxes]` maps a display name to a server-side directory:
+
+```toml
+[inboxes]
+rips = "/srv/incoming"
+```
+
+Put each package in a direct child directory. A package may contain nested files; preserve the filenames and relative paths referenced by CUE sheets and other sidecars.
+
+```text
+/srv/incoming/
+├── Album A/
+│   ├── disc.cue
+│   └── disc.bin
+└── Album B/
+    ├── dump.toc
+    ├── dump.scram
+    ├── dump.state
+    └── dump.subcode
+```
+
+Curators select packages under **Add / import → Configured inbox**. Package contents are copied into staging; source files are retained. Symlinks and special files are rejected. The browser sees configured inbox names and package names, not server filesystem roots.
+
+### Game DAT catalogs
+
+Local DAT files provide reference data for game matching. Configure each under a unique source name:
+
+```toml
+[dat_sources.nes]
+path = "/srv/catalogs/nes.dat"
+system = "nes"
+catalog = "NES headerless catalog"
+byte_domain = "org.junk.game.nes.ines-payload"
+byte_domain_version = 1
+```
+
+| Field | Effect |
+|---|---|
+| `path` | Local DAT file to import. |
+| `system` | System label associated with the catalog. |
+| `catalog` | Human-readable catalog label. |
+| `byte_domain` | The exact byte representation covered by its checksums; must agree with the catalog and processing operation. |
+| `byte_domain_version` | Version of that representation; defaults to `1`. |
+
+Supported normalized domains include:
+
+| Catalog bytes | `byte_domain` |
+|---|---|
+| Complete files, without normalization | `org.junk.game.raw-bytes` |
+| CD tracks with 2352-byte raw sectors | `org.junk.game.cd.raw-2352-track` |
+| NES iNES payload, excluding its header | `org.junk.game.nes.ines-payload` |
+| Nintendo 64 big-endian ROM bytes | `org.junk.game.n64.z64-big-endian` |
+| SNES headerless payload | `org.junk.game.snes.headerless-payload` |
+| PC Engine HuCard payload | `org.junk.game.pce.hucard-payload` |
+
+In **Administration**, import the configured DAT as an immutable snapshot and select the active snapshot. Results retain their original snapshot identity when you later select another catalog. A file hash, structural analysis, or tentative title is not a complete catalog match; consult each result's coverage and limitations.
+
+The optional manual download helper supports an allowlist of catalogs:
+
+```sh
+python3 scripts/cache_game_dats.py --help
+python3 scripts/cache_game_dats.py /srv/catalog-cache --catalog redump-psx
+```
+
+It retains downloaded data and a digest manifest. The server does not automatically download or refresh DATs. New DAT-o-MATIC downloads are disabled in the helper; local DAT files and verified cached data remain usable.
+
+## Users and collection access
+
+For separate trusted users, set `multi_user = true`, restart, and create accounts in **Administration**. Assign each account the appropriate collection role:
+
+| Role | Access |
+|---|---|
+| Viewer | Browse authorized collection data, view shared artwork, play and download prepared media. |
+| Curator | Viewer access plus inventory changes, imports, metadata/artwork work, and processing commands. |
+| Owner | Curator access plus collection access management. |
+
+Server administration and collection access are separate permissions. An administrator does not automatically receive permission to read every collection. Single-user mode keeps authentication and uses the default account; it is not anonymous access.
+
+### Passkeys
+
+Set `authentication_origin` to a stable, browser-trusted HTTPS origin and add it to `allowed_origins`. Register and use passkeys on that origin. The browser needs the standard WebAuthn JSON conversion APIs. Password login remains available.
+
+Use **Account & security** to manage account credentials and sessions. For local account recovery, see the command reference below.
+
+## Access from another computer
+
+For browser access, use HTTPS trusted by that browser. The certificate generated by setup is not automatically trusted by other devices. Do not bypass certificate verification.
+
+| Connection | Destination | Setup |
+|---|---|---|
+| Private HTTPS reverse proxy or Tailscale Serve | `http://127.0.0.1:9842` | Provides management to trusted network users; application login and roles still apply. |
+| Direct private HTTPS | Explicit `private_tls_bind`, e.g. `192.168.1.20:9844` | Trust the server certificate in the browser and ensure its names cover the hostname/IP you use. |
+| Direct client HTTPS | `lan_bind`, normally port `9843` | Uses the server certificate and public exposure settings. |
+| Public HTTPS reverse proxy or Cloudflare Tunnel | `http://127.0.0.1:9841` | Client access by default; enable public curation/admin only if desired. |
+
+Add each browser-facing HTTPS origin to `allowed_origins`, including its port when non-default. A private proxy with a browser-trusted certificate avoids having to install the server's certificate on each browser. Tailscale HTTPS uses a tailnet hostname, not an arbitrary `.local` name.
+
+Keep private and public proxy destinations separate. Public tunnels must target `public_bind`, even when they connect from localhost. Never publish the private management listener through a public tunnel.
+
+## Operations and backups
+
+The examples below use the built binary; place `--config /absolute/path/collector.toml` before any command when needed.
+
+| Command | Purpose |
+|---|---|
+| `setup [--username NAME]` | Initialize storage, TLS, the default account, and local browser configuration. Run while stopped. |
+| `init [--username NAME]` | First-time scripted initialization, accepting the password through standard input. |
+| `serve` | Run listeners and background workers. Stop with Ctrl-C. |
+| `doctor` | Check configuration and optional encoders without locking the archive; can run while serving. Does not test provider reachability, passwords, grants, or browser certificate trust. |
+| `reindex` | Rebuild the catalog from archive records. Stop the server first. |
+| `pairing` | Export server identity, public certificate, and endpoint data as JSON. Transfer it through a trusted channel; it contains no login credential and does not establish browser trust. Run while stopped. |
+| `recover-account --private-state PATH --user-id USER_ID` | Recover one account while stopped. Reads a new password, revokes sessions/passkeys, and preserves grants and administrator status. Use the exact private-state root and account UUID. |
+
+### Full backup
+
+1. Stop the server.
+2. Copy the complete `archive` directory, complete `state` directory, and `collector.toml` together to the backup destination.
+3. Verify the copy and protect it like the live private state.
+4. Restart the server.
+
+The state root includes pending uploads and work as well as SQLite databases and TLS keys. Do not copy live SQLite files as an ordinary filesystem backup. Keep inbox originals and external DAT source files in your backup plan too; those paths are outside the server roots.
+
+To restore, copy the saved roots into place, adjust configured filesystem paths if necessary, and start one server using that configuration. Do not run two copies of the same server identity concurrently. Archive-only reindexing does not restore accounts or access grants.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Login reports `origin_not_allowed` | Open the exact configured address. Add its origin to `allowed_origins` and restart. `localhost` and `127.0.0.1` are different origins. |
+| Management pages are missing | Use a private listener, or intentionally enable the relevant public exposure setting. |
+| “You do not have access to this resource” | Check the signed-in account's collection role. Public exposure does not grant permission. |
+| Certificate warning | Use a hostname covered by a browser-trusted certificate. Pairing JSON alone does not make a browser trust it. |
+| Music preparation is unavailable | Run `doctor`; check encoder paths, restart after configuration changes, and inspect the package's reported limitations. |
+| Metadata or artwork is unavailable | Check the provider user agent and the job's error. Manual curation and preservation remain available during provider outages. |
+| An import or preparation failed | Read the job/track error and fix its cause before retrying. Keep the complete source package and its original relative filenames. |
 
 ## Development
 
@@ -136,67 +308,16 @@ is descriptive metadata and never audio verification.
 npm --prefix web ci
 npm --prefix web run check
 npm --prefix web run build
+cargo build -p collector-server
+python3 scripts/check_architecture.py
 cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The public app and management entrypoints are separate bundles. Rebuild the Rust binary after changing embedded assets. Domain/core libraries cannot depend on database, networking or UI crates.
+Rebuild the Rust server after changing embedded web assets. `npm --prefix web run test:smoke` runs the browser journey against a temporary profile; `LOCAL_SETUP=1` selects localhost onboarding. Set `CHROME_PATH` when Chrome is not at the default macOS path.
 
-## Server inboxes
-
-Configure named inbox roots in `[inboxes]`, for example `rips = "/srv/incoming"`. Curators can list safe package names through the collection-scoped Import API and stage a direct child directory into the unified review workflow; configured roots are never returned. The curation workbench selects browser files or a configured inbox package, shows its inventory/progress and honest analyzer limitations, records catalog/physical review, and publishes the capture. Its submitter-scoped background-work ledger shows active/history progress and offers server-authorized cancel/retry controls, polling every two seconds while work is active and every 30 seconds while idle. The deprecated administrator endpoints remain compatibility adapters: `GET /api/v1/admin/inboxes` lists configured names and `POST /api/v1/admin/inboxes/{name}/import`, with `item_id`, `expected_revision`, and `package`, creates a provisional Import plus staging Job that still requires review before publication. Sources are retained; symlinks and special files are rejected. The `/api/v1/uploads` surface is also a compatibility adapter and is scheduled with the administrator inbox surface for removal in a future API major.
-
-## Game DAT catalogs
-
-Configure local catalog files by safe source name; source paths stay server-side:
-
-```toml
-[dat_sources.nes]
-path = "/srv/catalogs/nes.dat"
-system = "nes"
-catalog = "My NES DAT"
-byte_domain = "org.junk.game.raw-bytes"
-byte_domain_version = 1
-```
-
-The private administration panel imports exact DAT bytes as immutable snapshots
-and selects the active snapshot for future analysis. Curators can run explicit
-game hashing, structure, track and catalog operations against preserved captures;
-old results remain tied to their original source bytes and snapshot after refresh.
-
-For a manual, rate-limited cache of the currently supported Redump/No-Intro
-systems, run:
-
-```sh
-python3 scripts/cache_game_dats.py /path/outside/the/repository --catalog <key>
-```
-
-The script lists its allowlisted keys in `--help`, preserves raw
-provider ZIP/DAT bytes beside a digest manifest, and never performs automatic
-server refresh. See the [LA3 installation runbook](docs/local-alpha-installation.md)
-for filter, rate-limit and provider-refusal details. New DAT-o-MATIC downloads
-are currently paused after a provider refusal; existing verified caches and local
-DAT imports remain usable. Refreshes use a new cache root to retain old snapshots.
-
-## Recovery
-
-For the bounded local-alpha installation and stopped-server copy/restore drill, use
-[the LA3 installation runbook](docs/local-alpha-installation.md). It covers the
-archive, complete private-state root (including TLS and pending scratch),
-configuration, digest manifests and the prohibition on running original and restored
-copies of one server identity concurrently. It is not the planned P05 portable
-export/change-bundle workflow.
-
-```sh
-# Stop the server first: one process owns archive writes.
-cargo run -p collector-server -- reindex
-cargo run -p collector-server -- reset-password --username owner
-```
-
-Reset reads the new password from stdin and revokes device sessions. It does not remove passkeys. Back up the archive and private state together. Archive-only reconstruction does not restore users or permissions. Stop the server before copying SQLite files, or use SQLite-aware backup tooling.
-
-The archive retains original filenames and immutable metadata revisions. Sources are not consumed. Unfinished staging and upload data are retained for recovery; automatic reclamation is not yet implemented.
+See [architecture](docs/architecture.md) for dependency boundaries and [implementation status](docs/implementation-status.md) for detailed capability coverage.
 
 ## License
 

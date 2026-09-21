@@ -1690,7 +1690,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        6
+        7 // FX-01 adds disposable browse keys; archived fixture bytes remain unchanged.
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -5841,6 +5841,110 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             .files[0]
             .digest,
         Digest::sha256(cue)
+    );
+    assert!(
+        store.item(target).unwrap().deleted,
+        "unused import placeholder still browses"
+    );
+    store.reindex().unwrap();
+    assert!(
+        store.item(target).unwrap().deleted,
+        "retirement was not portable"
+    );
+    assert_eq!(store.item(replacement.id).unwrap().captures.len(), 1);
+
+    // Recreate the crash window: association committed, tombstone not yet written.
+    let mut original = store.item(target).unwrap();
+    original.deleted = false;
+    let revision = original.revision;
+    store.save(original, revision).unwrap();
+    recovered.resume_guided_ingests().unwrap();
+    assert!(store.item(target).unwrap().deleted);
+
+    // Meaningful inventory is independent of the moved dump.
+    let mut original = store.item(target).unwrap();
+    original.deleted = false;
+    original.wishlist = true;
+    let revision = original.revision;
+    store.save(original, revision).unwrap();
+    recovered.resume_guided_ingests().unwrap();
+    assert!(!store.item(target).unwrap().deleted);
+    let mut original = store.item(target).unwrap();
+    original.wishlist = false;
+    original.title = "My inventory title".into();
+    let revision = original.revision;
+    store.save(original, revision).unwrap();
+    recovered.resume_guided_ingests().unwrap();
+    assert!(!store.item(target).unwrap().deleted);
+
+    let mut original = store.item(target).unwrap();
+    original.title = "Guided album".into();
+    let revision = original.revision;
+    let snapshot = store.save(original, revision).unwrap();
+    let authority = store
+        .metadata_authority(collection.id, target)
+        .unwrap()
+        .unwrap();
+    let overridden = recovered
+        .update_metadata_authority(
+            &actor,
+            target,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: authority.revision,
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Subtitle,
+                    value: "Keep this note".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            Catalog::retire_item_if_unchanged(&*store, snapshot.clone(), Some(authority.revision)),
+            Err(Error::Conflict)
+        ),
+        "manual authority change lost the retirement race"
+    );
+    recovered.resume_guided_ingests().unwrap();
+    assert!(
+        !store.item(target).unwrap().deleted,
+        "manual metadata must survive"
+    );
+    let authority = recovered
+        .update_metadata_authority(
+            &actor,
+            target,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: overridden.revision,
+                change: MetadataAuthorityChange::ClearFieldOverride {
+                    field: MetadataField::Subtitle,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut other = store.capture(corrected.summary.capture_id).unwrap();
+    other.id = CaptureId::new();
+    other.revision = Revision(0);
+    other.association = CaptureAssociation {
+        item_id: Some(target),
+        ..Default::default()
+    };
+    other.representations.clear();
+    let _other = store.save_capture(other, Revision(0)).unwrap();
+    assert!(
+        matches!(
+            Catalog::retire_item_if_unchanged(&*store, snapshot, Some(authority.revision)),
+            Err(Error::Conflict)
+        ),
+        "independent capture attachment lost the retirement race"
+    );
+    recovered.resume_guided_ingests().unwrap();
+    assert!(
+        !store.item(target).unwrap().deleted,
+        "another disc must keep the entry alive"
     );
 }
 
@@ -10898,6 +11002,23 @@ fn derivative_jobs_converge_replay_keep_track_ownership_and_survive_item_edits_r
     let mut associated = capture.clone();
     associated.association.item_id = Some(saved.id);
     Catalog::save_capture(store.as_ref(), associated, capture.revision).unwrap();
+    assert_eq!(
+        service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    filter: BrowseFilter::Playable,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .iter()
+            .map(|v| v.id)
+            .collect::<Vec<_>>(),
+        vec![saved.id]
+    );
+
     let mut edit = Catalog::item(store.as_ref(), saved.id).unwrap();
     edit.title = "Manual edit survives".into();
     let rev = edit.revision;
@@ -10950,6 +11071,62 @@ fn derivative_jobs_converge_replay_keep_track_ownership_and_survive_item_edits_r
         ),
         Err(Error::IdempotencyConflict)
     ));
+}
+
+#[test]
+fn album_admission_uses_recorded_identity_but_workers_reject_changed_payloads() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let service = service.with_audio_converter(encoder.clone());
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let path = collection_path.join(format!(
+        "captures/{}/payload/{}/disc.bin",
+        imported.capture_id, imported.representation_id
+    ));
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes[0] ^= 1;
+    std::fs::write(path, bytes).unwrap();
+    // Browsing/admission describe the recorded package; they do not attest to
+    // current payload integrity. Background validation must still fail closed.
+    let plan = service
+        .music_album_preparation_plan(&actor, saved.id)
+        .unwrap();
+    assert_eq!(plan.total_tracks, 2);
+    let batch = service
+        .prepare_music_album(
+            &actor,
+            saved.id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![imported.representation_id],
+            },
+            &command(),
+        )
+        .unwrap();
+    while service.run_next_job("changed-album-source").unwrap() {}
+    let batch = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(batch.failed, 2);
+    assert_eq!(batch.succeeded, 0);
+    assert_eq!(encoder.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        Catalog::capture(store.as_ref(), imported.capture_id)
+            .unwrap()
+            .representations
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -12367,4 +12544,302 @@ fn metadata_refresh_uses_current_versions_and_keeps_historical_selection() {
     let historical = service.metadata_view(&actor, saved.id).unwrap();
     assert_eq!(historical.display.title.value, "Old title");
     assert_eq!(historical.candidates.len(), 2);
+}
+
+#[test]
+fn folder_discovery_is_authorized_disjoint_and_validates_paths() {
+    let (_root, _store, actor, service, collection) = setup();
+    let input = collector_app::DiscoverIngestCommand {
+        collection_id: collection.id,
+        files: [
+            "Dumps/disc1/disc.cue",
+            "Dumps/disc1/disc.bin",
+            "Dumps/disc2/disc.toc",
+            "Dumps/disc2/disc.scram",
+            "Dumps/disc2/disc.state",
+            "Dumps/disc2/disc.subcode",
+            "Dumps/readme.txt",
+        ]
+        .into_iter()
+        .map(|name| UploadFile {
+            name: name.into(),
+            bytes: ByteLength(32),
+            sha256: None,
+        })
+        .collect(),
+    };
+    let discovered = service.discover_ingest(&actor, input.clone()).unwrap();
+    assert_eq!(discovered.unassigned_files, vec!["Dumps/readme.txt"]);
+    let plan = discovered.plan.unwrap();
+    assert_eq!(plan.packages.len(), 2);
+    assert_eq!(plan.packages[0].files.len(), 2);
+    assert_eq!(plan.packages[1].files.len(), 4);
+    assert!(
+        plan.packages
+            .iter()
+            .all(|package| package.anchors.len() == 1)
+    );
+    let outsider = Principal {
+        user_id: UserId::new(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(service.discover_ingest(&outsider, input.clone()).is_err());
+    let mut malicious = input.clone();
+    malicious.files[0].name = "../outside.cue".into();
+    assert!(service.discover_ingest(&actor, malicious).is_err());
+    let mut duplicate = input;
+    duplicate.files[1].name = "Dumps/disc1/DISC.CUE".into();
+    assert!(service.discover_ingest(&actor, duplicate).is_err());
+}
+
+#[test]
+fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reindex() {
+    let clock = Arc::new(TestClock {
+        seconds: std::sync::atomic::AtomicI64::new(1_780_000_000),
+        millis: std::sync::atomic::AtomicU64::new(0),
+    });
+    let (_root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let mut saved = Vec::new();
+    for n in 0..105 {
+        clock.seconds.fetch_add(1, Ordering::SeqCst);
+        let mut value = item(collection.id);
+        value.title = format!("Album {:03}", 104 - n);
+        value.wishlist = n % 2 == 0;
+        value.domain.payload =
+            RawJson::from_value(serde_json::json!({"artist":if n%2==0 {"Zebra"} else {"Álvaro"}}));
+        saved.push(save_inventory(&service, &actor, value, Revision(0)).unwrap());
+    }
+    let collect = |sort, filter| {
+        let mut cursor = None;
+        let mut result = Vec::new();
+        loop {
+            let page = service
+                .browse_presented(
+                    &actor,
+                    BrowseQuery {
+                        sort,
+                        filter,
+                        limit: Some(17),
+                        cursor,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert!(page.items.len() <= 17);
+            result.extend(page.items.into_iter().map(|v| v.id));
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let unique = result.iter().collect::<std::collections::HashSet<_>>();
+        assert_eq!(unique.len(), result.len());
+        result
+    };
+    let title = collect(BrowseSort::Title, BrowseFilter::All);
+    assert_eq!(title, saved.iter().rev().map(|v| v.id).collect::<Vec<_>>());
+    assert_eq!(collect(BrowseSort::Title, BrowseFilter::Wishlist).len(), 53);
+    assert!(collect(BrowseSort::Title, BrowseFilter::FilesAttached).is_empty());
+    assert!(collect(BrowseSort::Title, BrowseFilter::Playable).is_empty());
+    let first = service
+        .browse_presented(
+            &actor,
+            BrowseQuery {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        service.browse_presented(
+            &actor,
+            BrowseQuery {
+                sort: BrowseSort::Artist,
+                cursor: first.next_cursor,
+                ..Default::default()
+            }
+        ),
+        Err(Error::Invalid(_))
+    ));
+    let newest = saved.last().unwrap().id;
+    let mut edited = saved[0].clone();
+    edited.title = "First after edit".into();
+    clock.seconds.fetch_add(100, Ordering::SeqCst);
+    save_inventory(&service, &actor, edited, saved[0].revision).unwrap();
+    assert_eq!(
+        collect(BrowseSort::RecentlyAdded, BrowseFilter::All)[0],
+        newest
+    );
+    service
+        .update_metadata_authority(
+            &actor,
+            saved[1].id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "000 effective title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        collect(BrowseSort::Title, BrowseFilter::All)[0],
+        saved[1].id
+    );
+    assert_eq!(
+        service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    search: Some("Zebra".into()),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        50
+    );
+    let expected = collect(BrowseSort::Artist, BrowseFilter::All);
+    store.reindex().unwrap();
+    assert_eq!(collect(BrowseSort::Artist, BrowseFilter::All), expected);
+    assert_eq!(
+        collect(BrowseSort::RecentlyAdded, BrowseFilter::All)[0],
+        newest
+    );
+    assert_eq!(
+        collect(BrowseSort::Title, BrowseFilter::All)[0],
+        saved[1].id
+    );
+    let other = store
+        .create_user("browse-viewer", "a long viewer password", false)
+        .unwrap();
+    store.grant(collection.id, other, Role::Viewer).unwrap();
+    let job = JobSpec {
+        id: JobId::new(),
+        user_id: actor.user_id,
+        collection_id: Some(collection.id),
+        item_id: Some(saved[0].id),
+        kind: "integrity_verification".into(),
+        phase: "queued".into(),
+        total_units: 1,
+        request: serde_json::json!({}),
+        frozen_input: None,
+    };
+    store.enqueue_job(job).unwrap();
+    let claim = store.claim_job("fx01", 30).unwrap().unwrap();
+    store
+        .fail_job(claim.id, &claim.claim_token, "fixture failure")
+        .unwrap();
+    assert_eq!(
+        collect(BrowseSort::Title, BrowseFilter::NeedsAttention),
+        vec![saved[0].id]
+    );
+    let viewer = Principal {
+        user_id: other,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(
+        service
+            .browse_presented(
+                &viewer,
+                BrowseQuery {
+                    filter: BrowseFilter::NeedsAttention,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    let stranger = store
+        .create_user("browse-stranger", "a long stranger password", true)
+        .unwrap();
+    assert!(
+        store
+            .browse(stranger, BrowseQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
+
+#[test]
+fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    // A tiny valid PCM WAVE master is playable directly, without preparation.
+    let mut wav = Vec::new();
+    wav.extend(b"RIFF");
+    wav.extend(40u32.to_le_bytes());
+    wav.extend(b"WAVEfmt ");
+    wav.extend(16u32.to_le_bytes());
+    wav.extend(1u16.to_le_bytes());
+    wav.extend(1u16.to_le_bytes());
+    wav.extend(44100u32.to_le_bytes());
+    wav.extend(88200u32.to_le_bytes());
+    wav.extend(2u16.to_le_bytes());
+    wav.extend(16u16.to_le_bytes());
+    wav.extend(b"data");
+    wav.extend(4u32.to_le_bytes());
+    wav.extend([0u8; 4]);
+    let upload = service
+        .create_upload(
+            &actor,
+            saved.id,
+            saved.revision,
+            vec![UploadFile {
+                name: "tiny.wav".into(),
+                bytes: ByteLength(wav.len() as u64),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service.upload_chunk(&actor, upload.id, 0, 0, &wav).unwrap();
+    let _published = service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
+    for filter in [BrowseFilter::FilesAttached, BrowseFilter::Playable] {
+        let page = service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    filter,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            page.items.iter().map(|v| v.id).collect::<Vec<_>>(),
+            vec![saved.id]
+        );
+    }
+    // Missing physical bytes must not turn an inventory query into a full read.
+    // Accessing the actual media still reports the missing file independently.
+    store.reindex().unwrap();
+    let paths = files_named(&root.path().join("archive"), "tiny.wav");
+    assert!(!paths.is_empty());
+    for path in paths {
+        std::fs::remove_file(path).unwrap();
+    }
+    assert_eq!(
+        service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    filter: BrowseFilter::Playable,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
 }

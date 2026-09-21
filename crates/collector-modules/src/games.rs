@@ -896,6 +896,12 @@ pub fn hash_cue_package(
 pub struct Games;
 
 impl CollectionModule for Games {
+    fn discover_imports(
+        &self,
+        names: &[PackageFileName],
+    ) -> Vec<crate::import_discovery::DiscoveredImportPackage> {
+        crate::import_discovery::discover(names, true)
+    }
     fn import_readiness(
         &self,
         _names: &[PackageFileName],
