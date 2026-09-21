@@ -2509,7 +2509,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 100); // Includes provider previews and folder discovery.
+    assert_eq!(paths.len(), 101); // Includes the read-only scan planning endpoint.
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -2529,6 +2529,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/imports",
         "/api/v1/imports/{id}",
         "/api/v1/captures/{id}/operations",
+        "/api/v1/captures/{id}/operations/plan",
         "/api/v1/captures/{id}/accuraterip-snapshots",
         "/api/v1/collections/{id}/catalog-snapshots",
         "/api/v1/admin/catalog-sources",
@@ -2862,7 +2863,7 @@ async fn job_routes_are_submitter_scoped_idempotent_and_secret_free() {
             user_id: owner,
             collection_id: None,
             item_id: None,
-            kind: "integrity_verification".into(),
+            kind: "fixture".into(),
             phase: "queued".into(),
             total_units: 2,
             request: serde_json::json!({"secret_request":"do-not-return"}),

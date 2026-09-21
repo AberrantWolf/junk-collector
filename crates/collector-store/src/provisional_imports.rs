@@ -907,6 +907,11 @@ impl ProvisionalImportPort for Store {
             let tx = db
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
+            tx.execute(
+                "DELETE FROM private.scan_requests WHERE kind='import' AND owner=?",
+                [id.to_string()],
+            )
+            .map_err(storage)?;
             tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',updated_at=? WHERE user_id=? AND state='queued' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
             tx.execute("UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=? WHERE user_id=? AND state='running' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
             let changed = tx.execute("UPDATE private.imports SET phase='cancelled',revision=revision+1,updated_at=? WHERE id=? AND revision=?",params![now,id.to_string(),expected_revision]).map_err(storage)?;
@@ -965,25 +970,40 @@ impl ProvisionalImportPort for Store {
                 now,
             )?;
         }
-        tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',updated_at=? WHERE user_id=? AND state='queued' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
-        tx.execute("UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=? WHERE user_id=? AND state='running' AND json_extract(request,'$.import_id')=?",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
+        tx.execute(
+            "DELETE FROM private.scan_requests WHERE kind='import' AND owner=?",
+            [id.to_string()],
+        )
+        .map_err(storage)?;
+        tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',updated_at=? WHERE user_id=? AND state='queued' AND json_extract(request,'$.import_id')=? AND NOT EXISTS(SELECT 1 FROM private.scan_requests sr WHERE sr.job_id=jobs.id AND sr.kind='direct')",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
+        tx.execute("UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=? WHERE user_id=? AND state='running' AND json_extract(request,'$.import_id')=? AND NOT EXISTS(SELECT 1 FROM private.scan_requests sr WHERE sr.job_id=jobs.id AND sr.kind='direct')",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
         tx.execute(
             "UPDATE private.guided_ingest_intents SET cancelled=1,settled=1 WHERE import_id=?",
             [id.to_string()],
         )
         .map_err(storage)?;
-        let next_phase = if committed { "published" } else { "cancelled" };
-        let changed = tx.execute("UPDATE private.imports SET phase=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?",params![next_phase,now,id.to_string(),expected_revision]).map_err(storage)?;
+        let direct_analysis:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.scan_requests r JOIN private.jobs j ON j.id=r.job_id WHERE r.kind='direct' AND j.state IN ('queued','running') AND j.kind='import_analysis' AND json_extract(j.request,'$.import_id')=?)",[id.to_string()],|row|row.get(0)).map_err(storage)?;
+        let next_phase = if committed {
+            "published"
+        } else if direct_analysis {
+            "analyzing"
+        } else {
+            "cancelled"
+        };
+        let changed = tx.execute("UPDATE private.imports SET phase=?,revision=revision+?,updated_at=? WHERE id=? AND revision=?",params![next_phase,u64::from(!direct_analysis),now,id.to_string(),expected_revision]).map_err(storage)?;
         if changed != 1 {
             return Err(Error::Conflict);
         }
         let mut result = record;
         result.view.phase = if committed {
             ImportPhase::Published
+        } else if direct_analysis {
+            ImportPhase::Analyzing
         } else {
             ImportPhase::Cancelled
         };
-        result.view.revision += 1;
+        // Cancelling only the parent must not invalidate an in-flight direct analysis.
+        result.view.revision += u64::from(!direct_analysis);
         result.view.updated_at = chrono::DateTime::from_timestamp(now, 0)
             .ok_or_else(|| Error::Storage("cancellation timestamp is invalid".into()))?;
         self.record_command(&tx, &result)?;
@@ -1298,6 +1318,7 @@ impl Store {
                 self.publish_processing_record_under_writer(
                     JobId(committed.id.0),
                     PortableProcessingRecord {
+                        inputs: None,
                         observation: committed,
                         import_rebinding: Some(rebinding),
                     },

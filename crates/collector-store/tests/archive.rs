@@ -109,6 +109,15 @@ impl CollectionModule for UnknownStampsModule {
 }
 
 impl CollectionModule for ReaderProcessingModule {
+    fn scan_inputs(
+        &self,
+        _operation: &CapabilityId,
+        _inventory: &collector_core::PackageInventory,
+        input: &RawJson,
+    ) -> ModuleResult<collector_modules::scan_inputs::ScanInputs> {
+        collector_modules::scan_inputs::ScanInputs::new(input)
+    }
+
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
             id: ModuleId("org.example.reader".into()),
@@ -315,6 +324,15 @@ impl StreamingProviderPort for FixtureStreamingProvider {
 }
 
 impl CollectionModule for ImportAnalyzingModule {
+    fn scan_inputs(
+        &self,
+        _operation: &CapabilityId,
+        _inventory: &collector_core::PackageInventory,
+        input: &RawJson,
+    ) -> ModuleResult<collector_modules::scan_inputs::ScanInputs> {
+        collector_modules::scan_inputs::ScanInputs::new(input)
+    }
+
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
             id: ModuleId("org.junk.music".into()),
@@ -1121,7 +1139,14 @@ fn rewrite_record(path: &Path, update: impl FnOnce(&mut serde_json::Value)) {
     update(&mut value);
     let bytes = serde_json::to_vec_pretty(&value).unwrap();
     std::fs::write(path, &bytes).unwrap();
-    let manifest = path.parent().unwrap().join("manifest.toml");
+    let manifest = path
+        .parent()
+        .unwrap()
+        .join(if path.file_name().unwrap() == "record.v4.json" {
+            "manifest.v4.toml"
+        } else {
+            "manifest.toml"
+        });
     let digest = Digest::sha256(&bytes).hex;
     let updated = std::fs::read_to_string(&manifest)
         .unwrap()
@@ -1690,7 +1715,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        7 // FX-01 adds disposable browse keys; archived fixture bytes remain unchanged.
+        8 // FX-02 adds rebuildable result groups; archived fixture bytes remain unchanged.
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -1698,7 +1723,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        13
+        14
     );
     assert_eq!(
         private
@@ -4150,7 +4175,7 @@ fn job_views_are_cursor_paged_and_omit_execution_secrets() {
                 user_id: user,
                 collection_id: None,
                 item_id: None,
-                kind: "integrity_verification".into(),
+                kind: "fixture".into(),
                 phase: "queued".into(),
                 total_units: 1,
                 request: serde_json::json!({"private_marker":format!("secret-{fixture}")}),
@@ -5515,7 +5540,7 @@ fn schema_thirteen_preserves_durable_imports_without_private_path_columns() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        13
+        14
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -7788,12 +7813,9 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
             },
             &command(),
         )
-        .unwrap();
-    assert!(service.run_next_job("mismatched-snapshot").unwrap());
-    assert_eq!(
-        service.job(&actor, mismatched_snapshot_job).unwrap().state,
-        JobState::Failed
-    );
+        .unwrap_err();
+    assert!(matches!(mismatched_snapshot_job, Error::Invalid(_)));
+    assert!(!service.run_next_job("mismatched-snapshot").unwrap());
 
     let operation = service
         .enqueue_processing_operation(
@@ -8185,7 +8207,42 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
             && summary.result.get().contains("\"status\":\"verified\"")
             && summary.result.get().contains("\"computed_offset\":0")
     });
-    assert_eq!(verified.count(), 2);
+    let verified = verified.collect::<Vec<_>>();
+    assert_eq!(verified.len(), 1); // Identical actual checks share a result.
+    assert_eq!(verified[0].occurrences, 2);
+    // Equal verified labels with different evaluated offset coverage are not the same result.
+    let wider=service.enqueue_processing_operation(&actor,published.capture_id,StartProcessingCommand {
+        operation:OperationId::new(collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION).unwrap(),operation_version:1,
+        representation_id:published.representation_id,snapshot_id:Some(first_snapshot),
+        selection:RawJson::from_value(serde_json::json!({"package_kind":"cue","anchor_file_index":0,"snapshot_id":first_snapshot,"maximum_offset":1})),
+    },&command()).unwrap();
+    service.run_next_job("wider-coverage").unwrap();
+    assert_eq!(
+        service.job(&actor, wider).unwrap().state,
+        JobState::Completed
+    );
+    let wider_summary = service
+        .capture_processing_summaries(
+            &actor,
+            published.capture_id,
+            published.representation_id,
+            None,
+            20,
+        )
+        .unwrap();
+    let verified_groups = wider_summary
+        .items
+        .iter()
+        .filter(|s| {
+            s.operation.as_str() == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(verified_groups.len(), 2);
+    assert!(
+        verified_groups
+            .iter()
+            .any(|s| s.observation_id == ObservationId(wider.0) && s.occurrences == 1)
+    );
 
     let collection_dir = std::fs::read_dir(root.path().join("archive/collections"))
         .unwrap()
@@ -12842,4 +12899,352 @@ fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
             .len(),
         1
     );
+}
+
+#[test]
+fn fx02_concurrent_scans_converge_and_rechecks_survive_archive_rebuild() {
+    let clock = Arc::new(TestClock::new(1_900_000_000));
+    let (root, store, actor, base, collection) = setup_with_clock(Some(clock.clone()));
+    let reviewed = reviewed_unattached_import(&base, &actor, collection.id, "scan-convergence");
+    base.enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    base.run_next_job("publish").unwrap();
+    let mut registry = Registry::builtins();
+    registry.register(Box::new(ReaderProcessingModule)).unwrap();
+    let service = Arc::new(CollectionService::new(store.clone(), Arc::new(registry)));
+    let request = StartProcessingCommand {
+        operation: OperationId::new("org.example.reader.inspect").unwrap(),
+        operation_version: 1,
+        representation_id: reviewed.representation_id,
+        snapshot_id: None,
+        selection: RawJson::from_value(serde_json::json!({})),
+    };
+    assert!(matches!(
+        service
+            .processing_plan(&actor, reviewed.capture_id, request.clone())
+            .unwrap()
+            .state,
+        collector_app::ScanState::Ready
+    ));
+    let barrier = Arc::new(std::sync::Barrier::new(4));
+    let handles = (0..4)
+        .map(|_| {
+            let service = service.clone();
+            let actor = actor.clone();
+            let request = request.clone();
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                service
+                    .enqueue_processing_operation(&actor, reviewed.capture_id, request, &command())
+                    .unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    let jobs = handles
+        .into_iter()
+        .map(|h| h.join().unwrap())
+        .collect::<Vec<_>>();
+    assert!(jobs.iter().all(|id| id == &jobs[0]));
+    clock.advance(60);
+    assert!(matches!(
+        service
+            .processing_plan(&actor, reviewed.capture_id, request.clone())
+            .unwrap()
+            .state,
+        collector_app::ScanState::Running
+    ));
+    service.run_next_job("scan").unwrap();
+    assert_eq!(
+        service.job(&actor, jobs[0]).unwrap().state,
+        JobState::Completed
+    );
+    let first = service
+        .processing_plan(&actor, reviewed.capture_id, request.clone())
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(first.occurrences, 1);
+    clock.advance(120);
+    let receipt = command();
+    let repeat = service
+        .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &receipt)
+        .unwrap();
+    assert_ne!(repeat, jobs[0]);
+    service.run_next_job("scan").unwrap();
+    let second = service
+        .processing_plan(&actor, reviewed.capture_id, request.clone())
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(second.occurrences, 2);
+    assert_eq!(second.observation_id, first.observation_id);
+    assert_eq!(second.created_at, first.created_at);
+    assert_eq!(
+        second.last_checked_at - first.last_checked_at,
+        chrono::Duration::seconds(120)
+    );
+    clock.advance(300);
+    assert_eq!(
+        service
+            .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &receipt)
+            .unwrap(),
+        repeat
+    );
+    assert!(!service.run_next_job("scan").unwrap());
+    assert_eq!(
+        service
+            .processing_plan(&actor, reviewed.capture_id, request.clone())
+            .unwrap()
+            .result
+            .unwrap()
+            .last_checked_at,
+        second.last_checked_at
+    );
+    let count_kind = |kind: &str| {
+        files_named(&root.path().join("archive"), "record.v4.json")
+            .into_iter()
+            .filter(|e| e.to_string_lossy().contains(kind))
+            .count()
+    };
+    assert_eq!(count_kind("processing_observations"), 1);
+    assert_eq!(count_kind("processing_occurrences"), 1);
+    store.reindex().unwrap();
+    let rebuilt = service
+        .processing_plan(&actor, reviewed.capture_id, request.clone())
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(rebuilt.occurrences, 2);
+    assert_eq!(rebuilt.last_checked_at, second.last_checked_at);
+    let repeated = store.processing_record(ObservationId(repeat.0)).unwrap();
+    let original = store.processing_record(ObservationId(jobs[0].0)).unwrap();
+    assert_eq!(
+        collector_app::processing_result_key(&original).unwrap(),
+        collector_app::processing_result_key(&repeated).unwrap()
+    );
+    let mut distinct = repeated.clone();
+    distinct
+        .observation
+        .limitations
+        .push("Partial coverage".into());
+    assert_ne!(
+        collector_app::processing_result_key(&original).unwrap(),
+        collector_app::processing_result_key(&distinct).unwrap()
+    );
+    let mut distinct = repeated;
+    distinct.inputs.as_mut().unwrap().selection = serde_json::json!({"offset":1});
+    assert_ne!(
+        collector_app::processing_result_key(&original).unwrap(),
+        collector_app::processing_result_key(&distinct).unwrap()
+    );
+    let active = service
+        .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &command())
+        .unwrap();
+    let claim = store.claim_job("cancel-gap", 30).unwrap().unwrap();
+    assert_eq!(claim.id, active);
+    service.cancel_job(&actor, active, &command()).unwrap();
+    assert!(matches!(
+        service
+            .processing_plan(&actor, reviewed.capture_id, request.clone())
+            .unwrap()
+            .state,
+        collector_app::ScanState::Cancelling
+    ));
+    assert_eq!(
+        service
+            .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &command())
+            .unwrap(),
+        active
+    );
+    store
+        .cancel_claimed_job(active, &claim.claim_token)
+        .unwrap();
+    let failed = service
+        .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &command())
+        .unwrap();
+    let claim = store.claim_job("fail-once", 30).unwrap().unwrap();
+    store
+        .fail_job(failed, &claim.claim_token, "interrupted scan")
+        .unwrap();
+    let replacement = service
+        .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &command())
+        .unwrap();
+    assert_eq!(
+        service.retry_job(&actor, failed, &command()).unwrap(),
+        replacement
+    );
+    assert_eq!(service.job(&actor, failed).unwrap().state, JobState::Failed);
+    service.run_next_job("replacement").unwrap();
+    assert!(!service.run_next_job("no-duplicate").unwrap());
+    let archive_copy = tempfile::tempdir().unwrap();
+    copy_tree(
+        &root.path().join("archive"),
+        &archive_copy.path().join("archive"),
+    );
+    let recovered = Store::open(
+        archive_copy.path().join("archive"),
+        archive_copy.path().join("fresh-state"),
+    )
+    .unwrap();
+    let recovered_record = recovered
+        .processing_record(ObservationId(repeat.0))
+        .unwrap();
+    assert_eq!(
+        collector_app::processing_result_key(&recovered_record).unwrap(),
+        collector_app::processing_result_key(&original).unwrap()
+    );
+    let occurrence = files_named(&archive_copy.path().join("archive"), "record.v4.json")
+        .into_iter()
+        .find(|p| p.to_string_lossy().contains("processing_occurrences"))
+        .unwrap();
+    rewrite_record(&occurrence, |v| {
+        v["snapshot_id"] = serde_json::json!(SnapshotId::new())
+    });
+    assert!(
+        recovered.reindex().is_err(),
+        "a contradictory occurrence must not acquire its reference's successful result"
+    );
+    let payload = find_file_with_bytes(&root.path().join("archive"), b"data").unwrap();
+    std::fs::remove_file(payload).unwrap();
+    let admitted = service
+        .enqueue_processing_operation(&actor, reviewed.capture_id, request.clone(), &command())
+        .unwrap();
+    assert!(matches!(
+        service
+            .processing_plan(&actor, reviewed.capture_id, request)
+            .unwrap()
+            .state,
+        collector_app::ScanState::Running
+    ));
+    service.run_next_job("missing-bytes").unwrap();
+    assert_eq!(
+        service.job(&actor, admitted).unwrap().state,
+        JobState::Failed
+    );
+}
+
+#[test]
+fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
+    let clock = Arc::new(TestClock::new(1_900_100_000));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+    let pcm = vec![0; 2352 * 10];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "shared.cue".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, &pcm)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, cue)
+        .unwrap();
+    service.resume_guided_ingests().unwrap();
+    let jobs = store.import_job_records(id, actor.user_id).unwrap();
+    let guided = jobs.iter().find(|j| j.kind == "import_analysis").unwrap();
+    clock.advance(60);
+    let direct = service
+        .enqueue_import_analysis(&actor, id, ModuleId("org.junk.music".into()), &command())
+        .unwrap();
+    assert_eq!(direct, guided.id);
+    let claim = store
+        .claim_job("interrupted-shared-worker", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.id, direct);
+    let revision = service.provisional_import(&actor, id).unwrap().revision;
+    service
+        .cancel_ingest(&actor, id, revision, &command())
+        .unwrap();
+    assert_eq!(
+        service.job(&actor, direct).unwrap().state,
+        JobState::Running
+    );
+    assert_eq!(
+        service.provisional_import(&actor, id).unwrap().phase,
+        ImportPhase::Analyzing
+    );
+    assert_eq!(
+        service.provisional_import(&actor, id).unwrap().revision,
+        revision,
+        "parent cancellation invalidated the independent analysis revision"
+    );
+    store
+        .fail_job(
+            direct,
+            &claim.claim_token,
+            "interrupted independently requested analysis",
+        )
+        .unwrap();
+    assert_eq!(
+        service.retry_job(&actor, direct, &command()).unwrap(),
+        direct
+    );
+    assert_eq!(
+        store
+            .claim_job("interrupted-again", 30)
+            .unwrap()
+            .unwrap()
+            .id,
+        direct
+    );
+    clock.advance(31);
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock,
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service.run_next_job("manual-after-restart").unwrap();
+    assert_eq!(
+        service.job(&actor, direct).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        service.provisional_import(&actor, id).unwrap().phase,
+        ImportPhase::AwaitingReview
+    );
+    assert!(!service.run_next_job("cancelled-parent").unwrap());
 }

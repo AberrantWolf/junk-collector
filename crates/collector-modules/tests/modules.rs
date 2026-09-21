@@ -2054,3 +2054,80 @@ fn redumper_package_can_select_toc_without_splitting_its_cue_companion() {
         Some(1)
     );
 }
+
+#[test]
+fn scan_planning_selects_only_eligible_anchors_without_opening_bytes() {
+    let registry = Registry::builtins();
+    let inventory = |names: &[&str]| {
+        PackageInventory::new(
+            CollectionId::new(),
+            PackageScope::Representation(RepresentationId::new()),
+            names
+                .iter()
+                .map(|name| PackageInventoryFile {
+                    id: PackageFileId::new(),
+                    display_name: PackageFileName::new(*name).unwrap(),
+                    bytes: ByteLength(2352),
+                })
+                .collect(),
+        )
+        .unwrap()
+    };
+    let inspect = registry
+        .scan_inputs(
+            &CapabilityId::new("org.junk.games.inspect-ines").unwrap(),
+            &inventory(&["renamed.bin"]),
+            &RawJson::from_value(serde_json::json!({})),
+        )
+        .unwrap();
+    assert!(
+        inspect.blockers.is_empty(),
+        "filename extensions must not substitute for structural validation"
+    );
+    let op = CapabilityId::new("org.junk.music.cd-structure").unwrap();
+    let planned = registry
+        .scan_inputs(
+            &op,
+            &inventory(&["disc.bin", "notes.txt", "disc.cue"]),
+            &RawJson::from_value(serde_json::json!({})),
+        )
+        .unwrap();
+    assert!(planned.blockers.is_empty());
+    assert_eq!(planned.files.len(), 1);
+    assert_eq!(planned.selection.value().unwrap()["anchor_file_index"], 2);
+    assert_eq!(planned.selection.value().unwrap()["package_kind"], "cue");
+    for (names, selection) in [
+        (
+            vec!["disc.bin", "disc.cue"],
+            serde_json::json!({"anchor_file_index":0}),
+        ),
+        (
+            vec!["disc.bin", "disc.cue"],
+            serde_json::json!({"anchor_file_index":-1}),
+        ),
+        (vec!["disc.cue"], serde_json::json!({})),
+        (
+            vec!["disc.bin", "disc.cue", "other.cue"],
+            serde_json::json!({}),
+        ),
+        (vec!["disc.toc", "disc.scram"], serde_json::json!({})),
+    ] {
+        let plan = registry
+            .scan_inputs(&op, &inventory(&names), &RawJson::from_value(selection))
+            .unwrap();
+        assert!(!plan.blockers.is_empty(), "{names:?}");
+    }
+    let complete = registry
+        .scan_inputs(
+            &op,
+            &inventory(&["disc.state", "disc.subcode", "disc.scram", "disc.toc"]),
+            &RawJson::from_value(serde_json::json!({})),
+        )
+        .unwrap();
+    assert!(complete.blockers.is_empty());
+    assert_eq!(complete.selection.value().unwrap()["anchor_file_index"], 3);
+    assert_eq!(
+        complete.selection.value().unwrap()["package_kind"],
+        "redumper"
+    );
+}

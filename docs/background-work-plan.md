@@ -4,7 +4,7 @@
 remaining whole-application nonblocking rule to scan lifecycle, durable progress,
 cleanup and reimport. Equivalent active scans must converge; completed results
 become the primary view, with equivalent actual rechecks recorded as lightweight
-occurrences. This is proposed scope and reuses the completed LA2 patterns below.
+occurrences. FX-02 implements these scan semantics and removes the whole-dialog execution lock from processing and manual import analysis; [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). The broader history/cleanup/reimport work remains proposed and reuses the completed LA2 patterns below.
 
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA2 integrates the relevant acceptance below across layers. Individual child

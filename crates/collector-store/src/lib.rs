@@ -268,6 +268,7 @@ impl Store {
         };
         store.cleanup_derivative_scratch()?;
         store.reindex()?;
+        store.rebuild_scan_admissions()?;
         store.recover_private_publications()?;
         store.reconcile_job_publications()?;
         store.reconcile_import_cleanup()?;
@@ -1137,6 +1138,22 @@ impl ImportPort for Store {
 }
 
 impl JobPort for Store {
+    fn scan_jobs(&self, user: UserId, key: &str) -> Result<Vec<JobRecord>> {
+        let ids = {
+            let db = lock(&self.db)?;
+            let mut stmt=db.prepare("SELECT j.id FROM private.scan_admissions a JOIN private.jobs j ON j.id=a.job_id WHERE a.scan_key=? AND j.user_id=? ORDER BY (j.state IN ('queued','running','cancel_requested')) DESC,j.created_at DESC,j.id DESC LIMIT 1").map_err(storage)?;
+            stmt.query_map(params![key, user.to_string()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(storage)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+        };
+        ids.into_iter()
+            .map(|id| self.job_record(id.parse().map_err(storage)?, user))
+            .collect()
+    }
+
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId> {
         self.enqueue_job_record(spec)
     }
@@ -1540,7 +1557,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 13 {
+    if private_version > 14 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -1942,6 +1959,12 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
+    if private_version < 14 {
+        db.execute_batch("CREATE TABLE private.scan_admissions(job_id TEXT PRIMARY KEY, scan_key TEXT NOT NULL);
+          CREATE INDEX private.scan_admissions_key ON scan_admissions(scan_key,job_id);
+          CREATE TABLE private.scan_requests(job_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, PRIMARY KEY(job_id,kind,owner));
+          PRAGMA private.user_version=14;").map_err(storage)?;
+    }
     // Preserve actual LA1 preview state without creating a checkpoint-only version.
     for column in ["settled", "cancelled"] {
         let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('guided_ingest_intents','private') WHERE name=?)", [column], |row| row.get(0)).map_err(storage)?;
@@ -1997,7 +2020,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 7 {
+    if catalog_version > 8 {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -2124,7 +2147,13 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS captures_item ON captures(item_id,id);
         CREATE INDEX IF NOT EXISTS private.jobs_item_owner_state ON jobs(item_id,user_id,state);
         CREATE INDEX IF NOT EXISTS private.imports_item_owner_phase ON imports(item_id,user_id,phase);
-        PRAGMA main.user_version = 7;").map_err(storage)?;
+        CREATE TABLE IF NOT EXISTS processing_groups(id TEXT PRIMARY KEY, result_key TEXT NOT NULL, scan_key TEXT,
+          first_checked_at INTEGER NOT NULL, last_checked_at INTEGER NOT NULL, occurrences INTEGER NOT NULL);
+        CREATE UNIQUE INDEX IF NOT EXISTS processing_groups_result ON processing_groups(result_key);
+        CREATE INDEX IF NOT EXISTS processing_groups_scan ON processing_groups(scan_key);
+        CREATE TABLE IF NOT EXISTS processing_members(id TEXT PRIMARY KEY, result_id TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS processing_members_result ON processing_members(result_id,id);
+        PRAGMA main.user_version = 8;").map_err(storage)?;
     Ok(())
 }
 

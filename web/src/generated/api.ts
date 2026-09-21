@@ -340,6 +340,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/captures/{id}/operations/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["processing_plan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collection-types": {
         parameters: {
             query?: never;
@@ -2762,9 +2778,13 @@ export interface components {
                 /** Format: date-time */
                 created_at: string;
                 current: boolean;
+                /** Format: date-time */
+                last_checked_at: string;
                 legacy_provenance: boolean;
                 limitations: string[];
                 observation_id: components["schemas"]["ObservationId"];
+                /** Format: int64 */
+                occurrences: number;
                 operation: components["schemas"]["CapabilityId"];
                 result: Record<string, never>;
                 snapshot_id?: null | components["schemas"]["SnapshotId"];
@@ -2920,9 +2940,13 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             current: boolean;
+            /** Format: date-time */
+            last_checked_at: string;
             legacy_provenance: boolean;
             limitations: string[];
             observation_id: components["schemas"]["ObservationId"];
+            /** Format: int64 */
+            occurrences: number;
             operation: components["schemas"]["CapabilityId"];
             result: Record<string, never>;
             snapshot_id?: null | components["schemas"]["SnapshotId"];
@@ -3041,6 +3065,16 @@ export interface components {
             expected_revision: components["schemas"]["Revision"];
         };
         SaveItemEnvelope: components["schemas"]["SaveItemCommandEnvelope"] | components["schemas"]["SaveItemEditCommandEnvelope"] | components["schemas"]["Wave1SaveItemEnvelope"];
+        ScanPlan: {
+            blockers: string[];
+            command: components["schemas"]["StartProcessingCommand"];
+            files: components["schemas"]["IngestAnchorChoice"][];
+            job?: null | components["schemas"]["JobView"];
+            result?: null | components["schemas"]["ProcessingSummary"];
+            state: components["schemas"]["ScanState"];
+        };
+        /** @enum {string} */
+        ScanState: "ready" | "blocked" | "running" | "cancelling" | "completed" | "failed" | "changed";
         /** Format: uuid */
         ServerId: string;
         /** Format: uuid */
@@ -4028,6 +4062,49 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    processing_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CaptureId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartProcessingCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanPlan"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

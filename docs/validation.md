@@ -1,5 +1,55 @@
 # Validation recorded for the foundation
 
+## FX-02 scan lifecycle — 2026-09-21
+
+Local acceptance passed. Implementation and final browser recovery checks are complete. The prior
+alpha/FX-01 checkpoint is commit `20c4ff0`.
+
+- Four concurrent commands with independent receipt keys converge on one active
+  computation. Cancelling work still occupies its slot; generic retry joins an
+  already active replacement. Readiness/admission work from recorded metadata even
+  after a temporary fixture's payload is removed; actual execution fails safely.
+- An advancing-clock recheck preserves one substantive result and adds a compact
+  occurrence. Receipt replay does not advance the date. The occurrence stores its
+  result reference, actual check time and acquisition/rebinding provenance, not
+  another copy of the common inputs or result payload. Archive-only reconstruction
+  preserves occurrences and rejects contradictory references.
+- Separate AccurateRip snapshot IDs with identical bytes and parsed observations
+  share a result while preserving acquisition provenance. A wider evaluated offset
+  range remains a distinct result, as do no-data/changed-reference outcomes. Existing
+  independent v2-only/partial-coverage module vectors remain in the workspace suite.
+- A manual request admitted after guided work shares the computation. Parent
+  cancellation preserves its source revision; manual retry and expired-lease
+  recovery after restart still complete without resuming the cancelled parent.
+  Cancelled album preparation retains its original retry/admission fence.
+- Module planning selects a sole eligible CUE/TOC even when it is not file zero,
+  rejects ambiguous/non-anchor/missing-companion selections and bounds settings.
+  HTTP rejects known-invalid processing inputs before job creation.
+- `npm --prefix web run test:scans` uses a real temporary server and a 64 MiB
+  preserved package: concurrent admission, close/reopen, reload, completed View
+  result, intentional recheck consolidation, editable unrelated controls and
+  invalid-input/no-job behavior and transient status-read retry. No mocked successful processing service is used.
+- Both standard HTTPS and `LOCAL_SETUP=1` smoke journeys passed in Chrome
+  153.0.8010.37, including actual FLAC playback, detached-player cleanup, reload,
+  role checks, access revocation, imports and provider work.
+
+The initial workspace run exposed route-count/fixture updates and a cancellation
+fence regression. The route inventory now includes scan planning, generic paging
+fixtures no longer impersonate source-less integrity jobs, and only a durable
+independent analysis owner can bypass a cancelled parent's workflow fence. The
+focused shared-analysis and cancelled-album tests passed after correction.
+
+Check record: `cargo test --workspace` passed (312 tests, zero failures; the
+explicit owned-corpus oracle remains ignored). The final focused lifecycle and
+readiness suites, strict workspace Clippy, formatting, architecture/link checks,
+generated API comparison, TypeScript, web build and embedded-server rebuild passed.
+The final standalone browser scan journey passed on the rebuilt server, including
+the transient-status recovery assertion and byte-for-byte served-asset checks.
+
+FX-03
+history cleanup and FX-05 remove/reimport remain separate deliveries. Broader
+U05/P04 and external LA3 qualification remain open.
+
 ## FX-01 browsing/navigation — 2026-09-21
 
 Local acceptance passed. This delivery adds a typed, bounded browse query and

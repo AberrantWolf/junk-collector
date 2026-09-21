@@ -44,6 +44,37 @@ Cancellation fences job admission in the same private-state transaction; discard
 records its receipt and cleanup intent together, with actual cleanup progress read
 separately. Settled and cancelled flags prevent repeated terminal effects.
 
+## FX-02 scan lifecycle (implementation contract)
+
+Application-owned scan plans normalize module-owned selections against recorded
+package inventories before admission. Planning and admission use recorded digests;
+actual bytes are checked with cancellation in the worker. Unknown/missing inputs
+are blockers, never successful-looking empty scans. Structural name checks do not
+claim structural or catalog verification. Immutable reference bytes and parsed observation, operation
+version, source fingerprint and normalized settings define equivalence.
+
+Private scan admissions are requester-scoped, matching the existing private Job
+boundary. Different command receipts converge atomically on equivalent queued,
+running or cancelling work. Completed work is visible as a result; a deliberate
+new check gets a new execution/occurrence. Cancellation does not free an active
+slot until settled, and generic retry must acquire the same slot. Durable direct
+and parent request references are committed with admission; parent cancellation
+must retain work still needed by a direct request. Cross-user private Job details
+are never exposed by a plan. No new scheduler is introduced.
+
+Portable completed observations retain a substantive result once. Subsequent
+identical computations publish compact immutable occurrences referring to that
+result, with their actual check time and per-occurrence snapshot/rebinding provenance.
+The canonical result retains the common frozen inputs; occurrences do not copy those
+inputs or output payloads. Result
+identity includes complete output, coverage, coordinates, limitations and algorithm
+inputs; timestamps/Job/receipt identities are excluded. Cache reuse creates no
+occurrence and never advances verification time. Original old observation bytes
+remain untouched; rebuildable grouping is conservative when old input provenance
+is unavailable. Reindex reconstructs references and rejects missing, inconsistent
+or cross-collection result links. Publication/recovery use the existing archive
+writer and journals, not a separately committed UI workflow.
+
 ## Dependency rules
 
 Wave 4 reserves the `collector-api-types` boundary below; its DTO move remains
@@ -175,7 +206,7 @@ collections/<readable-name>--<collection-id>/
   evidence/<evidence-id>/revisions/<zero-padded-revision>/...
 ```
 
-The tree above remains the schema-3 layout for existing records. Archive envelope schema 4 additively introduces ProcessingObservation, provider/catalog Snapshot, MetadataAuthority, and ConversionRecipe record kinds without rewriting schema-1/2/3 bytes. Mixed-version reindex preserves unknown record and module envelopes. Import-scoped observations are rebound at Capture publication to the committed Representation only after the ordered file identities, lengths, and digests match; their provisional fingerprint and explicit file mapping remain provenance. Migrated schema-1/2 artwork remains byte-for-byte at its item-local path and is reached through adapter-only locators; it is not moved or rewritten.
+The tree above remains the schema-3 layout for existing records. Archive envelope schema 4 additively introduces ProcessingObservation, compact ProcessingOccurrence, provider/catalog Snapshot, MetadataAuthority, and ConversionRecipe record kinds without rewriting schema-1/2/3 bytes. Mixed-version reindex preserves unknown record and module envelopes. Import-scoped observations are rebound at Capture publication to the committed Representation only after the ordered file identities, lengths, and digests match; their provisional fingerprint and explicit file mapping remain provenance. Migrated schema-1/2 artwork remains byte-for-byte at its item-local path and is reached through adapter-only locators; it is not moved or rewritten.
 
 MetadataAuthority revisions keep typed common title/subtitle and artwork authority,
 an owner-bound domain override envelope, and preserved unknown historical fields.
@@ -230,7 +261,7 @@ Durable publication journals contain transaction/entity identities, expected/tar
 
 Collection creation writes an immutable collection manifest and a private recovery intent for the owner grant before archive mutation. Startup completes the intended grant when the collection commit exists or removes the abandoned intent when it does not. Copying only the archive never reconstructs a grant.
 
-SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v7 and `private.sqlite` is schema v13. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
+SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v8 and `private.sqlite` is schema v14. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
 
 The first implementation reindexes metadata at startup; incremental startup/rebuild optimization remains in the performance milestone. Payloads are never read merely to browse. Writes are single-server; independent clones must not reuse operational identity. Replication requires additional protocol work, although IDs, revisions, immutable payloads and tombstones do not assume a server location.
 

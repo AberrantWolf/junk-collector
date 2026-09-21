@@ -30,19 +30,20 @@ intended trusted second device. The supported-platform cache currently contains
 PlayStation and NES; DAT-o-MATIC access must be restored or manually supplied ZIPs
 provided before N64/SNES/PC Engine can be cached. Do not
 repeat the passing owned-corpus or actual restore work unless its owning code
-changes. The integrated alpha checkout remains uncommitted. Preserve the broader release backlog below; mark its
+changes. The integrated alpha/FX-01 checkpoint was committed as `20c4ff0` on 2026-09-21. Preserve the broader release backlog below; mark its
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
 
-## Usability fixes — FX-01 complete, FX-02 next
+## Usability fixes — FX-02 complete, FX-03 next
 
 The user requested a combined set of UX/lifecycle fixes drawing on unfinished
 milestone work. [FX-01–FX-07](ux-fix-plan.md) maps the 18 audit findings and manual
 removal/clean-reimport/scan-consolidation requirements to complete deliveries,
 pulling forward the remaining U05 and P04.4–P04.6 criteria and broader nonblocking
-work. FX-01 is implemented and locally accepted on 2026-09-21; FX-02–FX-07 remain proposed. Completed D06/D07/LA1/LA2
+work. FX-01 is implemented and locally accepted on 2026-09-21; FX-02 is implemented and locally accepted on 2026-09-21; FX-03–FX-07 remain proposed. Completed D06/D07/LA1/LA2
 are reused; P05, native clients and large-scale indexing are not prerequisites.
-The plan includes the child ledger and ready-to-send FX-02 handoff. FX-01 does not claim LA3's
+FX-03 also includes the user-requested removal of repeated ineligible derivative analysis forms and meaningful grouped track presentation, reusing existing readiness/playback services without requiring FX-04 or placeholder systems.
+The plan includes the child ledger and ready-to-send FX-03 handoff. FX-01 does not claim LA3's
 second-device gate or the broader U05/P04/background-work gates complete.
 
 ## How to use this backlog

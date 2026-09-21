@@ -4,7 +4,7 @@
 operation matrix, whole-interface corrections/nonblocking behavior and completion
 review into integrated fixes with the UX audit. FX-01 completes the browse/navigation
 subset with [local acceptance evidence](validation.md#fx-01-browsingnavigation--2026-09-21). U05.1, the remaining U05.2 surfaces and the
-whole-interface U05.3 gate remain open; FX-02–FX-07 are proposed.
+whole-interface U05.3 gate remain open. FX-02 implements the processing-scan subset; its [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). FX-03–FX-07 remain proposed.
 
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA1–LA3 integrate the relevant acceptance below across layers. Individual child
@@ -78,7 +78,7 @@ Both require the appropriate supporting package members, not just a sidecar.
 
 | Child | State | Scope |
 |---|---|---|
-| U05.1 — Readiness contracts and analysis defaults | LA1 guided subset implemented | LA1 previews typed anchors/blockers/provider availability and selects one unique CUE/TOC anchor; the full operation matrix remains planned |
+| U05.1 — Readiness contracts and analysis defaults | LA1 guided and FX-02 scan subsets implemented | LA1 previews typed anchors/blockers/provider availability; FX-02 extends eligible defaults and typed lifecycle to committed-package operations; the remaining interface matrix stays open |
 | U05.2 — Audit and correct all implemented interfaces | Partial: FX-01 browse/navigation accepted; remaining surfaces open | U05.1 plus each surface's owning services: enumerate every screen/action, implement findings through their owners |
 | U05.3 — Interface completion review | Planned | U05.2/P04.6: actual user journeys, negative cases and audited completion evidence |
 

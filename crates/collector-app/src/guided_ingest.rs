@@ -636,7 +636,9 @@ impl CollectionService {
         {
             return Err(Error::Unavailable(issue.message.clone()));
         }
-        let fingerprint = self.fingerprint_inventory(&inventory)?;
+        let fingerprint = self
+            .processing
+            .recorded_source(record.view.collection_id, inventory.scope)?;
         let snapshot_id = self.processing.active_snapshot(
             record.view.collection_id,
             &ModuleId("org.junk.providers.local-dat".into()),
@@ -656,6 +658,13 @@ impl CollectionService {
                 .expect("guided analysis selection is an object")
                 .insert("anchor_file_index".into(), anchor_file_index.into());
         }
+        let selected = self
+            .modules
+            .scan_inputs(&capability, &inventory, &RawJson::from_value(selection))
+            .map_err(Error::from)?;
+        if !selected.blockers.is_empty() {
+            return Err(Error::Invalid(selected.blockers.join(" ")));
+        }
         let frozen = FrozenProcessingJob {
             collection_id: record.view.collection_id,
             collection_binding: eligibility.binding,
@@ -665,7 +674,7 @@ impl CollectionService {
             source_fingerprint: fingerprint,
             snapshot_id,
             observation_id: ObservationId(job.0),
-            selection: RawJson::from_value(selection),
+            selection: selected.selection,
             created_at: intent.created_at,
         };
         self.jobs.enqueue_job(JobSpec {

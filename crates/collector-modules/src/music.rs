@@ -1829,6 +1829,93 @@ pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSel
 pub struct Music;
 
 impl CollectionModule for Music {
+    fn scan_inputs(
+        &self,
+        operation: &CapabilityId,
+        inventory: &PackageInventory,
+        input: &RawJson,
+    ) -> ModuleResult<crate::scan_inputs::ScanInputs> {
+        let mut plan = crate::scan_inputs::ScanInputs::new(input)?;
+        plan.file(inventory, "anchor_file_index", |n| {
+            let n = n.to_ascii_lowercase();
+            n.ends_with(".cue") || n.ends_with(".toc")
+        })?;
+        if !plan.blockers.is_empty() {
+            return Ok(plan);
+        }
+        let mut value: serde_json::Value = plan
+            .selection
+            .parse()
+            .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+        let index = value["anchor_file_index"].as_u64().unwrap() as usize;
+        if inventory.files[index].bytes.0 == 0 {
+            plan.blockers
+                .push("The selected layout file is empty.".into());
+        }
+        let names = inventory
+            .files
+            .iter()
+            .map(|v| v.display_name.clone())
+            .collect::<Vec<_>>();
+        let kind = package_anchors(&names)
+            .into_iter()
+            .find(|(i, _)| *i == index)
+            .ok_or_else(|| ModuleError::Invalid("Not a supported CD anchor.".into()))?
+            .1;
+        let kind_value =
+            serde_json::to_value(kind).map_err(|e| ModuleError::Invalid(e.to_string()))?;
+        if value.get("package_kind").is_some_and(|v| v != &kind_value) {
+            plan.blockers
+                .push("Package layout does not match the selected anchor.".into());
+        }
+        if operation.as_str() != "org.junk.music.import-analysis" {
+            value["package_kind"] = kind_value;
+        }
+        plan.selection = RawJson::from_value(value);
+        plan.blockers.extend(
+            self.import_readiness(&names, Some(index))
+                .blockers
+                .into_iter()
+                .filter(|v| v.blocks_analysis)
+                .map(|v| v.message),
+        );
+        match operation.as_str() {
+            CD_STRUCTURE_OPERATION => plan.normalize::<CdPackageSelection>()?,
+            ACCURATERIP_VERIFICATION_OPERATION => {
+                plan.normalize::<AccurateRipSelection>()?;
+                if plan.blockers.is_empty() {
+                    let selected: AccurateRipSelection = plan
+                        .selection
+                        .parse()
+                        .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+                    if !(0..=2939).contains(&selected.maximum_offset) {
+                        plan.blockers.push(
+                            "Maximum offset must be between 0 and 2939 stereo sample frames."
+                                .into(),
+                        );
+                    }
+                }
+            }
+            "org.junk.music.import-analysis" => {
+                let _: MusicImportAnalysisInput = plan
+                    .selection
+                    .parse()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+                // These descriptive fields are ignored by the CD layout operation.
+                // Canonical input must not depend on a parent's inventory attachment.
+                let mut normalized: serde_json::Value = plan
+                    .selection
+                    .value()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+                normalized["domain"] = serde_json::Value::Null;
+                normalized["system"] = serde_json::Value::Null;
+                plan.selection = RawJson::from_value(normalized);
+            }
+            _ => return Err(ModuleError::UnknownCapability(operation.to_string())),
+        }
+        Ok(plan)
+    }
+
     fn discover_imports(
         &self,
         names: &[PackageFileName],

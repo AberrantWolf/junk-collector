@@ -3,7 +3,7 @@
 **Planning update 2026-09-21:** [FX-03/04/05/07](ux-fix-plan.md) incorporates the
 remaining searchable history, bulk cleanup, dismiss/restore and completion scope,
 plus newly requested manual item removal and clean reimport. These are proposed
-deliveries, not completed P04 criteria; retain the implemented LA1 subset below.
+deliveries, not completed P04 criteria; retain the implemented LA1 subset below. FX-02 adds shared scan ownership and resumable, nonblocking analysis polling; it does not complete P04 history search, dismiss/restore or bulk cleanup.
 
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA1 integrates the relevant acceptance below across layers. Individual child

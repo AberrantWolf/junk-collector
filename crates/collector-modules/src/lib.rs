@@ -4,6 +4,7 @@ pub mod games;
 pub mod music;
 
 pub mod import_discovery;
+pub mod scan_inputs;
 
 use collector_core::*;
 use serde::{Deserialize, Serialize};
@@ -423,6 +424,17 @@ pub struct ImportReadiness {
 }
 
 pub trait CollectionModule: Send + Sync {
+    fn scan_inputs(
+        &self,
+        _operation: &CapabilityId,
+        _inventory: &PackageInventory,
+        _input: &RawJson,
+    ) -> ModuleResult<scan_inputs::ScanInputs> {
+        Err(ModuleError::UnavailableCapability(
+            "This module does not expose scan input planning.".into(),
+        ))
+    }
+
     fn discover_imports(
         &self,
         _names: &[PackageFileName],
@@ -475,6 +487,29 @@ pub struct Registry {
     capabilities: BTreeMap<CapabilityId, String>,
 }
 impl Registry {
+    pub fn scan_inputs(
+        &self,
+        operation: &CapabilityId,
+        inventory: &PackageInventory,
+        input: &RawJson,
+    ) -> ModuleResult<scan_inputs::ScanInputs> {
+        let owner = self
+            .capabilities
+            .get(operation)
+            .ok_or_else(|| ModuleError::UnknownCapability(operation.to_string()))?;
+        let module = &self.modules[owner];
+        let capability = module
+            .descriptor()
+            .capabilities
+            .into_iter()
+            .find(|value| &value.id == operation)
+            .ok_or_else(|| ModuleError::UnknownCapability(operation.to_string()))?;
+        if let Availability::Unavailable { limitation } = capability.availability {
+            return Err(ModuleError::UnavailableCapability(limitation));
+        }
+        module.scan_inputs(operation, inventory, input)
+    }
+
     pub fn discover_imports(
         &self,
         owner: &ModuleId,

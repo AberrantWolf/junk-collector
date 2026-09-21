@@ -900,6 +900,53 @@
         }
       }
     },
+    "/api/v1/captures/{id}/operations/plan": {
+      "post": {
+        "operationId": "processing_plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartProcessingCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/collection-types": {
       "get": {
         "operationId": "collection_types",
@@ -9737,6 +9784,8 @@
             "items": {
               "type": "object",
               "required": [
+                "last_checked_at",
+                "occurrences",
                 "observation_id",
                 "operation",
                 "source",
@@ -9755,6 +9804,10 @@
                 "current": {
                   "type": "boolean"
                 },
+                "last_checked_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
                 "legacy_provenance": {
                   "type": "boolean"
                 },
@@ -9766,6 +9819,11 @@
                 },
                 "observation_id": {
                   "$ref": "#/components/schemas/ObservationId"
+                },
+                "occurrences": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
                 },
                 "operation": {
                   "$ref": "#/components/schemas/CapabilityId"
@@ -10410,6 +10468,8 @@
       "ProcessingSummary": {
         "type": "object",
         "required": [
+          "last_checked_at",
+          "occurrences",
           "observation_id",
           "operation",
           "source",
@@ -10428,6 +10488,10 @@
           "current": {
             "type": "boolean"
           },
+          "last_checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "legacy_provenance": {
             "type": "boolean"
           },
@@ -10439,6 +10503,11 @@
           },
           "observation_id": {
             "$ref": "#/components/schemas/ObservationId"
+          },
+          "occurrences": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           },
           "operation": {
             "$ref": "#/components/schemas/CapabilityId"
@@ -10936,6 +11005,67 @@
           {
             "$ref": "#/components/schemas/Wave1SaveItemEnvelope"
           }
+        ]
+      },
+      "ScanPlan": {
+        "type": "object",
+        "required": [
+          "state",
+          "command",
+          "files",
+          "blockers"
+        ],
+        "properties": {
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "command": {
+            "$ref": "#/components/schemas/StartProcessingCommand"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestAnchorChoice"
+            }
+          },
+          "job": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobView"
+              }
+            ]
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProcessingSummary"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/ScanState"
+          }
+        }
+      },
+      "ScanState": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "blocked",
+          "running",
+          "cancelling",
+          "completed",
+          "failed",
+          "changed"
         ]
       },
       "ServerId": {

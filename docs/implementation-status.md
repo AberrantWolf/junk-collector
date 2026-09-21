@@ -361,8 +361,8 @@ recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
 D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. D06.1 durable metadata authority and deterministic resolution are reviewed and corrected locally; D06.2 providers and artwork are reviewed and corrected locally; D06.3 metadata review and effective presentation are reviewed and corrected locally.
-Archive schema 4 and catalog schema 7 cover processing observations,
-streamed snapshots, metadata authority, and conversion recipes; private schema 13
+Archive schema 4 and catalog schema 8 cover processing observations and compact occurrences,
+streamed snapshots, metadata authority, and conversion recipes; private schema 14
 persists frozen Job input, provisional Import observations, active catalog
 selection, guided-ingest intent and restartable staging cleanup. Import publication
 rebinds evidence to its committed Representation with checked file mapping and
@@ -391,8 +391,20 @@ files-attached, playable-audio and requester-scoped attention filters. Catalog 7
 adds rebuildable browse keys; browsing does not hash payloads. Local acceptance passed on 2026-09-21; see the [validation record](validation.md#fx-01-browsingnavigation--2026-09-21)
 for browser evidence and exact Rust check/rerun outcomes.
 
-FX-02–FX-07 remain proposed: equivalent-scan admission and compact result
-occurrences, searchable history/bulk cleanup, focused editing/intake, manual
+FX-02 implements module-owned eligible-file planning, typed scan states, atomic
+requester-scoped active-work convergence, durable parent/direct ownership, and
+compact repeat-result occurrences. Actual checks retain first/last dates and counts;
+receipt replay does not advance them. Equivalent reference bytes and parsed inputs
+share result content while occurrences preserve snapshot provenance. Reindex retains
+legacy records, reconstructs occurrence references and rejects inconsistent links.
+The processing panel restores selected settings/current work, leads with View result,
+and keeps unrelated editing usable. Manual import analysis resumes polling after
+reopening. Admission uses recorded fingerprints; workers check actual bytes with
+cancellation. [Local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21) on 2026-09-21.
+
+FX-03 also plans to remove repeated ineligible derivative analysis forms and identify generated tracks in a grouped playable-files view; this UI correction is not yet implemented.
+
+FX-03–FX-07 remain proposed: searchable history/bulk cleanup, focused editing/intake, manual
 removal/restore/clean reimport, account recovery and the whole-interface review.
 LA3's second-device qualification and broader release gates remain open.
 

@@ -201,6 +201,11 @@ impl ProviderResponse {
 }
 
 pub trait ProcessingReadPort: Send + Sync {
+    fn grouped_observations(
+        &self,
+        query: &ProcessingQuery,
+    ) -> Result<collector_core::Page<crate::ProcessingResultGroup>>;
+    fn scan_result(&self, key: &str) -> Result<Option<crate::ProcessingResultGroup>>;
     fn observations(
         &self,
         query: &ProcessingQuery,
@@ -411,6 +416,8 @@ pub trait CatalogParserPort: Send + Sync {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PortableProcessingRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<crate::ScanIdentity>,
     pub observation: ProcessingObservation,
     pub import_rebinding: Option<ImportSourceRebinding>,
 }
@@ -418,6 +425,19 @@ pub struct PortableProcessingRecord {
 impl PortableProcessingRecord {
     pub fn validate(&self) -> Result<()> {
         self.observation.validate()?;
+        if let Some(inputs) = &self.inputs {
+            inputs.validate()?;
+            if inputs.collection_id != self.observation.collection_id
+                || inputs.operation != self.observation.operation
+                || inputs.operation_version != self.observation.operation_version
+                || inputs.source != self.observation.source_fingerprint
+            {
+                return Err(collector_core::Error::Invalid(
+                    "Scan inputs differ from the recorded computation".into(),
+                ));
+            }
+        }
+
         if !matches!(
             self.observation.source_fingerprint.source,
             PackageScope::Representation(_)
@@ -441,6 +461,8 @@ impl PortableProcessingRecord {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessingSummary {
+    pub last_checked_at: DateTime<Utc>,
+    pub occurrences: u64,
     pub observation_id: ObservationId,
     pub operation: OperationId,
     pub source: PackageScope,

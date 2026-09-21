@@ -143,7 +143,7 @@ pub enum GameHashProfile {
     PcePayload { copier_header: bool },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "profile", rename_all = "snake_case", deny_unknown_fields)]
 enum GameHashSelection {
     Raw,
@@ -165,26 +165,26 @@ impl From<GameHashSelection> for GameHashProfile {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct GameFileOperationInput {
     file_index: usize,
     #[serde(flatten)]
     profile: GameHashSelection,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GameCueOperationInput {
     cue_file_index: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GameInspectOperationInput {
     file_index: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "input", rename_all = "snake_case", deny_unknown_fields)]
 enum CatalogAnalysisSelection {
     RawFiles,
@@ -198,7 +198,7 @@ enum CatalogAnalysisSelection {
     },
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CatalogVerificationInput {
     snapshot_id: collector_core::SnapshotId,
     system: String,
@@ -896,6 +896,85 @@ pub fn hash_cue_package(
 pub struct Games;
 
 impl CollectionModule for Games {
+    fn scan_inputs(
+        &self,
+        operation: &CapabilityId,
+        inventory: &PackageInventory,
+        input: &RawJson,
+    ) -> ModuleResult<crate::scan_inputs::ScanInputs> {
+        let mut plan = crate::scan_inputs::ScanInputs::new(input)?;
+        match operation.as_str() {
+            "org.junk.games.hash" => {
+                plan.file(inventory, "file_index", |_| true)?;
+                plan.normalize::<GameFileOperationInput>()?;
+            }
+            "org.junk.games.inspect-ines" => {
+                // The user explicitly chose iNES inspection; filenames are not proof of format.
+                plan.file(inventory, "file_index", |_| true)?;
+                plan.normalize::<GameInspectOperationInput>()?;
+            }
+            "org.junk.games.hash-tracks" => {
+                plan.file(inventory, "cue_file_index", |n| {
+                    n.to_ascii_lowercase().ends_with(".cue")
+                })?;
+                plan.normalize::<GameCueOperationInput>()?;
+            }
+            "org.junk.games.catalog-verification" => {
+                let value: serde_json::Value = input
+                    .parse()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+                match value["input"].as_str() {
+                    Some("file") => plan.file(inventory, "file_index", |_| true)?,
+                    Some("cue_raw2352") => plan.file(inventory, "cue_file_index", |n| {
+                        n.to_ascii_lowercase().ends_with(".cue")
+                    })?,
+                    _ => {}
+                }
+                plan.normalize::<CatalogVerificationInput>()?;
+                if plan.blockers.is_empty() {
+                    let parsed: CatalogVerificationInput = plan
+                        .selection
+                        .parse()
+                        .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+                    if parsed.system.trim().is_empty() || parsed.system.len() > 120 {
+                        plan.blockers.push("Choose the catalog system.".into());
+                    }
+                }
+            }
+            "org.junk.games.import-analysis" => {
+                let _: ImportAnalysisInput = input
+                    .parse()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+            }
+            _ => return Err(ModuleError::UnknownCapability(operation.to_string())),
+        }
+        let selected: serde_json::Value = plan
+            .selection
+            .value()
+            .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+        if selected.get("cue_file_index").is_some() && inventory.files.len() < 2 {
+            plan.blockers
+                .push("A CUE check requires its referenced data files.".into());
+        }
+        if (operation.as_str() == "org.junk.games.inspect-ines"
+            || selected["profile"] == "ines_payload")
+            && let Some(index) = selected["file_index"]
+                .as_u64()
+                .and_then(|i| usize::try_from(i).ok())
+            && inventory
+                .files
+                .get(index)
+                .is_some_and(|file| file.bytes.0 < 16)
+        {
+            plan.blockers
+                .push("An iNES header requires at least 16 bytes.".into());
+        }
+        if inventory.files.is_empty() {
+            plan.blockers.push("The package has no files.".into());
+        }
+        Ok(plan)
+    }
+
     fn discover_imports(
         &self,
         names: &[PackageFileName],

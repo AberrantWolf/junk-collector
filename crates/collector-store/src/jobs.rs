@@ -564,6 +564,37 @@ impl Store {
                 return Err(Error::JobCancelled);
             }
         }
+        let scan_key = scan_key_for_spec(&tx, &spec)?;
+        if let Some(key) = &scan_key {
+            ensure_import_allows_work(&tx, &spec.request)?;
+            if let Some(id) = active_scan(&tx, spec.user_id, key, Some(spec.id))? {
+                retain_scan_request(&tx, id, &spec)?;
+                self.record_command(&tx, &id)?;
+                tx.commit().map_err(storage)?;
+                return Ok(id);
+            }
+            // The first admitted timestamp belongs to the durable computation.
+            if let Some(FrozenJobInput::Processing(mut proposed)) = spec.frozen_input.clone() {
+                let old: Option<String> = tx
+                    .query_row(
+                        "SELECT frozen_input FROM private.processing_jobs WHERE job_id=?",
+                        [spec.id.to_string()],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(storage)?;
+                if let Some(old) = old
+                    && let FrozenJobInput::Processing(original) =
+                        serde_json::from_str(&old).map_err(storage)?
+                {
+                    proposed.created_at = original.created_at;
+                    frozen_input = Some(
+                        serde_json::to_string(&FrozenJobInput::Processing(proposed))
+                            .map_err(storage)?,
+                    );
+                }
+            }
+        }
         // Creation time belongs to the first durable request, not output identity.
         if let Some(FrozenJobInput::Derivative(mut proposed)) = spec.frozen_input.clone() {
             let retained: Option<String> = tx
@@ -661,6 +692,14 @@ impl Store {
                 params![spec.id.to_string(), frozen_input],
             )
             .map_err(storage)?;
+        }
+        if let Some(key) = scan_key {
+            tx.execute(
+                "INSERT OR IGNORE INTO private.scan_admissions(job_id,scan_key) VALUES(?,?)",
+                params![spec.id.to_string(), key],
+            )
+            .map_err(storage)?;
+            retain_scan_request(&tx, spec.id, &spec)?;
         }
         if spec.kind == "music_derivative" && batch.is_none() {
             tx.execute(
@@ -1036,6 +1075,32 @@ impl Store {
                 return Err(Error::Conflict);
             }
         }
+        let scan: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.scan_admissions WHERE job_id=?)",
+                [id.to_string()],
+                |r| r.get(0),
+            )
+            .map_err(storage)?;
+        if scan {
+            tx.execute(
+                "DELETE FROM private.scan_requests WHERE job_id=? AND kind='direct' AND owner=?",
+                params![id.to_string(), user.to_string()],
+            )
+            .map_err(storage)?;
+            let shared: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM private.scan_requests WHERE job_id=?)",
+                    [id.to_string()],
+                    |r| r.get(0),
+                )
+                .map_err(storage)?;
+            if shared {
+                self.record_command(&tx, &())?;
+                tx.commit().map_err(storage)?;
+                return Ok(());
+            }
+        }
         if matches!(state.as_str(), "running" | "cancel_requested") && claim_token.is_some() {
             tx.execute(
                 "UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=?
@@ -1195,9 +1260,35 @@ impl Store {
             )
             .map_err(storage)?;
         let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
-        ensure_import_allows_work(&tx, &request)?;
+        let direct:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.scan_requests WHERE job_id=? AND kind='direct' AND owner=?)",params![id.to_string(),user.to_string()],|row|row.get(0)).map_err(storage)?;
+        ensure_import_work(&tx, &request, direct && kind == "import_analysis")?;
+        let scan_key: Option<String> = tx
+            .query_row(
+                "SELECT scan_key FROM private.scan_admissions WHERE job_id=?",
+                [id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        if let Some(key) = scan_key {
+            if let Some(active) = active_scan(&tx, user, &key, Some(id))? {
+                tx.execute(
+                    "INSERT OR IGNORE INTO private.scan_requests VALUES(?,'direct',?)",
+                    params![active.to_string(), user.to_string()],
+                )
+                .map_err(storage)?;
+                self.record_command(&tx, &active)?;
+                tx.commit().map_err(storage)?;
+                return Ok(active);
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO private.scan_requests VALUES(?,'direct',?)",
+                params![id.to_string(), user.to_string()],
+            )
+            .map_err(storage)?;
+        }
         if let Some(import) = request.get("import_id").and_then(serde_json::Value::as_str) {
-            tx.execute("UPDATE private.guided_ingest_intents SET settled=0,enrichment_error=NULL WHERE import_id=?", [import]).map_err(storage)?;
+            tx.execute("UPDATE private.guided_ingest_intents SET settled=0,enrichment_error=NULL WHERE import_id=? AND cancelled=0", [import]).map_err(storage)?;
         }
         let mut result = prior_result
             .as_deref()
@@ -1265,12 +1356,20 @@ fn ensure_import_allows_work(
     tx: &rusqlite::Transaction<'_>,
     request: &serde_json::Value,
 ) -> Result<()> {
+    ensure_import_work(tx, request, false)
+}
+
+fn ensure_import_work(
+    tx: &rusqlite::Transaction<'_>,
+    request: &serde_json::Value,
+    independent_analysis: bool,
+) -> Result<()> {
     if let Some(import) = request.get("import_id").and_then(serde_json::Value::as_str) {
         let stopped: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM private.imports WHERE id=?1 AND phase='cancelled')
-             OR EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE import_id=?1 AND cancelled=1)
+             OR EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE import_id=?1 AND cancelled=1 AND NOT ?2)
              OR EXISTS(SELECT 1 FROM private.import_cleanup WHERE import_id=?1)",
-            [import], |row| row.get(0)
+            params![import,independent_analysis], |row| row.get(0)
         ).map_err(storage)?;
         if stopped {
             return Err(Error::Conflict);
@@ -1330,4 +1429,151 @@ fn ensure_album_admission_capacity(
         return Err(Error::Unavailable("Too many album batches are pending; wait for one to finish or cancel outstanding work.".into()));
     }
     Ok(())
+}
+
+fn scan_key_for_spec(tx: &Connection, spec: &JobSpec) -> Result<Option<String>> {
+    if let Some(FrozenJobInput::Processing(frozen)) = &spec.frozen_input {
+        let raw = frozen
+            .snapshot_id
+            .map(|id| {
+                tx.query_row(
+                    "SELECT record FROM snapshots WHERE id=? AND collection_id=?",
+                    params![id.to_string(), frozen.collection_id.to_string()],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(storage)
+            })
+            .transpose()?
+            .flatten();
+        let snapshot = raw
+            .map(|raw| serde_json::from_str(&raw).map_err(storage))
+            .transpose()?;
+        return collector_app::scan_identity_from(frozen, snapshot)?
+            .key()
+            .map(Some);
+    }
+    if spec.kind == "integrity_verification" {
+        // The Item inventory record is metadata; no file bytes are read here.
+        let raw: String = tx
+            .query_row(
+                "SELECT record FROM items WHERE id=?",
+                [spec.item_id.ok_or(Error::NotFound)?.to_string()],
+                |r| r.get(0),
+            )
+            .map_err(storage)?;
+        let mut item: Item = serde_json::from_str(&raw).map_err(storage)?;
+        hydrate_captures(tx, &mut item)?;
+        return Ok(Some(
+            Digest::sha256(
+                &serde_json::to_vec(&(
+                    "integrity-v1",
+                    item.id,
+                    item.captures
+                        .iter()
+                        .flat_map(|c| &c.representations)
+                        .map(|r| {
+                            (
+                                r.id,
+                                r.files
+                                    .iter()
+                                    .map(|f| (&f.name, f.bytes, &f.digest))
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                ))
+                .map_err(storage)?,
+            )
+            .hex,
+        ));
+    }
+    Ok(None)
+}
+fn active_scan(
+    tx: &Connection,
+    user: UserId,
+    key: &str,
+    except: Option<JobId>,
+) -> Result<Option<JobId>> {
+    let id:Option<String>=tx.query_row("SELECT j.id FROM private.scan_admissions a JOIN private.jobs j ON j.id=a.job_id WHERE a.scan_key=? AND j.user_id=? AND j.state IN ('queued','running','cancel_requested') AND (? IS NULL OR j.id<>?) ORDER BY j.created_at,j.id LIMIT 1",params![key,user.to_string(),except.map(|v|v.to_string()),except.map(|v|v.to_string())],|r|r.get(0)).optional().map_err(storage)?;
+    id.map(|v| v.parse().map_err(storage)).transpose()
+}
+fn retain_scan_request(tx: &Connection, id: JobId, spec: &JobSpec) -> Result<()> {
+    let parent = spec
+        .request
+        .get("guided")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        .then(|| {
+            spec.request
+                .get("import_id")
+                .and_then(serde_json::Value::as_str)
+        })
+        .flatten();
+    let owner = parent
+        .map(str::to_owned)
+        .unwrap_or_else(|| spec.user_id.to_string());
+    tx.execute(
+        "INSERT OR IGNORE INTO private.scan_requests(job_id,kind,owner) VALUES(?,?,?)",
+        params![
+            id.to_string(),
+            if parent.is_some() { "import" } else { "direct" },
+            owner
+        ],
+    )
+    .map_err(storage)?;
+    Ok(())
+}
+
+impl Store {
+    pub(crate) fn rebuild_scan_admissions(&self) -> Result<()> {
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let specs = {
+            let mut stmt=tx.prepare("SELECT j.id,j.user_id,j.collection_id,j.item_id,j.kind,j.phase,j.total_units,j.request,p.frozen_input FROM private.jobs j JOIN private.processing_jobs p ON p.job_id=j.id LEFT JOIN private.scan_admissions a ON a.job_id=j.id WHERE a.job_id IS NULL").map_err(storage)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, u64>(6)?,
+                        r.get::<_, String>(7)?,
+                        r.get::<_, String>(8)?,
+                    ))
+                })
+                .map_err(storage)?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        for (id, user, collection, item, kind, phase, total, request, frozen) in specs {
+            let spec = JobSpec {
+                id: id.parse().map_err(storage)?,
+                user_id: user.parse().map_err(storage)?,
+                collection_id: collection.map(|v| v.parse().map_err(storage)).transpose()?,
+                item_id: item.map(|v| v.parse().map_err(storage)).transpose()?,
+                kind,
+                phase,
+                total_units: total,
+                request: serde_json::from_str(&request).map_err(storage)?,
+                frozen_input: Some(serde_json::from_str(&frozen).map_err(storage)?),
+            };
+            if let Some(key) = scan_key_for_spec(&tx, &spec)? {
+                tx.execute(
+                    "INSERT INTO private.scan_admissions VALUES(?,?)",
+                    params![id, key],
+                )
+                .map_err(storage)?;
+                retain_scan_request(&tx, spec.id, &spec)?;
+            }
+        }
+        tx.commit().map_err(storage)?;
+        Ok(())
+    }
 }

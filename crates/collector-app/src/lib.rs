@@ -8,6 +8,8 @@ pub use derivatives::*;
 mod guided_ingest;
 mod metadata;
 pub use metadata::*;
+mod scans;
+pub use scans::*;
 mod processing;
 pub mod security;
 
@@ -788,6 +790,7 @@ fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<Job
 }
 
 pub trait JobPort: Send + Sync {
+    fn scan_jobs(&self, user: UserId, key: &str) -> Result<Vec<JobRecord>>;
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId>;
     fn enqueue_preparation_member(
         &self,
@@ -2924,39 +2927,13 @@ impl CollectionService {
         let current_source = self
             .processing
             .recorded_source(query.collection_id, query.source)?;
-        let page = self.processing.observations(&query)?;
+        let page = self.processing.grouped_observations(&query)?;
         Ok(Page {
             items: page
                 .items
                 .into_iter()
-                .map(|observation| {
-                    let snapshot_observation = observation
-                        .snapshot_id
-                        .and_then(|snapshot_id| {
-                            self.processing
-                                .snapshot(SnapshotQuery {
-                                    collection_id: query.collection_id,
-                                    snapshot_id,
-                                })
-                                .ok()
-                        })
-                        .map(|snapshot| snapshot.parsed_observation);
-                    ProcessingSummary {
-                        observation_id: observation.id,
-                        operation: observation.operation,
-                        source: observation.source_fingerprint.source,
-                        snapshot_id: observation.snapshot_id,
-                        snapshot_observation,
-                        result: observation.typed_result.payload,
-                        current: observation.source_fingerprint.source == current_source.source
-                            && observation.source_fingerprint.files == current_source.files,
-                        support: observation.support,
-                        limitations: observation.limitations,
-                        legacy_provenance: false,
-                        created_at: observation.created_at,
-                    }
-                })
-                .collect(),
+                .map(|group| self.present_processing_group(group, &current_source))
+                .collect::<Result<Vec<_>>>()?,
             next_cursor: page.next_cursor,
         })
     }
@@ -3324,7 +3301,28 @@ impl CollectionService {
         })
     }
     pub fn provisional_import(&self, actor: &Principal, id: ImportId) -> Result<ImportView> {
-        Ok(self.authorized_provisional_import(actor, id)?.view)
+        let mut view = self.authorized_provisional_import(actor, id)?.view;
+        if view.phase == ImportPhase::Analyzing {
+            view.analysis_job_id = self
+                .provisional_imports
+                .import_job_records(id, actor.user_id)?
+                .into_iter()
+                .filter(|job| job.kind == "import_analysis")
+                .max_by_key(|job| {
+                    (
+                        matches!(
+                            job.state,
+                            JobState::Queued | JobState::Running | JobState::CancelRequested
+                        ),
+                        job.created_at,
+                        job.updated_at,
+                        job.id,
+                    )
+                })
+                .map(|job| job.id)
+                .or(view.analysis_job_id);
+        }
+        Ok(view)
     }
     pub fn stage_provisional_import_chunk(
         &self,
@@ -3388,70 +3386,79 @@ impl CollectionService {
     ) -> Result<JobId> {
         module.validate()?;
         let (record, eligibility) = self.provisional_import_for_write(actor, id)?;
-        let job = deterministic_job_id(actor.user_id, "import.analyze", context.key());
-        let capability = CapabilityId::new(format!("{}.import-analysis", module.0))?;
-        let contract = self.modules.capability_contract(&capability)?;
-        if contract.scope != collector_modules::OperationScope::CollectionDomain
-            || contract.owner != eligibility.owner
-            || module != eligibility.owner
-        {
-            return Err(Error::Invalid(
-                "import identity analysis must be owned by the collection module".into(),
-            ));
-        }
-        let operation_version = contract.schema_version;
-        let inventory = self
-            .processing
-            .package_inventory(record.view.collection_id, PackageScope::Import(id))?;
-        let source_fingerprint = self.fingerprint_inventory(&inventory)?;
-        let provider = ModuleId("org.junk.providers.local-dat".into());
-        let snapshot_id = self
-            .processing
-            .active_snapshot(record.view.collection_id, &provider)?;
-        let domain = record
-            .view
-            .association
-            .item_id
-            .map(|item| self.reader.item(item).map(|item| item.domain))
-            .transpose()?;
-        let selection = RawJson::from_value(serde_json::json!({
-            "import_id": id,
-            "representation_id": record.view.representation_id,
-            "files": record.view.files,
-            "snapshot_id": snapshot_id,
-            "system": null,
-            "domain": domain,
-        }));
-        let frozen = FrozenProcessingJob {
-            collection_id: record.view.collection_id,
-            collection_binding: eligibility.binding,
-            operation: capability,
-            operation_version,
-            source: PackageScope::Import(id),
-            source_fingerprint,
-            snapshot_id,
-            observation_id: ObservationId(job.0),
-            selection,
-            created_at: self.authentication.now(),
-        };
-        frozen.validate()?;
-        let spec = JobSpec {
-            id: job,
-            user_id: actor.user_id,
-            collection_id: Some(record.view.collection_id),
-            item_id: record.view.association.item_id,
-            kind: "import_analysis".into(),
-            phase: "queued".into(),
-            total_units: 1,
-            request: serde_json::json!({"import_id":id,"module":module}),
-            frozen_input: Some(FrozenJobInput::Processing(frozen)),
-        };
         self.execute_command(
             actor,
             context,
             "import.analyze.enqueue",
-            &(id, module),
+            &(id, module.clone()),
             |effects| {
+                let job = deterministic_job_id(actor.user_id, "import.analyze", context.key());
+                let capability = CapabilityId::new(format!("{}.import-analysis", module.0))?;
+                let contract = self.modules.capability_contract(&capability)?;
+                if contract.scope != collector_modules::OperationScope::CollectionDomain
+                    || contract.owner != eligibility.owner
+                    || module != eligibility.owner
+                {
+                    return Err(Error::Invalid(
+                        "import identity analysis must be owned by the collection module".into(),
+                    ));
+                }
+                let operation_version = contract.schema_version;
+                let inventory = self
+                    .processing
+                    .package_inventory(record.view.collection_id, PackageScope::Import(id))?;
+                let source_fingerprint = self
+                    .processing
+                    .recorded_source(record.view.collection_id, inventory.scope)?;
+                let provider = ModuleId("org.junk.providers.local-dat".into());
+                let snapshot_id = self
+                    .processing
+                    .active_snapshot(record.view.collection_id, &provider)?;
+                let domain = record
+                    .view
+                    .association
+                    .item_id
+                    .map(|item| self.reader.item(item).map(|item| item.domain))
+                    .transpose()?;
+                let selection = RawJson::from_value(serde_json::json!({
+                    "import_id": id,
+                    "representation_id": record.view.representation_id,
+                    "files": record.view.files,
+                    "snapshot_id": snapshot_id,
+                    "system": null,
+                    "domain": domain,
+                }));
+                let selection = match self
+                    .modules
+                    .scan_inputs(&capability, &inventory, &selection)
+                {
+                    Ok(planned) if planned.blockers.is_empty() => planned.selection,
+                    _ => selection, // Optional import analysis must still allow preserving unsupported bytes.
+                };
+                let frozen = FrozenProcessingJob {
+                    collection_id: record.view.collection_id,
+                    collection_binding: eligibility.binding,
+                    operation: capability,
+                    operation_version,
+                    source: PackageScope::Import(id),
+                    source_fingerprint,
+                    snapshot_id,
+                    observation_id: ObservationId(job.0),
+                    selection,
+                    created_at: self.authentication.now(),
+                };
+                frozen.validate()?;
+                let spec = JobSpec {
+                    id: job,
+                    user_id: actor.user_id,
+                    collection_id: Some(record.view.collection_id),
+                    item_id: record.view.association.item_id,
+                    kind: "import_analysis".into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({"import_id":id,"module":module}),
+                    frozen_input: Some(FrozenJobInput::Processing(frozen)),
+                };
                 if effects.import_record(id)?.view.phase != ImportPhase::Analyzing {
                     return Err(Error::Conflict);
                 }
@@ -3514,7 +3521,17 @@ impl CollectionService {
             .processing
             .package_inventory(frozen.collection_id, frozen.source)?;
         frozen.source_fingerprint.validate_inventory(&inventory)?;
-        if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+        if self.fingerprint_inventory_checked(&inventory, &mut || {
+            if self
+                .jobs
+                .cancellation_requested(claim.id, &claim.claim_token)?
+            {
+                Err(Error::JobCancelled)
+            } else {
+                Ok(())
+            }
+        })? != frozen.source_fingerprint
+        {
             return Err(Error::Conflict);
         }
         let host = ProcessingHost {
@@ -3605,7 +3622,17 @@ impl CollectionService {
         {
             return Err(Error::Conflict);
         }
-        if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+        if self.fingerprint_inventory_checked(&inventory, &mut || {
+            if self
+                .jobs
+                .cancellation_requested(claim.id, &claim.claim_token)?
+            {
+                Err(Error::JobCancelled)
+            } else {
+                Ok(())
+            }
+        })? != frozen.source_fingerprint
+        {
             return Err(Error::Conflict);
         }
         let observation = ProcessingObservation {
@@ -3619,7 +3646,12 @@ impl CollectionService {
             raw_observations: vec![],
             typed_result,
             limitations,
-            created_at: frozen.created_at,
+            created_at: self
+                .processing
+                .provisional_observations(id)?
+                .into_iter()
+                .find(|prior| prior.id == frozen.observation_id)
+                .map_or_else(|| self.authentication.now(), |prior| prior.created_at),
         };
         observation.validate()?;
         self.processing
@@ -3630,9 +3662,6 @@ impl CollectionService {
         Ok(self.provisional_imports.save_import(record, revision)?.view)
     }
 
-    fn fingerprint_inventory(&self, inventory: &PackageInventory) -> Result<SourceFingerprint> {
-        self.fingerprint_inventory_checked(inventory, &mut || Ok(()))
-    }
     fn fingerprint_inventory_checked(
         &self,
         inventory: &PackageInventory,
@@ -4147,7 +4176,11 @@ impl CollectionService {
         structure
             .source_fingerprint
             .validate_inventory(&inventory)?;
-        if self.fingerprint_inventory(&inventory)? != structure.source_fingerprint {
+        if self
+            .processing
+            .recorded_source(capture.collection_id, inventory.scope)?
+            != structure.source_fingerprint
+        {
             return Err(Error::Conflict);
         }
         let result: collector_modules::music::CdProcessingResult =
@@ -4290,61 +4323,41 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         let capture = self.reader.capture(capture_id)?;
-        let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
-        if !capture
-            .representations
-            .iter()
-            .any(|value| value.id == command.representation_id)
-        {
-            return Err(Error::NotFound);
-        }
-        let registered_version =
-            self.validate_operation_eligibility(&eligibility, &command.operation)?;
-        if command.operation_version != registered_version {
-            return Err(Error::Invalid("operation version is not registered".into()));
-        }
-        if let Some(snapshot_id) = command.snapshot_id {
-            self.processing.snapshot(SnapshotQuery {
-                collection_id: capture.collection_id,
-                snapshot_id,
-            })?;
-        }
-        let source = PackageScope::Representation(command.representation_id);
-        let inventory = self
-            .processing
-            .package_inventory(capture.collection_id, source)?;
-        let fingerprint = self.fingerprint_inventory(&inventory)?;
-        let id = deterministic_job_id(actor.user_id, "processing.operation", context.key());
-        let frozen = FrozenProcessingJob {
-            collection_id: capture.collection_id,
-            collection_binding: eligibility.binding,
-            operation: command.operation.clone(),
-            operation_version: command.operation_version,
-            source,
-            source_fingerprint: fingerprint,
-            snapshot_id: command.snapshot_id,
-            observation_id: ObservationId(id.0),
-            selection: command.selection.clone(),
-            created_at: self.authentication.now(),
-        };
-        frozen.validate()?;
-        let spec = JobSpec {
-            id,
-            user_id: actor.user_id,
-            collection_id: Some(capture.collection_id),
-            item_id: capture.association.item_id,
-            kind: "processing_operation".into(),
-            phase: "queued".into(),
-            total_units: inventory.files.iter().map(|file| file.bytes.0).sum(),
-            request: serde_json::json!({"capture_id":capture_id,"observation_id":frozen.observation_id}),
-            frozen_input: Some(FrozenJobInput::Processing(frozen)),
-        };
+        self.content_write_eligibility(actor, capture.collection_id)?;
         self.execute_command(
-            actor,
-            context,
-            "processing.operation.enqueue",
-            &(capture_id, command),
-            |effects| effects.enqueue_job(spec),
+            actor, context, "processing.operation.enqueue", &(capture_id, command.clone()),
+            |effects| {
+                let plan = self.processing_plan(actor, capture_id, command)?;
+                if !plan.blockers.is_empty() {
+                    return Err(Error::Invalid(plan.blockers.join(" ")));
+                }
+                let command = plan.command;
+                let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
+                let source = PackageScope::Representation(command.representation_id);
+                let fingerprint = self.processing.recorded_source(capture.collection_id, source)?;
+                let id = deterministic_job_id(actor.user_id, "processing.operation", context.key());
+                let total_units = fingerprint.files.iter().map(|v| v.bytes.0).sum();
+                let frozen = FrozenProcessingJob {
+                    collection_id: capture.collection_id,
+                    collection_binding: eligibility.binding,
+                    operation: command.operation,
+                    operation_version: command.operation_version,
+                    source,
+                    source_fingerprint: fingerprint,
+                    snapshot_id: command.snapshot_id,
+                    observation_id: ObservationId(id.0),
+                    selection: command.selection,
+                    created_at: self.authentication.now(),
+                };
+                frozen.validate()?;
+                effects.enqueue_job(JobSpec {
+                    id, user_id: actor.user_id, collection_id: Some(capture.collection_id),
+                    item_id: capture.association.item_id, kind: "processing_operation".into(),
+                    phase: "queued".into(), total_units,
+                    request: serde_json::json!({"capture_id":capture_id,"observation_id":frozen.observation_id}),
+                    frozen_input: Some(FrozenJobInput::Processing(frozen)),
+                })
+            },
         )
     }
 
@@ -4652,7 +4665,17 @@ impl CollectionService {
                     .processing
                     .package_inventory(frozen.collection_id, frozen.source)?;
                 frozen.source_fingerprint.validate_inventory(&inventory)?;
-                if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+                if self.fingerprint_inventory_checked(&inventory, &mut || {
+                    if self
+                        .jobs
+                        .cancellation_requested(claim.id, &claim.claim_token)?
+                    {
+                        Err(Error::JobCancelled)
+                    } else {
+                        Ok(())
+                    }
+                })? != frozen.source_fingerprint
+                {
                     return Err(Error::Conflict);
                 }
                 if self
@@ -4723,9 +4746,20 @@ impl CollectionService {
                 )?;
                 self.validate_frozen_binding(&current, &frozen.collection_binding)?;
                 self.validate_operation_eligibility(&current, &frozen.operation)?;
-                if self.fingerprint_inventory(&inventory)? != frozen.source_fingerprint {
+                if self.fingerprint_inventory_checked(&inventory, &mut || {
+                    if self
+                        .jobs
+                        .cancellation_requested(claim.id, &claim.claim_token)?
+                    {
+                        Err(Error::JobCancelled)
+                    } else {
+                        Ok(())
+                    }
+                })? != frozen.source_fingerprint
+                {
                     return Err(Error::Conflict);
                 }
+                let inputs = Some(self.scan_identity(&frozen)?);
                 let observation = ProcessingObservation {
                     id: frozen.observation_id,
                     collection_id: frozen.collection_id,
@@ -4741,13 +4775,14 @@ impl CollectionService {
                         payload,
                     },
                     limitations,
-                    created_at: frozen.created_at,
+                    created_at: self.authentication.now(),
                 };
                 observation.validate()?;
                 self.processing.publish_processing_record(
                     claim.id,
                     &claim.claim_token,
                     PortableProcessingRecord {
+                        inputs,
                         observation,
                         import_rebinding: None,
                     },

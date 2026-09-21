@@ -537,6 +537,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(dispose_specimen))
         .routes(routes!(verify))
         .routes(routes!(start_processing_operation))
+        .routes(routes!(processing_plan))
         .routes(routes!(acquire_accuraterip_snapshot))
         .routes(routes!(capture_processing_summaries))
         .routes(routes!(curation_catalog_snapshots))
@@ -2478,6 +2479,19 @@ async fn provisional_import(
 #[serde(deny_unknown_fields)]
 struct AnalyzeProvisionalImport {
     module: ModuleId,
+}
+
+#[utoipa::path(post, path = "/api/v1/captures/{id}/operations/plan", params(("id" = CaptureId, Path)), request_body = StartProcessingCommand, responses((status = 200, body = collector_app::ScanPlan), (status = 400), (status = 403), (status = 404)))]
+async fn processing_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CaptureId>,
+    Json(input): Json<StartProcessingCommand>,
+) -> ApiResult<Json<collector_app::ScanPlan>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.processing_plan(&actor, id, input)).await?,
+    ))
 }
 
 #[utoipa::path(post, path = "/api/v1/captures/{id}/operations", params(("id" = CaptureId, Path), ("Idempotency-Key" = String, Header)), request_body = StartProcessingCommand, responses((status = 202, body = serde_json::Value), (status = 400), (status = 403), (status = 404), (status = 409)))]

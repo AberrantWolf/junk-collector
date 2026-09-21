@@ -30,7 +30,8 @@ async function waitForJob(id:string,onProgress:(job:JobView)=>void,signal:AbortS
  }
 }
 
-export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:Props){
+export default function ImportWorkspace({item,onPublished,onError}:Props){
+ const [busy,setBusy]=useState(false);const [analysisError,setAnalysisError]=useState('');const [analysisPollRevision,setAnalysisPollRevision]=useState(0);
  const lifecycle=useRef(new AbortController());
  const [uploadProgress,setUploadProgress]=useState<UploadProgress>();const [activity,setActivity]=useState('');
  async function request<T=unknown>(path:string,init:RequestInit={}):Promise<T>{const signal=lifecycle.current.signal;signal.throwIfAborted();const value=await api<T>(path,{...init,signal});signal.throwIfAborted();return value;}
@@ -94,12 +95,16 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
    setEditingReview(true);
   }catch(error){report(error);}finally{finish();}
  }
+ useEffect(()=>{
+  if(record?.phase!=='analyzing'||!record.analysis_job_id)return;
+  const controller=new AbortController();const id=record.id;setJob(undefined);setAnalysisError('');
+  void waitForJob(record.analysis_job_id,value=>{if(!controller.signal.aborted)setJob(value);},controller.signal).then(async()=>{const value=await api<ImportView>(`/imports/${id}`,{signal:controller.signal});if(!controller.signal.aborted){setRecord(value);jobsChanged();}}).catch(error=>{if(!controller.signal.aborted)setAnalysisError(error instanceof Error?error.message:String(error));});
+  return()=>controller.abort();
+ },[record?.id,record?.phase,record?.analysis_job_id,analysisPollRevision]);
  async function beginReview(){
-  if(!record)return;setBusy(true);setActivity('Analyzing package…');setJob(undefined);
-  try{
-   const accepted=await request<{job_id:string}>(`/imports/${record.id}/analysis`,{method:'POST',body:JSON.stringify({module:item.domain.module})});
-   jobsChanged();await waitForJob(accepted.job_id,setJob,lifecycle.current.signal);jobsChanged();setRecord(await request<ImportView>(`/imports/${record.id}`));
-  }catch(error){report(error);}finally{finish();}
+  if(!record)return;setBusy(true);
+  try{const accepted=await request<{job_id:string}>(`/imports/${record.id}/analysis`,{method:'POST',body:JSON.stringify({module:item.domain.module})});setRecord({...record,analysis_job_id:accepted.job_id});jobsChanged();}
+  catch(error){report(error);}finally{finish();}
  }
  function association():Association{
   if(!attach)return {item_id:null,specimen_id:null,component_id:null,carrier_id:null};
@@ -136,7 +141,8 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
   {uploadProgress?<UploadMeter value={uploadProgress}/>:job&&!terminal.has(job.state)?<WorkProgress label={job.phase.replaceAll('_',' ')} completed={job.total_units?job.completed_units:undefined} total={job.total_units} detail="Server work continues independently of this window."/>:activity&&<WorkProgress label={activity}/>}
   {record&&<div className="import-docket">
    <header><div><span className="docket-phase">{record.phase==='awaiting_review'&&record.review?'Review saved · publication needed':phaseLabel[record.phase]}</span><strong className="docket-title">{record.source.package_name}</strong></div><span>Upload {percent(done,total)}%</span></header>
-   {record.phase==='analyzing'&&<p className="notice">Your files are uploaded, but are not attached to the album yet. Choose Review import to analyze the package.</p>}
+   {record.phase==='analyzing'&&<p className="notice">{record.analysis_job_id&&(!job||!terminal.has(job.state))?'Package analysis is underway. You can leave this panel and return to its progress.':'Your files are uploaded, but are not attached to the album yet. Choose Review import to analyze the package.'}</p>}
+   {record.phase==='analyzing'&&analysisError&&<p role="alert">{analysisError} <button onClick={()=>setAnalysisPollRevision(value=>value+1)}>Refresh analysis status</button></p>}
    {record.phase==='awaiting_review'&&!record.review&&<p className="notice">Analysis is complete. Confirm the album attachment and save your review below, then choose Publish capture. Tracks become available for preparation after publication.</p>}
    {record.phase==='awaiting_review'&&record.review&&<p className="notice">Your review is saved. Choose Publish capture to preserve this package and attach it to the selected album.</p>}
    <progress max={Math.max(total,1)} value={total?done:1} aria-label="Package staging progress"/><p className="muted" role="status" aria-live="polite">{checkingFiles?'Checking selected files against retained bytes':job?`${job.phase}: ${percent(job.completed_units,job.total_units)}%`:`${done.toLocaleString()} of ${total.toLocaleString()} bytes staged`}</p>
@@ -147,7 +153,7 @@ export default function ImportWorkspace({item,busy,setBusy,onPublished,onError}:
     <label>Original package files<input aria-label="Original package files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>
     <button className="primary" disabled={busy||!files.length}>Resume upload</button>
    </form>}
-   {record.phase==='analyzing' &&<button className="primary" disabled={busy} onClick={()=>void beginReview()}>Review import</button>}
+   {record.phase==='analyzing' &&<button className="primary" disabled={busy||!!record.analysis_job_id&&(!job||!terminal.has(job.state))} onClick={()=>void beginReview()}>{record.analysis_job_id&&(!job||!terminal.has(job.state))?'Analysis in progress…':'Review import'}</button>}
    {conflict&&<p className="notice conflict" role="alert"><strong>Revision conflict.</strong> {conflict}</p>}
    {record.phase==='awaiting_review'&&(!record.review||!!conflict||editingReview)&&<form aria-label="Review import" onSubmit={event=>{event.preventDefault();void saveReview();}}>
     <fieldset><legend>Identity</legend><label><input type="radio" name="identity" value="unidentified" checked={identity==='unidentified'} onChange={event=>setIdentity(event.target.value)}/> Keep unidentified</label>{candidates.map(candidate=><label key={candidate.key}><input type="radio" name="identity" value={candidate.key} checked={identity===candidate.key} onChange={event=>setIdentity(event.target.value)}/> {candidate.label}</label>)}</fieldset>

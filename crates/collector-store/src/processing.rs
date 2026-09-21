@@ -52,6 +52,10 @@ impl Store {
         cancelled: &mut dyn FnMut() -> Result<bool>,
     ) -> Result<()> {
         record.validate()?;
+        {
+            let db = lock(&self.db)?;
+            validate_processing_reference(&db, &record)?;
+        }
         if let Ok(existing) = self.processing_record(record.observation.id) {
             return if serde_json::to_value(existing).map_err(storage)?
                 == serde_json::to_value(&record).map_err(storage)?
@@ -64,18 +68,51 @@ impl Store {
             };
         }
         let txid = TransactionId(job.0);
-        self.publish_v4(
-            V4Target {
-                transaction_id: txid,
+        let result_key = collector_app::processing_result_key(&record)?;
+        let canonical: Option<String> = lock(&self.db)?
+            .query_row(
+                "SELECT id FROM processing_groups WHERE result_key=?",
+                [&result_key],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        if let Some(canonical) = canonical {
+            let occurrence = collector_app::ProcessingOccurrence {
+                id: record.observation.id,
                 collection_id: record.observation.collection_id,
-                kind: "processing_observation",
-                id: record.observation.id.to_string(),
-                revision: Revision(1),
-            },
-            &record,
-            None,
-            cancelled,
-        )?;
+                result_id: canonical.parse().map_err(storage)?,
+                result_key,
+                snapshot_id: record.observation.snapshot_id,
+                import_rebinding: record.import_rebinding.clone(),
+                checked_at: record.observation.created_at,
+            };
+            self.publish_v4(
+                V4Target {
+                    transaction_id: txid,
+                    collection_id: occurrence.collection_id,
+                    kind: "processing_occurrence",
+                    id: occurrence.id.to_string(),
+                    revision: Revision(1),
+                },
+                &occurrence,
+                None,
+                cancelled,
+            )?;
+        } else {
+            self.publish_v4(
+                V4Target {
+                    transaction_id: txid,
+                    collection_id: record.observation.collection_id,
+                    kind: "processing_observation",
+                    id: record.observation.id.to_string(),
+                    revision: Revision(1),
+                },
+                &record,
+                None,
+                cancelled,
+            )?;
+        }
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -411,6 +448,7 @@ impl Store {
 
     pub(crate) fn project_v4_records(&self, tx: &rusqlite::Transaction<'_>) -> Result<()> {
         let mut observations = Vec::new();
+        let mut occurrences = Vec::new();
         let mut snapshots = Vec::new();
         let mut recipes = Vec::new();
         let mut authorities = std::collections::BTreeMap::new();
@@ -432,6 +470,11 @@ impl Store {
                     read_v4(&revision, collection.id, "processing_observation")?;
                 record.validate()?;
                 observations.push(record);
+            }
+            for revision in latest_v4(&collection_dir.join("processing_occurrences"))? {
+                let occurrence: collector_app::ProcessingOccurrence =
+                    read_v4(&revision, collection.id, "processing_occurrence")?;
+                occurrences.push(occurrence);
             }
             for revision in latest_v4(&collection_dir.join("snapshots"))? {
                 let record: SnapshotRecord = read_v4(&revision, collection.id, "snapshot")?;
@@ -494,11 +537,8 @@ impl Store {
                 authorities.insert(record.item_id, record);
             }
         }
-        tx.execute_batch("DELETE FROM processing_observations; DELETE FROM snapshots; DELETE FROM conversion_recipes; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM metadata_refreshes;")
+        tx.execute_batch("DELETE FROM processing_members; DELETE FROM processing_groups; DELETE FROM processing_observations; DELETE FROM snapshots; DELETE FROM conversion_recipes; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM metadata_refreshes;")
             .map_err(storage)?;
-        for record in observations {
-            project_processing(tx, &record)?;
-        }
         for (record, path) in snapshots {
             tx.execute(
                 "INSERT INTO snapshots(id,collection_id,record,payload_path,created_at) VALUES(?,?,?,?,?)",
@@ -511,6 +551,44 @@ impl Store {
                 ],
             )
             .map_err(storage)?;
+        }
+        observations.sort_by_key(|record| (record.observation.created_at, record.observation.id));
+        for record in observations {
+            project_processing(tx, &record)?;
+        }
+        for occurrence in occurrences {
+            let raw: String = tx
+                .query_row(
+                    "SELECT record FROM processing_observations WHERE id=?",
+                    [occurrence.result_id.to_string()],
+                    |r| r.get(0),
+                )
+                .map_err(storage)?;
+            let mut record: PortableProcessingRecord =
+                serde_json::from_str(&raw).map_err(storage)?;
+            if record.observation.collection_id != occurrence.collection_id
+                || occurrence.id == occurrence.result_id
+            {
+                return Err(Error::Storage(
+                    "Invalid processing occurrence reference".into(),
+                ));
+            }
+            if collector_app::processing_result_key(&record)? != occurrence.result_key {
+                return Err(Error::Storage(
+                    "Processing occurrence does not reference an equivalent result".into(),
+                ));
+            }
+            record.observation.id = occurrence.id;
+            record.observation.created_at = occurrence.checked_at;
+            record.observation.snapshot_id = occurrence.snapshot_id;
+            record.import_rebinding = occurrence.import_rebinding;
+            record.validate()?;
+            if collector_app::processing_result_key(&record)? != occurrence.result_key {
+                return Err(Error::Storage(
+                    "Processing occurrence result differs from its reference".into(),
+                ));
+            }
+            project_processing(tx, &record)?;
         }
         for (collection, record) in recipes {
             tx.execute(
@@ -632,15 +710,57 @@ pub(crate) fn read_v4<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(&bytes).map_err(storage)
 }
 
+fn validate_processing_reference(
+    tx: &rusqlite::Connection,
+    record: &PortableProcessingRecord,
+) -> Result<()> {
+    if let Some(inputs) = &record.inputs {
+        match (&inputs.reference, record.observation.snapshot_id) {
+            (Some(reference), Some(id)) => {
+                let raw: String = tx
+                    .query_row(
+                        "SELECT record FROM snapshots WHERE id=? AND collection_id=?",
+                        params![id.to_string(), record.observation.collection_id.to_string()],
+                        |r| r.get(0),
+                    )
+                    .map_err(storage)?;
+                let snapshot: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
+                if snapshot.provider != reference.provider
+                    || snapshot.bytes != reference.bytes
+                    || snapshot.digest != reference.digest
+                    || snapshot.parsed_observation.value().map_err(storage)?
+                        != reference.parsed_observation.value().map_err(storage)?
+                {
+                    return Err(Error::Storage(
+                        "Processing reference content does not match its snapshot".into(),
+                    ));
+                }
+            }
+            (None, None) => {}
+            _ => {
+                return Err(Error::Storage(
+                    "Processing reference provenance is incomplete".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn project_processing(
     tx: &rusqlite::Transaction<'_>,
     record: &PortableProcessingRecord,
 ) -> Result<()> {
+    validate_processing_reference(tx, record)?;
     let (scope, id) = scope_columns(record.observation.source_fingerprint.source);
     tx.execute(
         "INSERT INTO processing_observations(id,collection_id,source_scope,source_id,operation,created_at,record) VALUES(?,?,?,?,?,?,?)",
         params![record.observation.id.to_string(),record.observation.collection_id.to_string(),scope,id,record.observation.operation.to_string(),record.observation.created_at.timestamp(),serde_json::to_string(record).map_err(storage)?],
     ).map_err(storage)?;
+    let key = collector_app::processing_result_key(record)?;
+    let scan_key = record.inputs.as_ref().map(|v| v.key()).transpose()?;
+    tx.execute("INSERT INTO processing_groups(id,result_key,scan_key,first_checked_at,last_checked_at,occurrences) VALUES(?,?,?,?,?,1) ON CONFLICT(result_key) DO UPDATE SET first_checked_at=MIN(first_checked_at,excluded.first_checked_at),last_checked_at=MAX(last_checked_at,excluded.last_checked_at),occurrences=occurrences+1",params![record.observation.id.to_string(),key,scan_key,record.observation.created_at.timestamp_millis(),record.observation.created_at.timestamp_millis()]).map_err(storage)?;
+    tx.execute("INSERT INTO processing_members(id,result_id) SELECT ?,id FROM processing_groups WHERE result_key=?",params![record.observation.id.to_string(),key]).map_err(storage)?;
     Ok(())
 }
 
@@ -666,6 +786,50 @@ fn project_metadata_candidate(
 }
 
 impl ProcessingReadPort for Store {
+    fn scan_result(&self, key: &str) -> Result<Option<collector_app::ProcessingResultGroup>> {
+        let db = lock(&self.db)?;
+        db.query_row("SELECT o.record,g.first_checked_at,g.last_checked_at,g.occurrences FROM processing_groups g JOIN processing_observations o ON o.id=g.id WHERE g.scan_key=? ORDER BY g.last_checked_at DESC,g.id DESC LIMIT 1",[key],read_group).optional().map_err(storage)?.map(parse_group).transpose()
+    }
+    fn grouped_observations(
+        &self,
+        query: &ProcessingQuery,
+    ) -> Result<Page<collector_app::ProcessingResultGroup>> {
+        query.validate()?;
+        let (scope, source) = scope_columns(query.source);
+        let db = lock(&self.db)?;
+        let cursor=query.after.map(|id|db.query_row("SELECT o.created_at,o.id FROM processing_observations o JOIN processing_groups g ON o.id=g.id WHERE o.id=? AND o.collection_id=? AND o.source_scope=? AND o.source_id=? AND (? IS NULL OR o.operation=?)",params![id.to_string(),query.collection_id.to_string(),scope,source,query.operation.as_ref().map(|op|op.as_str()),query.operation.as_ref().map(|op|op.as_str())],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?))).optional().map_err(storage)?.ok_or(Error::NotFound)).transpose()?;
+        let mut stmt=db.prepare("SELECT o.record,g.first_checked_at,g.last_checked_at,g.occurrences FROM processing_observations o JOIN processing_groups g ON o.id=g.id WHERE o.collection_id=? AND o.source_scope=? AND o.source_id=? AND (? IS NULL OR o.operation=?) AND (? IS NULL OR (o.created_at,o.id)<(?,?)) ORDER BY o.created_at DESC,o.id DESC LIMIT ?").map_err(storage)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    query.collection_id.to_string(),
+                    scope,
+                    source,
+                    query.operation.as_ref().map(ToString::to_string),
+                    query.operation.as_ref().map(ToString::to_string),
+                    cursor.as_ref().map(|v| v.0),
+                    cursor.as_ref().map(|v| v.0),
+                    cursor.as_ref().map(|v| v.1.as_str()),
+                    i64::from(query.limit) + 1
+                ],
+                read_group,
+            )
+            .map_err(storage)?;
+        let mut items = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(parse_group)
+            .collect::<Result<Vec<_>>>()?;
+        let next_cursor = if items.len() > usize::from(query.limit) {
+            items.truncate(usize::from(query.limit));
+            items.last().map(|v| v.observation.id.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
     fn observations(&self, query: &ProcessingQuery) -> Result<Page<ProcessingObservation>> {
         query.validate()?;
         let (scope, source_id) = scope_columns(query.source);
@@ -1300,4 +1464,21 @@ pub(crate) fn project_effective_metadata_search(
         .map_err(storage)?;
     }
     Ok(())
+}
+
+fn read_group(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, i64, i64, u64)> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+}
+fn parse_group(
+    (raw, first, last, occurrences): (String, i64, i64, u64),
+) -> Result<collector_app::ProcessingResultGroup> {
+    let record: PortableProcessingRecord = serde_json::from_str(&raw).map_err(storage)?;
+    Ok(collector_app::ProcessingResultGroup {
+        observation: record.observation,
+        first_checked_at: chrono::DateTime::from_timestamp_millis(first)
+            .ok_or_else(|| Error::Storage("Invalid check date".into()))?,
+        last_checked_at: chrono::DateTime::from_timestamp_millis(last)
+            .ok_or_else(|| Error::Storage("Invalid check date".into()))?,
+        occurrences,
+    })
 }
