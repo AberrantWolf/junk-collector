@@ -409,8 +409,7 @@ try{
  await importWorkspace.getByText('Review saved.',{exact:false}).waitFor();
  await importWorkspace.getByRole('button',{name:'Publish capture',exact:true}).click();
  await importWorkspace.getByText('Capture published.',{exact:false}).waitFor();
- const jobLedger=curator.getByRole('region',{name:'Background work'});
- await jobLedger.getByRole('article',{name:'Capture publication completed'}).waitFor();
+
  await page.evaluate(async()=>{
   const request=async(path,init={})=>{const response=await fetch(`/api/v1${path}`,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
   const collection=(await request('/collections',{method:'GET'})).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
@@ -423,18 +422,22 @@ try{
   for(let attempt=0;attempt<100;attempt++){const job=await request(`/jobs/${accepted.job_id}`,{method:'GET'});if(job.state==='failed')return;await new Promise(resolve=>setTimeout(resolve,50));}
   throw new Error('stale publication job did not fail');
  });
- await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).click();
- const failedJob=jobLedger.getByRole('article',{name:'Capture publication failed'});
- await failedJob.getByRole('button',{name:'Retry job',exact:true}).click();
- let cancelledRetry=false;try{await jobLedger.getByRole('article',{name:/Capture publication (queued|running)/}).getByRole('button',{name:'Cancel job',exact:true}).click({timeout:1500});cancelledRetry=true;}catch{await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).click();}
- if(cancelledRetry){await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='Refresh jobs');assert.equal(await jobLedger.getByRole('button',{name:'Refresh jobs',exact:true}).evaluate(node=>node===document.activeElement),true,'focus was not restored after cancelling a job');await jobLedger.getByRole('article',{name:'Capture publication cancelled'}).getByText('attempt 2',{exact:false}).waitFor();}else{await jobLedger.getByRole('article',{name:/Capture publication (completed|failed)/}).getByText('attempt 2',{exact:false}).waitFor();}
+ await curator.getByRole('button',{name:'Open work & history for this entry'}).click();
+ const workHistory=page.getByRole('dialog',{name:'Work & history'});await workHistory.waitFor();
+ if(await workHistory.getByRole('button',{name:'Show work for all entries'}).count())await workHistory.getByRole('button',{name:'Show work for all entries'}).click();
+ await workHistory.getByLabel('Search work',{exact:true}).fill('stale-publication-job');
+ await workHistory.locator('.job-list article').filter({hasText:'stale-publication-job'}).getByRole('button',{name:'Open work',exact:true}).click();
+ const failedJob=workHistory.getByRole('article',{name:'import publication failed'});
+ await failedJob.getByRole('button',{name:'Retry failed work'}).click();
+ await workHistory.getByRole('region',{name:'Execution history'}).getByText('attempt 2',{exact:false}).waitFor();
  await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:path.join(root,'web/test-results/jobs-mobile.png'),fullPage:true});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'work history has mobile horizontal overflow');
+ await workHistory.getByRole('button',{name:'Close work history'}).click();
+ await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  await importWorkspace.scrollIntoViewIfNeeded();
  await page.screenshot({path:path.join(root,'web/test-results/import-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'import workspace has mobile horizontal overflow');
- await jobLedger.scrollIntoViewIfNeeded();
- await page.screenshot({path:path.join(root,'web/test-results/jobs-mobile.png'),fullPage:true});
- assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'job ledger has mobile horizontal overflow');
  await page.setViewportSize({width:1440,height:1000});
  await copyRecord.getByRole('button',{name:'Record disposal',exact:true}).click();
  const disposalForm=copyRecord.getByRole('form',{name:'Record disposal'});
@@ -554,7 +557,7 @@ try{
 
   await preparation.getByRole('link',{name:/FLAC/}).first().waitFor({timeout:30000});
   assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}/music-preparation-batches`)).json()).some(batch=>batch.queued>0||batch.running>0);}),true,'all batch work settled before concurrent player acceptance could be observed');
-  const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.getByRole('button',{name:/A test pressing/}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
+  const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.getByRole('button',{name:/A test pressing/}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPage.getByRole('button',{name:'Add album to queue',exact:true}).click();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
   await albumBatch.getByText('2/2 ready',{exact:true}).waitFor({timeout:30000});
   const prepared=preparation.getByRole('link',{name:/FLAC/});await prepared.nth(1).waitFor();assert.equal(await prepared.count(),2);
   const hrefs=await prepared.evaluateAll(links=>links.map(link=>link.getAttribute('href')));assert.ok(hrefs.every(href=>href?.startsWith('/api/v1/items/')));
@@ -563,12 +566,12 @@ try{
   await page.evaluate(values=>sessionStorage.setItem('prepared-flac-urls',JSON.stringify(values)),hrefs);
   assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}`)).json()).revision;}),inventoryRevision,'preparation unexpectedly needed an inventory revision');
   await cdCurator.getByRole('button',{name:'Close curator'}).click();
-  const refreshedPlayer=page.getByRole('region',{name:'Music player'});
+  const refreshedPlayer=page.getByRole('region',{name:'Album tracks'});
   await refreshedPlayer.getByRole('link',{name:/FLAC/}).nth(1).waitFor();
   await page.reload();
   await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
   await page.getByRole('button',{name:/A test pressing/}).click();
-  await page.getByRole('region',{name:'Music player'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
+  await page.getByRole('region',{name:'Album tracks'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
   await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
   await cdCurator.waitFor();
   await cdCurator.locator('.metadata-review').scrollIntoViewIfNeeded();
@@ -576,12 +579,19 @@ try{
   assert.ok(sectionGap>=0&&sectionGap<60,`unexpected blank space after tracks: ${sectionGap}px`);
 
  }
- const restoredJobs=cdCurator.getByRole('region',{name:'Background work'});
+ // Generated tracks remain grouped in Music; no ineligible CD-operation forms.
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('.import-docket')).every(e=>!e.textContent.includes('lossless derivative')));
+ await cdCurator.getByRole('button',{name:'Open work & history for this entry'}).click();
+ const restoredWork=page.getByRole('dialog',{name:'Work & history'});
  await page.context().setOffline(true);
- await restoredJobs.getByRole('button',{name:'Refresh jobs',exact:true}).click();
- await restoredJobs.getByRole('alert').waitFor();
+ await restoredWork.getByRole('button',{name:'Refresh work',exact:true}).click();
+ await restoredWork.getByRole('alert').waitFor();
  await page.context().setOffline(false);
- await restoredJobs.getByRole('alert').waitFor({state:'detached'});
+ await restoredWork.getByRole('button',{name:'Refresh work',exact:true}).click();
+ await restoredWork.getByRole('alert').waitFor({state:'detached'});
+ await restoredWork.getByRole('button',{name:'Close work history'}).click();
+ await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await cdCurator.locator('.import-docket').first().waitFor();
  await page.emulateMedia({reducedMotion:'reduce'});
  assert.equal(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches),true);
  assert.equal(await page.evaluate(()=>getComputedStyle(document.querySelector('.import-docket')).animationName),'none');
@@ -597,30 +607,32 @@ try{
    await request('/admin/grants',{method:'POST',body:JSON.stringify({collection_id:collection.id,user_id:created.user_id,role:'viewer'})});
    return {collectionId:collection.id,itemId:localStorage.getItem('primary-music-item-id')};
   },playbackPassword);
-  const playbackContext=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1100,height:900}});
+  const playbackContext=await browser.newContext({storageState:await context.storageState(),ignoreHTTPSErrors:true,viewport:{width:1100,height:900}});
+  await playbackContext.clearCookies();
   playbackContext.setDefaultTimeout(30000);
   const playbackPage=await playbackContext.newPage();const playbackErrors=[];playbackPage.on('pageerror',error=>playbackErrors.push(error.message));
   await playbackPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
   await playbackPage.evaluate(async({username,password})=>{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password,device_name:'Playback qualification'})});if(!response.ok)throw new Error(`viewer login: ${response.status} ${await response.text()}`);},{username:'playback-viewer',password:playbackPassword});
   if(localSetup){await playbackPage.goto('http://localhost:19841');await playbackPage.getByText('Client access only at this address.',{exact:false}).waitFor();}else await playbackPage.reload();
   await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.getByRole('button',{name:/A test pressing/}).click();
-  const player=playbackPage.getByRole('region',{name:'Music player'});await player.waitFor();
+  const player=playbackPage.getByRole('region',{name:'Music player'});await player.waitFor();await player.getByRole('button',{name:'Queue (0)',exact:true}).waitFor();const album=playbackPage.getByRole('region',{name:'Album tracks'});
   const viewerArtwork=playbackPage.locator('.detail').getByRole('img',{name:/Cover Art Archive image/});await viewerArtwork.waitFor();
   assert.equal(await viewerArtwork.count(),1,'viewer player did not receive the shared effective artwork');
   assert.equal(await player.getByRole('button',{name:/Prepare/}).count(),0,'viewer player exposed derivative preparation');
   assert.equal(await playbackPage.evaluate(()=>performance.getEntriesByType('resource').some(entry=>entry.name.endsWith('/curation.js'))),false,'viewer player imported the curation bundle');
   const expected=await playbackPage.evaluate(async id=>{const rows=await(await fetch(`/api/v1/items/${id}/music-tracks`)).json();return rows.filter(row=>row.profile.codec==='flac'&&row.state.status==='available').map(row=>({position:row.track_position,representation:row.state.representation_id,capture:row.capture_id,source:row.source_representation_id}));},playbackFixture.itemId);
   assert.equal(expected.length,2);assert.equal(new Set(expected.map(row=>`${row.capture}/${row.source}`)).size,1,'fixture unexpectedly crossed disc queue boundaries');
-  assert.equal(await player.locator('.music-disc').count(),1);assert.equal(await player.locator('.music-track').count(),2,'profile variants became duplicate queue tracks');
-  assert.equal(await player.locator('.music-track').nth(0).getAttribute('data-representation-id'),expected[0].representation);
-  assert.equal(await player.locator('.music-track').nth(1).getAttribute('data-representation-id'),expected[1].representation);
+  assert.equal(await album.locator('.music-disc').count(),1);assert.equal(await album.locator('.music-track').count(),2,'profile variants became duplicate queue tracks');
+  assert.equal(await album.locator('.music-track').nth(0).getAttribute('data-representation-id'),expected[0].representation);
+  assert.equal(await album.locator('.music-track').nth(1).getAttribute('data-representation-id'),expected[1].representation);
   await playbackPage.evaluate(()=>{window.savedCanPlayType=HTMLMediaElement.prototype.canPlayType;HTMLMediaElement.prototype.canPlayType=()=>'';});
-  await player.getByRole('button',{name:'Refresh music availability',exact:true}).click();
-  await player.getByText('This browser does not report FLAC playback support.',{exact:false}).first().waitFor();
+  await album.getByRole('button',{name:'Refresh music availability',exact:true}).click();
+  await album.getByText('This browser does not report FLAC playback support.',{exact:false}).first().waitFor();
   assert.equal(await player.getByRole('button',{name:'Play',exact:true}).isDisabled(),true,'unsupported codec advertised playback');
-  assert.equal(await player.getByRole('link',{name:/FLAC/}).count(),2,'unsupported browser lost download fallback');
+  assert.equal(await album.getByRole('link',{name:/FLAC/}).count(),2,'unsupported browser lost download fallback');
   await playbackPage.evaluate(()=>{HTMLMediaElement.prototype.canPlayType=window.savedCanPlayType;delete window.savedCanPlayType;});
-  await player.getByRole('button',{name:'Refresh music availability',exact:true}).click();
+  await album.getByRole('button',{name:'Refresh music availability',exact:true}).click();
+  await album.getByRole('button',{name:'Add album to queue',exact:true}).click();
   const codec=await player.locator('audio').evaluate(element=>({support:element.canPlayType('audio/flac'),agent:navigator.userAgent}));assert.notEqual(codec.support,'','target browser did not report FLAC decoding support');
   // A rejected old play promise must not overwrite a newer track's state.
   await player.locator('audio').evaluate(element=>{const play=element.play.bind(element);element.play=()=>{element.play=play;return new Promise((_,reject)=>setTimeout(()=>reject(new DOMException('Obsolete request','AbortError')),500));};});
@@ -646,20 +658,23 @@ try{
   assert.match(await player.getByRole('status').innerText(),/Now playing[\s\S]*Track 02/,'natural media end did not advance to the following track');
   await playbackPage.reload();await playbackPage.getByLabel('A test pressing details',{exact:true}).waitFor();const rebuiltPlayer=playbackPage.getByRole('region',{name:'Music player'});await rebuiltPlayer.waitFor();
   await rebuiltPlayer.locator('.now-playing').waitFor();
-  assert.match(await rebuiltPlayer.locator('.now-playing').innerText(),/Ready[\s\S]*Track 01/);assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'refresh retained stale playback state');
+  assert.match(await rebuiltPlayer.locator('.now-playing').innerText(),/Ready[\s\S]*Track 02/);assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'refresh retained stale playback state');
   await playbackPage.setViewportSize({width:390,height:844});assert.equal(await playbackPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'viewer player has mobile horizontal overflow');await playbackPage.setViewportSize({width:1100,height:900});
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
   await playbackPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
   const detachedAudio=await rebuiltPlayer.locator('audio').elementHandle();
-  await playbackPage.locator('.detail').getByRole('button',{name:'Close details'}).click();await rebuiltPlayer.waitFor({state:'detached'});
-  assert.deepEqual(await detachedAudio.evaluate(element=>({paused:element.paused,src:element.getAttribute('src')})),{paused:true,src:null},'detached audio retained playback or media requests');
+  await playbackPage.locator('.detail').getByRole('button',{name:'Close details'}).click();await rebuiltPlayer.waitFor();
+  assert.deepEqual(await detachedAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'closing album interrupted persistent playback');
+  await rebuiltPlayer.getByRole('button',{name:'Queue (2)',exact:true}).click();
+  await rebuiltPlayer.getByRole('button',{name:'Remove Track 02 from queue',exact:true}).click();
+  assert.deepEqual(await detachedAudio.evaluate(element=>({paused:element.paused,src:element.getAttribute('src')})),{paused:true,src:null},'removing current track retained buffered playback');
+  await rebuiltPlayer.getByRole('button',{name:'Queue (1)',exact:true}).click();
+  await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
   await detachedAudio.dispose();
   await playbackPage.getByRole('button',{name:/A test pressing/}).click();await rebuiltPlayer.waitFor();
-  await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
   const expiredAudio=await rebuiltPlayer.locator('audio').elementHandle();
   await playbackContext.clearCookies();
-  await rebuiltPlayer.getByRole('button',{name:'Refresh music availability',exact:true}).click();
-  await playbackPage.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
+    await playbackPage.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
   assert.deepEqual(await expiredAudio.evaluate(element=>({paused:element.paused,src:element.getAttribute('src')})),{paused:true,src:null},'expired session retained audio');
   await expiredAudio.dispose();
   await playbackPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
@@ -669,7 +684,7 @@ try{
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
 
   await page.evaluate(async({collectionId})=>{const grants=await(await fetch(`/api/v1/collections/${collectionId}/grants`)).json();const grant=grants.find(value=>value.username==='playback-viewer');const response=await fetch(`/api/v1/collections/${collectionId}/grants/playback-viewer?expected_revision=${grant.revision}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`grant revocation: ${response.status} ${await response.text()}`);},playbackFixture);
-  await rebuiltPlayer.getByRole('button',{name:'Refresh music availability',exact:true}).click();await rebuiltPlayer.getByRole('alert').getByText('Access to this music is no longer available.',{exact:false}).waitFor();
+  await rebuiltPlayer.getByRole('alert').getByText('Access to this queued album is no longer available.',{exact:false}).waitFor();
   assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'revoked viewer retained an active media request');assert.deepEqual(playbackErrors,[]);
   console.log(`Browser playback qualified: Google Chrome ${browserVersion}; audio/flac=${codec.support}; actual start, pause/resume, seek, next/previous, natural ended advance, clean reload, and grant revocation passed.`);
   await playbackContext.close();
@@ -730,9 +745,27 @@ try{
  if(hasFlac){
   await page.getByRole('button',{name:/Provider pressing/}).first().click();
   const player=page.getByRole('region',{name:'Music player'});
+  await player.getByRole('button',{name:/Queue \(/}).click();await player.getByRole('button',{name:'Clear queue',exact:true}).click();
+  await page.getByRole('button',{name:'Add album to queue',exact:true}).click();
   importAudio=await player.locator('audio').elementHandle();await importAudio.evaluate(element=>{element.loop=true;});
   await player.getByRole('button',{name:'Play',exact:true}).click();
   await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
+ }
+ // Queue playback remains the same element while browsing and adding another album.
+ if(importAudio){
+  await page.getByRole('button',{name:'Back to results',exact:true}).click();
+  await page.getByRole('button',{name:/A test pressing/}).click();
+  assert.deepEqual(await importAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'browsing another album stopped the queue');
+  await page.getByRole('button',{name:'Add album to queue',exact:true}).click();
+  const dock=page.getByRole('region',{name:'Music player'});
+  await dock.getByRole('button',{name:/Queue \(/}).click();const queue=dock.getByRole('region',{name:'Currently playing list'});
+  assert.ok(await queue.locator('li').count()>=3,'second album did not append to the queue');
+  await queue.getByRole('button',{name:/Move .* up/}).last().click();
+  await queue.getByRole('button',{name:/Remove .* from queue/}).last().click();
+  assert.deepEqual(await importAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'editing a different queued track stopped playback');
+  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/music-queue-mobile.png',fullPage:true});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.setViewportSize({width:1440,height:1000});await dock.getByRole('button',{name:/Queue \(/}).click();
  }
  const folderRoot=path.join(scratch,'Folder intake');
  for(const name of ['Disc A','Disc B']){await mkdir(path.join(folderRoot,name),{recursive:true});await writeFile(path.join(folderRoot,name,'disc.cue'),'FILE "disc.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n');await writeFile(path.join(folderRoot,name,'disc.bin'),guidedBytes);}
@@ -820,7 +853,7 @@ try{
  const opaqueRow=page.getByRole('button',{name:/Opaque module fixture/});await opaqueRow.waitFor();assert.match(await opaqueRow.innerText(),/Unavailable type · org\.example\.absent/);await opaqueRow.click();
  await page.getByText('Module is not installed; preserved data is not executable.',{exact:false}).waitFor();
  if(hasFlac){const retained=await page.evaluate(async()=>{const [url]=JSON.parse(sessionStorage.getItem('prepared-flac-urls'));const response=await fetch(url,{headers:{Range:'bytes=0-3'}});return {status:response.status,magic:String.fromCharCode(...new Uint8Array(await response.arrayBuffer()))};});assert.deepEqual(retained,{status:206,magic:'fLaC'},'published FLAC was unreadable after restart with its module unavailable');
-  const opaquePlayer=page.getByRole('region',{name:'Music player'});await opaquePlayer.getByRole('button',{name:'Play',exact:true}).click();
+  const opaquePlayer=page.getByRole('region',{name:'Music player'});await page.getByRole('button',{name:'Add album to queue',exact:true}).click();await opaquePlayer.getByRole('button',{name:'Play',exact:true}).click();
   await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
   await opaquePlayer.getByRole('button',{name:'Pause',exact:true}).click();
  }

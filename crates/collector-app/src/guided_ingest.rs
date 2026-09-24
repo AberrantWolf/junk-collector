@@ -89,6 +89,8 @@ impl CollectionService {
     /// closes the crash window between a durable transition and its next job.
     pub fn resume_guided_ingests(&self) -> Result<()> {
         let cleanup_result = self.provisional_imports.reconcile_guided_cleanup();
+        self.jobs
+            .reconcile_work_history(&mut |user, target| self.settle_work_clear(user, target))?;
         let mut after = None;
         loop {
             let ids = self

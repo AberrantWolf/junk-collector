@@ -5042,6 +5042,221 @@
           }
         }
       }
+    },
+    "/api/v1/work": {
+      "get": {
+        "operationId": "work_history",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "unattached",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WorkEntry"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "change_work_history",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkHistoryCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/work/entry": {
+      "post": {
+        "operationId": "work_history_entry",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkTarget"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkEntry"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/work/jobs": {
+      "post": {
+        "operationId": "work_jobs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkJobsQuery"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WorkJobView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9865,6 +10080,189 @@
           }
         }
       },
+      "Page_WorkEntry": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "target",
+                "collection_name",
+                "name",
+                "kind",
+                "phase",
+                "status",
+                "created_at",
+                "updated_at",
+                "archived",
+                "clear_pending",
+                "received_bytes",
+                "reclaimed_bytes",
+                "pending_bytes",
+                "guided",
+                "active",
+                "shared"
+              ],
+              "properties": {
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkHistoryAction"
+                  }
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "archived": {
+                  "type": "boolean"
+                },
+                "cleanup_error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "clear_error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "clear_pending": {
+                  "type": "boolean"
+                },
+                "collection_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CollectionId"
+                    }
+                  ]
+                },
+                "collection_name": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "guided": {
+                  "type": "boolean"
+                },
+                "item_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ItemId"
+                    }
+                  ]
+                },
+                "item_title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "pending_bytes": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "phase": {
+                  "type": "string"
+                },
+                "received_bytes": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "reclaimed_bytes": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "revision": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "shared": {
+                  "type": "boolean"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "target": {
+                  "$ref": "#/components/schemas/WorkTarget"
+                },
+                "updated_at": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_WorkJobView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "job",
+                "prior_failures"
+              ],
+              "properties": {
+                "job": {
+                  "$ref": "#/components/schemas/JobView"
+                },
+                "prior_failures": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestAttemptView"
+                  }
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Pairing": {
         "type": "object",
         "required": [
@@ -11573,9 +11971,254 @@
         },
         "additionalProperties": false
       },
+      "WorkEntry": {
+        "type": "object",
+        "required": [
+          "target",
+          "collection_name",
+          "name",
+          "kind",
+          "phase",
+          "status",
+          "created_at",
+          "updated_at",
+          "archived",
+          "clear_pending",
+          "received_bytes",
+          "reclaimed_bytes",
+          "pending_bytes",
+          "guided",
+          "active",
+          "shared"
+        ],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkHistoryAction"
+            }
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "cleanup_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "clear_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "clear_pending": {
+            "type": "boolean"
+          },
+          "collection_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectionId"
+              }
+            ]
+          },
+          "collection_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "guided": {
+            "type": "boolean"
+          },
+          "item_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          },
+          "item_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pending_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "phase": {
+            "type": "string"
+          },
+          "received_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "reclaimed_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/WorkTarget"
+          },
+          "updated_at": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "WorkHistoryAction": {
+        "type": "string",
+        "enum": [
+          "dismiss",
+          "restore",
+          "discard",
+          "cancel_and_clear",
+          "retry_cleanup"
+        ]
+      },
+      "WorkHistoryCommand": {
+        "type": "object",
+        "required": [
+          "target",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/WorkHistoryAction"
+          },
+          "target": {
+            "$ref": "#/components/schemas/WorkTarget"
+          }
+        },
+        "additionalProperties": false
+      },
       "WorkId": {
         "type": "string",
         "format": "uuid"
+      },
+      "WorkJobView": {
+        "type": "object",
+        "required": [
+          "job",
+          "prior_failures"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobView"
+          },
+          "prior_failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestAttemptView"
+            }
+          }
+        }
+      },
+      "WorkJobsQuery": {
+        "type": "object",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "cursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "target": {
+            "$ref": "#/components/schemas/WorkTarget"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ImportId"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "import"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/JobId"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "job"
+                ]
+              }
+            }
+          }
+        ]
       }
     }
   }

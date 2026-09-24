@@ -11,6 +11,7 @@ mod migration_v3;
 mod processing;
 mod provisional_imports;
 mod publication;
+mod work_history;
 use chrono::Utc;
 use collector_app::{
     AccessPort, AccountView, ActiveDerivativeJob, AdministrationPort, AssetState,
@@ -1138,6 +1139,42 @@ impl ImportPort for Store {
 }
 
 impl JobPort for Store {
+    fn work_job_records(
+        &self,
+        user: UserId,
+        query: &collector_app::WorkJobsQuery,
+    ) -> Result<Page<JobRecord>> {
+        self.grouped_work_jobs(user, query)
+    }
+    fn work_page(
+        &self,
+        user: UserId,
+        collections: &[CollectionId],
+        query: &collector_app::WorkQuery,
+    ) -> Result<Page<collector_app::WorkEntry>> {
+        self.work_page_records(user, collections, query)
+    }
+    fn work_entry(
+        &self,
+        user: UserId,
+        target: &collector_app::WorkTarget,
+    ) -> Result<collector_app::WorkEntry> {
+        self.work_entry_record(user, target)
+    }
+    fn change_work_history(
+        &self,
+        user: UserId,
+        command: &collector_app::WorkHistoryCommand,
+    ) -> Result<()> {
+        self.change_work_history_record(user, command)
+    }
+    fn reconcile_work_history(
+        &self,
+        settle: &mut dyn FnMut(UserId, &collector_app::WorkTarget) -> Result<bool>,
+    ) -> Result<()> {
+        self.reconcile_work_history_records(settle)
+    }
+
     fn scan_jobs(&self, user: UserId, key: &str) -> Result<Vec<JobRecord>> {
         let ids = {
             let db = lock(&self.db)?;
@@ -1557,7 +1594,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 14 {
+    if private_version > 15 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -1964,6 +2001,11 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
           CREATE INDEX private.scan_admissions_key ON scan_admissions(scan_key,job_id);
           CREATE TABLE private.scan_requests(job_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, PRIMARY KEY(job_id,kind,owner));
           PRAGMA private.user_version=14;").map_err(storage)?;
+    }
+    if private_version < 15 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch("CREATE TABLE private.work_history(user_id TEXT NOT NULL,target TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0,pending INTEGER NOT NULL DEFAULT 0,action TEXT NOT NULL,error TEXT,PRIMARY KEY(user_id,target)); CREATE INDEX private.work_history_pending ON work_history(pending,target); CREATE INDEX private.jobs_import_owner ON jobs(user_id,json_extract(request,'$.import_id'),id); PRAGMA private.user_version=15;").map_err(storage)?;
+        tx.commit().map_err(storage)?;
     }
     // Preserve actual LA1 preview state without creating a checkpoint-only version.
     for column in ["settled", "cancelled"] {

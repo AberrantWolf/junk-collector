@@ -73,3 +73,18 @@
     gap: 7px;
   }
 }
+
+.work-history .job-list { margin-top: 1.5rem; }
+.work-history .job-list article { border-radius: 0; box-shadow: none; border-width: 0 0 1px; padding: 1rem 0; }
+.work-history .job-list header label { display: flex; flex-direction: row; align-items: baseline; gap: .7rem; margin: 0; }
+.work-history .job-list header input { width: auto; flex: 0 0 auto; }
+.work-history .job-list p { margin: .4rem 0; }
+.work-history .row-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+.work-review { padding: 1rem; border: 2px solid var(--accent, #71885c); margin: 1rem 0; }
+.work-history small { display: block; }
+.work-history .job-list header { flex-wrap: wrap; gap: .5rem; }
+@media(max-width:600px) { .work-history .form-grid { grid-template-columns: 1fr; } .work-history .job-list article { overflow-wrap: anywhere; } }
+
+.work-history .work-toggle { display:flex; flex-direction:row; align-items:center; gap:.6rem; }
+.work-history .work-toggle input { width:auto; margin:0; }
+.work-history fieldset details { margin-top:.6rem; }

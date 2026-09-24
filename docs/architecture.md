@@ -75,6 +75,24 @@ is unavailable. Reindex reconstructs references and rejects missing, inconsisten
 or cross-collection result links. Publication/recovery use the existing archive
 writer and journals, not a separately committed UI workflow.
 
+## FX-03 work/history contract
+
+The application work service owns requester-private history presentation and action
+eligibility. Store queries group import Jobs under their Import and preparation
+members under their batch, with direct ownership retained as independent work.
+Queries filter authorized collections before bounded keyset pagination; timestamps
+and IDs provide stable ordering. Names come from current authorized catalog rows.
+Dismissal is private presentation state, never deletion of results or payloads.
+
+Cancel-and-clear records a durable private intent with its command receipt. Existing
+cancellation/discard services settle that intent before history is dismissed; a
+published Capture wins over discard. Shared direct requests prevent staging disposal.
+The worker periodically reconciles pending intents across restart. Failures remain
+visible and retryable; restored history never restarts execution. Bulk UI actions
+submit an explicit reviewed target set with per-target receipts and outcomes, never
+an unbounded “all matching” mutation. Original payloads and successful evidence
+remain outside cleanup. Generic retry must reject pending clear/dismissed targets.
+
 ## Dependency rules
 
 Wave 4 reserves the `collector-api-types` boundary below; its DTO move remains
@@ -261,7 +279,7 @@ Durable publication journals contain transaction/entity identities, expected/tar
 
 Collection creation writes an immutable collection manifest and a private recovery intent for the owner grant before archive mutation. Startup completes the intended grant when the collection commit exists or removes the abandoned intent when it does not. Copying only the archive never reconstructs a grant.
 
-SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v8 and `private.sqlite` is schema v14. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
+SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v8 and `private.sqlite` is schema v15. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
 
 The first implementation reindexes metadata at startup; incremental startup/rebuild optimization remains in the performance milestone. Payloads are never read merely to browse. Writes are single-server; independent clones must not reuse operational identity. Replication requires additional protocol work, although IDs, revisions, immutable payloads and tombstones do not assume a server location.
 
@@ -285,14 +303,22 @@ Passkeys use one configured HTTPS authentication origin and standard WebAuthn. C
 
 ## Clients and shared audio
 
-The bounded browser player lives in the client bundle and consumes authorized
-availability rows and opaque media URLs. Its short-lived disc selection is grouped
-by Capture/source and chooses one representation per track. HTML media seconds
-are a presentation projection; this adds no reusable native queue, DSP engine,
-server player or persisted activity. The component owns and releases its media
-element at ref detachment, fences superseded play promises, and discards obsolete
-playback when availability changes. Native queue/PCM services remain separate
-shared-library work. Client playback never requires the curation bundle or surface.
+The bounded browser player has one owner at the authenticated application shell,
+independent of album views, navigation and curation refreshes. Album views enqueue
+one browser-decodable prepared representation per selected track; they do not own
+media elements. A fixed bottom dock appears for music browsing or an existing
+queue. Its personal queue (at most 500 entries, immutable item/representation/file
+coordinates and display metadata) is local to this browser origin and user, never
+server activity. Reload restores a paused queue, not autoplay. Selecting, removing
+or clearing the current entry releases obsolete playback; reordering/adding other
+entries and refreshing catalog data preserve the current media element and time.
+Current-file availability is rechecked before playback and periodically even away
+from its album. Access loss stops buffered audio, and session loss/sign-out detaches
+the player and clears in-memory personal state. Local queue data grants no media
+access. Ref detachment releases the media element and superseded asynchronous
+requests/play promises are fenced. HTML media seconds remain a presentation
+projection; native queue/PCM/DSP services remain separate shared-library work.
+Client playback never requires the curation bundle or surface.
 
 Artwork is part of browsing data, not a decorative optional gallery: games and CDs show cover thumbnails next to text, including search and offline snapshots. Unidentified/tentative identity is distinct from missing artwork.
 

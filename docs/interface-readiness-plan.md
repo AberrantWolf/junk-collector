@@ -1,10 +1,40 @@
 # U05 — Guided interfaces and readiness review
 
+**Provider lookup requirement 2026-09-22 (FX-04):** Automatically acquire CD
+metadata when supported dump analysis supplies its actual disc identity. Reuse the
+existing guided disc-ID acquisition for other intake paths; do not require a lookup
+button or automatically search filenames/timestamp-derived titles. Missing identity,
+no match, ambiguity and failure need distinct states; original preservation and
+manual metadata authority remain intact. Advanced explicit lookup/retry remains a
+recovery path, not the default journey. Verify requests for timestamp-named dumps.
+
+**Scale follow-up 2026-09-22 (pending FX-04/FX-07):** Existing-entry attachment
+currently lists general collection entries, not detected matches, and stops at
+1,000. Replace it with server-side search and explicit paging, with evidence-backed
+suggestions clearly separate from general search. Audit all growing record selectors
+for collection preloading, silent caps, disambiguation and access to later results;
+validate with at least 3,000 catalog entries. The manual-import destination search's
+unpaged 50-result limit is also in scope. Fixed small enum choices may remain dropdowns.
+
+**User requirement 2026-09-22 (pending, owned by FX-04 and reviewed in FX-07):**
+Import history and current-import details must be distinct navigable views, with no
+global history list embedded in intake/progress/detail panels. Preserve list context
+on return and support direct-link/reload of the selected import. Validate with
+thousands of records and bounded loading. More generally, separate meaningful
+browse/detail/task views instead of accumulating unrelated content in one panel.
+See [the FX-04 scope and acceptance](ux-fix-plan.md#fx-04--focused-editing-and-consistent-intake).
+
+**FX-03 update (2026-09-21):** Work & history, scoped server filtering/pagination,
+workflow/attempt grouping, dismissal/restoration, selected cleanup with durable
+settlement and byte outcomes, server-backed import reopening, and removal of
+ineligible derivative analysis forms are implemented. Local acceptance passed on 2026-09-21; see [validation](validation.md#fx-03-work-and-history--2026-09-21). Broader interface, mistaken-item removal/reimport and release gates
+remain open; this does not mark all U05/P04 criteria complete.
+
 **Planning update 2026-09-21:** [FX-01–FX-07](ux-fix-plan.md) groups the remaining
 operation matrix, whole-interface corrections/nonblocking behavior and completion
 review into integrated fixes with the UX audit. FX-01 completes the browse/navigation
 subset with [local acceptance evidence](validation.md#fx-01-browsingnavigation--2026-09-21). U05.1, the remaining U05.2 surfaces and the
-whole-interface U05.3 gate remain open. FX-02 implements the processing-scan subset; its [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). FX-03–FX-07 remain proposed.
+whole-interface U05.3 gate remain open. FX-02 implements the processing-scan subset; its [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). FX-03 implements history/cleanup and derivative-target presentation with local acceptance passed; FX-04–FX-07 remain proposed.
 
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA1–LA3 integrate the relevant acceptance below across layers. Individual child
@@ -79,7 +109,7 @@ Both require the appropriate supporting package members, not just a sidecar.
 | Child | State | Scope |
 |---|---|---|
 | U05.1 — Readiness contracts and analysis defaults | LA1 guided and FX-02 scan subsets implemented | LA1 previews typed anchors/blockers/provider availability; FX-02 extends eligible defaults and typed lifecycle to committed-package operations; the remaining interface matrix stays open |
-| U05.2 — Audit and correct all implemented interfaces | Partial: FX-01 browse/navigation accepted; remaining surfaces open | U05.1 plus each surface's owning services: enumerate every screen/action, implement findings through their owners |
+| U05.2 — Audit and correct all implemented interfaces | Partial: FX-01/02 accepted; FX-03 work/history accepted; remaining surfaces open | U05.1 plus each surface's owning services: enumerate every screen/action, implement findings through their owners |
 | U05.3 — Interface completion review | Planned | U05.2/P04.6: actual user journeys, negative cases and audited completion evidence |
 
 U05.2 must inventory every implemented screen/action, not just these examples:

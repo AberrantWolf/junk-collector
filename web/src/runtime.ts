@@ -34,3 +34,6 @@ export async function api<T=unknown>(path:string,init:RequestInit={}):Promise<T>
  }
  return response.status===204?undefined as T:response.json();
 }
+
+export {useMusicQueue,addMusicTracks} from './music-queue';
+export type {QueuedTrack} from './music-queue';

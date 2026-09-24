@@ -1620,6 +1620,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["work_history"];
+        put?: never;
+        post: operations["change_work_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work/entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["work_history_entry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["work_jobs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2794,6 +2842,47 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_WorkEntry: {
+            items: {
+                actions?: components["schemas"]["WorkHistoryAction"][];
+                active: boolean;
+                archived: boolean;
+                cleanup_error?: string | null;
+                clear_error?: string | null;
+                clear_pending: boolean;
+                collection_id?: null | components["schemas"]["CollectionId"];
+                collection_name: string;
+                /** Format: int64 */
+                created_at: number;
+                guided: boolean;
+                item_id?: null | components["schemas"]["ItemId"];
+                item_title?: string | null;
+                kind: string;
+                name: string;
+                /** Format: int64 */
+                pending_bytes: number;
+                phase: string;
+                /** Format: int64 */
+                received_bytes: number;
+                /** Format: int64 */
+                reclaimed_bytes: number;
+                /** Format: int64 */
+                revision?: number | null;
+                shared: boolean;
+                status: string;
+                target: components["schemas"]["WorkTarget"];
+                /** Format: int64 */
+                updated_at: number;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_WorkJobView: {
+            items: {
+                job: components["schemas"]["JobView"];
+                prior_failures: components["schemas"]["IngestAttemptView"][];
+            }[];
+            next_cursor?: string | null;
+        };
         Pairing: {
             certificate_pem: string;
             certificate_sha256: string;
@@ -3202,8 +3291,64 @@ export interface components {
             expected_revision: components["schemas"]["Revision"];
             item: components["schemas"]["Item"];
         };
+        WorkEntry: {
+            actions?: components["schemas"]["WorkHistoryAction"][];
+            active: boolean;
+            archived: boolean;
+            cleanup_error?: string | null;
+            clear_error?: string | null;
+            clear_pending: boolean;
+            collection_id?: null | components["schemas"]["CollectionId"];
+            collection_name: string;
+            /** Format: int64 */
+            created_at: number;
+            guided: boolean;
+            item_id?: null | components["schemas"]["ItemId"];
+            item_title?: string | null;
+            kind: string;
+            name: string;
+            /** Format: int64 */
+            pending_bytes: number;
+            phase: string;
+            /** Format: int64 */
+            received_bytes: number;
+            /** Format: int64 */
+            reclaimed_bytes: number;
+            /** Format: int64 */
+            revision?: number | null;
+            shared: boolean;
+            status: string;
+            target: components["schemas"]["WorkTarget"];
+            /** Format: int64 */
+            updated_at: number;
+        };
+        /** @enum {string} */
+        WorkHistoryAction: "dismiss" | "restore" | "discard" | "cancel_and_clear" | "retry_cleanup";
+        WorkHistoryCommand: {
+            action: components["schemas"]["WorkHistoryAction"];
+            target: components["schemas"]["WorkTarget"];
+        };
         /** Format: uuid */
         WorkId: string;
+        WorkJobView: {
+            job: components["schemas"]["JobView"];
+            prior_failures: components["schemas"]["IngestAttemptView"][];
+        };
+        WorkJobsQuery: {
+            cursor?: null | components["schemas"]["JobId"];
+            /** Format: int32 */
+            limit?: number | null;
+            target: components["schemas"]["WorkTarget"];
+        };
+        WorkTarget: {
+            id: components["schemas"]["ImportId"];
+            /** @enum {string} */
+            kind: "import";
+        } | {
+            id: components["schemas"]["JobId"];
+            /** @enum {string} */
+            kind: "job";
+        };
     };
     responses: never;
     parameters: never;
@@ -7574,6 +7719,159 @@ export interface operations {
                 content?: never;
             };
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    work_history: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                item_id?: components["schemas"]["ItemId"];
+                unattached?: boolean;
+                search?: string;
+                status?: string;
+                archived?: boolean;
+                after?: number;
+                before?: number;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_WorkEntry"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    change_work_history: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkHistoryCommand"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    work_history_entry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkTarget"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkEntry"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    work_jobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkJobsQuery"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_WorkJobView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

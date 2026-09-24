@@ -397,6 +397,14 @@ impl ProvisionalImportPort for Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        if record.view.phase != ImportPhase::Cancelled
+            && record.view.phase != ImportPhase::Published
+        {
+            let blocked:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.work_history WHERE target='import:'||? AND (pending=1 OR archived=1))",[record.view.id.to_string()],|r|r.get(0)).map_err(storage)?;
+            if blocked {
+                return Err(Error::Conflict);
+            }
+        }
         let changed = tx.execute(
             "UPDATE private.imports SET revision=?,files=?,item_id=?,specimen_id=?,component_id=?,carrier_id=?,expected_item_revision=?,candidates=?,limitations=?,review=?,analysis_job_id=?,phase=?,updated_at=? WHERE id=? AND revision=?",
             params![record.view.revision,files,record.view.association.item_id.map(|id|id.to_string()),record.view.association.specimen_id.map(|id|id.to_string()),record.view.association.component_id.map(|id|id.to_string()),record.view.association.carrier_id.map(|id|id.to_string()),record.view.expected_item_revision.map(|revision|revision.0),candidates,limitations,review,record.view.analysis_job_id.map(|id|id.to_string()),phase(record.view.phase),record.view.updated_at.timestamp(),record.view.id.to_string(),expected_revision],
@@ -420,6 +428,7 @@ impl ProvisionalImportPort for Store {
             return Err(Error::Invalid("chunk exceeds 8 MiB".into()));
         }
         let _guard = lock(&self.uploads)?;
+        self.ensure_import_not_clearing(id)?;
         let mut record = self.import_record(id)?;
         if record.view.phase == ImportPhase::Cancelled {
             return Err(Error::Conflict);
@@ -794,6 +803,9 @@ impl ProvisionalImportPort for Store {
             .collect()
     }
 
+    fn cleanup_import(&self, id: ImportId) -> Result<IngestDiscardResult> {
+        self.finish_import_cleanup(id)
+    }
     fn reconcile_guided_cleanup(&self) -> Result<()> {
         self.reconcile_import_cleanup()
     }
@@ -827,7 +839,7 @@ impl ProvisionalImportPort for Store {
         }
         let db = lock(&self.db)?;
         let mut sql = format!(
-            "{SELECT} WHERE user_id=? AND EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=imports.id)"
+            "{SELECT} WHERE user_id=? AND EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=imports.id) AND NOT EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=imports.user_id AND h.target='import:'||imports.id AND h.archived=1)"
         );
         if collection.is_some() {
             sql.push_str(" AND collection_id=?");
@@ -888,6 +900,12 @@ impl ProvisionalImportPort for Store {
 
         if record.view.revision != expected_revision {
             return Err(Error::Conflict);
+        }
+        let shared: bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN private.scan_requests r ON r.job_id=j.id WHERE json_extract(j.request,'$.import_id')=? AND r.kind='direct' AND j.state IN ('queued','running','cancel_requested'))",[id.to_string()],|r|r.get(0)).map_err(storage)?;
+        if shared {
+            return Err(Error::Unavailable(
+                "Independent requests still need this staging".into(),
+            ));
         }
         if matches!(
             record.view.phase,
@@ -1013,6 +1031,14 @@ impl ProvisionalImportPort for Store {
 }
 
 impl Store {
+    fn ensure_import_not_clearing(&self, id: ImportId) -> Result<()> {
+        let blocked:bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.work_history WHERE target='import:'||? AND (pending=1 OR archived=1))",[id.to_string()],|r|r.get(0)).map_err(storage)?;
+        if blocked {
+            Err(Error::Conflict)
+        } else {
+            Ok(())
+        }
+    }
     pub(crate) fn reconcile_import_cleanup(&self) -> Result<()> {
         let ids = {
             let db = lock(&self.db)?;
@@ -1113,6 +1139,9 @@ impl Store {
         self.ensure_job_continues(job, Some(claim_token))?;
         let _writer = lock(&self.writer)?;
         let mut record = self.import_record(id)?;
+        if self.capture(record.view.capture_id).is_err() {
+            self.ensure_import_not_clearing(id)?;
+        }
         if record.view.phase == ImportPhase::Published {
             return Ok(record);
         }

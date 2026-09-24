@@ -8,6 +8,8 @@ pub use derivatives::*;
 mod guided_ingest;
 mod metadata;
 pub use metadata::*;
+mod work_history;
+pub use work_history::*;
 mod scans;
 pub use scans::*;
 mod processing;
@@ -610,6 +612,7 @@ pub trait ProvisionalImportPort: Send + Sync {
         limit: u16,
     ) -> Result<Vec<ImportRecord>>;
     fn reconcile_guided_cleanup(&self) -> Result<()>;
+    fn cleanup_import(&self, id: ImportId) -> Result<IngestDiscardResult>;
     fn guided_cleanup_status(&self, id: ImportId) -> Result<Option<IngestDiscardResult>>;
     fn save_guided_ingest_intent(&self, intent: GuidedIngestIntent) -> Result<()>;
     fn guided_import_records(
@@ -790,6 +793,19 @@ fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<Job
 }
 
 pub trait JobPort: Send + Sync {
+    fn work_job_records(&self, user: UserId, query: &WorkJobsQuery) -> Result<Page<JobRecord>>;
+    fn work_page(
+        &self,
+        user: UserId,
+        collections: &[CollectionId],
+        query: &WorkQuery,
+    ) -> Result<Page<WorkEntry>>;
+    fn work_entry(&self, user: UserId, target: &WorkTarget) -> Result<WorkEntry>;
+    fn change_work_history(&self, user: UserId, command: &WorkHistoryCommand) -> Result<()>;
+    fn reconcile_work_history(
+        &self,
+        settle: &mut dyn FnMut(UserId, &WorkTarget) -> Result<bool>,
+    ) -> Result<()>;
     fn scan_jobs(&self, user: UserId, key: &str) -> Result<Vec<JobRecord>>;
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId>;
     fn enqueue_preparation_member(

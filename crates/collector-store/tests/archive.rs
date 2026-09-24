@@ -1723,7 +1723,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        14
+        15 // FX-03 adds private visibility/clear intents; original archive bytes stay unchanged.
     );
     assert_eq!(
         private
@@ -5526,7 +5526,7 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
 }
 
 #[test]
-fn schema_thirteen_preserves_durable_imports_without_private_path_columns() {
+fn current_private_schema_preserves_durable_imports_without_private_path_columns() {
     let root = tempfile::tempdir().unwrap();
     let archive = root.path().join("archive");
     let state = root.path().join("state");
@@ -5540,7 +5540,7 @@ fn schema_thirteen_preserves_durable_imports_without_private_path_columns() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        14
+        15 // Work-history state adds no private paths to Import records.
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -13184,6 +13184,31 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
         .enqueue_import_analysis(&actor, id, ModuleId("org.junk.music".into()), &command())
         .unwrap();
     assert_eq!(direct, guided.id);
+    let shared_history = service
+        .work_history_entry(&actor, &collector_app::WorkTarget::Import(id))
+        .unwrap();
+    assert!(shared_history.shared);
+    assert!(
+        !shared_history
+            .actions
+            .contains(&collector_app::WorkHistoryAction::CancelAndClear)
+    );
+    assert!(
+        service
+            .change_work_history(
+                &actor,
+                collector_app::WorkHistoryCommand {
+                    target: collector_app::WorkTarget::Import(id),
+                    action: collector_app::WorkHistoryAction::CancelAndClear
+                },
+                &command()
+            )
+            .is_err()
+    );
+    let direct_history = service
+        .work_history_entry(&actor, &collector_app::WorkTarget::Job(direct))
+        .unwrap();
+    assert!(direct_history.shared);
     let claim = store
         .claim_job("interrupted-shared-worker", 30)
         .unwrap()
@@ -13247,4 +13272,328 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
         ImportPhase::AwaitingReview
     );
     assert!(!service.run_next_job("cancelled-parent").unwrap());
+}
+
+#[test]
+fn fx03_history_filters_dismissal_clear_recovery_and_authorization() {
+    use collector_app::{WorkHistoryAction as A, WorkHistoryCommand as C, WorkQuery, WorkTarget};
+    let clock = Arc::new(TestClock::new(1_900_000_000));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let first = staged_import(&service, &actor, collection.id, "first package");
+    clock.advance(10);
+    let second = reviewed_unattached_import(&service, &actor, collection.id, "second package");
+    let job = service
+        .enqueue_import_publication(&actor, second.id, &command())
+        .unwrap();
+    service.run_next_job("publish").unwrap();
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let q = WorkQuery {
+        limit: Some(1),
+        ..Default::default()
+    };
+    let page = service.work_history(&actor, q.clone()).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].name, "second package");
+    assert_eq!(page.items[0].status, "completed");
+    let cursor = page.next_cursor.unwrap();
+    clock.advance(10);
+    let third = staged_import(&service, &actor, collection.id, "third package");
+    let older = service
+        .work_history(
+            &actor,
+            WorkQuery {
+                cursor: Some(cursor),
+                ..q
+            },
+        )
+        .unwrap();
+    assert_eq!(older.items[0].name, "first package");
+    assert!(older.next_cursor.is_none());
+    assert_eq!(
+        service
+            .work_history(
+                &actor,
+                WorkQuery {
+                    search: "DISC.BIN".into(),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        3
+    );
+    assert_eq!(
+        service
+            .work_history(
+                &actor,
+                WorkQuery {
+                    status: "needs_input".into(),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    assert!(
+        service
+            .work_history(
+                &actor,
+                WorkQuery {
+                    search: "received_bytes".into(),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .is_empty(),
+        "search must match file names, not storage JSON field names"
+    );
+    let published = WorkTarget::Import(second.id);
+    let dismiss = C {
+        target: published.clone(),
+        action: A::Dismiss,
+    };
+    let receipt = command();
+    service
+        .change_work_history(&actor, dismiss.clone(), &receipt)
+        .unwrap();
+    service
+        .change_work_history(&actor, dismiss, &receipt)
+        .unwrap();
+    assert_eq!(
+        service
+            .work_history(&actor, WorkQuery::default())
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    assert_eq!(
+        service
+            .work_history(
+                &actor,
+                WorkQuery {
+                    archived: true,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert!(Catalog::capture(&*store, second.capture_id).is_ok());
+    assert!(
+        service
+            .change_work_history(
+                &actor,
+                C {
+                    target: published.clone(),
+                    action: A::Discard
+                },
+                &command()
+            )
+            .is_err()
+    );
+    service
+        .change_work_history(
+            &actor,
+            C {
+                target: published,
+                action: A::Restore,
+            },
+            &command(),
+        )
+        .unwrap();
+    let target = WorkTarget::Import(first.id);
+    assert!(
+        service
+            .change_work_history(
+                &actor,
+                C {
+                    target: target.clone(),
+                    action: A::Dismiss
+                },
+                &command()
+            )
+            .is_err()
+    );
+    service
+        .change_work_history(
+            &actor,
+            C {
+                target: target.clone(),
+                action: A::CancelAndClear,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        service
+            .stage_provisional_import_chunk(&actor, first.id, 0, 0, b"data")
+            .is_err()
+    );
+    assert!(
+        service
+            .enqueue_import_analysis(
+                &actor,
+                first.id,
+                ModuleId("org.junk.music".into()),
+                &command()
+            )
+            .is_err()
+    );
+    let user = store
+        .create_user("another-work-user", "another very long password", false)
+        .unwrap();
+    store.grant(collection.id, user, Role::Curator).unwrap();
+    let other = Principal {
+        user_id: user,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(
+        service
+            .work_history(&other, WorkQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert!(matches!(
+        service.work_history_entry(&other, &target),
+        Err(Error::NotFound)
+    ));
+    assert!(
+        service
+            .change_work_history(
+                &other,
+                C {
+                    target: target.clone(),
+                    action: A::Restore
+                },
+                &command()
+            )
+            .is_err()
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service.resume_guided_ingests().unwrap();
+    let cleared = service.work_history_entry(&actor, &target).unwrap();
+    assert!(cleared.archived);
+    assert!(!cleared.clear_pending);
+    assert_eq!(cleared.reclaimed_bytes, 4);
+    assert_eq!(cleared.pending_bytes, 0);
+    assert!(
+        !root
+            .path()
+            .join("state/imports")
+            .join(first.id.to_string())
+            .exists()
+    );
+    assert!(
+        root.path()
+            .join("state/imports")
+            .join(third.id.to_string())
+            .exists()
+    );
+    service
+        .change_work_history(
+            &actor,
+            C {
+                target,
+                action: A::Restore,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        service.provisional_import(&actor, first.id).unwrap().phase,
+        ImportPhase::Cancelled
+    );
+    assert!(Catalog::capture(&*store, second.capture_id).is_ok());
+    let failed_target = WorkTarget::Import(third.id);
+    service
+        .change_work_history(
+            &actor,
+            C {
+                target: failed_target.clone(),
+                action: A::CancelAndClear,
+            },
+            &command(),
+        )
+        .unwrap();
+    let dir = root.path().join("state/imports").join(third.id.to_string());
+    let retained = dir.with_extension("retained");
+    std::fs::rename(&dir, &retained).unwrap();
+    std::fs::write(&dir, b"blocked cleanup fixture").unwrap();
+    service.resume_guided_ingests().unwrap();
+    let failed = service.work_history_entry(&actor, &failed_target).unwrap();
+    assert!(failed.clear_pending);
+    assert!(!failed.archived);
+    assert!(failed.cleanup_error.is_some());
+    assert_eq!(failed.pending_bytes, 4);
+    assert!(failed.actions.contains(&A::RetryCleanup));
+    std::fs::remove_file(&dir).unwrap();
+    std::fs::rename(&retained, &dir).unwrap();
+    service
+        .change_work_history(
+            &actor,
+            C {
+                target: failed_target.clone(),
+                action: A::RetryCleanup,
+            },
+            &command(),
+        )
+        .unwrap();
+    service.resume_guided_ingests().unwrap();
+    assert!(
+        service
+            .work_history_entry(&actor, &failed_target)
+            .unwrap()
+            .archived
+    );
+    assert!(Catalog::capture(&*store, second.capture_id).is_ok());
+    let retry_import = reviewed_unattached_import(&service, &actor, collection.id, "retry fence");
+    let retry_job = service
+        .enqueue_import_publication(&actor, retry_import.id, &command())
+        .unwrap();
+    let claim = store.claim_job("fixture", 60).unwrap().unwrap();
+    assert_eq!(claim.id, retry_job);
+    store
+        .fail_job(claim.id, &claim.claim_token, "first failed attempt")
+        .unwrap();
+    let retry_target = WorkTarget::Import(retry_import.id);
+    service
+        .change_work_history(
+            &actor,
+            C {
+                target: retry_target.clone(),
+                action: A::Dismiss,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.retry_job(&actor, retry_job, &command()).is_err());
+    service
+        .change_work_history(
+            &actor,
+            C {
+                target: retry_target,
+                action: A::Restore,
+            },
+            &command(),
+        )
+        .unwrap();
+    service.retry_job(&actor, retry_job, &command()).unwrap();
+    service.run_next_job("restored retry").unwrap();
+    assert_eq!(
+        service.job(&actor, retry_job).unwrap().state,
+        JobState::Completed
+    );
 }

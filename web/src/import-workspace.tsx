@@ -8,7 +8,7 @@ type ImportView=components['schemas']['ImportView'];
 type InboxSource=components['schemas']['InboxSourceView'];
 type JobView=components['schemas']['JobView'];
 type Association=components['schemas']['CaptureAssociation'];
-type Props={item:Item;busy:boolean;setBusy:(value:boolean)=>void;onPublished:(item:Item)=>void;onError:(error:unknown)=>void};
+type Props={initialImportId?:string;item:Item;onPublished:(item:Item)=>void;onError:(error:unknown)=>void};
 
 const terminal=new Set<JobView['state']>(['completed','failed','cancelled']);
 const phaseLabel:Record<ImportView['phase'],string>={staging:'Uploading files',analyzing:'Upload complete · analysis needed',awaiting_review:'Analysis complete · review needed',publishing:'Publishing capture',published:'Capture published',cancelled:'Import cancelled'};
@@ -30,7 +30,7 @@ async function waitForJob(id:string,onProgress:(job:JobView)=>void,signal:AbortS
  }
 }
 
-export default function ImportWorkspace({item,onPublished,onError}:Props){
+export default function ImportWorkspace({initialImportId,item,onPublished,onError}:Props){
  const [busy,setBusy]=useState(false);const [analysisError,setAnalysisError]=useState('');const [analysisPollRevision,setAnalysisPollRevision]=useState(0);
  const lifecycle=useRef(new AbortController());
  const [uploadProgress,setUploadProgress]=useState<UploadProgress>();const [activity,setActivity]=useState('');
@@ -57,7 +57,7 @@ export default function ImportWorkspace({item,onPublished,onError}:Props){
  const storageKey=`collector.import.${item.id}`;
 
  useEffect(()=>{let active=true;request<InboxSource[]>(`/collections/${item.collection_id}/inboxes`).then(value=>{if(!active)return;setInboxes(value);setLabel(current=>current||value[0]?.label||'');}).catch(report);return()=>{active=false;};},[item.collection_id]);
- useEffect(()=>{const id=localStorage.getItem(storageKey);if(id)request<ImportView>(`/imports/${id}`).then(setRecord).catch(error=>{if(isApiRequestError(error)&&(error.status===404||error.status===403))localStorage.removeItem(storageKey);report(error);});},[storageKey]);
+ useEffect(()=>{const id=initialImportId||localStorage.getItem(storageKey);if(id)request<ImportView>(`/imports/${id}`).then(setRecord).catch(error=>{if(isApiRequestError(error)&&(error.status===404||error.status===403))localStorage.removeItem(storageKey);report(error);});},[storageKey,initialImportId]);
  useEffect(()=>{if(record)localStorage.setItem(storageKey,record.id);},[record?.id,storageKey]);
  useEffect(()=>{setItemRevision(item.revision);},[item.revision]);
  useEffect(()=>{setInboxPackage(selectedInbox?.packages[0]||'');},[selectedInbox?.label]);
@@ -131,8 +131,9 @@ export default function ImportWorkspace({item,onPublished,onError}:Props){
 
  const canStage=source==='browser'?files.length>0:!!label&&!!inboxPackage;
  return <section data-uploading={!!uploadProgress} data-unsaved={(!record&&files.length>0)||editingReview||(record?.phase==='awaiting_review'&&!record.review&&(identity!=='unidentified'||!attach||!!specimen||!!component||!!carrier))} className="import-workspace" aria-labelledby="import-heading">
-  <div className="section-heading"><div><h3 id="import-heading">Capture accession</h3><p className="muted">Stage original package bytes, inspect the record, then choose what—if anything—they belong to.</p></div>{record&&<button disabled={busy} onClick={reset}>Stage another package</button>}</div>
-  {!record&&<form aria-label="Stage package" onSubmit={event=>{event.preventDefault();void stage();}}>
+  <div className="section-heading"><div><h3 id="import-heading">Capture accession</h3><p className="muted">Stage original package bytes, inspect the record, then choose what—if anything—they belong to.</p></div>{record&&!initialImportId&&<button disabled={busy} onClick={reset}>Stage another package</button>}</div>
+  {initialImportId&&!record&&<p role="status">Loading saved import…</p>}
+  {!record&&!initialImportId&&<form aria-label="Stage package" onSubmit={event=>{event.preventDefault();void stage();}}>
    <fieldset className="source-choice"><legend>Package source</legend><label><input type="radio" name="import-source" checked={source==='browser'} onChange={()=>setSource('browser')}/> This browser</label><label><input type="radio" name="import-source" checked={source==='inbox'} onChange={()=>setSource('inbox')}/> Configured inbox</label></fieldset>
    {source==='browser'?<label>Original package files<input aria-label="Original package files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>:inboxes.length?<div className="form-grid"><label>Inbox<select value={label} disabled={busy} onChange={event=>setLabel(event.target.value)}>{inboxes.map(value=><option key={value.label}>{value.label}</option>)}</select></label><label>Package<select value={inboxPackage} disabled={busy} onChange={event=>setInboxPackage(event.target.value)}>{selectedInbox?.packages.map(value=><option key={value}>{value}</option>)}</select></label></div>:<p className="notice">No configured inbox packages are available. Choose files from this browser.</p>}
    {source==='browser'&&files.length>0&&<div className="package-files compact" role="list">{files.map(file=><div role="listitem" key={fileName(file)}><span>{fileName(file)}</span><small>{file.size.toLocaleString()} bytes</small></div>)}</div>}

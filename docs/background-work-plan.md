@@ -1,10 +1,16 @@
 # Album preparation and nonblocking background work
 
+**FX-03 update (2026-09-21):** Work & history, scoped server filtering/pagination,
+workflow/attempt grouping, dismissal/restoration, selected cleanup with durable
+settlement and byte outcomes, server-backed import reopening, and removal of
+ineligible derivative analysis forms are implemented. Local acceptance passed on 2026-09-21; see [validation](validation.md#fx-03-work-and-history--2026-09-21). Broader interface, mistaken-item removal/reimport and release gates
+remain open; this does not mark all U05/P04 criteria complete.
+
 **Planning update 2026-09-21:** [FX-02–FX-05 and FX-07](ux-fix-plan.md) applies the
 remaining whole-application nonblocking rule to scan lifecycle, durable progress,
 cleanup and reimport. Equivalent active scans must converge; completed results
 become the primary view, with equivalent actual rechecks recorded as lightweight
-occurrences. FX-02 implements these scan semantics and removes the whole-dialog execution lock from processing and manual import analysis; [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). The broader history/cleanup/reimport work remains proposed and reuses the completed LA2 patterns below.
+occurrences. FX-02 implements these scan semantics and removes the whole-dialog execution lock from processing and manual import analysis; [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). FX-03 implements grouped work/history and durable selected cleanup using the completed LA2 patterns below; its local acceptance passed. Clean reimport remains FX-05.
 
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA2 integrates the relevant acceptance below across layers. Individual child

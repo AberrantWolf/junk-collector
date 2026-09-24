@@ -1,5 +1,92 @@
 # Validation recorded for the foundation
 
+## Persistent bottom music player — 2026-09-22
+
+Implementation and local acceptance are complete. This is the
+user-requested addition after FX-03, not completion of the remaining FX-04 scope.
+
+- One application-owned media element persists across album navigation, closing
+  details, catalog refreshes and import completion. Album views enqueue prepared
+  tracks/albums; original audio files use the same dock. Preparation and download
+  controls remain in the album view.
+- The browser-local queue is scoped by user and origin, limited to 500 entries,
+  and restores its selected track paused. Immutable item/representation/file
+  coordinates bind playback. Adding/reordering/removing other tracks does not
+  reload the current source; removing the current track releases buffered audio.
+- `npm --prefix web run test:queue` passes for user isolation, stable selection
+  through reordering, removal, signed-out mutation denial, malformed stored
+  coordinates, queue bounds and disabled storage. No server queue or personal
+  activity writes are added.
+- The updated real-browser smoke journeys passed in Chrome 153.0.8010.37, including
+  actual FLAC playback, pause/resume/seek, next/previous, natural advance, paused
+  reload, closing details without stopping playback, cross-album appends and
+  queue edits during playback, mobile layout, import completion, session expiry
+  and grant revocation. Buffered audio stops when access is lost even away from
+  the album. The final rebuilt-server run also passed same-browser user isolation and current-track removal, with guards against obsolete play promises and late media events.
+
+The first workspace run encountered a provider-fixture request read returning
+WouldBlock. The fixture now explicitly puts accepted sockets into blocking mode
+instead of relying on inheritance from its nonblocking listener; the two-second
+read/write bounds remain unchanged. Production networking is unchanged.
+
+TypeScript, web build, embedded-server rebuild, API comparison, architecture and
+formatting and strict workspace Clippy checks passed. The corrected provider
+fixture passed both in isolation and with its complete eight-test suite. `cargo test --workspace -- --test-threads=4` passed: 313 tests, zero failures,
+one intentionally ignored owned-corpus oracle. All
+browser fixtures use temporary archives/profiles. The user's running server and
+archive remain untouched; the rebuilt binary needs a restart to serve the new UI.
+
+## FX-03 work and history — 2026-09-21
+
+Implementation and local acceptance are complete. FX-02 was
+committed as `3493cd8` before this delivery. FX-03 and the persistent-player follow-up are included in the 2026-09-24 checkpoint.
+
+- Requester-scoped server queries filter by collection, item/unattached state,
+  package/file name, lifecycle status and dates before bounded keyset pagination.
+  Import/preparation roots group their executions and previous failed attempts.
+  The browser retains older loaded pages while refreshing current status.
+- Dismiss/restore changes private history visibility. Discard and cancel-and-clear
+  record durable intentions, fence stale upload/review/admission/retry/publication,
+  and settle through existing cancellation and staging-cleanup services. Published
+  originals and successful evidence remain. Independently owned work is protected.
+- Focused store coverage checks advancing-clock pages, filename-only search,
+  publication grouping, exact receipt replay, cross-user denial, mixed eligibility,
+  dismissed retry fences, restart cleanup and measured reclaimed bytes. An injected
+  staging cleanup failure stays visible and succeeds after repair and retry.
+  Existing shared-owner and last-owner lifecycle regressions also pass.
+- The dedicated real-browser `test:work` journey creates 28 imports, loads older
+  pages, refreshes without dropping them, searches, reviews mixed-eligibility
+  selections, dismisses/restores history, clears a partially uploaded package,
+  observes actual reclaimed bytes, reloads and resumes an older unattached upload.
+  It checks keyboard focus, mobile layout, transient status-read recovery and the
+  exact embedded assets served by the temporary server.
+- Generated tracks remain grouped by meaningful music-track labels with playback
+  and preparation. Module readiness suppresses ineligible per-track CD-operation
+  forms while preserving original-package blockers and historical observations.
+
+Initial full-suite runs exposed two schema-version assertions, now updated to 15
+while retaining their data-preservation checks. A process-interruption checkpoint
+wait and a local provider HTTP fixture timed out under concurrent load; the isolated
+process-interruption rerun passed, and the provider fixture passed in the reduced-
+concurrency full-suite rerun. The smoke test also needed to await the lazily loaded
+history dialog before clearing its item filter and wait for the reopened processing
+panel before inspecting its reduced-motion style. No production readiness checks or
+test timeouts were weakened.
+
+Architecture/documentation/fixture checks, formatting, generated API comparison,
+TypeScript, web build, embedded-server rebuild and strict workspace Clippy passed.
+The standard HTTPS browser smoke passed in Chrome 153.0.8010.37, including actual
+FLAC start/pause/resume/seek, next/previous, natural ended advance, clean reload,
+grant revocation, WebAuthn and mobile checks. The final dedicated FX-03 browser rerun also passed with exact served-asset
+comparison. The FX-02 scan browser journey passed again, including the real 64 MiB
+scan, concurrent admission, reopen, repeat consolidation, unrelated editing and
+invalid-input/no-job checks. `cargo test --workspace -- --test-threads=4` passed:
+313 tests, zero failures, one intentionally ignored owned-corpus oracle. All 157
+storage/archive tests passed together, including the process-interruption test.
+All browser and cleanup fixtures use temporary archives/profiles; the user's running
+server and archive were not reset. FX-04–FX-07 and the LA3 second-device/external
+qualification remain open; this does not close the broader U05/P04 completion gate.
+
 ## FX-02 scan lifecycle — 2026-09-21
 
 Local acceptance passed. Implementation and final browser recovery checks are complete. The prior

@@ -34,17 +34,41 @@ changes. The integrated alpha/FX-01 checkpoint was committed as `20c4ff0` on 202
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
 
-## Usability fixes — FX-02 complete, FX-03 next
+## Usability fixes — FX-03 accepted; FX-04 next
 
 The user requested a combined set of UX/lifecycle fixes drawing on unfinished
 milestone work. [FX-01–FX-07](ux-fix-plan.md) maps the 18 audit findings and manual
 removal/clean-reimport/scan-consolidation requirements to complete deliveries,
 pulling forward the remaining U05 and P04.4–P04.6 criteria and broader nonblocking
-work. FX-01 is implemented and locally accepted on 2026-09-21; FX-02 is implemented and locally accepted on 2026-09-21; FX-03–FX-07 remain proposed. Completed D06/D07/LA1/LA2
+work. FX-01 is implemented and locally accepted on 2026-09-21; FX-02 is implemented and locally accepted on 2026-09-21; FX-02 is committed as `3493cd8`. FX-03 is implemented and locally accepted (2026-09-21); FX-04–FX-07 remain proposed. Completed D06/D07/LA1/LA2
 are reused; P05, native clients and large-scale indexing are not prerequisites.
 FX-03 also includes the user-requested removal of repeated ineligible derivative analysis forms and meaningful grouped track presentation, reusing existing readiness/playback services without requiring FX-04 or placeholder systems.
-The plan includes the child ledger and ready-to-send FX-03 handoff. FX-01 does not claim LA3's
+The plan includes the child ledger and ready-to-send FX-04 handoff. FX-01 does not claim LA3's
 second-device gate or the broader U05/P04/background-work gates complete.
+
+2026-09-22 user follow-up: the persistent bottom player and local per-user queue
+are implemented and locally accepted. This is an additional focused delivery
+before the remaining FX-04 editor/intake work; both are included in the 2026-09-24 checkpoint.
+
+2026-09-22 navigation requirement: FX-04 must separate import-history browsing
+from focused import details/progress, preserve return context and support direct
+links, with acceptance at thousands-of-imports scale. It also owns the review of
+other overloaded panels for meaningful separate views. FX-07 rechecks this across
+the interface. These requirements are pending; prior FX-03 acceptance is retained
+as a dated record, not a claim that the new navigation requirement is implemented.
+
+2026-09-22 selector-scale follow-up: FX-04 replaces existing-entry attachment's
+collection-wide, silently capped dropdown with a searchable paged chooser, keeping
+actual suggested matches distinct from general collection search. Audit other
+growing lists/selectors for preloading and hidden cutoffs, including the manual
+import destination picker. Acceptance uses at least 3,000 catalog entries as well
+as import records; FX-07 checks the complete interface and FX-06 owns access UI fixes.
+
+2026-09-22 provider requirement: FX-04 makes automatic disc-identity lookup
+consistent across intake paths, using supported dump-derived CD layout/disc IDs,
+never filenames or timestamp-derived display titles. Guided ingestion already uses
+MusicBrainz disc IDs; reuse its acquisition policy. The broader consistency/UI fix
+is pending, including honest fallback states and timestamp-named dump acceptance.
 
 ## How to use this backlog
 

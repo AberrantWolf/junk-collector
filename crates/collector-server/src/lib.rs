@@ -1,3 +1,6 @@
+use collector_app::{
+    WorkEntry, WorkHistoryCommand, WorkJobView, WorkJobsQuery, WorkQuery, WorkTarget,
+};
 pub mod passkeys;
 use axum::{
     Json, Router,
@@ -466,6 +469,7 @@ pub fn router(state: AppState) -> Router {
         router = router
             .route("/curate", get(index))
             .route("/curation.js", get(curation_js))
+            .route("/work-history.js", get(work_history_js))
             .merge(curation_api);
     }
     if state
@@ -563,6 +567,9 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(upload, cancel_upload))
         .routes(routes!(commit_upload))
         .routes(routes!(jobs))
+        .routes(routes!(work_history, change_work_history))
+        .routes(routes!(work_history_entry))
+        .routes(routes!(work_jobs))
         .routes(routes!(job))
         .routes(routes!(cancel_job))
         .routes(routes!(retry_job))
@@ -3553,4 +3560,57 @@ async fn import_inbox(
         Json(serde_json::json!({"import_id":import.id,"job_id":job_id})),
     )
         .into_response())
+}
+
+#[utoipa::path(get,path="/api/v1/work",params(WorkQuery),responses((status=200,body=Page<WorkEntry>),(status=403),(status=422)))]
+async fn work_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<WorkQuery>,
+) -> ApiResult<Json<Page<WorkEntry>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.work_history(&actor, query)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/work/entry",request_body=WorkTarget,responses((status=200,body=WorkEntry),(status=403),(status=404)))]
+async fn work_history_entry(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(target): Json<WorkTarget>,
+) -> ApiResult<Json<WorkEntry>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.work_history_entry(&actor, &target)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/work",request_body=WorkHistoryCommand,params(("Idempotency-Key"=String,Header)),responses((status=204),(status=403),(status=409),(status=422)))]
+async fn change_work_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<WorkHistoryCommand>,
+) -> ApiResult<StatusCode> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    blocking(move || state.service.change_work_history(&actor, command, &context)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn work_history_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../../../web/dist/work-history.js"),
+    )
+}
+
+#[utoipa::path(post,path="/api/v1/work/jobs",request_body=WorkJobsQuery,responses((status=200,body=Page<WorkJobView>),(status=403),(status=404)))]
+async fn work_jobs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(query): Json<WorkJobsQuery>,
+) -> ApiResult<Json<Page<WorkJobView>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.work_jobs(&actor, query)).await?,
+    ))
 }

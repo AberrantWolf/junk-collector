@@ -10,12 +10,12 @@ type Detail=components['schemas']['IngestDetail'];
 type Item=components['schemas']['PresentedItem'];
 type InboxSource=components['schemas']['InboxSourceView'];
 type Page=components['schemas']['Page_IngestSummary'];
-type Props={collectionId:string;busy:boolean;setBusy:(value:boolean)=>void;onPublished:(item:Item,replacedItemId?:string)=>void;onError:(error:unknown)=>void};
+type Props={initialImportId?:string;historyOnly?:boolean;collectionId:string;busy:boolean;setBusy:(value:boolean)=>void;onPublished:(item:Item,replacedItemId?:string)=>void;onError:(error:unknown)=>void};
 function selectedName(files:File[]){return files.length===1?files[0].name:'Browser package';}
 function fileName(file:File){return file.webkitRelativePath||file.name;}
 function stateLabel(value:string){return value.replaceAll('_',' ');}
 
-export default function GuidedIngest({collectionId,busy,setBusy,onPublished,onError}:Props){
+export default function GuidedIngest({initialImportId,historyOnly=false,collectionId,busy,setBusy,onPublished,onError}:Props){
  const [source,setSource]=useState<'browser'|'inbox'>('browser');
  const [folderMode,setFolderMode]=useState(true);const [unassigned,setUnassigned]=useState<string[]>([]);const [queueLabel,setQueueLabel]=useState('');
  const [files,setFiles]=useState<File[]>([]);const [resumeFiles,setResumeFiles]=useState<File[]>([]);
@@ -66,6 +66,7 @@ export default function GuidedIngest({collectionId,busy,setBusy,onPublished,onEr
  },[collectionId]);
  useEffect(()=>{setInboxPackages(selectedInbox?.packages.slice(0,1)||[]);},[selectedInbox?.label]);
  useEffect(()=>{if(!uploadProgress)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[!!uploadProgress]);
+ useEffect(()=>{if(initialImportId)void open(initialImportId);},[initialImportId]);
  async function discover(selected:File[]){setFiles(selected);setFolderMode(true);setPlan(undefined);setUnassigned([]);await mutate(async()=>{
   setActivity('Finding dump packages…');
   const result=await request<Discovery>('/ingests/discover',{method:'POST',body:JSON.stringify({collection_id:collectionId,files:selected.map(file=>({name:fileName(file),bytes:file.size,sha256:null}))})});
@@ -108,13 +109,14 @@ export default function GuidedIngest({collectionId,busy,setBusy,onPublished,onEr
   const value=await request<Detail>(`/ingests/${detail.summary.import_id}/association`,{method:'PUT',body:JSON.stringify({expected_capture_revision:detail.summary.capture_revision,association:{item_id:selected?.id||null,specimen_id:null,component_id:null,carrier_id:null},expected_item_revision:selected?.revision||null})});setDetail(value);targetEdited.current=false;setTarget(value.import.association.item_id||'');setNotice(selected?`Dump attached to ${selected.title}. Other discs are unchanged. Unused automatic placeholders are removed; entries with independent inventory or manual information are kept.`:'Dump association removed. Original files are retained.');await refreshHistory();if(selected)callbacks.current.onPublished(await request<Item>(`/items/${selected.id}`),detail.import.association.item_id||undefined);await open(detail.summary.import_id);
  });}
  return <section className="guided-ingest" data-uploading={!!uploadProgress} aria-labelledby="guided-ingest-heading">
-  <h3 id="guided-ingest-heading">Import original packages</h3>
+  <h3 id="guided-ingest-heading">{historyOnly?'Import progress':'Import original packages'}</h3>{!historyOnly&&<>
   <p className="muted">Choose a folder of dumps. We find packages in its subfolders, create entries, preserve the originals, and gather available metadata and artwork.</p>
+  </>}
   {failure&&<p role="alert" className="notice error">{failure} Saved entries and received bytes are kept. Open the import below to resume.</p>}
   {notice&&<p role="status" className="notice">{notice}</p>}
   {queueLabel&&<p><strong>{queueLabel}</strong></p>}
   {uploadProgress?<UploadMeter value={uploadProgress}/>:activity&&<WorkProgress label={activity}/>}
-  <form onSubmit={event=>{event.preventDefault();void (plan?start():preview());}}>
+  {!historyOnly&&<><form onSubmit={event=>{event.preventDefault();void (plan?start():preview());}}>
    <fieldset className="source-choice"><legend>Import from</legend><label><input type="radio" name="guided-source" disabled={busy} checked={source==='browser'} onChange={()=>{setSource('browser');setPlan(undefined);}}/> This browser</label><label><input type="radio" name="guided-source" disabled={busy} checked={source==='inbox'} onChange={()=>{setSource('inbox');setPlan(undefined);}}/> Configured inbox</label></fieldset>
    {source==='browser'?<>
     <label>Dump folder<input aria-label="Dump folder" type="file" multiple {...{webkitdirectory:''}} disabled={busy} onChange={event=>{const selected=Array.from(event.target.files||[]);if(selected.length)void discover(selected);}}/></label>
@@ -130,8 +132,9 @@ export default function GuidedIngest({collectionId,busy,setBusy,onPublished,onEr
    {(plan||source==='inbox'||!folderMode)&&<button className="primary" disabled={busy||(source==='browser'?!files.length:!inboxPackages.length)}>{plan?(folderMode&&source==='browser'?`Import ${plan.packages.length} packages`:'Start import'):'Preview import'}</button>}
   </form>
   <p className="muted">Keep this window open while uploading. Once uploads finish, you can close it: saved entries and server processing are independent of this window. No separate inventory save is needed.</p>
-  <h4>Imports</h4>{history.length===0?<p className="muted">No imports yet.</p>:<div className="ingest-history">{history.map(value=><button type="button" key={value.import_id} onClick={()=>void open(value.import_id)}><strong>{value.package_name}</strong><span>{stateLabel(value.phase)} · {stateLabel(value.outcome)} · {value.file_count} files</span>{value.outcome==='active'&&value.phase!=='staging'&&<progress aria-label={`Processing ${value.package_name}`}/>} {(value.outcome==='needs_input'||value.outcome==='failed')&&<small>Needs attention — open for details</small>}</button>)}</div>}
+  <button disabled={busy} onClick={()=>window.dispatchEvent(new Event('collector-open-work'))}>Open work &amp; history</button><h4>Imports</h4>{history.length===0?<p className="muted">No imports yet.</p>:<div className="ingest-history">{history.map(value=><button type="button" key={value.import_id} onClick={()=>void open(value.import_id)}><strong>{value.package_name}</strong><span>{stateLabel(value.phase)} · {stateLabel(value.outcome)} · {value.file_count} files</span>{value.outcome==='active'&&value.phase!=='staging'&&<progress aria-label={`Processing ${value.package_name}`}/>} {(value.outcome==='needs_input'||value.outcome==='failed')&&<small>Needs attention — open for details</small>}</button>)}</div>}
   {cursor&&<button onClick={()=>void refreshHistory(cursor).catch(fail)}>More import history</button>}
+  </>}
   {detail&&<details className="ingest-detail" open={detailOpen} onToggle={event=>setDetailOpen(event.currentTarget.open)}><summary>Details: {detail.summary.package_name}</summary>
    {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {items.find(item=>item.id===detail.import.association.item_id)?.title||'another collection entry'}. Other discs attached to that entry are retained.</p>}
    {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label="Package staging progress" completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Received bytes and the entry are saved on the server."/>}

@@ -1,5 +1,35 @@
 # Import history and cleanup — P04 completion follow-up
 
+**Provider lookup requirement 2026-09-22 (FX-04):** Automatically acquire CD
+metadata when supported dump analysis supplies its actual disc identity. Reuse the
+existing guided disc-ID acquisition for other intake paths; do not require a lookup
+button or automatically search filenames/timestamp-derived titles. Missing identity,
+no match, ambiguity and failure need distinct states; original preservation and
+manual metadata authority remain intact. Advanced explicit lookup/retry remains a
+recovery path, not the default journey. Verify requests for timestamp-named dumps.
+
+**Scale follow-up 2026-09-22 (pending FX-04/FX-07):** Existing-entry attachment
+currently lists general collection entries, not detected matches, and stops at
+1,000. Replace it with server-side search and explicit paging, with evidence-backed
+suggestions clearly separate from general search. Audit all growing record selectors
+for collection preloading, silent caps, disambiguation and access to later results;
+validate with at least 3,000 catalog entries. The manual-import destination search's
+unpaged 50-result limit is also in scope. Fixed small enum choices may remain dropdowns.
+
+**User requirement 2026-09-22 (pending, owned by FX-04 and reviewed in FX-07):**
+Import history and current-import details must be distinct navigable views, with no
+global history list embedded in intake/progress/detail panels. Preserve list context
+on return and support direct-link/reload of the selected import. Validate with
+thousands of records and bounded loading. More generally, separate meaningful
+browse/detail/task views instead of accumulating unrelated content in one panel.
+See [the FX-04 scope and acceptance](ux-fix-plan.md#fx-04--focused-editing-and-consistent-intake).
+
+**FX-03 update (2026-09-21):** Work & history, scoped server filtering/pagination,
+workflow/attempt grouping, dismissal/restoration, selected cleanup with durable
+settlement and byte outcomes, server-backed import reopening, and removal of
+ineligible derivative analysis forms are implemented. Local acceptance passed on 2026-09-21; see [validation](validation.md#fx-03-work-and-history--2026-09-21). Broader interface, mistaken-item removal/reimport and release gates
+remain open; this does not mark all U05/P04 criteria complete.
+
 **Planning update 2026-09-21:** [FX-03/04/05/07](ux-fix-plan.md) incorporates the
 remaining searchable history, bulk cleanup, dismiss/restore and completion scope,
 plus newly requested manual item removal and clean reimport. These are proposed
@@ -41,8 +71,8 @@ it does not depend on C06 event streaming.
 
 | Child | State | Scope and dependencies |
 |---|---|---|
-| P04.4 — Identifiable import and attempt history | LA1 subset implemented | Bounded submitter-scoped list/detail, step/attempt projections and reopen are implemented; search/filter/dismissed history remain planned |
-| P04.5 — Import cleanup lifecycle | LA1 subset implemented | Cancel/fence and discard unpublished staging with actual byte results plus published association correction are implemented; archive/restore, bulk and cleanup-failure UI remain planned |
+| P04.4 — Identifiable import and attempt history | Implemented and locally accepted in FX-03 | Server search/filter/keyset pages, named workflow groups, attempt detail, dismissed history and server-backed reopening |
+| P04.5 — Import cleanup lifecycle | FX-03 history/unpublished subset locally accepted | Dismiss/restore, selected/bulk cleanup, durable cancellation/settlement and byte/error/retry outcomes; mistaken published-item removal remains FX-05 |
 | P04.6 — Web completion review | Planned | LA1 real-browser journey is evidence for one path, not the full mixed-role/bulk/mobile completion matrix |
 
 ### P04.4 — Identifiable import and attempt history

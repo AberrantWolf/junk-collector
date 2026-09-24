@@ -148,7 +148,7 @@ The full first release, native clients and public deployment remain later target
 - S03 advances private state to v6 with expiring targeted enrollment and separately hashed/revocable native credentials. Same-user recent browser approval, cancellation/expiry/replay protection, one-time issuance, header-independent native authentication, and native-device inventory/revocation are implemented. `collector-client` owns an injectable secure-storage port, refuses redirects/cross-origin credential delivery, validates enrolled server identity/certificate material, and completes the LAN TLS integration through real enrollment.
 - U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted.
 - Private SQLite advances through explicit migrations and stores a durable default UserId selected once from legacy first-row behavior. First-account creation sets it transactionally; later accounts do not change it.
-- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally. D05.1 is reviewed and corrected locally: authorized frozen BIN/CUE and current raw-redumper packages produce strict signed layouts, exact `i16` stereo 44.1-kHz PCM, published disc IDs where the layout permits them, and bounded cancellation-aware AccurateRip checksum/offset inputs. Mixed mode, synthetic gaps and unsupported/ambiguous sidecars cannot claim whole-disc audio. D05.2 is reviewed and corrected locally: the provider adapter freezes bounded exact dBAR/no-data observations for checked offline replay, and music-owned policy retains explicit per-track v1/v2 coverage while requiring every expected track and a justified unique offset for whole-disc verification. D05.3 is reviewed and corrected locally: music Import analysis, committed structure jobs, shared-verifier AccurateRip jobs, archived snapshots, history and web curation use the existing registry/job/publication paths. Synthetic workflow tests cover outage, retry, cancellation, exact snapshot-byte rejection, no-data, refresh and reindex. D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. Immutable fixed-profile recipes consume music-owned exact track ranges; the optional bounded process adapter validates FLAC by independently decoding every integer PCM frame and inspects Opus delay/padding; single-track outputs publish through the Capture journal and appear through a viewer-safe availability/read contract with strong ETag and Range behavior. Server-owned optional encoder configuration and curation-only explicit preparation leave import and original reads independent of tools. The bounded browser-player child is implemented locally over that shared DTO: viewer playback is grouped by Capture/source, prefers a decodable FLAC, and provides in-memory play/pause/seek/next/previous/ended transitions with honest codec/access failures. Google Chrome 153.0.8010.37 actually decoded and played generated FLAC; the child is reviewed and corrected locally. `opusenc`, live-provider, owned real-dump, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external.
+- The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally. D05.1 is reviewed and corrected locally: authorized frozen BIN/CUE and current raw-redumper packages produce strict signed layouts, exact `i16` stereo 44.1-kHz PCM, published disc IDs where the layout permits them, and bounded cancellation-aware AccurateRip checksum/offset inputs. Mixed mode, synthetic gaps and unsupported/ambiguous sidecars cannot claim whole-disc audio. D05.2 is reviewed and corrected locally: the provider adapter freezes bounded exact dBAR/no-data observations for checked offline replay, and music-owned policy retains explicit per-track v1/v2 coverage while requiring every expected track and a justified unique offset for whole-disc verification. D05.3 is reviewed and corrected locally: music Import analysis, committed structure jobs, shared-verifier AccurateRip jobs, archived snapshots, history and web curation use the existing registry/job/publication paths. Synthetic workflow tests cover outage, retry, cancellation, exact snapshot-byte rejection, no-data, refresh and reindex. D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. Immutable fixed-profile recipes consume music-owned exact track ranges; the optional bounded process adapter validates FLAC by independently decoding every integer PCM frame and inspects Opus delay/padding; single-track outputs publish through the Capture journal and appear through a viewer-safe availability/read contract with strong ETag and Range behavior. Server-owned optional encoder configuration and curation-only explicit preparation leave import and original reads independent of tools. The bounded browser-player child is implemented locally over that shared DTO: album track selection is grouped by Capture/source and prefers a decodable FLAC; the 2026-09-22 shell-owned player keeps a local per-user cross-album queue with play/pause/seek/next/previous/ended transitions and honest codec/access failures. Google Chrome 153.0.8010.37 actually decoded and played generated FLAC; the child is reviewed and corrected locally. `opusenc`, live-provider, owned real-dump, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external.
 - Separate private operational database; collection roles, private field filtering, revisioned accounts/grants, password/passkey recovery, browser-session inventory, and revocable paired native credentials.
 - Separate public/private HTTP routers and direct LAN TLS. Public curation/admin independently configured; disabled APIs and management bundles are absent.
 - WebAuthn passkey registration/login backend and browser integration when an HTTPS authentication origin is configured. Registration and passwordless login pass a Chromium virtual-authenticator end-to-end test; real password-manager/hardware acceptance remains a release gate.
@@ -402,9 +402,18 @@ and keeps unrelated editing usable. Manual import analysis resumes polling after
 reopening. Admission uses recorded fingerprints; workers check actual bytes with
 cancellation. [Local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21) on 2026-09-21.
 
-FX-03 also plans to remove repeated ineligible derivative analysis forms and identify generated tracks in a grouped playable-files view; this UI correction is not yet implemented.
+FX-03 implements Work & history with collection/item/unattached, package/file-name,
+date and lifecycle filters, bounded server pages, import/preparation grouping and
+execution-attempt detail. Private schema 15 retains dismissal/restoration and durable
+clear intents; cancellation and eligible staging cleanup settle before archival.
+Per-target review shows eligibility, byte effects and partial outcomes. Pending clear
+and dismissed history fence stale admission/retry; shared work remains protected.
+Manual and guided imports reopen from server identities, including upload resumption.
+Generated track files remain in the named Music track groups; ineligible derivative
+CD-operation forms are suppressed using scan readiness while evidence stays readable.
+FX-03 [local acceptance passed](validation.md#fx-03-work-and-history--2026-09-21) on 2026-09-21; no external release qualification is claimed.
 
-FX-03–FX-07 remain proposed: searchable history/bulk cleanup, focused editing/intake, manual
+FX-04–FX-07 remain proposed: focused editing/intake, manual
 removal/restore/clean reimport, account recovery and the whole-interface review.
 LA3's second-device qualification and broader release gates remain open.
 
@@ -594,8 +603,9 @@ remains readable after restart without its module or tool. Strong content ETags
 and full, partial, suffix, open-ended, unsatisfiable and If-Range behavior are
 exercised through HTTP. Import, inventory, verification and media GET still do
 not request conversion. The following bounded browser child is now implemented
-locally and is reviewed. It uses these rows directly for Capture/source-scoped
-in-memory queues and actual viewer FLAC playback without adding a backend player
+locally and is reviewed. Its album views use these rows directly for Capture/source-scoped track selection;
+the 2026-09-22 shell player owns the local queue and actual viewer FLAC playback
+without adding a backend player
 or conversion-on-read path.
 
 ### LA3 independent review (2026-09-20)
@@ -633,3 +643,43 @@ Second-device qualification remains outstanding.
   before retirement; no payloads are deleted. Browser refresh clears retired
   selections, and explicit reassociation follows the destination only if the moved
   source was selected, preserving unrelated playback.
+
+### Persistent browser music queue — 2026-09-22
+
+The user-requested bottom player is implemented and locally accepted; see
+[validation](validation.md#persistent-bottom-music-player--2026-09-22).
+One shell-owned audio element survives album navigation, catalog refresh and import
+completion. Album views append a track or prepared album; original audio files can
+also be queued. The player supports transport/seek, cross-album advance, reorder,
+remove and clear. A bounded localStorage queue is scoped to browser origin/user,
+restores paused on reload and is never written to the server. Without writable
+localStorage, it remains usable for the current session. Access is rechecked before
+playback and periodically; loss of access/session releases buffered audio. This
+completes a user-requested portion adjacent to FX-04, not the whole FX-04 delivery.
+
+### View separation requirement — 2026-09-22 (planned)
+
+FX-04 now explicitly owns separate import-history and selected-import detail/progress
+views, with preserved return context, direct-link/reload and thousands-of-records
+acceptance. The current combined history/detail panel does not yet meet this new
+requirement. FX-04 also reviews overloaded views elsewhere; FX-07 verifies meaningful
+browse/detail/task separation across the interface. See [the fix plan](ux-fix-plan.md).
+
+The 2026-09-22 selector-scale audit also remains planned under FX-04/FX-07. Guided
+attachment currently preloads general collection entries up to 1,000, rather than
+showing detected matches; the manual history destination search exposes only its
+first 50 results. The accepted replacement is authorized, bounded server-side
+search/pagination with clearly separate evidence-backed suggestions and useful
+album disambiguation. Acceptance must find destinations beyond those old limits.
+
+### Automatic CD provider lookup requirement — 2026-09-22 (FX-04 follow-up)
+
+Guided ingestion already acquires MusicBrainz data automatically with a disc ID
+from its CD analysis. The metadata editor still presents an explicit optional
+lookup and offers a search built from displayed metadata. FX-04 must make automatic
+dump-derived identity lookup consistent across intake paths and remove reliance on
+that explicit control for ordinary ingestion. Dump filenames/folders/timestamps,
+including placeholder titles inherited from them, must never become automatic text
+queries. Missing identity and provider/no-match/ambiguity states must remain honest;
+manual metadata authority and original preservation remain protected. This broader
+requirement is planned, not an assertion that every existing path already meets it.

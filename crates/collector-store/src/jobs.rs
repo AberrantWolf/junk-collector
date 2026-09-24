@@ -73,6 +73,40 @@ fn parse_job_record(row: StoredJobRecord) -> Result<JobRecord> {
 }
 
 impl Store {
+    pub(crate) fn grouped_work_jobs(
+        &self,
+        user: UserId,
+        query: &collector_app::WorkJobsQuery,
+    ) -> Result<Page<JobRecord>> {
+        let (kind, id) = match query.target {
+            collector_app::WorkTarget::Import(id) => ("import", id.to_string()),
+            collector_app::WorkTarget::Job(id) => ("job", id.to_string()),
+        };
+        let db = lock(&self.db)?;
+        let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND json_extract(request,'$.import_id')=?3) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
+        let mut items = stmt
+            .query_map(
+                params![
+                    user.to_string(),
+                    kind,
+                    id,
+                    query.cursor.map(|id| id.to_string()),
+                    u32::from(query.limit.unwrap_or(25)) + 1
+                ],
+                read_job_record,
+            )
+            .map_err(storage)?
+            .map(|r| parse_job_record(r.map_err(storage)?))
+            .collect::<Result<Vec<_>>>()?;
+        let next_cursor = if items.len() > usize::from(query.limit.unwrap_or(25)) {
+            items.pop();
+            items.last().map(|j| j.id.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
     pub(crate) fn job_records_for_import(
         &self,
         import: ImportId,
@@ -292,6 +326,7 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        Self::ensure_work_retry_allowed(&tx, id, user)?;
         let frozen = Self::preparation_batch_input(&tx, id, user)?;
         ensure_album_admission_capacity(&tx, user, id)?;
         let now = self.clock.now().timestamp();
@@ -550,7 +585,7 @@ impl Store {
                     "SELECT EXISTS(SELECT 1 FROM private.jobs j
                 JOIN private.preparation_members m ON m.batch_id=j.id
                 WHERE j.id=? AND j.user_id=? AND j.state='running' AND j.cancellation_requested=0
-                  AND j.claim_token=? AND m.job_id=?)",
+                  AND j.claim_token=? AND m.job_id=? AND NOT EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=j.user_id AND (h.pending=1 OR h.archived=1) AND (h.target='job:'||j.id OR h.target='import:'||json_extract(j.request,'$.import_id'))))",
                     params![
                         parent.to_string(),
                         spec.user_id.to_string(),
@@ -568,6 +603,7 @@ impl Store {
         if let Some(key) = &scan_key {
             ensure_import_allows_work(&tx, &spec.request)?;
             if let Some(id) = active_scan(&tx, spec.user_id, key, Some(spec.id))? {
+                Self::ensure_work_retry_allowed(&tx, id, spec.user_id)?;
                 retain_scan_request(&tx, id, &spec)?;
                 self.record_command(&tx, &id)?;
                 tx.commit().map_err(storage)?;
@@ -1018,7 +1054,7 @@ impl Store {
     ) -> Result<bool> {
         lock(&self.db)?
             .query_row(
-                "SELECT state='cancel_requested' FROM private.jobs
+                "SELECT state='cancel_requested' OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
                  WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested')",
                 params![id.to_string(), claim_token],
                 |row| row.get(0),
@@ -1207,11 +1243,20 @@ impl Store {
         Ok(Page { items, next_cursor })
     }
 
+    fn ensure_work_retry_allowed(db: &Connection, id: JobId, user: UserId) -> Result<()> {
+        let blocked:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.work_history h JOIN private.jobs j ON j.id=? WHERE h.user_id=? AND (h.archived=1 OR h.pending=1) AND (h.target='job:'||j.id OR h.target='import:'||json_extract(j.request,'$.import_id')))",params![id.to_string(),user.to_string()],|r|r.get(0)).map_err(storage)?;
+        if blocked {
+            Err(Error::Conflict)
+        } else {
+            Ok(())
+        }
+    }
     pub(crate) fn retry_failed_job_record(&self, id: JobId, user: UserId) -> Result<JobId> {
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        Self::ensure_work_retry_allowed(&tx, id, user)?;
         let (kind, state, prior_result, error, attempt, failed_at): (
             String,
             String,
@@ -1272,6 +1317,7 @@ impl Store {
             .map_err(storage)?;
         if let Some(key) = scan_key {
             if let Some(active) = active_scan(&tx, user, &key, Some(id))? {
+                Self::ensure_work_retry_allowed(&tx, active, user)?;
                 tx.execute(
                     "INSERT OR IGNORE INTO private.scan_requests VALUES(?,'direct',?)",
                     params![active.to_string(), user.to_string()],
@@ -1368,7 +1414,8 @@ fn ensure_import_work(
         let stopped: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM private.imports WHERE id=?1 AND phase='cancelled')
              OR EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE import_id=?1 AND cancelled=1 AND NOT ?2)
-             OR EXISTS(SELECT 1 FROM private.import_cleanup WHERE import_id=?1)",
+             OR EXISTS(SELECT 1 FROM private.import_cleanup WHERE import_id=?1)
+             OR EXISTS(SELECT 1 FROM private.work_history WHERE target='import:'||?1 AND (pending=1 OR archived=1))",
             params![import,independent_analysis], |row| row.get(0)
         ).map_err(storage)?;
         if stopped {
