@@ -1,5 +1,62 @@
 # Validation recorded for the foundation
 
+## FX-04 review corrections — 2026-09-25
+
+Existing-destination guided admission now rechecks the Item revision in the
+Store transaction that commits the Import and intent. Replaying the original
+receipt after a later Item edit returns the accepted import; a changed request
+with the same key remains an idempotency conflict. The editor adopts inventory
+title, subtitle, type fields and Wishlist when publication changes its Item
+identity, while later updates to that same Item retain the current section and
+draft. Work & history rereads every loaded page, removes successfully mutated
+rows until refreshed, and drops entries that no longer match the server filter.
+
+The targeted archive tests and temporary-server `test:fx04-review` and `test:work`
+browser journeys cover these regressions. The repository gates below were rerun
+after the corrections.
+
+## FX-04 focused editing and intake — 2026-09-24
+
+Local acceptance completed 2026-09-25.
+
+Implementation joins new and existing-entry package intake in the guided
+application coordinator. The accepted destination/revision and analysis policy
+are durable; preservation-only intake publishes originals without analysis or
+provider work. A timestamp-named CD fixture checks that automatic MusicBrainz
+requests use the layout-derived disc identifier and contain no filename or
+placeholder title. Existing destinations retain their other Captures and inventory;
+manual metadata authority survives provider refresh. The selected Work & history
+detail is a separate authorized URL-backed view, while current-import progress
+reads one import. Destination search and inbox packages use server-side bounded
+pages, and the [growing-list audit](fx04-scale-audit.md) records other surfaces.
+
+The temporary-server `test:fx04` browser journey passed with 3,000 Items and
+3,000 imports. It found and attached an Item beyond the former 1,000-entry cap,
+distinguished two same-title editions, loaded a later destination page, opened a
+late import with no catalog read, restored its filtered list with browser Back,
+returned to detail with Forward, reloaded the detail URL, and checked mobile layout.
+The full `test:smoke` browser journey passed after the FX-04 changes, including
+real FLAC playback, new and existing intake, automatic disc-ID lookup without a
+repeat request on browser reload, reassociation and the read-only access entry
+action. The Rust HTTP test covers
+inbox label loading without packages, 50-result search pages, later-page cursors and denied
+cross-collection access. Focused archive tests cover existing-item admission,
+reassociation, preservation-only processing and automatic timestamp-package
+lookup. `test:work`, `test:browse` and `test:scans` all passed after the final
+navigation change. The browse fixture now reloads after seeding through the API
+to observe those out-of-band writes.
+
+`python3 scripts/check_architecture.py`, `cargo fmt --all -- --check`,
+`cargo test --workspace -- --test-threads=4` (including 161 archive tests and
+doctests; one owned-corpus oracle intentionally ignored),
+`cargo clippy --workspace --all-targets -- -D warnings`,
+`npm --prefix web run check`, `npm --prefix web run build`, and
+`npm --prefix web run check:api` passed. The Rust server was rebuilt after embedded
+web assets changed. All browser runs use temporary server roots, profiles and
+fixtures; the user's archive was untouched. This is local validation and does not
+qualify LA3's second LAN device or general large-scale indexing.
+
+
 ## Persistent bottom music player — 2026-09-22
 
 Implementation and local acceptance are complete. This is the

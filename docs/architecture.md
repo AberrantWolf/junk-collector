@@ -36,6 +36,10 @@ Automatic metadata protects manual authority; filename-derived defaults remain
 provisional. Optional provider/preparation outcomes are independent of preservation.
 Existing low-level/manual imports retain their behavior; only the new guided import
 intent requests automatic enrichment. Optional preparation uses the LA2 durable album service.
+Guided admission checks a selected existing Item's collection, module and revision
+only on first command execution. The Store rechecks that revision in the same
+transaction that commits the Import and intent. A completed receipt replays its
+accepted result after later Item edits; a new request must use the current revision.
 Module-owned readiness describes name-level anchor/companion constraints; staged
 structural analysis validates actual contents. Failed analysis retains the package
 for unidentified preservation. Worker reconciliation paginates all unsettled intents
@@ -284,6 +288,34 @@ SQLite state must be local to the server. The current rebuildable `catalog.sqlit
 The first implementation reindexes metadata at startup; incremental startup/rebuild optimization remains in the performance milestone. Payloads are never read merely to browse. Writes are single-server; independent clones must not reuse operational identity. Replication requires additional protocol work, although IDs, revisions, immutable payloads and tombstones do not assume a server location.
 
 ## Ingest and assets
+
+### Focused intake and work navigation
+
+Guided ingestion is the primary new and existing Item intake coordinator. Its
+accepted intent freezes the destination Item and revision, analysis policy and
+package inventory before staging. A selected existing Item receives one package
+without creating a placeholder Item; its independent inventory and other Captures
+survive reassociation. Preservation-only intake skips structural analysis,
+automatic provider lookup and audio preparation while retaining original bytes and
+an honest unidentified outcome. The private intent records whether an Item was
+created by this workflow so cleanup never retires a pre-existing destination.
+
+Supported music analysis derives the MusicBrainz disc identifier from the parsed
+CD layout. The application admits one durable provider acquisition per import and
+advances it after analysis, independently of the browser panel. Source filenames,
+folders and placeholder titles are never automatic provider queries. Advanced
+manual provider lookup remains an explicit recovery tool. Neither a provider
+candidate nor structural evidence verifies catalog identity.
+
+Work & history has a bounded list query and an authorized focused entry read. A
+selected import's detail is a separate URL-backed view; list filters and loaded
+pages remain mounted in state for Back navigation without rendering the list under
+the detail. The current-import panel reads only that import. Destination selection
+uses authorized paged catalog search and checks the chosen Item's current revision
+before submitting or correcting an association. Configured inbox labels are read
+without package enumeration; package search scans the selected direct inbox root
+with a bounded sorted response and cursor. The former full-package response remains
+available for pre-release callers, while the browser uses the paged path.
 
 Uploads declare a complete file inventory, optional source SHA-256 values, item and expected revision. Names reject traversal, absolute paths, control characters and Windows separators. Chunks are bounded to 8 MiB; browser chunks use 4 MiB. Durable file lengths recover upload cursors after restart. Duplicate identical chunks are idempotent; conflicting overlaps fail. Completed staging still accepts byte-identical chunk replay read-only. Browser resumption validates the reselected inventory and compares retained prefixes before appending remaining bytes. Startup resolves abandoned cancellation acknowledgments atomically with their Import state; once a Capture is committed, recovery completes its existing publication rather than reopening pre-commit Item revision review.
 

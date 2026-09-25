@@ -386,6 +386,14 @@ pub enum IngestEnrichmentPolicy {
     None,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestAnalysisPolicy {
+    #[default]
+    Automatic,
+    PreserveOnly,
+}
+
 pub use collector_modules::{IngestAnchorChoice, IngestBlocker, IngestBlockerKind};
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -442,9 +450,20 @@ pub struct IngestPlan {
 #[serde(deny_unknown_fields)]
 pub struct StartIngestCommand {
     pub plan: IngestPlan,
+    #[serde(default)]
+    pub analysis: IngestAnalysisPolicy,
     pub enrichment: IngestEnrichmentPolicy,
     #[serde(default)]
     pub prepare_music: bool,
+    #[serde(default)]
+    pub destination: Option<IngestDestination>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IngestDestination {
+    pub item_id: ItemId,
+    pub expected_revision: Revision,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -453,8 +472,10 @@ pub struct GuidedIngestIntent {
     pub user_id: UserId,
     pub plan_token: String,
     pub target_item_id: ItemId,
+    pub created_item: bool,
     pub default_title: String,
     pub anchor_file_index: Option<usize>,
+    pub analysis: IngestAnalysisPolicy,
     pub enrichment: IngestEnrichmentPolicy,
     pub enrichment_error: Option<String>,
     pub prepare_music: bool,

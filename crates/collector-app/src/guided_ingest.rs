@@ -352,7 +352,20 @@ impl CollectionService {
         context: &CommandContext,
         preflight: impl FnOnce(&IngestPlan) -> Result<()>,
     ) -> Result<AcceptedIngest> {
-        self.content_write_eligibility(actor, command.plan.collection_id)?;
+        let eligibility = self.content_write_eligibility(actor, command.plan.collection_id)?;
+        if command.destination.is_some() && command.plan.packages.len() != 1 {
+            return Err(Error::Invalid(
+                "an existing destination accepts one package at a time".into(),
+            ));
+        }
+        if command.analysis == IngestAnalysisPolicy::PreserveOnly
+            && (command.enrichment != IngestEnrichmentPolicy::None || command.prepare_music)
+        {
+            return Err(Error::Invalid(
+                "preservation without analysis cannot request enrichment or music preparation"
+                    .into(),
+            ));
+        }
         let views = self.execute_command(actor, context, "ingest.start", &command, |effects| {
             preflight(&command.plan)?;
             let replanned = self.plan_ingest(
@@ -396,6 +409,16 @@ impl CollectionService {
                 ));
             }
             let now = self.authentication.now();
+            if let Some(destination) = &command.destination {
+                let item = self.reader.item(destination.item_id)?;
+                if item.deleted
+                    || item.collection_id != command.plan.collection_id
+                    || item.domain.module != eligibility.owner
+                    || item.revision != destination.expected_revision
+                {
+                    return Err(Error::Conflict);
+                }
+            }
             let mut records = Vec::new();
             let mut intents = Vec::new();
             for package in &command.plan.packages {
@@ -405,11 +428,17 @@ impl CollectionService {
                     "guided-import",
                     &key,
                 ));
-                let target_item_id = ItemId(super::deterministic_inventory_uuid(
-                    actor.user_id,
-                    "guided-item",
-                    &key,
-                ));
+                let target_item_id = command
+                    .destination
+                    .as_ref()
+                    .map(|value| value.item_id)
+                    .unwrap_or_else(|| {
+                        ItemId(super::deterministic_inventory_uuid(
+                            actor.user_id,
+                            "guided-item",
+                            &key,
+                        ))
+                    });
                 let capture_id = CaptureId(super::deterministic_inventory_uuid(
                     actor.user_id,
                     "guided-capture",
@@ -461,8 +490,14 @@ impl CollectionService {
                         files,
                         capture_id,
                         representation_id,
-                        association: CaptureAssociation::default(),
-                        expected_item_revision: None,
+                        association: CaptureAssociation {
+                            item_id: command.destination.as_ref().map(|value| value.item_id),
+                            ..Default::default()
+                        },
+                        expected_item_revision: command
+                            .destination
+                            .as_ref()
+                            .map(|value| value.expected_revision),
                         candidates: vec![],
                         limitations: package
                             .blockers
@@ -485,12 +520,14 @@ impl CollectionService {
                     user_id: actor.user_id,
                     plan_token: command.plan.token.clone(),
                     target_item_id,
+                    created_item: command.destination.is_none(),
                     default_title: package.default_title.clone(),
                     anchor_file_index: package
                         .anchors
                         .iter()
                         .find(|anchor| anchor.selected)
                         .map(|anchor| anchor.file_index),
+                    analysis: command.analysis,
                     enrichment: command.enrichment,
                     enrichment_error: None,
                     prepare_music: command.prepare_music,
@@ -531,6 +568,9 @@ impl CollectionService {
                 item
             }
             Err(Error::NotFound) => {
+                if !intent.created_item {
+                    return Err(Error::NotFound);
+                }
                 let eligibility = self.content_write_eligibility_for_user(
                     intent.user_id,
                     record.view.collection_id,
@@ -563,10 +603,11 @@ impl CollectionService {
             }
             Err(error) => return Err(error),
         };
-        if self
-            .processing
-            .metadata_authority(item.collection_id, item.id)?
-            .is_none()
+        if intent.created_item
+            && self
+                .processing
+                .metadata_authority(item.collection_id, item.id)?
+                .is_none()
         {
             let mut authority = MetadataAuthority::default();
             if item.title != intent.default_title {
@@ -727,7 +768,7 @@ impl CollectionService {
     /// The committed association and original intent are the durable cleanup
     /// request. Reconciliation retries the gap after the association receipt.
     fn retire_reassigned_placeholder(&self, intent: &GuidedIngestIntent) -> Result<()> {
-        if !intent.settled && !intent.cancelled {
+        if !intent.created_item || (!intent.settled && !intent.cancelled) {
             return Ok(());
         }
         let record = self.provisional_imports.import_record(intent.import_id)?;
@@ -814,12 +855,25 @@ impl CollectionService {
                 item_id: Some(item.id),
                 ..Default::default()
             };
-            record.view.expected_item_revision = Some(item.revision);
+            if intent.created_item {
+                record.view.expected_item_revision = Some(item.revision);
+            }
             let revision = record.view.revision;
             record = self.provisional_imports.save_import(record, revision)?;
         }
         match record.view.phase {
             ImportPhase::Analyzing => {
+                if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
+                    record.view.review = Some(ImportReviewDecision {
+                        identity: ImportIdentityDecision::Unidentified,
+                        association: record.view.association,
+                    });
+                    record.view.phase = ImportPhase::AwaitingReview;
+                    let revision = record.view.revision;
+                    record = self.provisional_imports.save_import(record, revision)?;
+                    self.enqueue_guided_publication(&intent, &record)?;
+                    return Ok(());
+                }
                 let jobs = self
                     .provisional_imports
                     .import_job_records(id, intent.user_id)?;
@@ -866,7 +920,10 @@ impl CollectionService {
                         },
                         association: record.view.association,
                     });
-                    record.view.expected_item_revision = Some(self.reader.item(item.id)?.revision);
+                    if intent.created_item {
+                        record.view.expected_item_revision =
+                            Some(self.reader.item(item.id)?.revision);
+                    }
                     let revision = record.view.revision;
                     record = self.provisional_imports.save_import(record, revision)?;
                 }
@@ -1557,6 +1614,36 @@ impl CollectionService {
             &record.view.id.to_string(),
         );
         let metadata_job = jobs.iter().find(|job| job.id == metadata_job_id);
+        let metadata_message = metadata_job
+            .filter(|job| job.state == JobState::Completed)
+            .and_then(|job| completed_snapshot_id(job.result.as_ref()))
+            .and_then(|snapshot_id| {
+                self.processing
+                    .snapshot(SnapshotQuery {
+                        collection_id: record.view.collection_id,
+                        snapshot_id,
+                    })
+                    .ok()
+            })
+            .and_then(|snapshot| {
+                snapshot
+                    .parsed_observation
+                    .parse::<collector_modules::music::MusicBrainzSnapshotObservation>()
+                    .ok()
+            })
+            .map(|observation| match observation.outcome {
+                collector_modules::music::MetadataProviderOutcome::NoMatch => {
+                    "No MusicBrainz release matched the derived disc identifier; originals remain preserved".into()
+                }
+                collector_modules::music::MetadataProviderOutcome::Candidates
+                    if observation.release_count > 1 =>
+                {
+                    format!("{} possible MusicBrainz releases were recorded for review; this is descriptive identity, not verification", observation.release_count)
+                }
+                collector_modules::music::MetadataProviderOutcome::Candidates => {
+                    "MusicBrainz release metadata was recorded from the derived disc identifier".into()
+                }
+            });
         let artwork_listing_job = jobs.iter().find(|job| job.id == artwork_listing_job_id);
         let artwork_image_job = jobs.iter().find(|job| job.id == artwork_image_job_id);
         let metadata_step = if intent.enrichment == IngestEnrichmentPolicy::None {
@@ -1572,7 +1659,7 @@ impl CollectionService {
                     && metadata_job.is_some_and(|job| job.state == JobState::Failed),
             }
         } else if music && metadata_job.is_some() {
-            job_step("metadata", metadata_job, false, None)
+            job_step("metadata", metadata_job, false, metadata_message)
         } else if music {
             job_step("metadata", None, false, None)
         } else {
@@ -1681,7 +1768,11 @@ impl CollectionService {
                 by_kind.get("import_analysis").copied(),
                 record.view.phase == ImportPhase::Published
                     && !by_kind.contains_key("import_analysis"),
-                record.view.limitations.first().cloned(),
+                if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
+                    Some("Preservation without analysis was selected; no structural or provider identity was claimed".into())
+                } else {
+                    record.view.limitations.first().cloned()
+                },
             ),
             job_step(
                 "preservation",

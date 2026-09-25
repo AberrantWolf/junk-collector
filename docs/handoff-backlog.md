@@ -34,41 +34,28 @@ changes. The integrated alpha/FX-01 checkpoint was committed as `20c4ff0` on 202
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
 
-## Usability fixes — FX-03 accepted; FX-04 next
+## Usability fixes — FX-04 implemented; FX-05 next
 
-The user requested a combined set of UX/lifecycle fixes drawing on unfinished
-milestone work. [FX-01–FX-07](ux-fix-plan.md) maps the 18 audit findings and manual
-removal/clean-reimport/scan-consolidation requirements to complete deliveries,
-pulling forward the remaining U05 and P04.4–P04.6 criteria and broader nonblocking
-work. FX-01 is implemented and locally accepted on 2026-09-21; FX-02 is implemented and locally accepted on 2026-09-21; FX-02 is committed as `3493cd8`. FX-03 is implemented and locally accepted (2026-09-21); FX-04–FX-07 remain proposed. Completed D06/D07/LA1/LA2
-are reused; P05, native clients and large-scale indexing are not prerequisites.
-FX-03 also includes the user-requested removal of repeated ineligible derivative analysis forms and meaningful grouped track presentation, reusing existing readiness/playback services without requiring FX-04 or placeholder systems.
-The plan includes the child ledger and ready-to-send FX-04 handoff. FX-01 does not claim LA3's
-second-device gate or the broader U05/P04/background-work gates complete.
+[FX-01–FX-07](ux-fix-plan.md) maps the combined UX and lifecycle work. FX-01,
+FX-02 and FX-03 were locally accepted on 2026-09-21. The persistent browser
+music player was accepted on 2026-09-22. FX-04 was implemented in the 2026-09-24
+checkpoint: focused editing sections, separate URL-backed Work & history detail,
+server-paged destination and inbox package search, shared new/existing guided
+intake, preservation-only processing, derived-disc-ID automatic provider lookup,
+and the mapped artwork, cost and role guidance fixes. Its
+[growing-list audit](fx04-scale-audit.md) distinguishes bounded selectors from
+FX-06 access-list work. A temporary real-server journey passed with 3,000 Items
+and 3,000 imports, including an Item beyond the former 1,000-entry cutoff.
+Local acceptance passed on 2026-09-25; exact checks and limitations are in
+[validation](validation.md).
 
-2026-09-22 user follow-up: the persistent bottom player and local per-user queue
-are implemented and locally accepted. This is an additional focused delivery
-before the remaining FX-04 editor/intake work; both are included in the 2026-09-24 checkpoint.
-
-2026-09-22 navigation requirement: FX-04 must separate import-history browsing
-from focused import details/progress, preserve return context and support direct
-links, with acceptance at thousands-of-imports scale. It also owns the review of
-other overloaded panels for meaningful separate views. FX-07 rechecks this across
-the interface. These requirements are pending; prior FX-03 acceptance is retained
-as a dated record, not a claim that the new navigation requirement is implemented.
-
-2026-09-22 selector-scale follow-up: FX-04 replaces existing-entry attachment's
-collection-wide, silently capped dropdown with a searchable paged chooser, keeping
-actual suggested matches distinct from general collection search. Audit other
-growing lists/selectors for preloading and hidden cutoffs, including the manual
-import destination picker. Acceptance uses at least 3,000 catalog entries as well
-as import records; FX-07 checks the complete interface and FX-06 owns access UI fixes.
-
-2026-09-22 provider requirement: FX-04 makes automatic disc-identity lookup
-consistent across intake paths, using supported dump-derived CD layout/disc IDs,
-never filenames or timestamp-derived display titles. Guided ingestion already uses
-MusicBrainz disc IDs; reuse its acquisition policy. The broader consistency/UI fix
-is pending, including honest fallback states and timestamp-named dump acceptance.
+FX-05 is the next delivery. It owns Remove item, Restore and clean reimport on
+the same identity, including durable workflow-generation fencing, shared-work
+ownership, retained originals and default preservation of manual metadata,
+physical inventory, loans and artwork. Its architecture and command contract
+must be reviewed before implementing state changes. FX-06 handles collection
+access/account recovery; FX-07 audits the entire interface. The outstanding LA3
+second-device qualification and broader release gates remain separate.
 
 ## How to use this backlog
 

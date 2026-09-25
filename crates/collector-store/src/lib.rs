@@ -2019,6 +2019,8 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         ("preparation_batch_id", "TEXT"),
         ("preparation_error", "TEXT"),
         ("anchor_file_index", "INTEGER"),
+        ("created_item", "INTEGER NOT NULL DEFAULT 1"),
+        ("analysis", "TEXT NOT NULL DEFAULT 'automatic'"),
     ] {
         let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('guided_ingest_intents','private') WHERE name=?)", [column], |row| row.get(0)).map_err(storage)?;
         if !exists {

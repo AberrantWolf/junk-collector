@@ -1647,6 +1647,14 @@
             "schema": {
               "$ref": "#/components/schemas/CollectionId"
             }
+          },
+          {
+            "name": "packages",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1664,6 +1672,73 @@
             }
           },
           "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{id}/inboxes/{label}/packages": {
+      "get": {
+        "operationId": "inbox_packages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "label",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxPackagePage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           }
         }
@@ -7251,6 +7326,26 @@
           }
         }
       },
+      "InboxPackagePage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "InboxSourceView": {
         "type": "object",
         "required": [
@@ -7268,6 +7363,13 @@
             }
           }
         }
+      },
+      "IngestAnalysisPolicy": {
+        "type": "string",
+        "enum": [
+          "automatic",
+          "preserve_only"
+        ]
       },
       "IngestAnchorChoice": {
         "type": "object",
@@ -7365,6 +7467,22 @@
           "unsupported_package",
           "missing_companion"
         ]
+      },
+      "IngestDestination": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          }
+        },
+        "additionalProperties": false
       },
       "IngestDetail": {
         "type": "object",
@@ -11716,6 +11834,19 @@
           "enrichment"
         ],
         "properties": {
+          "analysis": {
+            "$ref": "#/components/schemas/IngestAnalysisPolicy"
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IngestDestination"
+              }
+            ]
+          },
           "enrichment": {
             "$ref": "#/components/schemas/IngestEnrichmentPolicy"
           },

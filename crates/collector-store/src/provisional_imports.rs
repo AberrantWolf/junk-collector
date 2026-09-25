@@ -2,8 +2,8 @@ use super::*;
 use crate::files::safe_name;
 use collector_app::{
     GuidedIngestIntent, ImportIdentityDecision, ImportPhase, ImportRecord, ImportSourceKind,
-    IngestDiscardResult, IngestEnrichmentPolicy, PortableProcessingRecord, ProcessingPort,
-    ProvisionalImportPort,
+    IngestAnalysisPolicy, IngestDiscardResult, IngestEnrichmentPolicy, PortableProcessingRecord,
+    ProcessingPort, ProvisionalImportPort,
 };
 use rusqlite::TransactionBehavior;
 use std::collections::HashSet;
@@ -66,6 +66,23 @@ fn parse_enrichment(value: &str) -> Result<IngestEnrichmentPolicy> {
         "none" => Ok(IngestEnrichmentPolicy::None),
         _ => Err(Error::Storage(
             "stored guided enrichment policy is invalid".into(),
+        )),
+    }
+}
+
+fn analysis(value: IngestAnalysisPolicy) -> &'static str {
+    match value {
+        IngestAnalysisPolicy::Automatic => "automatic",
+        IngestAnalysisPolicy::PreserveOnly => "preserve_only",
+    }
+}
+
+fn parse_analysis(value: &str) -> Result<IngestAnalysisPolicy> {
+    match value {
+        "automatic" => Ok(IngestAnalysisPolicy::Automatic),
+        "preserve_only" => Ok(IngestAnalysisPolicy::PreserveOnly),
+        _ => Err(Error::Storage(
+            "stored guided analysis policy is invalid".into(),
         )),
     }
 }
@@ -685,10 +702,45 @@ impl ProvisionalImportPort for Store {
                     "guided intent disagrees with its Import".into(),
                 ));
             }
+            if !intent.created_item {
+                let Some(expected) = record.view.expected_item_revision else {
+                    return Err(Error::Invalid(
+                        "existing destination has no revision".into(),
+                    ));
+                };
+                if record.view.association.item_id != Some(intent.target_item_id) {
+                    return Err(Error::Invalid(
+                        "guided destination disagrees with its Import".into(),
+                    ));
+                }
+                let current = tx
+                    .query_row(
+                        "SELECT collection_id,revision,deleted FROM items WHERE id=?",
+                        [intent.target_item_id.to_string()],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)?,
+                                row.get::<_, bool>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(storage)?;
+                if current
+                    != Some((
+                        record.view.collection_id.to_string(),
+                        i64::try_from(expected.0).map_err(|_| Error::Conflict)?,
+                        false,
+                    ))
+                {
+                    return Err(Error::Conflict);
+                }
+            }
             insert_import(&tx, record)?;
             tx.execute(
-                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,default_title,anchor_file_index,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
-                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.default_title,intent.anchor_file_index.map(|value| value as i64),enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
+                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
+                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
             )
             .map_err(storage)?;
             views.push(record.view.clone());
@@ -701,9 +753,9 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?)),
             )
             .optional()
             .map_err(storage)?
@@ -713,6 +765,8 @@ impl ProvisionalImportPort for Store {
                     user_id: row.0.parse().map_err(storage)?,
                     plan_token: row.1,
                     target_item_id: row.2.parse().map_err(storage)?,
+                    created_item: row.14,
+                    analysis: parse_analysis(&row.15)?,
                     default_title: row.3,
                     anchor_file_index: row
                         .13
@@ -752,7 +806,7 @@ impl ProvisionalImportPort for Store {
                  LEFT JOIN items original ON original.id=g.target_item_id
                  WHERE i.phase IN ('analyzing','awaiting_review','published')
                    AND ((g.settled=0 AND g.cancelled=0) OR
-                        (i.phase='published' AND c.item_id IS NOT NULL AND c.item_id<>g.target_item_id AND original.deleted=0))
+                        (g.created_item=1 AND i.phase='published' AND c.item_id IS NOT NULL AND c.item_id<>g.target_item_id AND original.deleted=0))
                    AND (? IS NULL OR g.import_id>?)
                  ORDER BY g.import_id
                  LIMIT ?",

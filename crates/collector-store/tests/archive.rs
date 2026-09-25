@@ -217,6 +217,7 @@ struct FixtureAccurateRipProvider {
 struct MetadataFixtureServer {
     stop: Arc<AtomicBool>,
     origin: String,
+    requests: Arc<std::sync::Mutex<Vec<String>>>,
     join: Option<thread::JoinHandle<()>>,
 }
 
@@ -235,6 +236,8 @@ fn metadata_fixture_server(replies: Vec<(&'static str, Vec<u8>)>) -> MetadataFix
     listener.set_nonblocking(true).unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let stopped = stop.clone();
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = requests.clone();
     let join = thread::spawn(move || {
         for (status_and_headers, body) in replies {
             let (mut stream, _) = loop {
@@ -254,7 +257,11 @@ fn metadata_fixture_server(replies: Vec<(&'static str, Vec<u8>)>) -> MetadataFix
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
             let mut request = [0_u8; 8192];
-            let _ = stream.read(&mut request).unwrap();
+            let count = stream.read(&mut request).unwrap();
+            recorded
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&request[..count]).into_owned());
             let response = format!(
                 "HTTP/1.1 {status_and_headers}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
@@ -266,6 +273,7 @@ fn metadata_fixture_server(replies: Vec<(&'static str, Vec<u8>)>) -> MetadataFix
     MetadataFixtureServer {
         stop,
         origin: format!("http://{address}"),
+        requests,
         join: Some(join),
     }
 }
@@ -5616,8 +5624,10 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &CommandContext::new("guided-redumper-anchor").unwrap(),
         )
@@ -5672,8 +5682,10 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         )
@@ -5741,8 +5753,10 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             &actor,
             StartIngestCommand {
                 plan: stale,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         ),
@@ -5754,8 +5768,10 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             &actor,
             StartIngestCommand {
                 plan: plan.clone(),
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &key,
         )
@@ -5765,8 +5781,10 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             &actor,
             StartIngestCommand {
                 plan: plan.clone(),
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &key,
         )
@@ -5776,8 +5794,10 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
             &actor,
             StartIngestCommand {
                 plan: plan.clone(),
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &key,
             |_| Err(Error::Unavailable("inbox or provider changed".into())),
@@ -5974,6 +5994,364 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
 }
 
 #[test]
+fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement() {
+    let (_root, store, actor, service, collection) = setup();
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let packages = ["Disc A", "Disc B"]
+        .into_iter()
+        .map(|name| IngestPackageSelection {
+            anchor_file_index: None,
+            source: ImportSourceSummary {
+                kind: ImportSourceKind::Browser,
+                label: None,
+                package_name: name.into(),
+            },
+            files: vec![
+                UploadFile {
+                    name: "disc.cue".into(),
+                    bytes: ByteLength(cue.len() as u64),
+                    sha256: None,
+                },
+                UploadFile {
+                    name: "disc.bin".into(),
+                    bytes: ByteLength(pcm.len() as u64),
+                    sha256: None,
+                },
+            ],
+        })
+        .collect();
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages,
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(accepted.imports.len(), 2);
+    for summary in &accepted.imports {
+        service
+            .stage_provisional_import_chunk(&actor, summary.import_id, 0, 0, cue)
+            .unwrap();
+        service
+            .stage_provisional_import_chunk(&actor, summary.import_id, 1, 0, &pcm)
+            .unwrap();
+    }
+    for _ in 0..20 {
+        if !service.run_next_job("two-guided-imports").unwrap() {
+            break;
+        }
+    }
+    let source = accepted.imports[0].target_item_id.unwrap();
+    let target = accepted.imports[1].target_item_id.unwrap();
+    assert_ne!(source, target);
+    let first = service
+        .ingest_detail(&actor, accepted.imports[0].import_id)
+        .unwrap();
+    let second = service
+        .ingest_detail(&actor, accepted.imports[1].import_id)
+        .unwrap();
+    assert_eq!(first.import.phase, ImportPhase::Published);
+    assert_eq!(second.import.phase, ImportPhase::Published);
+    service
+        .correct_ingest_association(
+            &actor,
+            first.summary.import_id,
+            collector_app::CorrectIngestAssociationCommand {
+                expected_capture_revision: first.summary.capture_revision.unwrap(),
+                association: CaptureAssociation {
+                    item_id: Some(target),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(store.item(target).unwrap().revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(store.item(source).unwrap().deleted);
+    service.resume_guided_ingests().unwrap();
+    assert!(
+        store.item(source).unwrap().deleted,
+        "reconciliation revived a retired placeholder"
+    );
+    store.reindex().unwrap();
+    assert!(store.item(source).unwrap().deleted);
+    assert_eq!(store.item(target).unwrap().captures.len(), 2);
+}
+
+#[test]
+fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_placeholder() {
+    let (_root, store, actor, service, collection) = setup();
+    let existing = store.save(item(collection.id), Revision(0)).unwrap();
+    let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "260919_134632_disk7".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let destination = Some(collector_app::IngestDestination {
+        item_id: existing.id,
+        expected_revision: existing.revision,
+    });
+    assert!(matches!(
+        service.start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan: plan.clone(),
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: Some(collector_app::IngestDestination {
+                    item_id: existing.id,
+                    expected_revision: Revision(0)
+                })
+            },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+    let accepted_command = StartIngestCommand {
+        plan,
+        analysis: collector_app::IngestAnalysisPolicy::Automatic,
+        enrichment: IngestEnrichmentPolicy::None,
+        prepare_music: false,
+        destination,
+    };
+    let acceptance_key = command();
+    let accepted = service
+        .start_ingest(&actor, accepted_command.clone(), &acceptance_key)
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    assert!(
+        !store
+            .guided_ingest_intent(id)
+            .unwrap()
+            .unwrap()
+            .created_item
+    );
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    assert!(service.run_next_job("existing-analysis").unwrap());
+    assert!(service.run_next_job("existing-publication").unwrap());
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.summary.target_item_id, Some(existing.id));
+    let saved = store.item(existing.id).unwrap();
+    assert_eq!(saved.title, existing.title);
+    assert_eq!(saved.subtitle, existing.subtitle);
+    let mut edited = saved.clone();
+    edited.title = "Edited after acceptance".into();
+    let edited = store.save(edited, saved.revision).unwrap();
+    let replay = service
+        .start_ingest(&actor, accepted_command.clone(), &acceptance_key)
+        .unwrap();
+    assert_eq!(replay.imports[0].import_id, id);
+    let mut changed_request = accepted_command;
+    changed_request
+        .destination
+        .as_mut()
+        .unwrap()
+        .expected_revision = edited.revision;
+    assert!(matches!(
+        service.start_ingest(&actor, changed_request, &acceptance_key),
+        Err(Error::IdempotencyConflict)
+    ));
+    let other = store.save(item(collection.id), Revision(0)).unwrap();
+    service
+        .correct_ingest_association(
+            &actor,
+            id,
+            collector_app::CorrectIngestAssociationCommand {
+                expected_capture_revision: detail.summary.capture_revision.unwrap(),
+                association: CaptureAssociation {
+                    item_id: Some(other.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(other.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    service.resume_guided_ingests().unwrap();
+    assert!(!store.item(existing.id).unwrap().deleted);
+}
+
+#[test]
+fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit() {
+    let (_root, store, actor, service, collection) = setup();
+    let existing = store.save(item(collection.id), Revision(0)).unwrap();
+    let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Replay before upload".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(2352 * 10),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let request = StartIngestCommand {
+        plan,
+        analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+        enrichment: IngestEnrichmentPolicy::None,
+        prepare_music: false,
+        destination: Some(collector_app::IngestDestination {
+            item_id: existing.id,
+            expected_revision: existing.revision,
+        }),
+    };
+    let key = command();
+    let accepted = service.start_ingest(&actor, request.clone(), &key).unwrap();
+    let mut edited = existing.clone();
+    edited.title = "Edited while upload is pending".into();
+    let edited = store.save(edited, existing.revision).unwrap();
+    let replay = service.start_ingest(&actor, request.clone(), &key).unwrap();
+    assert_eq!(accepted.imports[0].import_id, replay.imports[0].import_id);
+    let fresh_key = command();
+    assert!(matches!(
+        service.start_ingest(&actor, request, &fresh_key),
+        Err(Error::Conflict)
+    ));
+    assert_eq!(store.item(existing.id).unwrap().revision, edited.revision);
+}
+
+#[test]
+fn guided_preservation_only_publishes_without_claiming_analysis() {
+    let (_root, store, actor, service, collection) = setup();
+    let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "unidentified-disc".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    assert!(
+        store
+            .import_job_records(id, actor.user_id)
+            .unwrap()
+            .iter()
+            .all(|job| job.kind != "import_analysis")
+    );
+    assert!(service.run_next_job("preservation-only").unwrap());
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(
+        detail
+            .steps
+            .iter()
+            .find(|step| step.step == "identification")
+            .unwrap()
+            .state,
+        collector_app::IngestStepState::Skipped
+    );
+}
+
+#[test]
 fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
     let (root, store, actor, service, collection) = setup();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
@@ -6012,8 +6390,10 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: true,
+                destination: None,
             },
             &command(),
         )
@@ -6114,8 +6494,10 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
             &actor,
             StartIngestCommand {
                 plan: unavailable,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: true,
+                destination: None,
             },
             &command(),
         ),
@@ -6138,8 +6520,10 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: true,
+                destination: None,
             },
             &command(),
         )
@@ -6251,8 +6635,10 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         )
@@ -6371,7 +6757,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
-                        package_name: "provider_default.cue".into(),
+                        package_name: "260919_134632_disk7".into(),
                     },
                     files: vec![
                         UploadFile {
@@ -6394,8 +6780,10 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         )
@@ -6491,6 +6879,16 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .unwrap();
     assert!(service.run_next_job("guided-provider-publication").unwrap());
     assert!(service.run_next_job("guided-provider-metadata").unwrap());
+    let requests = mb_server.requests.lock().unwrap();
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.contains("/ws/2/discid/"))
+    );
+    assert!(requests.iter().all(|request| !request.contains("260919")
+        && !request.contains("134632")
+        && !request.contains("disk7")));
+    drop(requests);
     assert!(
         service
             .run_next_job("guided-provider-art-listing-failure")
@@ -6557,7 +6955,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         step.step == "artwork" && step.state == collector_app::IngestStepState::Succeeded
     }));
     let target = detail.summary.target_item_id.unwrap();
-    assert_eq!(store.item(target).unwrap().title, "provider default");
+    assert_eq!(store.item(target).unwrap().title, "260919 134632 disk7");
     let metadata = service.metadata_view(&actor, target).unwrap();
     assert_eq!(metadata.display.title.value, "Automatic provider title");
     let artwork = metadata.display.artwork.unwrap();
@@ -6606,8 +7004,10 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         )
@@ -6667,8 +7067,10 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         )
@@ -6747,8 +7149,10 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         )
@@ -13163,8 +13567,10 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
             &actor,
             StartIngestCommand {
                 plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                destination: None,
             },
             &command(),
         )

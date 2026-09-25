@@ -33,20 +33,20 @@ try{
   const accepted=await request(`/imports/${reviewed.id}/publish`,{method:'POST'});
   for(let n=0;n<1200;n++){const job=await request('/jobs/'+accepted.job_id);if(job.state==='completed')return {item:id,collection:collection.id,capture:reviewed.capture_id,representation:reviewed.representation_id};if(job.state==='failed')throw new Error(job.error);await new Promise(r=>setTimeout(r,100));}throw new Error('publication timed out');
  });
- await page.goto(origin+'/?collection='+fixture.collection+'&item='+fixture.item);await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await page.goto(origin+'/?collection='+fixture.collection+'&item='+fixture.item);await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Advanced evidence',exact:true}).click();
  const editor=page.getByRole('dialog',{name:/Edit entry/});const scans=editor.getByRole('region',{name:'Game package analysis'});const docket=scans.locator('.import-docket');
  await docket.getByLabel('Operation').selectOption('org.junk.games.hash');await docket.getByRole('button',{name:'Run operation',exact:true}).waitFor();
  const accepted=page.waitForResponse(r=>new URL(r.url()).pathname===`/api/v1/captures/${fixture.capture}/operations`&&r.request().method()==='POST');
  await docket.getByRole('button',{name:'Run operation',exact:true}).click();const job=(await(await accepted).json()).job_id;
  await docket.getByRole('button',{name:'Check in progress…',exact:true}).waitFor();assert.equal(await docket.getByRole('button',{name:'Run operation',exact:true}).count(),0);
- assert.equal(await editor.getByLabel('Title',{exact:true}).isEnabled(),true,'scan locked unrelated editor fields');
+ await editor.getByRole('button',{name:'Details',exact:true}).click();assert.equal(await editor.getByLabel('Title',{exact:true}).isEnabled(),true,'scan locked unrelated editor fields');await editor.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  const joined=await page.evaluate(async f=>{
   const body={operation:'org.junk.games.hash',operation_version:1,representation_id:f.representation,snapshot_id:null,selection:{profile:'raw'}};
   return Promise.all([1,2].map(async()=>{const response=await fetch(`/api/v1/captures/${f.capture}/operations`,{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify(body)});if(!response.ok)throw new Error(await response.text());return response.json();}));
  },fixture);assert.ok(joined.every(value=>value.job_id===job));
- await editor.getByRole('button',{name:'Close curator'}).click();await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();await docket.getByRole('button',{name:'Check in progress…',exact:true}).waitFor();
+ await editor.getByRole('button',{name:'Close curator'}).click();await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Advanced evidence',exact:true}).click();await docket.getByRole('button',{name:'Check in progress…',exact:true}).waitFor();
  await docket.getByRole('button',{name:'View result',exact:true}).waitFor({timeout:120000});assert.equal(await docket.getByRole('button',{name:'Run operation',exact:true}).count(),0);assert.match(await docket.innerText(),/Checked 1 time/);
- await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();await docket.getByRole('button',{name:'View result',exact:true}).waitFor();
+ await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Advanced evidence',exact:true}).click();await docket.getByRole('button',{name:'View result',exact:true}).waitFor();
  await docket.getByText('More actions',{exact:true}).click();await docket.getByRole('button',{name:'Check again',exact:true}).click();await docket.getByRole('button',{name:'Check in progress…',exact:true}).waitFor();await docket.getByText('Checked 2 times',{exact:false}).waitFor({timeout:120000});assert.equal(await docket.locator('.stored-file').count(),1);
  await page.route('**/operations/plan',route=>route.fulfill({status:503,json:{error:{code:'temporarily_unavailable',message:'Status temporarily unavailable'}}}),{times:1});
  await docket.getByLabel('Operation').selectOption('org.junk.games.hash-tracks');await docket.getByRole('button',{name:'Retry check status'}).click();await docket.getByText('No eligible package file is available.',{exact:true}).waitFor();assert.equal(await docket.getByRole('button',{name:'Run operation',exact:true}).isEnabled(),false);

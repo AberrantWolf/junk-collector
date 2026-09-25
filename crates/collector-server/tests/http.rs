@@ -753,6 +753,82 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
     assert!(!text.contains("not-a-package"));
     assert!(!text.contains(inbox_root.to_str().unwrap()));
 
+    for index in 0..105 {
+        std::fs::create_dir(inbox_root.join(format!("disc-{index:03}"))).unwrap();
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/collections/{}/inboxes?packages=false",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let labels: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(labels[0]["packages"], serde_json::json!([]));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/collections/{}/inboxes/Optical%20shelf/packages?search=disc-&limit=50",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let first: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 50);
+    assert_eq!(first["items"][0], "disc-000");
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/collections/{}/inboxes/Optical%20shelf/packages?search=disc-&limit=50&cursor={cursor}", collection.id))
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let second: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(second["items"][0], "disc-050");
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/collections/{}/inboxes/Optical%20shelf/packages?search=disc-104",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {stranger_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
     let response = app
         .clone()
         .oneshot(
@@ -2509,7 +2585,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 104); // Includes work history and its scoped entry read.
+    assert_eq!(paths.len(), 105); // Includes paged inbox package search.
     for path in [
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
@@ -2547,6 +2623,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/ingests/{id}/retry",
         "/api/v1/ingests/{id}/association",
         "/api/v1/collections/{id}/inboxes",
+        "/api/v1/collections/{id}/inboxes/{label}/packages",
         "/api/v1/collections/{collection}/inboxes/{label}/stage",
         "/api/v1/collection-types",
         "/api/v1/items/{id}/metadata",

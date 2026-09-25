@@ -27,7 +27,7 @@ const dbar=Buffer.alloc(31);dbar[0]=2;dbar.writeUInt32LE(676,1);dbar.writeUInt32
 for(let index=0;index<2;index++){const offset=13+index*9;dbar[offset]=17;dbar.writeUInt32LE(checksums[index],offset+1);dbar.writeUInt32LE(0,offset+5);}
 const accurateRipServer=createServer((_request,response)=>{response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
 await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
-const metadataProviderServer=createServer((request,response)=>{const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const body=Buffer.from(JSON.stringify({id:url.pathname.split('/').at(-1),releases:releases.map(value=>({...value,media:[{discs:[{id:url.pathname.split('/').at(-1)}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const body=Buffer.from(JSON.stringify({releases}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
+const metadataRequests=[];const metadataProviderServer=createServer((request,response)=>{metadataRequests.push(request.url);const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const body=Buffer.from(JSON.stringify({id:url.pathname.split('/').at(-1),releases:releases.map(value=>({...value,media:[{discs:[{id:url.pathname.split('/').at(-1)}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const body=Buffer.from(JSON.stringify({releases}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
 await new Promise((resolve,reject)=>{metadataProviderServer.once('error',reject);metadataProviderServer.listen(metadataProviderPort,'127.0.0.1',resolve);});
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
@@ -101,7 +101,7 @@ try{
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
  await page.getByText('Collection created.',{exact:false}).waitFor();
  await administration.getByRole('button',{name:'Import immutable snapshot',exact:true}).click();
- await administration.getByText('The exact DAT source bytes were archived and indexed.',{exact:false}).waitFor();
+ await administration.getByText('Catalog acquisition: completed',{exact:false}).waitFor();
  await administration.getByRole('button',{name:'Activate',exact:true}).click();
  await administration.getByRole('button',{name:'Active',exact:true}).waitFor();
  await page.getByRole('button',{name:'Close administration'}).click();
@@ -112,6 +112,7 @@ try{
  await addForm.getByRole('button',{name:'Enter inventory manually',exact:true}).click();
  await addForm.getByLabel('Collection').selectOption({label:'Cartridge shelf'});
  await addForm.getByLabel('Platform',{exact:true}).fill('Fixture console');
+ page.once('dialog',dialog=>dialog.accept());
  await addForm.getByLabel('Collection').selectOption({label:'Shelf & stereo'});
  assert.equal(await addForm.getByLabel('Artist',{exact:true}).inputValue(),'','switching collection retained incompatible unsaved domain fields');
  await page.getByText('Music CDs fields are supplied by Music CDs.',{exact:true}).waitFor();
@@ -136,6 +137,7 @@ try{
  await curator.waitFor({state:'hidden'});
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  await curator.waitFor();
+ await curator.getByRole('button',{name:'Details',exact:true}).click();
  assert.equal(await curator.getByLabel('Title',{exact:true}).inputValue(),'A test pressing','discard changed the saved album');
  await curator.evaluate(element=>{element.scrollTop=element.scrollHeight;});
  const closeBounds=await curator.getByRole('button',{name:'Close curator'}).boundingBox();
@@ -145,6 +147,7 @@ try{
  assert.equal(await page.getByLabel('A test pressing details',{exact:true}).count(),1,'Escape also closed the underlying details');
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  await curator.waitFor();
+ await curator.getByRole('button',{name:'Copies',exact:true}).click();
  await curator.getByRole('button',{name:'Add physical copy',exact:true}).click();
  const copyForm=curator.getByRole('form',{name:'New physical copy'});
  await copyForm.getByLabel('Copy label').fill('Reference copy');
@@ -152,7 +155,7 @@ try{
  await copyForm.getByLabel('Record acquisition details').check();
  await copyForm.getByLabel('Acquisition date').fill('2026-09-10');
  await copyForm.getByLabel('Source').fill('Synthetic browser fixture');
- await copyForm.getByLabel('Cost in minor units').fill('2400');
+ await copyForm.getByLabel('Cost amount').fill('2400');
  await copyForm.getByLabel('Private notes').fill('Keep the obi with disc one.');
  await copyForm.getByRole('button',{name:'Save copy',exact:true}).click();
  await page.getByText('Physical inventory updated.',{exact:true}).waitFor();
@@ -209,6 +212,7 @@ try{
  await page.setViewportSize({width:1440,height:1000});
  // Synthetic one-pixel fixture; image decoding and real thumbnail bounds have separate Rust coverage.
  const png=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=160;c.height=160;const ctx=c.getContext('2d');ctx.fillStyle='#375e53';ctx.fillRect(0,0,160,160);ctx.fillStyle='#e5d69a';ctx.beginPath();ctx.arc(80,80,52,0,Math.PI*2);ctx.fill();ctx.fillStyle='#375e53';ctx.beginPath();ctx.arc(80,80,12,0,Math.PI*2);ctx.fill();return c.toDataURL('image/png').split(',')[1];}),'base64');
+ await curator.getByRole('button',{name:'Artwork',exact:true}).click();
  const assetForm=curator.getByRole('form',{name:'Attach supporting image'});
  await assetForm.getByLabel('Alternative text').fill('Archival cover');
  await assetForm.getByLabel('Artwork image').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:png});
@@ -239,8 +243,9 @@ try{
  await page.screenshot({path:path.join(root,'web/test-results/assets-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'asset editor has mobile horizontal overflow');
  await page.setViewportSize({width:1440,height:1000});
+ await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  const metadataReview=curator.getByRole('region',{name:'Metadata review'});
- await metadataReview.getByText('Lookup is optional and explicit.',{exact:false}).waitFor();
+ await metadataReview.getByText('Supported CD imports automatically look up',{exact:false}).waitFor();
  const sourceSelect=metadataReview.getByRole('combobox',{name:'Identifier or search source'});
  await sourceSelect.focus();await page.keyboard.press('Tab');
  assert.equal(await metadataReview.getByLabel('Request a fresh provider response').evaluate(node=>node===document.activeElement),true,'metadata source controls lost their keyboard order');
@@ -261,6 +266,7 @@ try{
  console.log('Detached metadata completion released.');
  assert.equal(untouched.revision,0,'closing a detached panel applied pending metadata');
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await metadataReview.getByText('Metadata refresh completed.',{exact:false}).waitFor();
  assert.equal(await metadataReview.locator('.candidate').count(),3,'provider alternatives were not retained');
  assert.equal(await metadataReview.locator('.candidate.current').count(),3,'fresh search candidates were not current');
@@ -312,8 +318,7 @@ try{
  await metadataReview.getByRole('button',{name:'Retry front cover preview',exact:true}).click();
  await page.waitForFunction(()=>{const image=document.querySelector('img[alt="Front cover preview"]');return image?.complete&&image.naturalWidth>0;});
  await metadataReview.getByRole('button',{name:/Front cover/}).click();
- await metadataReview.getByText('Artwork acquired and preserved.',{exact:false}).waitFor();
- await metadataReview.getByRole('button',{name:'Use selected artwork',exact:true}).click();
+ await metadataReview.getByText('Artwork acquired, preserved and selected as the cover.',{exact:false}).waitFor();
  // An explicit release lookup produces a new version; artwork publication itself
  // must not depend on a second network request or change metadata selection.
  await sourceSelect.selectOption('custom-release');
@@ -335,15 +340,17 @@ try{
  assert.equal(await page.locator('.collection-row').count(),1,'effective metadata was not searchable');
  await page.getByRole('button',{name:/試験盤/}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await metadataReview.locator('.candidate.historical').first().waitFor();
  await metadataReview.getByLabel('Displayed title').fill('A test pressing');
  await metadataReview.getByRole('button',{name:'Save title override',exact:true}).click();
  await metadataReview.getByLabel('Displayed subtitle').fill('Japan · CD');
  await metadataReview.getByRole('button',{name:'Save subtitle override',exact:true}).click();
+ await curator.getByText('Advanced manual import review',{exact:true}).click();
  const importWorkspace=curator.getByRole('region',{name:'Capture accession'});
  await importWorkspace.getByLabel('Configured inbox').check();
  assert.equal(await importWorkspace.getByRole('combobox',{name:'Inbox',exact:true}).inputValue(),'Optical shelf');
- assert.equal(await importWorkspace.getByRole('combobox',{name:'Package',exact:true}).inputValue(),'reference-disc');
+ await importWorkspace.getByRole('radio',{name:'reference-disc'}).check();
  await importWorkspace.getByLabel('This browser').check();
  await importWorkspace.getByLabel('This browser').focus();await page.keyboard.press('ArrowRight');
  assert.equal(await importWorkspace.getByLabel('Configured inbox').evaluate(node=>node===document.activeElement),true,'import source keyboard order changed');
@@ -374,6 +381,8 @@ try{
  await page.reload();
  await page.getByRole('button',{name:/A test pressing/}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
+ await curator.getByText('Advanced manual import review',{exact:true}).click();
  await resumeForm.waitFor();
  // A same-name/same-size different source must not append a mixed master.
  await resumeForm.getByLabel('Original package files').setInputFiles({name:'browser-disc.bin',mimeType:'application/octet-stream',buffer:Buffer.alloc(uploadBytes.length,38)});
@@ -435,10 +444,13 @@ try{
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'work history has mobile horizontal overflow');
  await workHistory.getByRole('button',{name:'Close work history'}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
+ await curator.getByText('Advanced manual import review',{exact:true}).click();
  await importWorkspace.scrollIntoViewIfNeeded();
  await page.screenshot({path:path.join(root,'web/test-results/import-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'import workspace has mobile horizontal overflow');
  await page.setViewportSize({width:1440,height:1000});
+ await curator.getByRole('button',{name:'Copies',exact:true}).click();
  await copyRecord.getByRole('button',{name:'Record disposal',exact:true}).click();
  const disposalForm=copyRecord.getByRole('form',{name:'Record disposal'});
  await disposalForm.getByLabel('Disposal date').fill('2026-09-12');
@@ -447,6 +459,7 @@ try{
  await disposalForm.getByRole('button',{name:'Record disposal',exact:true}).click();
  await copyRecord.getByText('disposed 2026-09-12',{exact:false}).waitFor();
  await copyRecord.getByText('returned 2026-09-11',{exact:false}).waitFor();
+ await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await importWorkspace.getByRole('button',{name:'Stage another package',exact:true}).click();
  const conflictStage=importWorkspace.getByRole('form',{name:'Stage package'});
  await conflictStage.getByLabel('Original package files').setInputFiles({name:'review-conflict.bin',mimeType:'application/octet-stream',buffer:Buffer.from('review conflict')});
@@ -478,6 +491,8 @@ try{
  await page.getByRole('button',{name:/A test pressing/}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  const restoredCurator=page.getByRole('dialog',{name:/Edit entry/});
+ await restoredCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
+ await restoredCurator.getByText('Advanced manual import review',{exact:true}).click();
  await restoredCurator.getByRole('region',{name:'Capture accession'}).getByText('Review saved.',{exact:false}).waitFor();
  const restoredImport=restoredCurator.getByRole('region',{name:'Capture accession'});
  await restoredImport.getByRole('button',{name:'Edit review',exact:true}).click();
@@ -499,12 +514,14 @@ try{
  await cdReview.getByRole('button',{name:'Save review',exact:true}).click();
  await restoredImport.getByRole('button',{name:'Publish capture',exact:true}).click();
  await restoredImport.getByText('Capture published.',{exact:false}).waitFor();
+ await restoredCurator.getByRole('button',{name:'Music',exact:true}).click();
  await restoredCurator.getByRole('region',{name:'Music preparation'}).locator('.music-track').first().waitFor();
  assert.equal(await restoredCurator.getByRole('region',{name:'Music preparation'}).locator('.music-track').count(),2,'publication did not refresh tracks without reopening');
  await restoredCurator.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('button',{name:/A test pressing/}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  const cdCurator=page.getByRole('dialog',{name:/Edit entry/});
+ await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  const musicAnalysis=cdCurator.getByRole('region',{name:'Music CD analysis'});await musicAnalysis.waitFor();
  const cdDocket=musicAnalysis.locator('.import-docket').filter({hasText:'2 files'});
  await cdDocket.getByLabel('Operation').selectOption('org.junk.music.cd-structure');
@@ -520,7 +537,9 @@ try{
  assert.match(await cdDocket.innerText(), /Unavailable physical edge frames/);
  assert.match(await cdDocket.innerText(),/Track 1: verified, computed at 0 stereo sample frames/);
  assert.match(await cdDocket.innerText(),/Track 2: verified, computed at 0 stereo sample frames/);
- assert.equal(await cdCurator.getByRole('img',{name:'Private archival cover',exact:true}).count(),1,'music analysis displaced artwork from the text workflow');
+ await cdCurator.getByRole('button',{name:'Artwork',exact:true}).click();
+ assert.equal(await cdCurator.getByRole('img',{name:'Private archival cover',exact:true}).count(),1,'music analysis displaced artwork from the artwork task');
+ await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
  if(hasFlac){
   const preparation=cdCurator.getByRole('region',{name:'Music preparation'});await preparation.waitFor();
   assert.equal(await preparation.locator('.music-track').first().evaluate(element=>getComputedStyle(element).display),'grid','music stylesheet is not embedded');
@@ -551,7 +570,9 @@ try{
   assert.equal(await preparation.getByRole('button',{name:'Refresh music availability',exact:true}).isDisabled(),false,'accepted encoding blocked unrelated browsing controls');
   await preparation.getByRole('button',{name:'Prepare selected album',exact:true}).click();
   await preparation.getByRole('region',{name:'Album preparation progress'}).locator('article').nth(1).waitFor();
+  await cdCurator.getByRole('button',{name:'Details',exact:true}).click();
   assert.equal(await cdCurator.getByLabel('Title',{exact:true}).isDisabled(),false,'accepted encoding blocked unrelated inventory editing');
+  await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
   // Preparing publishes Capture outputs independently of an inventory save.
   const inventoryRevision=await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}`)).json()).revision;});
 
@@ -574,13 +595,13 @@ try{
   await page.getByRole('region',{name:'Album tracks'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
   await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
   await cdCurator.waitFor();
-  await cdCurator.locator('.metadata-review').scrollIntoViewIfNeeded();
-  const sectionGap=await cdCurator.evaluate(element=>element.querySelector('.metadata-review').getBoundingClientRect().top-element.querySelector('.music-preparation').getBoundingClientRect().bottom);
-  assert.ok(sectionGap>=0&&sectionGap<60,`unexpected blank space after tracks: ${sectionGap}px`);
+  await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
+  await cdCurator.getByRole('region',{name:'Music preparation'}).locator('.music-track').first().waitFor();
 
  }
  // Generated tracks remain grouped in Music; no ineligible CD-operation forms.
  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.import-docket')).every(e=>!e.textContent.includes('lossless derivative')));
+ await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await cdCurator.getByRole('button',{name:'Open work & history for this entry'}).click();
  const restoredWork=page.getByRole('dialog',{name:'Work & history'});
  await page.context().setOffline(true);
@@ -591,10 +612,12 @@ try{
  await restoredWork.getByRole('alert').waitFor({state:'detached'});
  await restoredWork.getByRole('button',{name:'Close work history'}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
- await cdCurator.locator('.import-docket').first().waitFor();
+ await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
+ const visibleDocket=cdCurator.getByRole('region',{name:'Music CD analysis'}).locator('.import-docket').first();
+ await visibleDocket.waitFor();
  await page.emulateMedia({reducedMotion:'reduce'});
  assert.equal(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches),true);
- assert.equal(await page.evaluate(()=>getComputedStyle(document.querySelector('.import-docket')).animationName),'none');
+ assert.equal(await visibleDocket.evaluate(element=>getComputedStyle(element).animationName),'none');
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.evaluate(async()=>{const jobs=await(await fetch('/api/v1/jobs?limit=1')).json();const importKey=Object.keys(localStorage).find(key=>key.startsWith('collector.import.'));sessionStorage.setItem('owner-import-id',importKey?localStorage.getItem(importKey)||'':'');sessionStorage.setItem('owner-job-id',jobs.items[0].id);});
  await cdCurator.getByRole('button',{name:'Close curator'}).click();
@@ -722,24 +745,31 @@ try{
  if(hasFlac){assert.equal(await guided.getByLabel('Prepare supported music as FLAC after preservation').isDisabled(),false);await guided.getByLabel('Prepare supported music as FLAC after preservation').check();}
  let releaseGuided;const guidedHeld=new Promise(resolve=>{releaseGuided=resolve;});
  await page.route('**/api/v1/imports/*/files/*',async route=>{await guidedHeld;await route.continue();},{times:1});
- await guided.getByRole('button',{name:'Start import',exact:true}).click();
+ await guided.getByRole('button',{name:'Preserve 1 package',exact:true}).click();
  await guided.getByRole('progressbar',{name:'Uploading package',exact:true}).waitFor();
  assert.equal(await guided.getByRole('form',{name:'Resume guided package'}).count(),0);
  releaseGuided();
- await guided.getByRole('button',{name:/Guided smoke master/}).waitFor();
- await guided.getByText('Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.',{exact:true}).waitFor();
- await guidedForm.getByRole('button',{name:'Close curator'}).click();
- await page.getByRole('button',{name:'Add / import',exact:true}).click();
- const reopenedGuidedForm=page.getByRole('dialog',{name:/Add or import/});
- const reopenedGuided=reopenedGuidedForm.getByRole('region',{name:'Import original packages'});
- const guidedHistory=reopenedGuided.getByRole('button',{name:/Guided smoke master/});
- await guidedHistory.click();
- await guidedHistory.getByText('published · succeeded',{exact:false}).waitFor();
- await reopenedGuided.locator('.ingest-detail').evaluate(element=>element.open=true);
- if(hasFlac)await reopenedGuided.locator('.ingest-steps').getByText('preparation',{exact:true}).waitFor();
- await reopenedGuided.getByText(/Capture [0-9a-f-]{36}/).waitFor();
- await reopenedGuidedForm.getByRole('button',{name:'Close curator'}).click();
+ await page.getByRole('region',{name:'Import original packages'}).getByText('Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Close curator'}).click();
+ await page.getByRole('button',{name:'Work & history',exact:true}).click();
+ const guidedWork=page.getByRole('dialog',{name:'Work & history'});
+ await guidedWork.getByLabel('Search work').fill('Guided smoke master');
+ const guidedRow=guidedWork.locator('.job-list article').filter({hasText:'Guided smoke master'});
+ await guidedRow.getByRole('button',{name:'Open work'}).click();
+ const guidedHistory=guidedWork.getByRole('region',{name:'Import progress'});
+ await guidedHistory.getByText(/Capture [0-9a-f-]{36}/).waitFor();
+ if(hasFlac)await guidedHistory.locator('.ingest-steps').getByText('preparation',{exact:true}).waitFor();
+ for(let attempt=0;attempt<100&&!metadataRequests.some(value=>value.startsWith('/ws/2/discid/'));attempt++)await new Promise(resolve=>setTimeout(resolve,100));
+ assert.ok(metadataRequests.some(value=>value.startsWith('/ws/2/discid/')),`automatic guided lookup did not use a disc ID: ${metadataRequests.join(', ')}`);
+ assert.equal(metadataRequests.some(value=>value.includes('Guided%20smoke%20master')||value.includes('guided-original')),false,'automatic lookup used a package name');
+ const guidedItem=await page.evaluate(async()=>{const work=await(await fetch('/api/v1/work?search=Guided%20smoke%20master&limit=10')).json();const id=work.items.find(value=>value.name==='Guided smoke master')?.item_id;if(!id)throw new Error('guided import has no item');return (await(await fetch(`/api/v1/items/${id}`)).json());});
+ await page.waitForFunction(async id=>{const item=await(await fetch(`/api/v1/items/${id}`)).json();return item.title==='Provider pressing';},guidedItem.id,{timeout:30000});
+ const discLookupCount=metadataRequests.filter(value=>value.startsWith('/ws/2/discid/')).length;
+ await guidedWork.getByRole('button',{name:'Close work history'}).click();
+ await page.reload();
  await page.getByRole('button',{name:/Provider pressing/}).first().waitFor();
+ await page.waitForTimeout(1200);
+ assert.equal(metadataRequests.filter(value=>value.startsWith('/ws/2/discid/')).length,discLookupCount,'reloading the browser repeated automatic CD lookup');
  // Folder intake needs no blank inventory form and handles every detected package.
  let importAudio;
  if(hasFlac){
@@ -780,21 +810,31 @@ try{
  await folderImport.getByText('Package details and import options',{exact:true}).click();
  await folderImport.getByLabel('Automatically gather available metadata and artwork').uncheck();
  await folderForm.screenshot({path:path.join(root,'web/test-results/folder-import.png')});
- await folderImport.getByRole('button',{name:'Import 2 packages',exact:true}).click();
- await folderImport.getByText('Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.',{exact:true}).waitFor();
- await folderForm.getByRole('button',{name:'Close curator'}).click();
- await page.getByRole('button',{name:'Add / import',exact:true}).click();
- for(const name of ['Disc A','Disc B'])await page.getByRole('region',{name:'Import original packages'}).getByRole('button',{name:new RegExp(name)}).getByText('published · succeeded',{exact:false}).waitFor();
- const associationPanel=page.getByRole('region',{name:'Import original packages'});
- await associationPanel.getByRole('button',{name:/Disc A/}).click();
- await associationPanel.getByText('Attach this dump to an existing entry',{exact:true}).click();
- await page.waitForFunction(()=>document.querySelector('.ingest-detail select')?.selectedOptions[0]?.textContent==='Disc A');
- const sourceItem=await associationPanel.getByLabel('Published association').inputValue();
- assert.match(sourceItem,/^[0-9a-f-]{36}$/);
- await associationPanel.getByLabel('Published association').selectOption({label:'Disc B'});
- const targetItem=await associationPanel.getByLabel('Published association').inputValue();
- await associationPanel.getByRole('button',{name:'Correct association',exact:true}).click();
- await associationPanel.getByText(/Dump attached to Disc B/).waitFor();
+ await folderImport.getByRole('button',{name:'Preserve 2 packages',exact:true}).click();
+ await page.getByRole('region',{name:'Import original packages'}).getByText('Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Close curator'}).click();
+ const {sourceItem,targetItem}=await page.evaluate(async()=>{
+  const read=async name=>{for(let attempt=0;attempt<300;attempt++){const result=await(await fetch(`/api/v1/work?search=${encodeURIComponent(name)}&limit=10`)).json();const row=result.items.find(value=>value.target.kind==='import'&&value.name===name&&value.item_id&&value.status==='completed');if(row)return row.item_id;await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`No published work for ${name}`);};
+  return {sourceItem:await read('Disc A'),targetItem:await read('Disc B')};
+ });
+ assert.notEqual(sourceItem,targetItem,'folder imports selected the same Item');
+ const originals=await page.evaluate(async ids=>Promise.all(ids.map(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title)),[sourceItem,targetItem]);
+ assert.deepEqual(originals,['Disc A','Disc B'],'folder work did not resolve its own created Items');
+ await page.getByRole('button',{name:'Work & history',exact:true}).click();
+ const associationPanel=page.getByRole('dialog',{name:'Work & history'});
+ await associationPanel.getByRole('button',{name:'Show work for all entries'}).click();
+ await associationPanel.getByLabel('Search work').fill('Disc A');
+ await associationPanel.locator('.job-list article').filter({hasText:'Disc A'}).getByRole('button',{name:'Open work'}).click();
+ await associationPanel.getByText('Correct destination',{exact:true}).click();
+ await associationPanel.getByRole('button',{name:'Search existing entries'}).click();
+ await associationPanel.getByRole('searchbox',{name:'Search existing entries'}).fill('Disc B');
+ await associationPanel.locator('.destination-results button').filter({hasText:'Disc B'}).click();
+ await associationPanel.getByRole('button',{name:'Save association'}).click();
+ const movedImportId=new URL(page.url()).searchParams.get('work').split(':')[1];
+ await page.waitForFunction(async({id,target})=>{const response=await fetch(`/api/v1/ingests/${id}`);return response.ok&&(await response.json()).import.association.item_id===target;},{id:movedImportId,target:targetItem});
+ assert.equal(await associationPanel.locator('.guided-ingest').count(),1,'selected import detail duplicated after reassociation');
+ await associationPanel.getByText('Updating import…').waitFor({state:'detached'});
+ await page.waitForFunction(async id=>(await fetch(`/api/v1/items/${id}`)).status===404,sourceItem,{timeout:30000});
  const mergedDiscs=await page.evaluate(async({sourceItem,targetItem})=>{
   const read=async path=>{const response=await fetch(`/api/v1${path}`);if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
   const sourceStatus=(await fetch(`/api/v1/items/${sourceItem}`)).status;
@@ -806,7 +846,7 @@ try{
  assert.equal(mergedDiscs.listed,false,'reassociation left its automatic placeholder in browsing');
  assert.equal(mergedDiscs.captures,2,'reassociation replaced the destination disc');
  if(importAudio){assert.deepEqual(await importAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'background imports displaced the playing album');await importAudio.evaluate(element=>{element.pause();element.loop=false;});}
- await page.getByRole('button',{name:'Close curator'}).click();
+ await associationPanel.getByRole('button',{name:'Close work history'}).click();
  await page.getByRole('searchbox').fill('pressing');
  await page.waitForTimeout(350);
  // The generic renderer must accept a third descriptor without a frontend ID branch.
@@ -827,7 +867,7 @@ try{
   const response=await route.fetch();const item=await response.json();
   await route.fulfill({response,json:{...item,title:'Unsupported schema fixture',domain:{...item.domain,schema_version:99},effective_permissions:{...item.effective_permissions,can_curate:false},content_permissions:{can_edit:false,status:'item_schema_unsupported',message:'Unsupported stored schema fixture.'}}});
  });
- await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:/Edit entry/});assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).isDisabled(),true);assert.equal(await readOnlyForm.getByRole('button',{name:'Save inventory',exact:true}).isDisabled(),true);await readOnlyForm.getByText('Collection access',{exact:true}).waitFor();await readOnlyForm.getByRole('button',{name:'Close curator'}).click();
+ await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:/Edit entry/});await readOnlyForm.getByText('Collection access',{exact:true}).waitFor();await readOnlyForm.getByRole('button',{name:'Details',exact:true}).click();assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).isDisabled(),true);assert.equal(await readOnlyForm.getByRole('button',{name:'Save inventory',exact:true}).isDisabled(),true);await readOnlyForm.getByRole('button',{name:'Close curator'}).click();
  await fixturePage.unroute('**/api/v1/collection-types');await fixturePage.route('**/api/v1/collection-types',route=>route.fulfill({json:[]}));await fixturePage.reload();await fixturePage.getByRole('button',{name:'Administration',exact:true}).waitFor();assert.equal(await fixturePage.getByRole('button',{name:'Administration',exact:true}).isEnabled(),true);assert.equal(await fixturePage.getByRole('button',{name:'Manage collections',exact:true}).isEnabled(),true);
  await fixturePage.close();
  const rejectedOwner=await page.evaluate(async()=>{

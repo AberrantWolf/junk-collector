@@ -563,6 +563,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
             routes!(stage_provisional_import_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
         .routes(routes!(collection_inboxes))
+        .routes(routes!(inbox_packages))
         .routes(routes!(stage_inbox_import))
         .routes(routes!(upload, cancel_upload))
         .routes(routes!(commit_upload))
@@ -2666,6 +2667,64 @@ struct InboxSourceView {
     packages: Vec<String>,
 }
 
+#[derive(Deserialize)]
+struct InboxListQuery {
+    packages: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct InboxPackagesQuery {
+    search: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+struct InboxPackagePage {
+    items: Vec<String>,
+    next_cursor: Option<String>,
+}
+
+fn paged_inbox_packages(
+    root: &std::path::Path,
+    query: InboxPackagesQuery,
+) -> Result<InboxPackagePage> {
+    let root = std::fs::canonicalize(root).map_err(|error| Error::Storage(error.to_string()))?;
+    let limit = query.limit.unwrap_or(50).clamp(1, 100) as usize;
+    let search = query.search.unwrap_or_default().to_lowercase();
+    let mut items = Vec::with_capacity(limit + 1);
+    for entry in std::fs::read_dir(root).map_err(|error| Error::Storage(error.to_string()))? {
+        let entry = entry.map_err(|error| Error::Storage(error.to_string()))?;
+        let metadata = std::fs::symlink_metadata(entry.path())
+            .map_err(|error| Error::Storage(error.to_string()))?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || name.is_empty()
+            || name.contains(['/', '\\'])
+            || matches!(name.as_str(), "." | "..")
+            || query.cursor.as_ref().is_some_and(|cursor| &name <= cursor)
+            || !name.to_lowercase().contains(&search)
+        {
+            continue;
+        }
+        items.push(name);
+        items.sort_unstable();
+        if items.len() > limit + 1 {
+            items.pop();
+        }
+    }
+    let next_cursor = if items.len() > limit {
+        items.truncate(limit);
+        items.last().cloned()
+    } else {
+        None
+    };
+    Ok(InboxPackagePage { items, next_cursor })
+}
+
 fn direct_inbox_packages(root: &std::path::Path) -> Result<Vec<String>> {
     let root = std::fs::canonicalize(root).map_err(|error| Error::Storage(error.to_string()))?;
     let mut packages = Vec::new();
@@ -2764,11 +2823,12 @@ fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-#[utoipa::path(get, path = "/api/v1/collections/{id}/inboxes", params(("id" = CollectionId, Path)), responses((status = 200, body = Vec<InboxSourceView>), (status = 403)))]
+#[utoipa::path(get, path = "/api/v1/collections/{id}/inboxes", params(("id" = CollectionId, Path), ("packages" = Option<bool>, Query)), responses((status = 200, body = Vec<InboxSourceView>), (status = 403)))]
 async fn collection_inboxes(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<CollectionId>,
+    Query(query): Query<InboxListQuery>,
 ) -> ApiResult<Json<Vec<InboxSourceView>>> {
     let actor = principal(&state, &headers)?;
     state.service.authorize(&actor, id, Action::Curate)?;
@@ -2780,12 +2840,31 @@ async fn collection_inboxes(
                 .map(|(label, root)| {
                     Ok(InboxSourceView {
                         label: label.clone(),
-                        packages: direct_inbox_packages(root)?,
+                        packages: if query.packages == Some(false) {
+                            Vec::new()
+                        } else {
+                            direct_inbox_packages(root)?
+                        },
                     })
                 })
                 .collect::<Result<Vec<_>>>()
         })
         .await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{id}/inboxes/{label}/packages", params(("id" = CollectionId, Path), ("label" = String, Path), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = InboxPackagePage), (status = 403), (status = 404)))]
+async fn inbox_packages(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, label)): Path<(CollectionId, String)>,
+    Query(query): Query<InboxPackagesQuery>,
+) -> ApiResult<Json<InboxPackagePage>> {
+    let actor = principal(&state, &headers)?;
+    state.service.authorize(&actor, id, Action::Curate)?;
+    let root = state.inboxes.get(&label).ok_or(Error::NotFound)?.clone();
+    Ok(Json(
+        blocking(move || paged_inbox_packages(&root, query)).await?,
     ))
 }
 

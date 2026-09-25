@@ -1,6 +1,7 @@
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {WorkProgress,UploadMeter} from './work-progress';
 import React,{useEffect,useState,useRef,api,isApiRequestError} from '@collector/runtime';
+import InboxPackageChooser from './inbox-package-chooser';
 import type {components} from './generated/api';
 
 type Item=components['schemas']['PresentedItem'];
@@ -53,14 +54,12 @@ export default function ImportWorkspace({initialImportId,item,onPublished,onErro
  const total=record?.files.reduce((sum,file)=>sum+file.bytes,0)||files.reduce((sum,file)=>sum+file.size,0);
  const done=record?.files.reduce((sum,file)=>sum+file.received_bytes,0)||0;
  const candidates=record?.candidates||[];
- const selectedInbox=inboxes.find(value=>value.label===label);
  const storageKey=`collector.import.${item.id}`;
 
- useEffect(()=>{let active=true;request<InboxSource[]>(`/collections/${item.collection_id}/inboxes`).then(value=>{if(!active)return;setInboxes(value);setLabel(current=>current||value[0]?.label||'');}).catch(report);return()=>{active=false;};},[item.collection_id]);
+ useEffect(()=>{let active=true;request<InboxSource[]>(`/collections/${item.collection_id}/inboxes?packages=false`).then(value=>{if(!active)return;setInboxes(value);setLabel(current=>current||value[0]?.label||'');}).catch(report);return()=>{active=false;};},[item.collection_id]);
  useEffect(()=>{const id=initialImportId||localStorage.getItem(storageKey);if(id)request<ImportView>(`/imports/${id}`).then(setRecord).catch(error=>{if(isApiRequestError(error)&&(error.status===404||error.status===403))localStorage.removeItem(storageKey);report(error);});},[storageKey,initialImportId]);
  useEffect(()=>{if(record)localStorage.setItem(storageKey,record.id);},[record?.id,storageKey]);
  useEffect(()=>{setItemRevision(item.revision);},[item.revision]);
- useEffect(()=>{setInboxPackage(selectedInbox?.packages[0]||'');},[selectedInbox?.label]);
  useEffect(()=>{const refresh=()=>{if(record)request<ImportView>(`/imports/${record.id}`).then(setRecord).catch(report);};window.addEventListener('online',refresh);window.addEventListener('collector-jobs-updated',refresh);return()=>{window.removeEventListener('online',refresh);window.removeEventListener('collector-jobs-updated',refresh);};},[record?.id]);
 
  function reset(){setEditingReview(false);localStorage.removeItem(storageKey);setRecord(undefined);setJob(undefined);setConflict('');setFiles([]);setIdentity('unidentified');setAttach(true);setSpecimen('');setComponent('');setCarrier('');}
@@ -135,7 +134,7 @@ export default function ImportWorkspace({initialImportId,item,onPublished,onErro
   {initialImportId&&!record&&<p role="status">Loading saved import…</p>}
   {!record&&!initialImportId&&<form aria-label="Stage package" onSubmit={event=>{event.preventDefault();void stage();}}>
    <fieldset className="source-choice"><legend>Package source</legend><label><input type="radio" name="import-source" checked={source==='browser'} onChange={()=>setSource('browser')}/> This browser</label><label><input type="radio" name="import-source" checked={source==='inbox'} onChange={()=>setSource('inbox')}/> Configured inbox</label></fieldset>
-   {source==='browser'?<label>Original package files<input aria-label="Original package files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>:inboxes.length?<div className="form-grid"><label>Inbox<select value={label} disabled={busy} onChange={event=>setLabel(event.target.value)}>{inboxes.map(value=><option key={value.label}>{value.label}</option>)}</select></label><label>Package<select value={inboxPackage} disabled={busy} onChange={event=>setInboxPackage(event.target.value)}>{selectedInbox?.packages.map(value=><option key={value}>{value}</option>)}</select></label></div>:<p className="notice">No configured inbox packages are available. Choose files from this browser.</p>}
+   {source==='browser'?<label>Original package files<input aria-label="Original package files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>:inboxes.length?<div><label>Inbox<select value={label} disabled={busy} onChange={event=>setLabel(event.target.value)}>{inboxes.map(value=><option key={value.label}>{value.label}</option>)}</select></label><InboxPackageChooser collectionId={item.collection_id} label={label} selected={inboxPackage?[inboxPackage]:[]} onSelect={value=>setInboxPackage(value[0]||'')} disabled={busy}/></div>:<p className="notice">No configured inbox packages are available. Choose files from this browser.</p>}
    {source==='browser'&&files.length>0&&<div className="package-files compact" role="list">{files.map(file=><div role="listitem" key={fileName(file)}><span>{fileName(file)}</span><small>{file.size.toLocaleString()} bytes</small></div>)}</div>}
    <button className="primary" disabled={busy||!canStage}>Stage package</button>
   </form>}

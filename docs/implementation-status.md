@@ -413,8 +413,9 @@ Generated track files remain in the named Music track groups; ineligible derivat
 CD-operation forms are suppressed using scan readiness while evidence stays readable.
 FX-03 [local acceptance passed](validation.md#fx-03-work-and-history--2026-09-21) on 2026-09-21; no external release qualification is claimed.
 
-FX-04–FX-07 remain proposed: focused editing/intake, manual
-removal/restore/clean reimport, account recovery and the whole-interface review.
+FX-04 implements focused editing/intake (2026-09-24); FX-05–FX-07 remain
+proposed: manual removal/restore/clean reimport, account recovery and the
+whole-interface review. See the current FX-04 section below for exact scope.
 LA3's second-device qualification and broader release gates remain open.
 
 ## Required before the planned first release
@@ -657,22 +658,20 @@ localStorage, it remains usable for the current session. Access is rechecked bef
 playback and periodically; loss of access/session releases buffered audio. This
 completes a user-requested portion adjacent to FX-04, not the whole FX-04 delivery.
 
-### View separation requirement — 2026-09-22 (planned)
+### View separation requirement — 2026-09-22 (historical requirement)
 
 FX-04 now explicitly owns separate import-history and selected-import detail/progress
 views, with preserved return context, direct-link/reload and thousands-of-records
-acceptance. The current combined history/detail panel does not yet meet this new
-requirement. FX-04 also reviews overloaded views elsewhere; FX-07 verifies meaningful
+acceptance. The combined history/detail panel did not meet this requirement at the
+time of writing; FX-04 now implements separate views. FX-07 verifies meaningful
 browse/detail/task separation across the interface. See [the fix plan](ux-fix-plan.md).
 
-The 2026-09-22 selector-scale audit also remains planned under FX-04/FX-07. Guided
-attachment currently preloads general collection entries up to 1,000, rather than
-showing detected matches; the manual history destination search exposes only its
-first 50 results. The accepted replacement is authorized, bounded server-side
-search/pagination with clearly separate evidence-backed suggestions and useful
-album disambiguation. Acceptance must find destinations beyond those old limits.
+The 2026-09-22 selector defects are corrected by FX-04's authorized, bounded
+server search and pagination. General collection results are labelled as search,
+without claiming detected matches. The [growing-list audit](fx04-scale-audit.md)
+records remaining access-list work owned by FX-06 and broader FX-07 checks.
 
-### Automatic CD provider lookup requirement — 2026-09-22 (FX-04 follow-up)
+### Automatic CD provider lookup requirement — 2026-09-22 (historical requirement)
 
 Guided ingestion already acquires MusicBrainz data automatically with a disc ID
 from its CD analysis. The metadata editor still presents an explicit optional
@@ -682,4 +681,37 @@ that explicit control for ordinary ingestion. Dump filenames/folders/timestamps,
 including placeholder titles inherited from them, must never become automatic text
 queries. Missing identity and provider/no-match/ambiguity states must remain honest;
 manual metadata authority and original preservation remain protected. This broader
-requirement is planned, not an assertion that every existing path already meets it.
+requirement was a planning statement. The primary new/existing intake path now
+shares the guided coordinator and its derived-disc-ID acquisition. The advanced
+manual review path remains for imports admitted through the older provisional API;
+its explicit provider lookup is a recovery action, not automatic acquisition.
+
+### FX-04 focused editing and intake — implemented 2026-09-24, locally accepted 2026-09-25
+
+Review corrections on 2026-09-25 bind existing-destination revision checks to
+first admission after receipt replay, initialize editor drafts when a guided
+publication adopts a different Item, retain the chosen section on later Item
+updates, and refresh every loaded Work & history page. See
+[validation](validation.md#fx-04-review-corrections--2026-09-25).
+
+The workbench presents Details, Copies, Files, Music, Artwork and Advanced evidence
+as navigable task sections. Inventory title and edition edits are direct; metadata
+authority/provenance is progressively disclosed. Files uses guided intake for new
+and existing entries, with destination, source, readiness, preservation-only
+choice, upload and durable server progress. Existing-Item admission freezes its
+revision and preserves its other Captures and independent inventory. Missing
+companions and provider/tool availability are visible before submission. The
+existing private guided-intent table gains additive `created_item` and `analysis`
+fields without resetting older intents; the private schema remains v15. The
+timestamp-named music fixture confirms automatic MusicBrainz requests use the
+parsed disc identifier. No-match, multiple-candidate, missing-identity and provider
+failures have distinct progress text; manual metadata authority survives refresh.
+
+Work & history now uses separate list and focused selected-work views, an
+authorized URL identity and Back/Forward/reload. Import detail and current intake
+do not preload the catalog or mount the global history. The destination chooser
+searches server-side with 50-result pages, selected-entry context and revision
+recheck. Catalog snapshots and inbox package selection are paged. The
+[scale audit](fx04-scale-audit.md) records all growing surfaces and scope of later
+access and history work. A temporary-server browser journey passed with 3,000
+entries and 3,000 imports, including selection beyond the former 1,000-entry cap.

@@ -564,6 +564,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{id}/inboxes/{label}/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["inbox_packages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/devices/{id}": {
         parameters: {
             query?: never;
@@ -2168,10 +2184,16 @@ export interface components {
             item_id: components["schemas"]["ItemId"];
             package: string;
         };
+        InboxPackagePage: {
+            items: string[];
+            next_cursor?: string | null;
+        };
         InboxSourceView: {
             label: string;
             packages: string[];
         };
+        /** @enum {string} */
+        IngestAnalysisPolicy: "automatic" | "preserve_only";
         IngestAnchorChoice: {
             file_index: number;
             label: string;
@@ -2197,6 +2219,10 @@ export interface components {
         };
         /** @enum {string} */
         IngestBlockerKind: "missing_anchor" | "ambiguous_anchors" | "unsupported_package" | "missing_companion";
+        IngestDestination: {
+            expected_revision: components["schemas"]["Revision"];
+            item_id: components["schemas"]["ItemId"];
+        };
         IngestDetail: {
             attempts: components["schemas"]["IngestAttemptView"][];
             cleanup?: null | components["schemas"]["IngestDiscardResult"];
@@ -3227,6 +3253,8 @@ export interface components {
             username?: string | null;
         };
         StartIngestCommand: {
+            analysis?: components["schemas"]["IngestAnalysisPolicy"];
+            destination?: null | components["schemas"]["IngestDestination"];
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
             plan: components["schemas"]["IngestPlan"];
             prepare_music?: boolean;
@@ -4799,7 +4827,9 @@ export interface operations {
     };
     collection_inboxes: {
         parameters: {
-            query?: never;
+            query?: {
+                packages?: boolean;
+            };
             header?: never;
             path: {
                 id: components["schemas"]["CollectionId"];
@@ -4817,6 +4847,44 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    inbox_packages: {
+        parameters: {
+            query?: {
+                search?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxPackagePage"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
