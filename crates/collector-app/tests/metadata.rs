@@ -3,6 +3,7 @@ use collector_core::*;
 
 fn item() -> Item {
     Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: CollectionId::new(),
         revision: Revision(1),

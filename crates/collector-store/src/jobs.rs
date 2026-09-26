@@ -326,6 +326,7 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        if tx.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?",[id.to_string()],|row|row.get::<_,bool>(0)).optional().map_err(storage)?.unwrap_or(false) { return Err(Error::Conflict); }
         Self::ensure_work_retry_allowed(&tx, id, user)?;
         let frozen = Self::preparation_batch_input(&tx, id, user)?;
         ensure_album_admission_capacity(&tx, user, id)?;
@@ -579,6 +580,19 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        if let Some(item_id) = spec.item_id {
+            let removed: bool = tx
+                .query_row(
+                    "SELECT COALESCE((SELECT deleted FROM items WHERE id=?),0)",
+                    [item_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if removed {
+                return Err(Error::Conflict);
+            }
+        }
+        ensure_import_allows_work(&tx, &spec.request)?;
         if let Some((parent, token)) = batch {
             let allowed: bool = tx
                 .query_row(
@@ -686,6 +700,7 @@ impl Store {
                 ensure_album_admission_capacity(&tx, spec.user_id, spec.id)?;
             }
             ensure_import_allows_work(&tx, &spec.request)?;
+            tx.execute("INSERT OR IGNORE INTO private.item_job_generations(job_id,generation) SELECT ?1,COALESCE(json_extract(record,'$.lifecycle.generation'),0) FROM items WHERE id=COALESCE(?2,(SELECT item_id FROM private.imports WHERE id=?3))",params![spec.id.to_string(),spec.item_id.map(|id|id.to_string()),spec.request.get("import_id").and_then(serde_json::Value::as_str)]).map_err(storage)?;
             tx.execute(
                 "INSERT INTO private.jobs(
                   id,user_id,collection_id,item_id,kind,state,phase,
@@ -1054,7 +1069,7 @@ impl Store {
     ) -> Result<bool> {
         lock(&self.db)?
             .query_row(
-                "SELECT state='cancel_requested' OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
+                "SELECT state='cancel_requested' OR (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
                  WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested')",
                 params![id.to_string(), claim_token],
                 |row| row.get(0),
@@ -1256,6 +1271,7 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        if tx.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?",[id.to_string()],|row|row.get::<_,bool>(0)).optional().map_err(storage)?.unwrap_or(false) { return Err(Error::Conflict); }
         Self::ensure_work_retry_allowed(&tx, id, user)?;
         let (kind, state, prior_result, error, attempt, failed_at): (
             String,
@@ -1415,6 +1431,12 @@ fn ensure_import_work(
             "SELECT EXISTS(SELECT 1 FROM private.imports WHERE id=?1 AND phase='cancelled')
              OR EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE import_id=?1 AND cancelled=1 AND NOT ?2)
              OR EXISTS(SELECT 1 FROM private.import_cleanup WHERE import_id=?1)
+             OR EXISTS(SELECT 1 FROM private.imports p JOIN items i ON i.id=p.item_id
+                       WHERE p.id=?1 AND NOT ?2 AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_import_generations g WHERE g.import_id=p.id),0))
+             OR EXISTS(SELECT 1 FROM private.guided_ingest_intents g JOIN items i
+                       ON i.id=g.target_item_id WHERE g.import_id=?1 AND i.deleted=1 AND NOT ?2)
+             OR EXISTS(SELECT 1 FROM private.imports p JOIN items i ON i.id=p.item_id
+                       WHERE p.id=?1 AND i.deleted=1 AND NOT ?2)
              OR EXISTS(SELECT 1 FROM private.work_history WHERE target='import:'||?1 AND (pending=1 OR archived=1))",
             params![import,independent_analysis], |row| row.get(0)
         ).map_err(storage)?;

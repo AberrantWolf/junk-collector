@@ -386,7 +386,7 @@ impl CollectionService {
         let eligibility = self.content_write_eligibility_for_user(user_id, collection_id)?;
         if let Some(item_id) = item_id {
             let item = self.reader.item(item_id)?;
-            if item.collection_id != collection_id {
+            if item.collection_id != collection_id || item.deleted {
                 return Err(Error::Conflict);
             }
             self.validate_owned_domain(&eligibility, &item.domain)?;

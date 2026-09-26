@@ -1031,6 +1031,7 @@ async fn legacy_upload_routes_delegate_to_imports_and_use_a_distinct_publication
         )
         .unwrap();
     let item = Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -1784,6 +1785,21 @@ async fn direct_grant_api_matches_owner_policy_and_removal_is_immediate() {
             .await
             .unwrap();
         assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        let exact_denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/v1/collections/{}/grants/member",
+                        collection.id
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(exact_denied.status(), StatusCode::FORBIDDEN);
     }
 
     let removed = app
@@ -1982,6 +1998,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
     )
     .unwrap();
     let item = Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -2025,6 +2042,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
             &actor,
             other_item_id,
             Item {
+                lifecycle: Default::default(),
                 id: other_item_id,
                 collection_id: other_collection.id,
                 revision: Revision(0),
@@ -2585,8 +2603,10 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 105); // Includes paged inbox package search.
+    assert_eq!(paths.len(), 107); // Adds the separate Item Remove and Restore commands.
     for path in [
+        "/api/v1/items/{id}/remove",
+        "/api/v1/items/{id}/restore",
         "/api/v1/items/{id}/specimens",
         "/api/v1/items/{id}/specimens/{specimen_id}",
         "/api/v1/items/{id}/specimens/{specimen_id}/components",
@@ -2721,6 +2741,7 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
         )
         .unwrap();
     let item = Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -2837,6 +2858,7 @@ async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work
         )
         .unwrap();
     let item = Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -3065,6 +3087,7 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         .unwrap();
     let item_id = ItemId::new();
     let item = Item {
+        lifecycle: Default::default(),
         id: item_id,
         collection_id: collection.id,
         revision: Revision(0),
@@ -3433,6 +3456,7 @@ async fn asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_select
     let item = Catalog::save(
         &*state.store,
         Item {
+            lifecycle: Default::default(),
             id: ItemId::new(),
             collection_id: collection.id,
             revision: Revision(0),
@@ -3880,6 +3904,7 @@ async fn focused_inventory_routes_require_curator_role_and_revisioned_idempotent
         .grant(collection.id, viewer, Role::Viewer)
         .unwrap();
     let stored = Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -4118,6 +4143,7 @@ async fn wave1_item_envelope_preserves_server_owned_state_and_rejects_changes() 
         )
         .unwrap();
     let stored = Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
         revision: Revision(0),

@@ -20,6 +20,7 @@ export function useDialogDismiss(onClose:()=>void){
   const element=ref.current;const overflow=document.body.style.overflow;
   document.body.style.overflow='hidden';element?.querySelector<HTMLButtonElement>('.close')?.focus();
   function keydown(event:KeyboardEvent){
+   if(element!==[...document.querySelectorAll('[role="dialog"]')].at(-1))return;
    if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();latest.current();}
    if(event.key==='Tab'&&element){
     const controls=[...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(value=>value.getClientRects().length>0);

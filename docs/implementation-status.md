@@ -146,7 +146,7 @@ The full first release, native clients and public deployment remain later target
 - P01.6 coordinates collection archive creation with its intended private owner grant. Startup holds the writer lock through private migration/recovery, archive migration, and projection rebuild; deterministic command-bound Collection IDs make interrupted creation safely retryable. Archive-only restoration still creates no grants. P01's target-Linux/filesystem qualification remains an external review gate, not a claimed power-loss certification.
 - S02 implements separate revisioned account, browser-session, passkey, recovery, and audit models in private SQLite schema v5. Exact-Origin enforcement, five-minute recent authentication, scoped deterministic rate limits, ten-code 160-bit recovery batches, atomic password replacement/session revocation, passkey counter CAS, last-enabled-administrator/owner guards, default reassignment, and stopped-server explicit-UserId recovery are covered with real SQLite and deterministic concurrency tests.
 - S03 advances private state to v6 with expiring targeted enrollment and separately hashed/revocable native credentials. Same-user recent browser approval, cancellation/expiry/replay protection, one-time issuance, header-independent native authentication, and native-device inventory/revocation are implemented. `collector-client` owns an injectable secure-storage port, refuses redirects/cross-origin credential delivery, validates enrolled server identity/certificate material, and completes the LAN TLS integration through real enrollment.
-- U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted.
+- U02 provides revisioned account/profile/default-user and collection-grant APIs plus generated-client administration, owner-grant, profile, recovery-code, session, passkey, and paired-device controls. UI affordances use server-computed `EffectivePermissions`; direct service/HTTP authorization remains authoritative. Disabled accounts are preserved rather than deleted. The 2026-09-26 FX-06 browser follow-up supplies direct collection access, bounded grants, signed-out recovery and in-place recent-authentication retry without changing that service policy.
 - Private SQLite advances through explicit migrations and stores a durable default UserId selected once from legacy first-row behavior. First-account creation sets it transactionally; later accounts do not change it.
 - The S01 threat/recovery contract and D01 pinned reuse/fixture map are complete design gates. S02/S03 now implement the credential/recovery/enrollment portions; authenticated TLS rotation remains S04. D02/D03 and D04.1's reader-only game primitives are implemented locally. D04.2–D04.3 now add the DAT adapter, snapshot/match policy and game workflow locally; D04 is reviewed locally. D05.1 is reviewed and corrected locally: authorized frozen BIN/CUE and current raw-redumper packages produce strict signed layouts, exact `i16` stereo 44.1-kHz PCM, published disc IDs where the layout permits them, and bounded cancellation-aware AccurateRip checksum/offset inputs. Mixed mode, synthetic gaps and unsupported/ambiguous sidecars cannot claim whole-disc audio. D05.2 is reviewed and corrected locally: the provider adapter freezes bounded exact dBAR/no-data observations for checked offline replay, and music-owned policy retains explicit per-track v1/v2 coverage while requiring every expected track and a justified unique offset for whole-disc verification. D05.3 is reviewed and corrected locally: music Import analysis, committed structure jobs, shared-verifier AccurateRip jobs, archived snapshots, history and web curation use the existing registry/job/publication paths. Synthetic workflow tests cover outage, retry, cancellation, exact snapshot-byte rejection, no-data, refresh and reindex. D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. Immutable fixed-profile recipes consume music-owned exact track ranges; the optional bounded process adapter validates FLAC by independently decoding every integer PCM frame and inspects Opus delay/padding; single-track outputs publish through the Capture journal and appear through a viewer-safe availability/read contract with strong ETag and Range behavior. Server-owned optional encoder configuration and curation-only explicit preparation leave import and original reads independent of tools. The bounded browser-player child is implemented locally over that shared DTO: album track selection is grouped by Capture/source and prefers a decodable FLAC; the 2026-09-22 shell-owned player keeps a local per-user cross-album queue with play/pause/seek/next/previous/ended transitions and honest codec/access failures. Google Chrome 153.0.8010.37 actually decoded and played generated FLAC; the child is reviewed and corrected locally. `opusenc`, live-provider, owned real-dump, gapless/sample-accurate playback and external mastering/deployment qualification remain unavailable/external.
 - Separate private operational database; collection roles, private field filtering, revisioned accounts/grants, password/passkey recovery, browser-session inventory, and revocable paired native credentials.
@@ -413,9 +413,8 @@ Generated track files remain in the named Music track groups; ineligible derivat
 CD-operation forms are suppressed using scan readiness while evidence stays readable.
 FX-03 [local acceptance passed](validation.md#fx-03-work-and-history--2026-09-21) on 2026-09-21; no external release qualification is claimed.
 
-FX-04 implements focused editing/intake (2026-09-24); FX-05–FX-07 remain
-proposed: manual removal/restore/clean reimport, account recovery and the
-whole-interface review. See the current FX-04 section below for exact scope.
+FX-04 implements focused editing/intake (2026-09-24); FX-05 now implements
+Remove/Restore and clean reimport; its current validation is recorded below. FX-06 access/recovery is locally implemented and accepted; FX-07 whole-interface review remains open. See the current sections below.
 LA3's second-device qualification and broader release gates remain open.
 
 ## Required before the planned first release
@@ -669,7 +668,7 @@ browse/detail/task separation across the interface. See [the fix plan](ux-fix-pl
 The 2026-09-22 selector defects are corrected by FX-04's authorized, bounded
 server search and pagination. General collection results are labelled as search,
 without claiming detected matches. The [growing-list audit](fx04-scale-audit.md)
-records remaining access-list work owned by FX-06 and broader FX-07 checks.
+records the access-list work completed in FX-06 and broader FX-07 checks.
 
 ### Automatic CD provider lookup requirement — 2026-09-22 (historical requirement)
 
@@ -715,3 +714,64 @@ recheck. Catalog snapshots and inbox package selection are paged. The
 [scale audit](fx04-scale-audit.md) records all growing surfaces and scope of later
 access and history work. A temporary-server browser journey passed with 3,000
 entries and 3,000 imports, including selection beyond the former 1,000-entry cap.
+
+### FX-05 Remove/Restore slice — in progress 2026-09-25
+
+The Item archive tombstone now has curator-only Remove and Restore commands with
+revision and idempotency receipts. Ordinary search/browse excludes removed Items;
+an explicit paged Removed entries view can reopen one and restore its same ID.
+Evidence, activity and artwork backing reads require curator access for a
+removed Item, including subject-owned asset routes.
+The archived Item still retains physical inventory, metadata and links to
+originals/evidence. Removed Items reject new guided destination admission and
+item-owned Job admission; the removal boundary stops obsolete queued/running
+work while retaining separately owned scans. Restart reconciliation settles
+private work if interruption falls after tombstone publication. An Import whose
+Capture committed before removal may finish its receipt and Evidence reference
+without rewriting tombstoned inventory. Store tests cover reindex, restart,
+curator/viewer visibility, pending guided work, queued-work cancellation and
+that post-commit recovery boundary; the
+real browser browse journey covers Remove, reload in Removed entries, and Restore.
+
+This is not FX-05 completion. Clean reimport still needs a durable generation
+claim, replacement Capture transition, optional reset choices, retained-byte
+staging/validation, and the full restart/shared-work acceptance matrix.
+
+### FX-05 complete implementation — locally accepted 2026-09-26
+
+Clean reimport now uses the same Item with either its retained original package
+or a browser replacement upload. A review step explains stopped/dismissed old
+work, fresh automatic metadata, and optional manual metadata/artwork resets.
+Manual choices, physical inventory and loans are preserved by default. Reset
+choices take effect at admission; original bytes and observations are retained.
+The prior current Capture remains usable until an archive Item revision switches
+to the completed replacement. Other discs are unchanged. Generation-stamped jobs
+and imports fence obsolete work, including generic retries and stale acquisition
+completion. Independent scan/derivative owners retain shared work.
+
+Retained copying checks actual bytes in cancellable background work, including
+length bounds and final hashing. Failed browser uploads reopen with the existing
+resume controls; retained staging offers Job retry. Archive preparation and private
+admission keep the original command receipt recoverable. Portable lifecycle and
+metadata cutoffs reproduce removal/current associations and explicit authority
+resets after restart/reindex. Already queued historical files remain playable after
+replacement and stop on removal or loss of read access. Reimport details are shown
+only to their owning user, without exposing another curator's private workflow.
+
+The shared guided-import destination editor compares the selected entry with the
+saved association: unchanged attached or unattached destinations explicitly say
+there is nothing to save. The save action appears only for a changed destination;
+loading is distinct from unattached, and polling preserves a destination draft.
+
+Implementation review and acceptance results are recorded in [validation](validation.md).
+FX-06 moves collection access into its own collection-scoped panel, including empty
+and content-read-only collections. Authorized grant search and pagination are
+bounded in the Store; exact target lookup supplies the revision for updates beyond
+the current page. The browser redeems recovery codes into the existing session,
+shows safe one-time copy/download controls, and centrally resumes one pending
+sensitive command after fresh password or passkey authentication while retaining
+the owning draft on cancellation. Review fixes bind grant rows to their loaded
+scope, fence and abort cancelled authentication attempts, and log out any fresh
+replacement session when revoking the current session. Security policy, rate limits, revocation and
+listener exposure remain in their existing server owners. Local validation is in
+[validation](validation.md). FX-07 and the separate LA3 second-device qualification remain open.

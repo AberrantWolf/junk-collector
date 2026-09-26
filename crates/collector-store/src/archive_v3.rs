@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ItemRecordV3 {
+    #[serde(default)]
+    pub lifecycle: ItemLifecycle,
     pub id: ItemId,
     pub collection_id: CollectionId,
     pub revision: Revision,
@@ -26,6 +28,7 @@ pub(crate) struct ItemRecordV3 {
 impl From<&Item> for ItemRecordV3 {
     fn from(item: &Item) -> Self {
         Self {
+            lifecycle: item.lifecycle.clone(),
             id: item.id,
             collection_id: item.collection_id,
             revision: item.revision,
@@ -48,6 +51,7 @@ impl From<&Item> for ItemRecordV3 {
 impl ItemRecordV3 {
     pub(crate) fn into_item(self, captures: Vec<Capture>, assets: Vec<Asset>) -> Item {
         Item {
+            lifecycle: self.lifecycle,
             id: self.id,
             collection_id: self.collection_id,
             revision: self.revision,
@@ -209,6 +213,7 @@ mod tests {
 
     fn item() -> Item {
         Item {
+            lifecycle: Default::default(),
             id: ItemId::new(),
             collection_id: CollectionId::new(),
             revision: Revision(4),
@@ -245,8 +250,15 @@ mod tests {
         let item = item();
         let bytes = serde_json::to_vec(&ItemRecordV3::from(&item)).unwrap();
         let text = String::from_utf8(bytes).unwrap();
-        assert!(!text.contains("captures"));
-        assert!(!text.contains("assets"));
+        let document: serde_json::Value = serde_json::from_str(&text).unwrap();
+        // Portable lifecycle references now include historical Capture IDs;
+        // the prohibition is against embedding the compatibility projections.
+        assert!(document.get("captures").is_none());
+        assert!(document.get("assets").is_none());
+        assert_eq!(
+            document["lifecycle"]["historical_captures"],
+            serde_json::json!([])
+        );
         assert!(text.contains(r#""z":1e+02,"a":null"#));
         let restored = ItemRecordV3::from(&item).into_item(item.captures.clone(), vec![]);
         assert_eq!(restored.captures[0].id, item.captures[0].id);

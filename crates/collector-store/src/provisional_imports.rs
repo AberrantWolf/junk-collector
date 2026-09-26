@@ -318,8 +318,33 @@ const SELECT: &str = "SELECT id,user_id,revision,collection_id,source_kind,sourc
 
 fn insert_import(tx: &rusqlite::Transaction<'_>, record: &ImportRecord) -> Result<()> {
     validate(record)?;
+    if let Some(item_id) = record.view.association.item_id {
+        let current: Option<(String, u64, bool)> = tx
+            .query_row(
+                "SELECT collection_id,revision,deleted FROM items WHERE id=?",
+                [item_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(storage)?;
+        let Some((collection_id, revision, deleted)) = current else {
+            return Err(Error::NotFound);
+        };
+        if deleted
+            || collection_id != record.view.collection_id.to_string()
+            || record
+                .view
+                .expected_item_revision
+                .is_some_and(|expected| expected.0 != revision)
+        {
+            return Err(Error::Conflict);
+        }
+    }
     if record.view.revision != 1 {
         return Err(Error::Invalid("a new Import starts at revision 1".into()));
+    }
+    if let Some(item) = record.view.association.item_id {
+        tx.execute("INSERT OR IGNORE INTO private.item_import_generations(import_id,generation) SELECT ?1,COALESCE(json_extract(record,'$.lifecycle.generation'),0) FROM items WHERE id=?2",params![record.view.id.to_string(),item.to_string()]).map_err(storage)?;
     }
     let files = stored_json(&record.view.files, 16 * 1024 * 1024, "files")?;
     let candidates = stored_json(&record.view.candidates, 1024 * 1024, "candidates")?;
@@ -441,103 +466,18 @@ impl ProvisionalImportPort for Store {
         offset: u64,
         bytes: &[u8],
     ) -> Result<ImportRecord> {
-        if bytes.len() > IMPORT_CHUNK_LIMIT {
-            return Err(Error::Invalid("chunk exceeds 8 MiB".into()));
-        }
-        let _guard = lock(&self.uploads)?;
-        self.ensure_import_not_clearing(id)?;
-        let mut record = self.import_record(id)?;
-        if record.view.phase == ImportPhase::Cancelled {
-            return Err(Error::Conflict);
-        }
-        let declared = record.view.files.get(index).ok_or(Error::NotFound)?;
-        let end = offset
-            .checked_add(bytes.len() as u64)
-            .ok_or_else(|| Error::Invalid("offset overflow".into()))?;
-        if offset > declared.received_bytes.0 || end > declared.bytes.0 {
-            return Err(Error::Conflict);
-        }
-        let directory = self.state.join("imports").join(id.to_string());
-        // A lost response may be retried after staging has completed. Verify
-        // durable bytes read-only; later phases must never mutate the source.
-        if record.view.phase != ImportPhase::Staging {
-            if end > declared.received_bytes.0 {
-                return Err(Error::Conflict);
-            }
-            let mut file = File::open(directory.join(format!("{index}.part"))).map_err(storage)?;
-            let mut previous = vec![0; bytes.len()];
-            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
-            file.read_exact(&mut previous).map_err(storage)?;
-            return if previous == bytes {
-                Ok(record)
-            } else {
-                Err(Error::Conflict)
-            };
-        }
-        fs::create_dir_all(&directory).map_err(storage)?;
-        let path = directory.join(format!("{index}.part"));
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .map_err(storage)?;
-        let mut current = file.metadata().map_err(storage)?.len();
-        if current < offset {
-            return Err(Error::Storage(
-                "Import scratch is shorter than its durable offset".into(),
-            ));
-        }
-        if current > declared.received_bytes.0 {
-            file.set_len(declared.received_bytes.0).map_err(storage)?;
-            file.sync_all().map_err(storage)?;
-            current = declared.received_bytes.0;
-        }
-        if current > offset {
-            if end > current || end > declared.received_bytes.0 {
-                return Err(Error::Conflict);
-            }
-            let mut previous = vec![0; bytes.len()];
-            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
-            file.read_exact(&mut previous).map_err(storage)?;
-            if previous != bytes {
-                return Err(Error::Conflict);
-            }
-            return Ok(record);
-        } else {
-            file.seek(SeekFrom::End(0)).map_err(storage)?;
-            file.write_all(bytes).map_err(storage)?;
-            file.sync_all().map_err(storage)?;
-        }
-        let length = file.metadata().map_err(storage)?.len();
-        let entry = &mut record.view.files[index];
-        entry.received_bytes = ByteLength(length);
-        if length == entry.bytes.0 {
-            let (_, observed) = crate::files::hash_file(&path)?;
-            if entry
-                .digest
-                .as_ref()
-                .is_some_and(|expected| *expected != observed)
-            {
-                return Err(Error::Invalid(
-                    "staged file does not match its declared digest".into(),
-                ));
-            }
-            entry.digest = Some(observed);
-        }
-        if record
-            .view
-            .files
-            .iter()
-            .all(|file| file.received_bytes == file.bytes && file.digest.is_some())
-        {
-            record.view.phase = ImportPhase::Analyzing;
-        }
-        let revision = record.view.revision;
-        self.save_import(record, revision)
+        self.stage_import_chunk_checked(id, index, offset, bytes, &mut || Ok(()))
     }
 
+    fn stage_retained_import(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+        representation: RepresentationId,
+    ) -> Result<ImportRecord> {
+        self.copy_retained_import(id, job, claim_token, representation)
+    }
     fn stage_inbox_import(
         &self,
         id: ImportId,
@@ -678,13 +618,19 @@ impl ProvisionalImportPort for Store {
 
     fn accept_guided_imports(
         &self,
-        records: Vec<ImportRecord>,
+        mut records: Vec<ImportRecord>,
         intents: Vec<GuidedIngestIntent>,
     ) -> Result<Vec<collector_app::ImportView>> {
         if records.is_empty() || records.len() != intents.len() || records.len() > 64 {
             return Err(Error::Invalid(
                 "guided acceptance requires 1..=64 paired packages".into(),
             ));
+        }
+        let _writer = lock(&self.writer)?;
+        for (record, intent) in records.iter_mut().zip(&intents) {
+            if intent.clean_reimport.is_some() {
+                self.begin_clean_reimport(record, intent)?;
+            }
         }
         let mut db = lock(&self.db)?;
         let tx = db
@@ -701,6 +647,14 @@ impl ProvisionalImportPort for Store {
                 return Err(Error::Invalid(
                     "guided intent disagrees with its Import".into(),
                 ));
+            }
+            if intent.clean_reimport.is_some() {
+                Self::stop_item_work_in_tx(
+                    &tx,
+                    intent.target_item_id,
+                    self.clock.now().timestamp(),
+                )?;
+                Self::archive_old_item_work(&tx, intent.target_item_id, record.view.id)?;
             }
             if !intent.created_item {
                 let Some(expected) = record.view.expected_item_revision else {
@@ -739,8 +693,8 @@ impl ProvisionalImportPort for Store {
             }
             insert_import(&tx, record)?;
             tx.execute(
-                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
-                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
+                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,clean_reimport,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
+                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),intent.clean_reimport.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
             )
             .map_err(storage)?;
             views.push(record.view.clone());
@@ -753,9 +707,9 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?)),
             )
             .optional()
             .map_err(storage)?
@@ -765,6 +719,7 @@ impl ProvisionalImportPort for Store {
                     user_id: row.0.parse().map_err(storage)?,
                     plan_token: row.1,
                     target_item_id: row.2.parse().map_err(storage)?,
+                    clean_reimport: row.16.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
                     created_item: row.14,
                     analysis: parse_analysis(&row.15)?,
                     default_title: row.3,
@@ -862,6 +817,9 @@ impl ProvisionalImportPort for Store {
     }
     fn reconcile_guided_cleanup(&self) -> Result<()> {
         self.reconcile_import_cleanup()
+    }
+    fn reconcile_removed_item_work(&self) -> Result<()> {
+        Store::reconcile_removed_item_work(self)
     }
 
     fn guided_cleanup_status(&self, id: ImportId) -> Result<Option<IngestDiscardResult>> {
@@ -1086,7 +1044,7 @@ impl ProvisionalImportPort for Store {
 
 impl Store {
     fn ensure_import_not_clearing(&self, id: ImportId) -> Result<()> {
-        let blocked:bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.work_history WHERE target='import:'||? AND (pending=1 OR archived=1))",[id.to_string()],|r|r.get(0)).map_err(storage)?;
+        let blocked:bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.work_history WHERE target='import:'||?1 AND (pending=1 OR archived=1)) OR EXISTS(SELECT 1 FROM private.imports p JOIN items i ON i.id=p.item_id WHERE p.id=?1 AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_import_generations g WHERE g.import_id=p.id),0))",[id.to_string()],|r|r.get(0)).map_err(storage)?;
         if blocked {
             Err(Error::Conflict)
         } else {
@@ -1213,11 +1171,23 @@ impl Store {
             Err(Error::NotFound) => None,
             Err(error) => return Err(error),
         };
+        if committed_capture.is_none()
+            && let Some(item_id) = record.view.association.item_id
+            && self.item(item_id)?.deleted
+        {
+            return Err(Error::Conflict);
+        }
         if let (Some(item_id), Some(expected)) = (
             record.view.association.item_id,
             record.view.expected_item_revision,
         ) && committed_capture.is_none()
             && self.item(item_id)?.revision != expected
+            && !self
+                .item(item_id)?
+                .lifecycle
+                .reimport
+                .as_ref()
+                .is_some_and(|pending| pending.import_id == id && !pending.completed)
         {
             if record.view.phase != ImportPhase::AwaitingReview {
                 record.view.phase = ImportPhase::AwaitingReview;
@@ -1495,17 +1465,130 @@ impl Store {
             if !already_referenced {
                 let item = self.item(item_id)?;
                 let revision = item.revision;
-                self.publish_under_writer(item, revision, vec![])
-                    .map_err(|error| {
-                        Error::Storage(format!(
-                            "Import Evidence Item reference publication failed: {error}"
-                        ))
-                    })?;
+                let result = if item.deleted {
+                    self.publish_committed_import_reference_under_writer(item, revision)
+                } else {
+                    self.publish_under_writer(item, revision, vec![])
+                };
+                result.map_err(|error| {
+                    Error::Storage(format!(
+                        "Import Evidence Item reference publication failed: {error}"
+                    ))
+                })?;
             }
         }
+        self.finish_clean_reimport_under_writer(id)?;
         record = self.import_record(id)?;
         record.view.phase = ImportPhase::Published;
         let revision = record.view.revision;
+        self.save_import(record, revision)
+    }
+}
+
+impl Store {
+    pub(crate) fn stage_import_chunk_checked(
+        &self,
+        id: ImportId,
+        index: usize,
+        offset: u64,
+        bytes: &[u8],
+        checkpoint: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<ImportRecord> {
+        if bytes.len() > IMPORT_CHUNK_LIMIT {
+            return Err(Error::Invalid("chunk exceeds 8 MiB".into()));
+        }
+        let _guard = lock(&self.uploads)?;
+        self.ensure_import_not_clearing(id)?;
+        let mut record = self.import_record(id)?;
+        if record.view.phase == ImportPhase::Cancelled {
+            return Err(Error::Conflict);
+        }
+        let declared = record.view.files.get(index).ok_or(Error::NotFound)?;
+        let end = offset
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| Error::Invalid("offset overflow".into()))?;
+        if offset > declared.received_bytes.0 || end > declared.bytes.0 {
+            return Err(Error::Conflict);
+        }
+        let directory = self.state.join("imports").join(id.to_string());
+        // A lost response may be retried after staging has completed. Verify
+        // durable bytes read-only; later phases must never mutate the source.
+        if record.view.phase != ImportPhase::Staging {
+            if end > declared.received_bytes.0 {
+                return Err(Error::Conflict);
+            }
+            let mut file = File::open(directory.join(format!("{index}.part"))).map_err(storage)?;
+            let mut previous = vec![0; bytes.len()];
+            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
+            file.read_exact(&mut previous).map_err(storage)?;
+            return if previous == bytes {
+                Ok(record)
+            } else {
+                Err(Error::Conflict)
+            };
+        }
+        fs::create_dir_all(&directory).map_err(storage)?;
+        let path = directory.join(format!("{index}.part"));
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(storage)?;
+        let mut current = file.metadata().map_err(storage)?.len();
+        if current < offset {
+            return Err(Error::Storage(
+                "Import scratch is shorter than its durable offset".into(),
+            ));
+        }
+        if current > declared.received_bytes.0 {
+            file.set_len(declared.received_bytes.0).map_err(storage)?;
+            file.sync_all().map_err(storage)?;
+            current = declared.received_bytes.0;
+        }
+        if current > offset {
+            if end > current || end > declared.received_bytes.0 {
+                return Err(Error::Conflict);
+            }
+            let mut previous = vec![0; bytes.len()];
+            file.seek(SeekFrom::Start(offset)).map_err(storage)?;
+            file.read_exact(&mut previous).map_err(storage)?;
+            if previous != bytes {
+                return Err(Error::Conflict);
+            }
+            return Ok(record);
+        } else {
+            file.seek(SeekFrom::End(0)).map_err(storage)?;
+            file.write_all(bytes).map_err(storage)?;
+            file.sync_all().map_err(storage)?;
+        }
+        let length = file.metadata().map_err(storage)?.len();
+        let entry = &mut record.view.files[index];
+        entry.received_bytes = ByteLength(length);
+        if length == entry.bytes.0 {
+            let (_, observed) = crate::files::hash_file_checked(&path, entry.bytes.0, checkpoint)?;
+            if entry
+                .digest
+                .as_ref()
+                .is_some_and(|expected| *expected != observed)
+            {
+                return Err(Error::Invalid(
+                    "staged file does not match its declared digest".into(),
+                ));
+            }
+            entry.digest = Some(observed);
+        }
+        if record
+            .view
+            .files
+            .iter()
+            .all(|file| file.received_bytes == file.bytes && file.digest.is_some())
+        {
+            record.view.phase = ImportPhase::Analyzing;
+        }
+        let revision = record.view.revision;
+        checkpoint()?;
         self.save_import(record, revision)
     }
 }

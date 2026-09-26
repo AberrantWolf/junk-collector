@@ -21,12 +21,25 @@ pub(crate) fn safe_name(name: &str) -> Result<()> {
     Ok(())
 }
 pub(crate) fn hash_file(path: &Path) -> Result<(ByteLength, Digest)> {
+    hash_file_checked(path, u64::MAX, &mut || Ok(()))
+}
+pub(crate) fn hash_file_checked(
+    path: &Path,
+    maximum: u64,
+    checkpoint: &mut dyn FnMut() -> Result<()>,
+) -> Result<(ByteLength, Digest)> {
     let mut file = File::open(path).map_err(storage)?;
     let mut hash = Sha256::new();
     let mut bytes = 0u64;
     let mut buffer = vec![0u8; 1024 * 1024];
     loop {
+        checkpoint()?;
         let read = file.read(&mut buffer).map_err(storage)?;
+        if bytes.saturating_add(read as u64) > maximum {
+            return Err(Error::Invalid(
+                "staged file exceeds its declared length".into(),
+            ));
+        }
         if read == 0 {
             break;
         }
@@ -157,6 +170,14 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         let now = Utc::now().timestamp();
+        tx.execute(
+            "INSERT INTO private.item_job_generations(job_id,generation)
+             SELECT ?1,COALESCE(json_extract(record,'$.lifecycle.generation'),0)
+             FROM items WHERE id=?2 AND NOT EXISTS(SELECT 1 FROM private.jobs WHERE id=?1)
+             ON CONFLICT(job_id) DO NOTHING",
+            params![job.id.to_string(), job.item_id.to_string()],
+        )
+        .map_err(storage)?;
         tx.execute(
             "INSERT INTO private.jobs(
               id,user_id,collection_id,item_id,kind,state,phase,
@@ -364,6 +385,15 @@ impl Store {
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(storage)?;
+        let obsolete: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN items i ON i.id=j.item_id
+             WHERE j.id=? AND (i.deleted=1 OR COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)
+             <>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=j.id),0)))",
+            [id.to_string()], |row| row.get(0),
+        ).map_err(storage)?;
+        if obsolete {
+            return Err(Error::Conflict);
+        }
         let (state, phase, claim_token, prior_result, error, attempt, failed_at): (
             String,
             String,
@@ -944,8 +974,23 @@ impl Store {
         if item.deleted {
             return Err(Error::NotFound);
         }
-        let capture = item
-            .captures
+        // Historical files remain addressable for existing queues and provenance.
+        // Recheck the live association: moving a capture must revoke the old URL.
+        let mut captures = item.captures.clone();
+        for id in &item.lifecycle.historical_captures {
+            let capture = match self.capture(*id) {
+                Ok(capture) => capture,
+                // A superseded replacement may have stopped before publishing.
+                Err(Error::NotFound) => continue,
+                Err(error) => return Err(error),
+            };
+            if capture.collection_id == item.collection_id
+                && capture.association.item_id == Some(item.id)
+            {
+                captures.push(capture);
+            }
+        }
+        let capture = captures
             .iter()
             .find(|capture| {
                 capture
@@ -1033,9 +1078,6 @@ impl Store {
 
     pub(crate) fn asset_states_for_item_record(&self, item_id: ItemId) -> Result<Vec<AssetState>> {
         let item = self.item(item_id)?;
-        if item.deleted {
-            return Err(Error::NotFound);
-        }
         let inherited_work = match item.identity_link {
             ItemIdentityLink::Work { work_id } => Some(work_id),
             ItemIdentityLink::Edition { edition_id } => self.edition(edition_id)?.work_id,
@@ -1076,23 +1118,46 @@ impl Store {
             AssetSubject::Work { work_id } => Ok(self.work(work_id)?.collection_id),
             AssetSubject::Edition { edition_id } => Ok(self.edition(edition_id)?.collection_id),
             AssetSubject::Capture { capture_id } => Ok(self.capture(capture_id)?.collection_id),
-            AssetSubject::Specimen { specimen_id } => self.subject_owner(|item| {
-                item.specimens
-                    .iter()
-                    .any(|specimen| specimen.id == specimen_id)
-            }),
-            AssetSubject::Component { component_id } => self.subject_owner(|item| {
-                item.specimens.iter().any(|specimen| {
-                    specimen
-                        .components
-                        .iter()
-                        .any(|component| component.id == component_id)
-                })
-            }),
+            AssetSubject::Specimen { .. } | AssetSubject::Component { .. } => {
+                let id = self
+                    .asset_subject_item_record(subject)?
+                    .ok_or(Error::NotFound)?;
+                Ok(self.item(id)?.collection_id)
+            }
         }
     }
 
-    fn subject_owner(&self, matches: impl Fn(&Item) -> bool) -> Result<CollectionId> {
+    pub(crate) fn asset_subject_item_record(
+        &self,
+        subject: AssetSubject,
+    ) -> Result<Option<ItemId>> {
+        match subject {
+            AssetSubject::Item { item_id } => Ok(Some(item_id)),
+            AssetSubject::Capture { capture_id } => {
+                Ok(self.capture(capture_id)?.association.item_id)
+            }
+            AssetSubject::Specimen { specimen_id } => self
+                .subject_owner(|item| {
+                    item.specimens
+                        .iter()
+                        .any(|specimen| specimen.id == specimen_id)
+                })
+                .map(|(id, _)| Some(id)),
+            AssetSubject::Component { component_id } => self
+                .subject_owner(|item| {
+                    item.specimens.iter().any(|specimen| {
+                        specimen
+                            .components
+                            .iter()
+                            .any(|component| component.id == component_id)
+                    })
+                })
+                .map(|(id, _)| Some(id)),
+            AssetSubject::Work { .. } | AssetSubject::Edition { .. } => Ok(None),
+        }
+    }
+
+    fn subject_owner(&self, matches: impl Fn(&Item) -> bool) -> Result<(ItemId, CollectionId)> {
         let db = lock(&self.db)?;
         let mut statement = db.prepare("SELECT record FROM items").map_err(storage)?;
         let rows = statement
@@ -1101,7 +1166,7 @@ impl Store {
         let mut owner = None;
         for row in rows {
             let item: Item = serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
-            if matches(&item) && owner.replace(item.collection_id).is_some() {
+            if matches(&item) && owner.replace((item.id, item.collection_id)).is_some() {
                 return Err(Error::Storage(
                     "asset subject identity has more than one owner".into(),
                 ));
@@ -1115,6 +1180,7 @@ impl Store {
         asset_id: AssetId,
         command: CreateAssetCommand,
         bytes: &[u8],
+        expected_generation: Option<u64>,
     ) -> Result<AssetState> {
         let CreateAssetCommand {
             collection_id,
@@ -1157,6 +1223,15 @@ impl Store {
         let thumbnail = thumbnail.into_inner();
 
         let _writer = lock(&self.writer)?;
+        if let Some(expected) = expected_generation {
+            let item_id = self
+                .asset_subject_item_record(subject)?
+                .ok_or(Error::Conflict)?;
+            let item = self.item(item_id)?;
+            if item.deleted || item.lifecycle.generation != expected {
+                return Err(Error::Conflict);
+            }
+        }
         if self.asset_subject_collection_record(subject)? != collection_id {
             return Err(Error::Invalid(
                 "asset subject is outside the selected collection".into(),
@@ -1604,5 +1679,31 @@ impl Store {
         walk(source, source, &mut files, 0)?;
         files.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(files)
+    }
+}
+
+#[cfg(test)]
+mod retained_hash_tests {
+    use super::*;
+    #[test]
+    fn staged_hash_checks_cancellation_and_declared_size_during_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("payload");
+        fs::write(&path, vec![0u8; 3 * 1024 * 1024]).unwrap();
+        let mut checkpoints = 0;
+        let result = hash_file_checked(&path, 3 * 1024 * 1024, &mut || {
+            checkpoints += 1;
+            if checkpoints == 2 {
+                Err(Error::JobCancelled)
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(result, Err(Error::JobCancelled)));
+        assert_eq!(checkpoints, 2);
+        assert!(matches!(
+            hash_file_checked(&path, 1024, &mut || Ok(())),
+            Err(Error::Invalid(_))
+        ));
     }
 }

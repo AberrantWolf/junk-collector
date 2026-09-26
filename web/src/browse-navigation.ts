@@ -4,7 +4,7 @@ import type {operations} from './generated/api';
 type BrowseQuery=NonNullable<operations['browse']['parameters']['query']>;
 export type BrowseLocation={collection:string;search:string;sort:NonNullable<BrowseQuery['sort']>;filter:NonNullable<BrowseQuery['filter']>;item:string};
 const sorts=['title','recently_added','artist','platform'];
-const filters=['all','wishlist','files_attached','playable','needs_attention'];
+const filters=['all','wishlist','files_attached','playable','needs_attention','removed'];
 export function readLocation():BrowseLocation{
  const q=new URLSearchParams(location.search);
  return {collection:q.get('collection')||'',search:q.get('search')||'',sort:(sorts.includes(q.get('sort')||'')?q.get('sort'):'title') as BrowseLocation['sort'],filter:(filters.includes(q.get('filter')||'')?q.get('filter'):'all') as BrowseLocation['filter'],item:q.get('item')||''};

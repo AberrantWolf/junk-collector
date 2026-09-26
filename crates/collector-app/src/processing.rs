@@ -599,6 +599,11 @@ impl MetadataAuthorityRecord {
 /// Mechanism-only persistence and package access. Authorization and currency
 /// policy remain in CollectionService.
 pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
+    fn ensure_snapshot_current(
+        &self,
+        item: collector_core::ItemId,
+        snapshot: SnapshotId,
+    ) -> Result<()>;
     fn conversion_scratch(&self) -> Result<Box<dyn crate::ConversionScratch>>;
     fn derivative_committed(&self, frozen: &crate::FrozenDerivativeJob) -> Result<bool>;
     fn publish_derivative(

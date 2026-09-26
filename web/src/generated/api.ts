@@ -539,7 +539,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["get_collection_grant"];
         put: operations["set_collection_grant"];
         post?: never;
         delete: operations["remove_collection_grant"];
@@ -1124,6 +1124,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["remove_item"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/representations/{representation}/{index}": {
         parameters: {
             query?: never;
@@ -1134,6 +1150,22 @@ export interface paths {
         get: operations["media"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_item"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1880,6 +1912,13 @@ export interface components {
             id: string;
             system: string;
         };
+        CleanReimportOptions: {
+            expected_metadata_revision: components["schemas"]["Revision"];
+            replace_captures: components["schemas"]["CaptureId"][];
+            reset_artwork: boolean;
+            reset_metadata: boolean;
+            retained_representation?: null | components["schemas"]["RepresentationId"];
+        };
         Collection: {
             /**
              * @description Absent in pre-CT.2 creation manifests. Deserialization classifies those
@@ -2247,6 +2286,7 @@ export interface components {
             can_cancel: boolean;
             can_correct_association: boolean;
             can_discard: boolean;
+            can_resume_upload: boolean;
         };
         IngestPlan: {
             collection_id: components["schemas"]["CollectionId"];
@@ -2311,6 +2351,7 @@ export interface components {
             identifiers: components["schemas"]["ProviderIdentity"][];
             identity: components["schemas"]["IdentityState"];
             identity_link: components["schemas"]["ItemIdentityLink"];
+            lifecycle?: components["schemas"]["ItemLifecycle"];
             metadata: components["schemas"]["MetadataState"];
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["Specimen"][];
@@ -2334,6 +2375,28 @@ export interface components {
             edition_id: components["schemas"]["EditionId"];
             /** @enum {string} */
             kind: "edition";
+        };
+        /** @description Archive-owned current workflow and capture selection. Historical captures stay addressable. */
+        ItemLifecycle: {
+            /** Format: int64 */
+            automatic_metadata_through: number;
+            /** Format: int64 */
+            generation: number;
+            historical_captures: components["schemas"]["CaptureId"][];
+            reimport?: null | components["schemas"]["ItemReimport"];
+            /** Format: int64 */
+            reset_artwork_through: number;
+            /** Format: int64 */
+            reset_fields_through: number;
+        };
+        ItemLifecycleCommand: {
+            expected_revision: components["schemas"]["Revision"];
+        };
+        ItemReimport: {
+            capture_id: components["schemas"]["CaptureId"];
+            completed: boolean;
+            import_id: components["schemas"]["ImportId"];
+            replaced_captures: components["schemas"]["CaptureId"][];
         };
         JobAccepted: {
             job_id: components["schemas"]["JobId"];
@@ -2771,6 +2834,16 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_GrantView: {
+            items: {
+                collection_id: components["schemas"]["CollectionId"];
+                revision: components["schemas"]["Revision"];
+                role: components["schemas"]["Role"];
+                user_id: components["schemas"]["UserId"];
+                username: string;
+            }[];
+            next_cursor?: string | null;
+        };
         Page_IngestSummary: {
             items: {
                 capture_id: components["schemas"]["CaptureId"];
@@ -2836,6 +2909,7 @@ export interface components {
                 inventory_title?: string | null;
                 presentation: components["schemas"]["ModulePresentation"];
                 primary_artwork?: null | components["schemas"]["AssetId"];
+                reimport_import_id?: null | components["schemas"]["ImportId"];
                 revision: components["schemas"]["Revision"];
                 specimens: components["schemas"]["PresentedSpecimen"][];
                 subtitle: string;
@@ -2844,6 +2918,8 @@ export interface components {
                 /** Format: date-time */
                 updated_at: string;
                 wishlist: boolean;
+                /** Format: int64 */
+                workflow_generation: number;
             }[];
             next_cursor?: string | null;
         };
@@ -3020,6 +3096,7 @@ export interface components {
             inventory_title?: string | null;
             presentation: components["schemas"]["ModulePresentation"];
             primary_artwork?: null | components["schemas"]["AssetId"];
+            reimport_import_id?: null | components["schemas"]["ImportId"];
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["PresentedSpecimen"][];
             subtitle: string;
@@ -3028,6 +3105,8 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             wishlist: boolean;
+            /** Format: int64 */
+            workflow_generation: number;
         };
         PresentedModuleData: {
             module: components["schemas"]["ModuleId"];
@@ -3254,6 +3333,7 @@ export interface components {
         };
         StartIngestCommand: {
             analysis?: components["schemas"]["IngestAnalysisPolicy"];
+            clean_reimport?: null | components["schemas"]["CleanReimportOptions"];
             destination?: null | components["schemas"]["IngestDestination"];
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
             plan: components["schemas"]["IngestPlan"];
@@ -4711,6 +4791,9 @@ export interface operations {
             header?: never;
             path: {
                 id: components["schemas"]["CollectionId"];
+                search: string | null;
+                cursor: string | null;
+                limit: number | null;
             };
             cookie?: never;
         };
@@ -4721,7 +4804,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GrantView"][];
+                    "application/json": components["schemas"]["Page_GrantView"];
                 };
             };
             401: {
@@ -4731,6 +4814,46 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_collection_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": null | components["schemas"]["GrantView"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5713,7 +5836,7 @@ export interface operations {
         parameters: {
             query?: {
                 sort?: "title" | "recently_added" | "artist" | "platform";
-                filter?: "all" | "wishlist" | "files_attached" | "playable" | "needs_attention";
+                filter?: "all" | "wishlist" | "files_attached" | "playable" | "needs_attention" | "removed";
                 collection_id?: components["schemas"]["CollectionId"];
                 search?: string;
                 cursor?: string;
@@ -6397,6 +6520,51 @@ export interface operations {
             };
         };
     };
+    remove_item: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemLifecycleCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     media: {
         parameters: {
             query?: never;
@@ -6439,6 +6607,51 @@ export interface operations {
                 content?: never;
             };
             416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    restore_item: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemLifecycleCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedItem"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

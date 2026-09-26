@@ -1497,6 +1497,41 @@
             "schema": {
               "$ref": "#/components/schemas/CollectionId"
             }
+          },
+          {
+            "name": "search",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -1505,10 +1540,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/GrantView"
-                  }
+                  "$ref": "#/components/schemas/Page_GrantView"
                 }
               }
             }
@@ -1523,6 +1555,55 @@
       }
     },
     "/api/v1/collections/{id}/grants/{username}": {
+      "get": {
+        "operationId": "get_collection_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GrantView"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      },
       "put": {
         "operationId": "set_collection_grant",
         "parameters": [
@@ -2687,7 +2768,8 @@
                 "wishlist",
                 "files_attached",
                 "playable",
-                "needs_attention"
+                "needs_attention",
+                "removed"
               ]
             }
           },
@@ -3499,6 +3581,61 @@
         }
       }
     },
+    "/api/v1/items/{id}/remove": {
+      "post": {
+        "operationId": "remove_item",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemLifecycleCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/representations/{representation}/{index}": {
       "get": {
         "operationId": "media",
@@ -3549,6 +3686,61 @@
             "description": ""
           },
           "416": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/restore": {
+      "post": {
+        "operationId": "restore_item",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemLifecycleCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
             "description": ""
           }
         }
@@ -6151,6 +6343,43 @@
           }
         }
       },
+      "CleanReimportOptions": {
+        "type": "object",
+        "required": [
+          "replace_captures",
+          "reset_metadata",
+          "reset_artwork",
+          "expected_metadata_revision"
+        ],
+        "properties": {
+          "expected_metadata_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "replace_captures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          "reset_artwork": {
+            "type": "boolean"
+          },
+          "reset_metadata": {
+            "type": "boolean"
+          },
+          "retained_representation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepresentationId"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "Collection": {
         "type": "object",
         "required": [
@@ -7582,6 +7811,7 @@
       "IngestPermissions": {
         "type": "object",
         "required": [
+          "can_resume_upload",
           "can_cancel",
           "can_discard",
           "can_correct_association"
@@ -7594,6 +7824,9 @@
             "type": "boolean"
           },
           "can_discard": {
+            "type": "boolean"
+          },
+          "can_resume_upload": {
             "type": "boolean"
           }
         }
@@ -7892,6 +8125,9 @@
           "identity_link": {
             "$ref": "#/components/schemas/ItemIdentityLink"
           },
+          "lifecycle": {
+            "$ref": "#/components/schemas/ItemLifecycle"
+          },
           "metadata": {
             "$ref": "#/components/schemas/MetadataState"
           },
@@ -7982,6 +8218,93 @@
             }
           }
         ]
+      },
+      "ItemLifecycle": {
+        "type": "object",
+        "description": "Archive-owned current workflow and capture selection. Historical captures stay addressable.",
+        "required": [
+          "generation",
+          "historical_captures",
+          "automatic_metadata_through",
+          "reset_fields_through",
+          "reset_artwork_through"
+        ],
+        "properties": {
+          "automatic_metadata_through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "historical_captures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          "reimport": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemReimport"
+              }
+            ]
+          },
+          "reset_artwork_through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "reset_fields_through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ItemLifecycleCommand": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ItemReimport": {
+        "type": "object",
+        "required": [
+          "import_id",
+          "capture_id",
+          "replaced_captures",
+          "completed"
+        ],
+        "properties": {
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "import_id": {
+            "$ref": "#/components/schemas/ImportId"
+          },
+          "replaced_captures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          }
+        }
       },
       "JobAccepted": {
         "type": "object",
@@ -9750,6 +10073,50 @@
           }
         }
       },
+      "Page_GrantView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "collection_id",
+                "user_id",
+                "username",
+                "role",
+                "revision"
+              ],
+              "properties": {
+                "collection_id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision"
+                },
+                "role": {
+                  "$ref": "#/components/schemas/Role"
+                },
+                "user_id": {
+                  "$ref": "#/components/schemas/UserId"
+                },
+                "username": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_IngestSummary": {
         "type": "object",
         "required": [
@@ -9975,6 +10342,7 @@
               "type": "object",
               "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
               "required": [
+                "workflow_generation",
                 "id",
                 "collection_id",
                 "revision",
@@ -10067,6 +10435,16 @@
                     }
                   ]
                 },
+                "reimport_import_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImportId"
+                    }
+                  ]
+                },
                 "revision": {
                   "$ref": "#/components/schemas/Revision"
                 },
@@ -10094,6 +10472,11 @@
                 },
                 "wishlist": {
                   "type": "boolean"
+                },
+                "workflow_generation": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
                 }
               }
             }
@@ -10757,6 +11140,7 @@
         "type": "object",
         "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
         "required": [
+          "workflow_generation",
           "id",
           "collection_id",
           "revision",
@@ -10849,6 +11233,16 @@
               }
             ]
           },
+          "reimport_import_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImportId"
+              }
+            ]
+          },
           "revision": {
             "$ref": "#/components/schemas/Revision"
           },
@@ -10876,6 +11270,11 @@
           },
           "wishlist": {
             "type": "boolean"
+          },
+          "workflow_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -11836,6 +12235,16 @@
         "properties": {
           "analysis": {
             "$ref": "#/components/schemas/IngestAnalysisPolicy"
+          },
+          "clean_reimport": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CleanReimportOptions"
+              }
+            ]
           },
           "destination": {
             "oneOf": [

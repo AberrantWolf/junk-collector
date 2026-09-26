@@ -532,8 +532,28 @@ pub enum ItemIdentityLink {
     Edition { edition_id: EditionId },
 }
 
+/// Archive-owned current workflow and capture selection. Historical captures stay addressable.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ItemLifecycle {
+    pub generation: u64,
+    pub historical_captures: Vec<CaptureId>,
+    pub reimport: Option<ItemReimport>,
+    pub automatic_metadata_through: u64,
+    pub reset_fields_through: u64,
+    pub reset_artwork_through: u64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ItemReimport {
+    pub import_id: ImportId,
+    pub capture_id: CaptureId,
+    pub replaced_captures: Vec<CaptureId>,
+    pub completed: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Item {
+    #[serde(default)]
+    pub lifecycle: ItemLifecycle,
     pub id: ItemId,
     pub collection_id: CollectionId,
     pub revision: Revision,
@@ -1373,6 +1393,7 @@ pub enum BrowseFilter {
     FilesAttached,
     Playable,
     NeedsAttention,
+    Removed,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BrowseQuery {
@@ -1494,6 +1515,7 @@ mod tests {
             migration_provenance: None,
         };
         let item = Item {
+            lifecycle: Default::default(),
             id: item_id,
             collection_id: collection,
             revision: Revision(1),

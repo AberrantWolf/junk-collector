@@ -431,6 +431,7 @@ impl CollectionService {
             "metadata.artwork.publish",
             &request,
             |effects| {
+                self.processing.ensure_snapshot_current(item_id, command.snapshot_id)?;
                 let snapshot = self.processing.snapshot(SnapshotQuery {
                     collection_id: item.collection_id,
                     snapshot_id: command.snapshot_id,
@@ -483,6 +484,7 @@ impl CollectionService {
                         ),
                     },
                     &bytes,
+                    Some(item.lifecycle.generation),
                 )
             },
         )
@@ -522,6 +524,8 @@ impl CollectionService {
             "metadata.refresh.provider",
             &request,
             |effects| {
+                self.processing
+                    .ensure_snapshot_current(item_id, command.snapshot_id)?;
                 let snapshot = self.processing.snapshot(SnapshotQuery {
                     collection_id: item.collection_id,
                     snapshot_id: command.snapshot_id,
@@ -571,6 +575,8 @@ impl CollectionService {
         {
             return Ok(existing);
         }
+        self.processing
+            .ensure_snapshot_current(item.id, snapshot_id)?;
         let revision = self
             .processing
             .metadata_authority(item.collection_id, item.id)?
@@ -1514,7 +1520,13 @@ impl CollectionService {
                 revision: record.revision,
                 authority,
                 legacy: Vec::new(),
-                current: record.current_candidates,
+                current: if record.revision.0 <= item.lifecycle.automatic_metadata_through
+                    && item.lifecycle.automatic_metadata_through > 0
+                {
+                    Some(vec![])
+                } else {
+                    record.current_candidates
+                },
             });
         }
         let mut authority = MetadataAuthority {
@@ -1608,6 +1620,19 @@ pub fn metadata_authority_for_inventory(
     record: &MetadataAuthorityRecord,
 ) -> Result<MetadataAuthority> {
     let mut authority = record.authority.clone();
+    if record.revision.0 <= item.lifecycle.reset_fields_through
+        && item.lifecycle.reset_fields_through > 0
+    {
+        authority.field_overrides.clear();
+        authority.selected_candidate = None;
+        authority.domain_overrides = None;
+    }
+    if record.revision.0 <= item.lifecycle.reset_artwork_through
+        && item.lifecycle.reset_artwork_through > 0
+    {
+        authority.artwork_choice = None;
+    }
+
     if let Some(baseline) = &record.inventory {
         for (field, old, new) in [
             (MetadataField::Title, &baseline.title, &item.title),
@@ -1659,8 +1684,17 @@ pub fn resolve_record_metadata(
     history: &[MetadataCandidateObservation],
 ) -> Result<ResolvedMetadataDisplay> {
     let authority = metadata_authority_for_inventory(item, record)?;
-    let current =
-        current_metadata_candidates(&authority, history, record.current_candidates.as_deref())?;
+    let current = current_metadata_candidates(
+        &authority,
+        history,
+        if record.revision.0 <= item.lifecycle.automatic_metadata_through
+            && item.lifecycle.automatic_metadata_through > 0
+        {
+            Some(&[])
+        } else {
+            record.current_candidates.as_deref()
+        },
+    )?;
     resolve_metadata_display(item, &authority, &current, "en")
 }
 

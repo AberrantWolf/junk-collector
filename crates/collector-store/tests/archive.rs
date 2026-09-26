@@ -1225,6 +1225,7 @@ fn setup_with_clock(
 }
 fn item(collection: CollectionId) -> Item {
     Item {
+        lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection,
         revision: Revision(0),
@@ -1247,6 +1248,270 @@ fn item(collection: CollectionId) -> Item {
         deleted: false,
         updated_at: chrono::Utc::now(),
     }
+}
+
+#[test]
+fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
+    let (root, store, actor, service, collection) = setup();
+    let mut inventory = item(collection.id);
+    inventory.specimens.push(Specimen {
+        id: SpecimenId::new(),
+        label: "Owned copy".into(),
+        condition: Condition::Unknown,
+        ownership: Ownership::Owned,
+        possession: Possession::Present,
+        acquisition: None,
+        components: vec![],
+        loans: vec![],
+        private_notes: None,
+    });
+    let saved = Catalog::save(&*store, inventory, Revision(0)).unwrap();
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let artwork = service
+        .create_asset(
+            &actor,
+            CreateAssetCommand {
+                collection_id: collection.id,
+                subject: AssetSubject::Item { item_id: saved.id },
+                kind: AssetKind::Cover,
+                visibility: Visibility::Shared,
+                alt_text: "Preserved cover".into(),
+            },
+            &encoded.into_inner(),
+            &command(),
+        )
+        .unwrap();
+    let saved = Catalog::item(&*store, saved.id).unwrap();
+    assert!(Catalog::item(&*store, saved.id).is_ok());
+    assert!(service.item_presented(&actor, saved.id).is_ok());
+    let pending_plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "unfinished replacement".into(),
+                    },
+                    files: vec![UploadFile {
+                        name: "disc.bin".into(),
+                        bytes: ByteLength(1),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let pending = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                clean_reimport: None,
+                plan: pending_plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: Some(collector_app::IngestDestination {
+                    item_id: saved.id,
+                    expected_revision: saved.revision,
+                }),
+            },
+            &command(),
+        )
+        .unwrap();
+    let pending_id = pending.imports[0].import_id;
+    assert_eq!(
+        store.import_record(pending_id).unwrap().view.phase,
+        ImportPhase::Staging
+    );
+    let viewer_id = store
+        .create_user("removed-viewer", "another long test password", false)
+        .unwrap();
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    let queued = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: queued,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(saved.id),
+            kind: "catalog_acquisition".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let removed = service
+        .set_item_removed(
+            &actor,
+            saved.id,
+            saved.revision,
+            true,
+            &CommandContext::new("remove-preserved-item").unwrap(),
+        )
+        .unwrap();
+    assert!(removed.deleted);
+    assert_eq!(removed.specimens.len(), 1);
+    assert_eq!(
+        store.import_record(pending_id).unwrap().view.phase,
+        ImportPhase::Cancelled
+    );
+    assert!(
+        store
+            .guided_ingest_intent(pending_id)
+            .unwrap()
+            .unwrap()
+            .cancelled
+    );
+    assert!(matches!(
+        service.create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "replacement".into(),
+                },
+                files: vec![UploadFile {
+                    name: "disc.bin".into(),
+                    bytes: ByteLength(1),
+                    sha256: None,
+                }],
+                association: CaptureAssociation {
+                    item_id: Some(saved.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(removed.revision),
+            },
+            &CommandContext::new("removed-destination-denied").unwrap(),
+        ),
+        Err(Error::Conflict)
+    ));
+    assert_eq!(
+        store.job_record(queued, actor.user_id).unwrap().state,
+        JobState::Cancelled
+    );
+    assert!(matches!(
+        service.item_presented(&viewer, saved.id),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.evidence(&viewer, saved.id),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.activity(&viewer, saved.id),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.asset_resource(&viewer, collection.id, artwork.id, true),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.asset(&viewer, saved.id, artwork.id, true),
+        Err(Error::Forbidden)
+    ));
+    assert!(
+        service
+            .asset_resource(&actor, collection.id, artwork.id, true)
+            .is_ok()
+    );
+    assert!(
+        service
+            .browse_presented(
+                &viewer,
+                BrowseQuery {
+                    filter: BrowseFilter::Removed,
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert!(
+        service
+            .browse_presented(&actor, BrowseQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    let removed_page = service
+        .browse_presented(
+            &actor,
+            BrowseQuery {
+                filter: BrowseFilter::Removed,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(removed_page.items.len(), 1);
+    assert!(removed_page.items[0].deleted);
+    assert_eq!(
+        service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    filter: BrowseFilter::Removed,
+                    search: Some("風の歌".into()),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    store.reindex().unwrap();
+    assert!(Catalog::item(&*store, saved.id).unwrap().deleted);
+    assert_eq!(
+        store.import_record(pending_id).unwrap().view.phase,
+        ImportPhase::Cancelled
+    );
+    let restored = service
+        .set_item_removed(
+            &actor,
+            saved.id,
+            removed.revision,
+            false,
+            &CommandContext::new("restore-preserved-item").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(restored.id, saved.id);
+    assert_eq!(restored.specimens.len(), 1);
+    assert!(!restored.deleted);
+    assert_eq!(
+        service
+            .browse_presented(&actor, BrowseQuery::default())
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert_eq!(
+        Catalog::item(&reopened, saved.id).unwrap().specimens.len(),
+        1
+    );
+    assert_eq!(
+        reopened.import_record(pending_id).unwrap().view.phase,
+        ImportPhase::Cancelled
+    );
 }
 
 fn legacy_collection_fixture() -> (tempfile::TempDir, UserId, CollectionId, ItemId) {
@@ -2074,7 +2339,9 @@ fn concurrent_last_authority_changes_cannot_both_commit() {
             .any(|account| account.enabled && account.administrator)
     );
 
-    let grants = AccessPort::grants(&*store, collection.id).unwrap();
+    let grants = AccessPort::grants(&*store, collection.id, "", None, 50)
+        .unwrap()
+        .items;
     let barrier = Arc::new(std::sync::Barrier::new(3));
     let mut workers = Vec::new();
     for grant in grants {
@@ -2095,13 +2362,76 @@ fn concurrent_last_authority_changes_cannot_both_commit() {
         1
     );
     assert_eq!(
-        AccessPort::grants(&*store, collection.id)
+        AccessPort::grants(&*store, collection.id, "", None, 50)
             .unwrap()
+            .items
             .iter()
             .filter(|grant| grant.role == Role::Owner)
             .count(),
         1
     );
+}
+
+#[test]
+fn collection_access_pages_search_authorized_grants_without_truncation() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let owner = store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let collection = store
+        .create_collection(
+            owner,
+            Collection {
+                id: CollectionId::new(),
+                revision: Revision(1),
+                name: "Paged access".into(),
+                created_at: chrono::Utc::now(),
+                binding: CollectionBinding::Assigned {
+                    module: ModuleId("org.junk.music".into()),
+                },
+            },
+        )
+        .unwrap();
+    for username in ["alpha", "bravo", "charlie", "delta", "echo"] {
+        let user = store
+            .create_user(username, "a sufficiently long password", false)
+            .unwrap();
+        Catalog::grant(&store, collection.id, user, Role::Viewer).unwrap();
+    }
+    let first = AccessPort::grants(&store, collection.id, "", None, 2).unwrap();
+    assert_eq!(
+        first
+            .items
+            .iter()
+            .map(|grant| grant.username.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "bravo"]
+    );
+    let second =
+        AccessPort::grants(&store, collection.id, "", first.next_cursor.as_deref(), 2).unwrap();
+    assert_eq!(
+        second
+            .items
+            .iter()
+            .map(|grant| grant.username.as_str())
+            .collect::<Vec<_>>(),
+        vec!["charlie", "delta"]
+    );
+    let third =
+        AccessPort::grants(&store, collection.id, "", second.next_cursor.as_deref(), 2).unwrap();
+    assert_eq!(
+        third
+            .items
+            .iter()
+            .map(|grant| grant.username.as_str())
+            .collect::<Vec<_>>(),
+        vec!["echo", "owner"]
+    );
+    assert!(third.next_cursor.is_none());
+    let filtered = AccessPort::grants(&store, collection.id, "HAR", None, 2).unwrap();
+    assert_eq!(filtered.items.len(), 1);
+    assert_eq!(filtered.items[0].username, "charlie");
 }
 
 #[test]
@@ -5290,6 +5620,7 @@ fn subprocess_command_receipt_worker() {
                             alt_text: "Cover".into(),
                         },
                         png.get_ref(),
+                        None,
                     )
                     .unwrap(),
             )
@@ -5623,6 +5954,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -5681,6 +6013,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -5752,6 +6085,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan: stale,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -5767,6 +6101,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -5780,6 +6115,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -5793,6 +6129,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest_with_preflight(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -6034,6 +6371,7 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -6136,6 +6474,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -6150,6 +6489,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
         Err(Error::Conflict)
     ));
     let accepted_command = StartIngestCommand {
+        clean_reimport: None,
         plan,
         analysis: collector_app::IngestAnalysisPolicy::Automatic,
         enrichment: IngestEnrichmentPolicy::None,
@@ -6253,6 +6593,7 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
         )
         .unwrap();
     let request = StartIngestCommand {
+        clean_reimport: None,
         plan,
         analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
         enrichment: IngestEnrichmentPolicy::None,
@@ -6314,6 +6655,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -6389,6 +6731,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -6493,6 +6836,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan: unavailable,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -6519,6 +6863,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -6634,6 +6979,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
@@ -6779,6 +7125,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
@@ -7003,6 +7350,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -7066,6 +7414,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
@@ -7148,6 +7497,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -10551,6 +10901,66 @@ fn committed_import_after_item_edit() {
 }
 
 #[test]
+fn removed_item_finishes_an_already_committed_import_receipt() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let import = staged_import(&service, &actor, collection.id, "remove-commit-gap");
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: import.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: CaptureAssociation {
+                    item_id: Some(saved.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(saved.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    let job = service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    drop(service);
+    drop(store);
+    let crashing = Store::open_with_publication_fault(
+        root.path().join("archive"),
+        root.path().join("state"),
+        Arc::new(PanicAtImportCommit),
+    )
+    .unwrap();
+    let claim = crashing.claim_job("old-process", 30).unwrap().unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || crashing.publish_import_for_job(import.id, job, &claim.claim_token, &mut || Ok(()))
+        ))
+        .is_err()
+    );
+    drop(crashing);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    assert!(Catalog::capture(&*reopened, import.capture_id).is_ok());
+    let service = CollectionService::new(reopened.clone(), Arc::new(Registry::builtins()));
+    let current = Catalog::item(&*reopened, saved.id).unwrap();
+    service
+        .set_item_removed(&actor, saved.id, current.revision, true, &command())
+        .unwrap();
+    assert_ne!(service.job(&actor, job).unwrap().state, JobState::Cancelled);
+    service.run_next_job("new-process").unwrap();
+    let outcome = service.job(&actor, job).unwrap();
+    assert_eq!(outcome.state, JobState::Completed, "{outcome:?}");
+    assert_eq!(
+        service.provisional_import(&actor, import.id).unwrap().phase,
+        ImportPhase::Published
+    );
+    assert!(Catalog::item(&*reopened, saved.id).unwrap().deleted);
+    assert_eq!(Catalog::evidence(&*reopened, saved.id).unwrap().len(), 1);
+}
+
+#[test]
 fn stale_analysis_cannot_be_rebound_to_different_published_bytes() {
     let (root, store, actor, _base_service, collection) = setup();
     let mut registry = Registry::default();
@@ -13566,6 +13976,7 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
@@ -14001,5 +14412,889 @@ fn fx03_history_filters_dismissal_clear_recovery_and_authorization() {
     assert_eq!(
         service.job(&actor, retry_job).unwrap().state,
         JobState::Completed
+    );
+}
+
+fn fx05_plan(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    files: Vec<UploadFile>,
+) -> collector_app::IngestPlan {
+    service
+        .plan_ingest(
+            actor,
+            PlanIngestCommand {
+                collection_id: collection,
+                packages: vec![IngestPackageSelection {
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Replacement".into(),
+                    },
+                    files,
+                    anchor_file_index: None,
+                }],
+            },
+        )
+        .unwrap()
+}
+fn fx05_drain(service: &CollectionService) {
+    for _ in 0..20 {
+        service.resume_guided_ingests().unwrap();
+        if !service.run_next_job("fx05").unwrap() {
+            return;
+        }
+    }
+    panic!("reimport failed to settle");
+}
+fn fx05_original(
+    store: &Store,
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+) -> Item {
+    let original = store.save(item(collection), Revision(0)).unwrap();
+    let plan = fx05_plan(
+        service,
+        actor,
+        collection,
+        vec![UploadFile {
+            name: "disc.bin".into(),
+            bytes: ByteLength(4),
+            sha256: None,
+        }],
+    );
+    let accepted = service
+        .start_ingest(
+            actor,
+            StartIngestCommand {
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: Some(collector_app::IngestDestination {
+                    item_id: original.id,
+                    expected_revision: original.revision,
+                }),
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(actor, accepted.imports[0].import_id, 0, 0, b"data")
+        .unwrap();
+    fx05_drain(service);
+    store.item(original.id).unwrap()
+}
+
+#[test]
+fn clean_reimport_reuses_validated_originals_preserves_authority_and_survives_restart() {
+    let (root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    assert_eq!(original.captures.len(), 1);
+    let old = &original.captures[0];
+    let representation = &old.representations[0];
+    let authority = service
+        .update_metadata_authority(
+            &actor,
+            original.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "My chosen title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let plan = fx05_plan(
+        &service,
+        &actor,
+        collection.id,
+        representation
+            .files
+            .iter()
+            .map(|file| UploadFile {
+                name: file.name.clone(),
+                bytes: file.bytes,
+                sha256: Some(file.digest.hex.clone()),
+            })
+            .collect(),
+    );
+    let request = StartIngestCommand {
+        clean_reimport: Some(collector_app::CleanReimportOptions {
+            replace_captures: vec![old.id],
+            retained_representation: Some(representation.id),
+            reset_metadata: false,
+            reset_artwork: false,
+            expected_metadata_revision: authority.revision,
+        }),
+        plan,
+        analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+        enrichment: IngestEnrichmentPolicy::None,
+        prepare_music: false,
+        destination: Some(collector_app::IngestDestination {
+            item_id: original.id,
+            expected_revision: original.revision,
+        }),
+    };
+    let key = command();
+    let accepted = service.start_ingest(&actor, request.clone(), &key).unwrap();
+    let id = accepted.imports[0].import_id;
+    assert_eq!(
+        store.item(original.id).unwrap().captures[0].id,
+        old.id,
+        "old usable capture disappeared before replacement"
+    );
+    assert_eq!(
+        service
+            .start_ingest(&actor, request.clone(), &key)
+            .unwrap()
+            .imports[0]
+            .import_id,
+        id
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    fx05_drain(&service);
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(
+        detail.import.phase,
+        ImportPhase::Published,
+        "{:?}",
+        detail.summary
+    );
+    let replaced = store.item(original.id).unwrap();
+    assert_eq!(replaced.captures.len(), 1);
+    assert_ne!(replaced.captures[0].id, old.id);
+    assert_eq!(
+        replaced.captures[0].representations[0].files[0].digest,
+        Digest::sha256(b"data")
+    );
+    assert_eq!(replaced.title, original.title);
+    assert_eq!(replaced.wishlist, original.wishlist);
+    assert_eq!(
+        service
+            .metadata_view(&actor, original.id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "My chosen title"
+    );
+    assert!(store.capture(old.id).is_ok(), "historical originals lost");
+    let mut media = service
+        .representation(&actor, original.id, representation.id, 0)
+        .unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut media.reader, &mut bytes).unwrap();
+    assert_eq!(bytes, b"data");
+    store.reindex().unwrap();
+    assert_eq!(
+        store.item(original.id).unwrap().captures[0].id,
+        replaced.captures[0].id
+    );
+    assert_eq!(
+        service.start_ingest(&actor, request, &key).unwrap().imports[0].import_id,
+        id
+    );
+}
+
+#[test]
+fn clean_reimport_failed_replacement_keeps_original_and_explicit_reset_is_portable() {
+    let (_root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    let old = original.captures[0].id;
+    let authority = service
+        .update_metadata_authority(
+            &actor,
+            original.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "Override to reset".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let plan = fx05_plan(
+        &service,
+        &actor,
+        collection.id,
+        vec![UploadFile {
+            name: "replacement.bin".into(),
+            bytes: ByteLength(4),
+            sha256: Some(Digest::sha256(b"good").hex),
+        }],
+    );
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                clean_reimport: Some(collector_app::CleanReimportOptions {
+                    replace_captures: vec![old],
+                    retained_representation: None,
+                    reset_metadata: true,
+                    reset_artwork: true,
+                    expected_metadata_revision: authority.revision,
+                }),
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: Some(collector_app::IngestDestination {
+                    item_id: original.id,
+                    expected_revision: original.revision,
+                }),
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    assert!(
+        service
+            .stage_provisional_import_chunk(&actor, id, 0, 0, b"evil")
+            .is_err()
+    );
+    assert_eq!(store.item(original.id).unwrap().captures[0].id, old);
+    assert_eq!(
+        service
+            .metadata_view(&actor, original.id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        original.title
+    );
+    store.reindex().unwrap();
+    assert_eq!(store.item(original.id).unwrap().captures[0].id, old);
+    assert_eq!(
+        service
+            .metadata_view(&actor, original.id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        original.title
+    );
+    // Cancelling a failed replacement leaves the old usable state intact.
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    service
+        .cancel_ingest(&actor, id, detail.import.revision, &command())
+        .unwrap();
+    fx05_drain(&service);
+    assert_eq!(store.item(original.id).unwrap().captures[0].id, old);
+}
+
+#[test]
+fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_edits() {
+    let (_root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+    let pcm = vec![0; 2352 * 10];
+    let plan = fx05_plan(
+        &service,
+        &actor,
+        collection.id,
+        vec![
+            UploadFile {
+                name: "disc.bin".into(),
+                bytes: ByteLength(pcm.len() as u64),
+                sha256: None,
+            },
+            UploadFile {
+                name: "disc.cue".into(),
+                bytes: ByteLength(cue.len() as u64),
+                sha256: None,
+            },
+        ],
+    );
+    let earlier = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: Some(collector_app::IngestDestination {
+                    item_id: original.id,
+                    expected_revision: original.revision,
+                }),
+            },
+            &command(),
+        )
+        .unwrap()
+        .imports[0]
+        .import_id;
+    service
+        .stage_provisional_import_chunk(&actor, earlier, 0, 0, &pcm)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, earlier, 1, 0, cue)
+        .unwrap();
+    service.resume_guided_ingests().unwrap();
+    let direct = service
+        .enqueue_import_analysis(
+            &actor,
+            earlier,
+            ModuleId("org.junk.music".into()),
+            &command(),
+        )
+        .unwrap();
+    let obsolete = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: obsolete,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(original.id),
+            kind: "import_staging".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({"import_id":earlier}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let old = &original.captures[0];
+    let rep = &old.representations[0];
+    let plan = fx05_plan(
+        &service,
+        &actor,
+        collection.id,
+        rep.files
+            .iter()
+            .map(|file| UploadFile {
+                name: file.name.clone(),
+                bytes: file.bytes,
+                sha256: Some(file.digest.hex.clone()),
+            })
+            .collect(),
+    );
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                clean_reimport: Some(collector_app::CleanReimportOptions {
+                    replace_captures: vec![old.id],
+                    retained_representation: Some(rep.id),
+                    reset_metadata: false,
+                    reset_artwork: false,
+                    expected_metadata_revision: Revision(0),
+                }),
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: Some(collector_app::IngestDestination {
+                    item_id: original.id,
+                    expected_revision: original.revision,
+                }),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        service.job(&actor, obsolete).unwrap().state,
+        JobState::Cancelled
+    );
+    assert!(service.retry_job(&actor, obsolete, &command()).is_err());
+    assert_eq!(service.job(&actor, direct).unwrap().state, JobState::Queued);
+    let mut edited = store.item(original.id).unwrap();
+    let revision = edited.revision;
+    edited.subtitle = "Changed while replacing".into();
+    store.save(edited, revision).unwrap();
+    fx05_drain(&service);
+    assert_eq!(
+        service.job(&actor, direct).unwrap().state,
+        JobState::Completed
+    );
+    let replaced = store.item(original.id).unwrap();
+    assert_eq!(replaced.subtitle, "Changed while replacing");
+    assert_eq!(replaced.captures.len(), 1);
+    assert_eq!(
+        service
+            .ingest_detail(&actor, accepted.imports[0].import_id)
+            .unwrap()
+            .import
+            .phase,
+        ImportPhase::Published
+    );
+    assert_eq!(
+        service
+            .ingest_detail(&actor, earlier)
+            .unwrap()
+            .summary
+            .outcome,
+        collector_app::IngestStepState::Cancelled
+    );
+}
+
+fn fx05_retained_command(
+    service: &CollectionService,
+    actor: &Principal,
+    item: &Item,
+) -> StartIngestCommand {
+    let capture = &item.captures[0];
+    let representation = &capture.representations[0];
+    StartIngestCommand {
+        plan: fx05_plan(
+            service,
+            actor,
+            item.collection_id,
+            representation
+                .files
+                .iter()
+                .map(|file| UploadFile {
+                    name: file.name.clone(),
+                    bytes: file.bytes,
+                    sha256: Some(file.digest.hex.clone()),
+                })
+                .collect(),
+        ),
+        destination: Some(collector_app::IngestDestination {
+            item_id: item.id,
+            expected_revision: item.revision,
+        }),
+        clean_reimport: Some(collector_app::CleanReimportOptions {
+            replace_captures: vec![capture.id],
+            retained_representation: Some(representation.id),
+            reset_metadata: false,
+            reset_artwork: false,
+            expected_metadata_revision: Revision(0),
+        }),
+        analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+        enrichment: IngestEnrichmentPolicy::None,
+        prepare_music: false,
+    }
+}
+
+#[test]
+fn clean_reimport_checks_retained_bytes_and_retries_after_repair() {
+    let (root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    let request = fx05_retained_command(&service, &actor, &original);
+    let accepted = service.start_ingest(&actor, request, &command()).unwrap();
+    let id = accepted.imports[0].import_id;
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let capture = &original.captures[0];
+    let path = collection_path.join(format!(
+        "captures/{}/payload/{}/disc.bin",
+        capture.id, capture.representations[0].id
+    ));
+    std::fs::write(&path, b"evil").unwrap();
+    fx05_drain(&service);
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Staging);
+    assert!(
+        !detail.summary.permissions.can_resume_upload,
+        "retained bytes must not ask for a browser upload"
+    );
+    assert_eq!(store.item(original.id).unwrap().captures[0].id, capture.id);
+    let failed = service
+        .jobs(&actor)
+        .unwrap()
+        .into_iter()
+        .find(|job| job.kind == "import_staging" && job.state == JobState::Failed)
+        .unwrap();
+    assert!(failed.error.as_deref().unwrap().contains("digest"));
+    std::fs::write(&path, b"data").unwrap();
+    service.retry_job(&actor, failed.id, &command()).unwrap();
+    fx05_drain(&service);
+    assert_eq!(
+        service.ingest_detail(&actor, id).unwrap().import.phase,
+        ImportPhase::Published
+    );
+    assert_ne!(store.item(original.id).unwrap().captures[0].id, capture.id);
+}
+
+#[test]
+fn clean_reimport_admission_receipt_recovers_at_every_item_commit_boundary() {
+    use collector_store::PublicationFaultPoint as Point;
+    for point in [
+        Point::Prepared,
+        Point::BytesStaged,
+        Point::PayloadPublished,
+        Point::RevisionCommitted,
+        Point::ProjectionApplied,
+        Point::Completed,
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let original = fx05_original(&store, &service, &actor, collection.id);
+        let request = fx05_retained_command(&service, &actor, &original);
+        let key = command();
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        assert!(
+            service.start_ingest(&actor, request.clone(), &key).is_err(),
+            "{point:?}"
+        );
+        drop(service);
+        drop(store);
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let accepted = service.start_ingest(&actor, request.clone(), &key).unwrap();
+        assert_eq!(
+            store.item(original.id).unwrap().lifecycle.generation,
+            1,
+            "generation advanced twice at {point:?}"
+        );
+        fx05_drain(&service);
+        assert_eq!(
+            service
+                .ingest_detail(&actor, accepted.imports[0].import_id)
+                .unwrap()
+                .import
+                .phase,
+            ImportPhase::Published,
+            "{point:?}"
+        );
+        store.reindex().unwrap();
+        assert_eq!(store.item(original.id).unwrap().captures.len(), 1);
+        assert_ne!(
+            store.item(original.id).unwrap().captures[0].id,
+            original.captures[0].id
+        );
+        assert_eq!(
+            service.start_ingest(&actor, request, &key).unwrap().imports[0].import_id,
+            accepted.imports[0].import_id
+        );
+    }
+}
+
+#[test]
+fn clean_reimport_replacement_recovers_at_every_capture_commit_boundary() {
+    use collector_store::PublicationFaultPoint as Point;
+    for point in [
+        Point::Prepared,
+        Point::BytesStaged,
+        Point::PayloadPublished,
+        Point::RevisionCommitted,
+        Point::ProjectionApplied,
+        Point::Completed,
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let original = fx05_original(&store, &service, &actor, collection.id);
+        let accepted = service
+            .start_ingest(
+                &actor,
+                fx05_retained_command(&service, &actor, &original),
+                &command(),
+            )
+            .unwrap();
+        let id = accepted.imports[0].import_id;
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        for _ in 0..6 {
+            service.resume_guided_ingests().unwrap();
+            let _ = service.run_next_job("fx05-interrupted");
+            if service
+                .jobs(&actor)
+                .unwrap()
+                .iter()
+                .any(|job| job.state == JobState::Failed)
+            {
+                break;
+            }
+        }
+        let interrupted = store.item(original.id).unwrap();
+        assert_eq!(
+            interrupted.captures.len(),
+            1,
+            "partial association at {point:?}"
+        );
+        if interrupted.captures[0].id != original.captures[0].id {
+            // Recovery can finish within a later coordinator sweep in this loop.
+            // The replacement is visible only with its committed lifecycle switch.
+            assert!(
+                interrupted.lifecycle.reimport.as_ref().unwrap().completed,
+                "premature replacement at {point:?}"
+            );
+            assert_eq!(
+                service.ingest_detail(&actor, id).unwrap().import.phase,
+                ImportPhase::Published
+            );
+        }
+        drop(service);
+        drop(store);
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        for job in service.jobs(&actor).unwrap() {
+            if job.state == JobState::Failed {
+                service.retry_job(&actor, job.id, &command()).unwrap();
+            }
+        }
+        fx05_drain(&service);
+        assert_eq!(
+            service.ingest_detail(&actor, id).unwrap().import.phase,
+            ImportPhase::Published,
+            "{point:?}"
+        );
+        let replaced = store.item(original.id).unwrap();
+        assert_eq!(replaced.captures.len(), 1);
+        assert_ne!(replaced.captures[0].id, original.captures[0].id);
+        store.reindex().unwrap();
+        assert_eq!(
+            store.item(original.id).unwrap().captures[0].id,
+            replaced.captures[0].id
+        );
+    }
+}
+
+#[test]
+fn clean_reimport_preserves_artwork_by_default_and_resets_only_explicit_authority() {
+    let (_root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let image_bytes = encoded.into_inner();
+    let artwork = service
+        .create_asset(
+            &actor,
+            CreateAssetCommand {
+                collection_id: collection.id,
+                subject: AssetSubject::Item {
+                    item_id: original.id,
+                },
+                kind: AssetKind::Cover,
+                visibility: Visibility::Shared,
+                alt_text: "Chosen cover".into(),
+            },
+            &image_bytes,
+            &command(),
+        )
+        .unwrap();
+    let authority = service
+        .update_metadata_authority(
+            &actor,
+            original.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetArtworkChoice {
+                    asset_id: artwork.id,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let original = store.item(original.id).unwrap();
+    let mut request = fx05_retained_command(&service, &actor, &original);
+    request
+        .clean_reimport
+        .as_mut()
+        .unwrap()
+        .expected_metadata_revision = authority.revision;
+    service.start_ingest(&actor, request, &command()).unwrap();
+    fx05_drain(&service);
+    assert_eq!(
+        service
+            .metadata_view(&actor, original.id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        Some(artwork.id)
+    );
+    let mut request = fx05_retained_command(&service, &actor, &store.item(original.id).unwrap());
+    let options = request.clean_reimport.as_mut().unwrap();
+    options.expected_metadata_revision = authority.revision;
+    options.reset_artwork = true;
+    service.start_ingest(&actor, request, &command()).unwrap();
+    fx05_drain(&service);
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, original.id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        None
+    );
+    let late_art = ContentPort::create_asset(
+        store.as_ref(),
+        AssetId::new(),
+        CreateAssetCommand {
+            collection_id: collection.id,
+            subject: AssetSubject::Item {
+                item_id: original.id,
+            },
+            kind: AssetKind::Cover,
+            visibility: Visibility::Shared,
+            alt_text: "Late old provider image".into(),
+        },
+        &image_bytes,
+        Some(original.lifecycle.generation),
+    );
+    assert!(
+        matches!(late_art, Err(Error::Conflict)),
+        "late artwork crossed the writer generation fence"
+    );
+    assert!(
+        service
+            .asset(&actor, original.id, artwork.id, false)
+            .is_ok(),
+        "reset deleted artwork bytes"
+    );
+}
+
+#[test]
+fn clean_reimport_rejects_prior_generation_snapshot_completion() {
+    let (_root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    let id = JobId::new();
+    let snapshot = SnapshotId::new();
+    store
+        .enqueue_job(JobSpec {
+            id,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(original.id),
+            kind: "provider_acquisition".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let claim = store.claim_job("provider-fixture", 30).unwrap().unwrap();
+    assert_eq!(claim.id, id);
+    store
+        .complete_job(
+            id,
+            &claim.claim_token,
+            serde_json::json!({"completion":{"snapshot_id":snapshot}}),
+        )
+        .unwrap();
+    store
+        .ensure_snapshot_current(original.id, snapshot)
+        .unwrap();
+    service
+        .start_ingest(
+            &actor,
+            fx05_retained_command(&service, &actor, &original),
+            &command(),
+        )
+        .unwrap();
+    assert!(matches!(
+        store.ensure_snapshot_current(original.id, snapshot),
+        Err(Error::Conflict)
+    ));
+    store.reindex().unwrap();
+    assert!(matches!(
+        store.ensure_snapshot_current(original.id, snapshot),
+        Err(Error::Conflict)
+    ));
+}
+
+#[test]
+fn clean_reimport_supersedes_a_partially_committed_replacement_without_resurrection() {
+    let (root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    let first = service
+        .start_ingest(
+            &actor,
+            fx05_retained_command(&service, &actor, &original),
+            &command(),
+        )
+        .unwrap()
+        .imports[0]
+        .clone();
+    service.run_next_job("stage-first").unwrap();
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(PanicAtImportCommit),
+        )
+        .unwrap(),
+    );
+    let claim = store.claim_job("interrupted-process", 30).unwrap().unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            store.publish_import_for_job(first.import_id, claim.id, &claim.claim_token, &mut || {
+                Ok(())
+            })
+        }))
+        .is_err()
+    );
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let pending = store.item(original.id).unwrap();
+    assert!(!pending.lifecycle.reimport.as_ref().unwrap().completed);
+    assert_eq!(pending.captures[0].id, original.captures[0].id);
+    let second = service
+        .start_ingest(
+            &actor,
+            fx05_retained_command(&service, &actor, &pending),
+            &command(),
+        )
+        .unwrap()
+        .imports[0]
+        .clone();
+    let during = store.item(original.id).unwrap();
+    assert_eq!(during.captures.len(), 1);
+    assert_eq!(during.captures[0].id, original.captures[0].id);
+    fx05_drain(&service);
+    store.reindex().unwrap();
+    let finished = store.item(original.id).unwrap();
+    assert_eq!(finished.captures.len(), 1);
+    assert_eq!(finished.captures[0].id, second.capture_id);
+    assert_ne!(finished.captures[0].id, first.capture_id);
+    assert!(
+        service
+            .representation(
+                &actor,
+                original.id,
+                original.captures[0].representations[0].id,
+                0
+            )
+            .is_ok()
     );
 }

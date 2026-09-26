@@ -36,6 +36,10 @@ review into integrated fixes with the UX audit. FX-01 completes the browse/navig
 subset with [local acceptance evidence](validation.md#fx-01-browsingnavigation--2026-09-21). U05.1, the remaining U05.2 surfaces and the
 whole-interface U05.3 gate remain open. FX-02 implements the processing-scan subset; its [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). FX-03 implements history/cleanup and derivative-target presentation with local acceptance passed; FX-04–FX-07 remain proposed.
 
+**Status update 2026-09-26:** FX-04 is locally accepted. FX-05 implements
+Remove/Restore and clean reimport; exact lifecycle validation is recorded separately.
+The overall U05 gate remains open. FX-06 is locally accepted; FX-07 remains open.
+
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA1–LA3 integrate the relevant acceptance below across layers. Individual child
 assignments at the bottom are reference scope, not separate required handoffs.
@@ -109,7 +113,7 @@ Both require the appropriate supporting package members, not just a sidecar.
 | Child | State | Scope |
 |---|---|---|
 | U05.1 — Readiness contracts and analysis defaults | LA1 guided and FX-02 scan subsets implemented | LA1 previews typed anchors/blockers/provider availability; FX-02 extends eligible defaults and typed lifecycle to committed-package operations; the remaining interface matrix stays open |
-| U05.2 — Audit and correct all implemented interfaces | Partial: FX-01/02 accepted; FX-03 work/history accepted; remaining surfaces open | U05.1 plus each surface's owning services: enumerate every screen/action, implement findings through their owners |
+| U05.2 — Audit and correct all implemented interfaces | Partial: FX-01–FX-06 locally accepted in their mapped scopes; whole-interface audit remains open | U05.1 plus each surface's owning services: enumerate every screen/action, implement findings through their owners |
 | U05.3 — Interface completion review | Planned | U05.2/P04.6: actual user journeys, negative cases and audited completion evidence |
 
 U05.2 must inventory every implemented screen/action, not just these examples:

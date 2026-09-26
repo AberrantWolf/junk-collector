@@ -1,5 +1,151 @@
 # Validation recorded for the foundation
 
+## FX-06 review fixes — 2026-09-26
+
+The three review findings are corrected using the existing grant, authentication
+and logout contracts. Scope-tagged grant results cannot supply controls for a
+newly selected collection. Password/passkey prompts have per-prompt identities and
+cancellable requests, so late completion cannot settle another prompt. Revoke
+Current also logs out the replacement session that reauthentication may issue.
+
+TypeScript, web build, architecture/link checks, and `git diff --check` passed.
+The Rust server was rebuilt with the updated embedded assets. The extended real
+browser `test:fx06` passed collection switching while the next grant response is
+held, cancelled in-flight login followed by a newer prompt, preserved drafts,
+successful retry, and current-session revocation after authentication (including
+an explicit `/me` 401 check and reload). The journey also retained its invalid/
+consumed recovery-code and other-session revocation checks. Typed recent-auth
+responses and delayed responses were injected for deterministic UI race coverage;
+login, mutations, logout and recovery use the temporary real server.
+The full browser smoke suite also passed, including virtual WebAuthn registration/
+login, login/expiry, access denial, actual FLAC playback and grant revocation,
+management bundles and mobile layouts. Formatting passed. No Rust service or API
+contract changed in this review follow-up; earlier workspace results remain below.
+
+## Guided-import association feedback follow-up — 2026-09-26
+
+The shared guided-import editor now derives pending changes from the saved Item
+association and the selected destination, normalizing an unattached destination to
+null. Unchanged destinations explain that there is nothing to save; only changed
+destinations offer Save association. Loading is distinct from unattached, and an
+in-flight destination refresh cannot replace a newer user selection. The saved
+association notice no longer names the unsaved destination as already attached.
+This uses the existing chooser, command and server permission contract.
+
+TypeScript, web build, architecture/link checks and `git diff --check` pass.
+The existing smoke journey was extended to cover unchanged destination, an unsaved
+detach followed by reselecting the original entry, and the saved state after moving
+to another entry. Browser verification of this follow-up is pending: two server
+rebuild attempts stalled in rustc without output or CPU activity and were stopped
+(after approximately five minutes and two and a half minutes). No compiler error
+was reported. Generated web assets are updated, but the embedded Rust server still
+needs a successful rebuild before this UI change is served. Earlier FX-05 acceptance
+below predates this follow-up and is not evidence for its new browser assertions.
+
+## FX-06 collection access and account recovery — 2026-09-26
+
+FX-06 adds a collection-scoped access panel independent of Item selection and
+content eligibility, server-bounded searchable grant pages, and an exact grant
+revision lookup for updates outside the displayed page. The signed-out browser
+redeems recovery codes into the server-issued session. One-time codes can be copied
+or downloaded; closing their display asks the user to confirm they saved them.
+The shared request client handles the typed recent-authentication error, keeps the
+original command body and idempotency key, offers password or passkey, and retries
+once after success. Cancellation leaves the form draft available. No recovery code,
+password, or passkey assertion is stored in a URL or browser storage.
+
+A temporary Chrome 153.0.8010.37 server/profile journey passes empty-collection
+access, cancelled and successful reauthentication with the grant draft, recovery
+into an authenticated session, and consumed-code denial. The extended run also
+checks invalid-code feedback and revocation of an old browser session. The browser
+forces one typed freshness response to exercise the UI without waiting five minutes;
+the real Store test advances the clock to the exact freshness boundary. Existing
+Store concurrency tests prove only one recovery-code redemption succeeds. The
+focused grant query test crosses three pages and checks case-insensitive search.
+The full smoke journey exercises virtual WebAuthn, role denial, public/private
+listener composition, unavailable-module read-only access, and actual FLAC playback
+with grant revocation. Physical passkey and second-device LAN qualification remain
+external and are not claimed here. FX-07 still owns the whole-interface completion
+review and account-list scale audit.
+
+Required gate results: architecture/link checker, formatting, `cargo test
+--workspace`, strict workspace Clippy, TypeScript check, generated API contract
+check, web build, rebuilt Rust server, FX-06 browser journey, and full browser
+smoke pass. The new grant pagination regression also passes. No production user
+archive or profile was used.
+
+## FX-05 clean reimport and lifecycle review — 2026-09-26
+
+The incomplete Remove/Restore implementation was reviewed and extended into the
+complete same-Item clean-reimport workflow. The temporary-server
+`npm --prefix web run test:fx05` journey passes retained-original reuse,
+reviewed preservation defaults, replacement-upload failure, close/reopen/resume,
+unchanged inventory identity/fields, real WAV playback across replacement and
+availability polling, mobile review, and removal/restoration with resumed playback.
+The final mobile review was visually inspected. `test:browse` also passed removal,
+reload in Removed entries, restoration, artwork, navigation and keyboard behavior
+in Chrome 153.0.8010.37. No production archive or user server was used.
+
+All nine `clean_reimport` archive regressions pass. They cover validated retained
+bytes, corruption and repair/retry, default metadata/artwork preservation, explicit
+authority resets, failed replacement retaining the current capture, later manual
+edits, independent scan ownership, obsolete Job retry rejection, stale acquisition
+completion, writer-fenced artwork, command replay, restart/reindex, and six fault
+points each for admission and replacement publication. A separate caught-panic
+case interrupts immediately after Capture commit, starts a second reimport, and
+proves the abandoned replacement cannot reappear. Expected panic output in that
+case is deliberate fault injection, not a failing test.
+
+The architecture/link checker, formatting, TypeScript check, generated API contract
+comparison, web build, strict workspace Clippy, and all-target compilation passed.
+The server was rebuilt after the web assets and final lifecycle changes. The smoke
+fixture now verifies its temporary FLAC wrapper before server startup, and browser
+readiness has a bounded cold-start allowance; production encoder timeouts were
+not relaxed. Earlier runs hit host executable-startup timeouts, recorded separately
+from feature failures.
+
+The full browser smoke suite passes, including actual FLAC playback and grant
+revocation, automatic disc-ID provider enrichment, private/public role checks,
+virtual WebAuthn, restart with an unavailable module, and mobile layouts. Its
+retired-placeholder assertion now requires a curator-readable tombstone and
+ordinary-browse exclusion instead of 404, matching Restore's contract. The
+provider-title assertion waits for actual metadata before reloading. The full
+28-test HTTP suite passes. The wider archive run caught a missing-job recovery
+case with a retained generation row; job recreation now preserves that row,
+and the existing crash-window regression passes again.
+
+Final local acceptance passed: `cargo test --workspace` (including all 172 archive,
+28 HTTP, nine store-unit and five recovery-regression tests), strict workspace
+Clippy, architecture/link checks, formatting, TypeScript, API contract comparison,
+web build, queue tests, and the browse, FX-05 and full smoke browser journeys.
+The canonical Item-record test now checks that captures/assets are absent from the
+top-level record while allowing the intentional portable historical Capture IDs.
+The existing user-owned CD oracle test remains ignored without
+`JUNK_COLLECTOR_W4_CD_DUMP_ROOT` and its private `oracle.toml`; this acceptance does
+not claim that external qualification or the outstanding LA3 second-device gate.
+FX-05 is locally accepted on 2026-09-26; FX-06 acceptance is recorded above.
+
+## FX-05 Remove/Restore slice — 2026-09-25 (FX-05 not accepted)
+
+The archive-backed tombstone and removed-items browse are implemented and locally
+exercised. `removed_item_is_recoverable_and_keeps_inventory_across_reindex`
+passes with inventory and artwork preservation, a queued Job, pending guided
+Import, viewer denial for removed Item/evidence/activity/artwork reads, reindex
+and restart. The crash-boundary
+`removed_item_finishes_an_already_committed_import_receipt` test verifies
+that a Capture committed before removal still finishes its Import receipt and
+Evidence reference after restart. The real `web/tests/browse.mjs` journey
+passed Remove, refresh in the Removed entries view, and Restore with the same
+Item identity and artwork. Removed file rows do not offer downloads or queue
+actions until restoration.
+
+The architecture/link checker, formatting, generated API contract comparison,
+web type check/build and workspace Clippy passed after these corrections. The
+final `cargo test --workspace` passed, including all 163 Store archive tests and
+28 server HTTP tests. The server was rebuilt with the final web assets, and the
+real Chrome `web/tests/browse.mjs` journey passed again.
+Clean reimport and its generation/replacement/reuse acceptance remain open.
+
 ## FX-04 review corrections — 2026-09-25
 
 Existing-destination guided admission now rechecks the Item revision in the

@@ -6,6 +6,8 @@ pub use collection_types::*;
 mod derivatives;
 pub use derivatives::*;
 mod guided_ingest;
+mod item_lifecycle;
+pub use item_lifecycle::prepare_clean_reimport;
 mod metadata;
 pub use metadata::*;
 mod work_history;
@@ -67,6 +69,7 @@ pub trait Catalog: Send + Sync {
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>>;
     fn item(&self, id: ItemId) -> Result<Item>;
     fn save(&self, item: Item, expected: Revision) -> Result<Item>;
+    fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item>;
     /// Compare the complete hydrated item and authority revision under the writer lock.
     fn retire_item_if_unchanged(
         &self,
@@ -129,6 +132,7 @@ impl<T: Catalog + ?Sized> CollectionReadPort for T {
 pub trait CollectionWritePort: Send + Sync {
     fn create_collection(&self, user: UserId, collection: Collection) -> Result<Collection>;
     fn save(&self, item: Item, expected: Revision) -> Result<Item>;
+    fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item>;
     /// Compare the complete hydrated item and authority revision under the writer lock.
     fn retire_item_if_unchanged(
         &self,
@@ -142,7 +146,13 @@ pub trait CollectionWritePort: Send + Sync {
 
 pub trait AccessPort: Send + Sync {
     fn grant_for_user(&self, collection: CollectionId, user: UserId) -> Result<Option<GrantView>>;
-    fn grants(&self, collection: CollectionId) -> Result<Vec<GrantView>>;
+    fn grants(
+        &self,
+        collection: CollectionId,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<GrantView>>;
     fn set_grant(
         &self,
         collection: CollectionId,
@@ -239,11 +249,13 @@ pub trait ContentPort: Send + Sync {
     fn asset_state(&self, asset: AssetId) -> Result<AssetState>;
     fn asset_states_for_item(&self, item: ItemId) -> Result<Vec<AssetState>>;
     fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId>;
+    fn asset_subject_item(&self, subject: AssetSubject) -> Result<Option<ItemId>>;
     fn create_asset(
         &self,
         asset: AssetId,
         command: CreateAssetCommand,
         bytes: &[u8],
+        expected_generation: Option<u64>,
     ) -> Result<AssetState>;
     fn update_asset(
         &self,
@@ -449,6 +461,8 @@ pub struct IngestPlan {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StartIngestCommand {
+    #[serde(default)]
+    pub clean_reimport: Option<CleanReimportOptions>,
     pub plan: IngestPlan,
     #[serde(default)]
     pub analysis: IngestAnalysisPolicy,
@@ -461,6 +475,16 @@ pub struct StartIngestCommand {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
+pub struct CleanReimportOptions {
+    pub replace_captures: Vec<CaptureId>,
+    pub retained_representation: Option<RepresentationId>,
+    pub reset_metadata: bool,
+    pub reset_artwork: bool,
+    pub expected_metadata_revision: Revision,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct IngestDestination {
     pub item_id: ItemId,
     pub expected_revision: Revision,
@@ -468,6 +492,7 @@ pub struct IngestDestination {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GuidedIngestIntent {
+    pub clean_reimport: Option<CleanReimportOptions>,
     pub import_id: ImportId,
     pub user_id: UserId,
     pub plan_token: String,
@@ -534,6 +559,7 @@ pub struct IngestAttemptView {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPermissions {
+    pub can_resume_upload: bool,
     pub can_cancel: bool,
     pub can_discard: bool,
     pub can_correct_association: bool,
@@ -599,6 +625,13 @@ pub trait ProvisionalImportPort: Send + Sync {
         offset: u64,
         bytes: &[u8],
     ) -> Result<ImportRecord>;
+    fn stage_retained_import(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+        representation: RepresentationId,
+    ) -> Result<ImportRecord>;
     fn stage_inbox_import(
         &self,
         id: ImportId,
@@ -633,6 +666,7 @@ pub trait ProvisionalImportPort: Send + Sync {
         limit: u16,
     ) -> Result<Vec<ImportRecord>>;
     fn reconcile_guided_cleanup(&self) -> Result<()>;
+    fn reconcile_removed_item_work(&self) -> Result<()>;
     fn cleanup_import(&self, id: ImportId) -> Result<IngestDiscardResult>;
     fn guided_cleanup_status(&self, id: ImportId) -> Result<Option<IngestDiscardResult>>;
     fn save_guided_ingest_intent(&self, intent: GuidedIngestIntent) -> Result<()>;
@@ -1184,6 +1218,9 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
     fn save(&self, item: Item, expected: Revision) -> Result<Item> {
         Catalog::save(self, item, expected)
     }
+    fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item> {
+        Catalog::set_item_removed(self, id, expected, removed)
+    }
     fn retire_item_if_unchanged(
         &self,
         item: Item,
@@ -1597,6 +1634,8 @@ impl From<Capture> for PresentedCapture {
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
+    pub workflow_generation: u64,
+    pub reimport_import_id: Option<ImportId>,
     pub id: ItemId,
     pub collection_id: CollectionId,
     pub revision: Revision,
@@ -2071,7 +2110,15 @@ impl CollectionService {
         query: BrowseQuery,
     ) -> Result<Page<PresentedItem>> {
         if let Some(collection) = query.collection_id {
-            self.authorize(actor, collection, Action::Browse)?;
+            self.authorize(
+                actor,
+                collection,
+                if query.filter == BrowseFilter::Removed {
+                    Action::Curate
+                } else {
+                    Action::Browse
+                },
+            )?;
         }
         let page = self.reader.browse(actor.user_id, query)?;
         let mut items = Vec::with_capacity(page.items.len());
@@ -2079,7 +2126,7 @@ impl CollectionService {
             let role = self.authorize(actor, item.collection_id, Action::Browse)?;
             let effective_metadata = self.effective_metadata_for_item(&item)?;
             item.redact_for(role);
-            items.push(self.presented(item, role, effective_metadata)?);
+            items.push(self.presented(item, role, actor.user_id, effective_metadata)?);
         }
         Ok(Page {
             items,
@@ -2088,15 +2135,24 @@ impl CollectionService {
     }
     pub fn item_presented(&self, actor: &Principal, id: ItemId) -> Result<PresentedItem> {
         let mut item = self.reader.item(id)?;
-        let role = self.authorize(actor, item.collection_id, Action::Browse)?;
+        let role = self.authorize(
+            actor,
+            item.collection_id,
+            if item.deleted {
+                Action::Curate
+            } else {
+                Action::Browse
+            },
+        )?;
         let effective_metadata = self.effective_metadata_for_item(&item)?;
         item.redact_for(role);
-        self.presented(item, role, effective_metadata)
+        self.presented(item, role, actor.user_id, effective_metadata)
     }
     fn presented(
         &self,
         item: Item,
         role: Role,
+        user: UserId,
         mut effective_metadata: ResolvedMetadataDisplay,
     ) -> Result<PresentedItem> {
         let collection = self.reader.collection(item.collection_id)?;
@@ -2150,6 +2206,20 @@ impl CollectionService {
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
+            workflow_generation: item.lifecycle.generation,
+            reimport_import_id: if private {
+                item.lifecycle
+                    .reimport
+                    .as_ref()
+                    .filter(|value| {
+                        self.provisional_imports
+                            .import_record(value.import_id)
+                            .is_ok_and(|record| record.user_id == user)
+                    })
+                    .map(|value| value.import_id)
+            } else {
+                None
+            },
             id: item.id,
             collection_id: item.collection_id,
             revision: item.revision,
@@ -2214,6 +2284,9 @@ impl CollectionService {
                         "moving items across collections is not supported".into(),
                     ));
                 }
+                if previous.deleted {
+                    return Err(Error::Conflict);
+                }
                 self.validate_owned_domain(&eligibility, &previous.domain)?;
                 previous.domain
             }
@@ -2274,7 +2347,7 @@ impl CollectionService {
     ) -> Result<Item> {
         let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
         self.validate_owned_domain(&eligibility, &command.domain)?;
-        let (specimens, captures, assets, metadata, deleted, revision, updated_at) =
+        let (lifecycle, specimens, captures, assets, metadata, deleted, revision, updated_at) =
             match self.reader.item(id) {
                 Ok(previous) => {
                     if previous.collection_id != command.collection_id {
@@ -2282,8 +2355,12 @@ impl CollectionService {
                             "moving items across collections is not supported".into(),
                         ));
                     }
+                    if previous.deleted {
+                        return Err(Error::Conflict);
+                    }
                     self.validate_owned_domain(&eligibility, &previous.domain)?;
                     (
+                        previous.lifecycle,
                         previous.specimens,
                         previous.captures,
                         previous.assets,
@@ -2294,6 +2371,7 @@ impl CollectionService {
                     )
                 }
                 Err(Error::NotFound) => (
+                    ItemLifecycle::default(),
                     vec![],
                     vec![],
                     vec![],
@@ -2305,6 +2383,7 @@ impl CollectionService {
                 Err(error) => return Err(error),
             };
         let item = Item {
+            lifecycle,
             id,
             collection_id: command.collection_id,
             revision,
@@ -2340,6 +2419,9 @@ impl CollectionService {
     ) -> Result<Item> {
         let (id, expected) = target;
         let mut item = self.reader.item(id)?;
+        if item.deleted {
+            return Err(Error::Conflict);
+        }
         let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
         self.validate_owned_domain(&eligibility, &item.domain)?;
         self.execute_command(actor, context, operation, request, move |effects| {
@@ -2739,6 +2821,7 @@ impl CollectionService {
                     &item.captures,
                     &item.assets,
                     &item.metadata,
+                    &item.lifecycle,
                     item.deleted,
                     item.updated_at,
                 ))
@@ -2749,6 +2832,7 @@ impl CollectionService {
                     &current.captures,
                     &current.assets,
                     &current.metadata,
+                    &current.lifecycle,
                     current.deleted,
                     current.updated_at,
                 ))
@@ -2770,6 +2854,10 @@ impl CollectionService {
                     && item.captures.is_empty()
                     && item.assets.is_empty()
                     && !item.deleted
+                    && serde_json::to_value(&item.lifecycle)
+                        .map_err(|error| Error::Invalid(error.to_string()))?
+                        == serde_json::to_value(ItemLifecycle::default())
+                            .map_err(|error| Error::Invalid(error.to_string()))?
                     && serde_json::to_value(&item.metadata)
                         .map_err(|error| Error::Invalid(error.to_string()))?
                         == serde_json::to_value(MetadataState::default())
@@ -2929,7 +3017,15 @@ impl CollectionService {
     }
     pub fn evidence(&self, actor: &Principal, id: ItemId) -> Result<Vec<PresentedEvidence>> {
         let item = self.reader.item(id)?;
-        let role = self.authorize(actor, item.collection_id, Action::Browse)?;
+        let role = self.authorize(
+            actor,
+            item.collection_id,
+            if item.deleted {
+                Action::Curate
+            } else {
+                Action::Browse
+            },
+        )?;
         let private = role != Role::Viewer;
         Ok(self
             .reader
@@ -3010,7 +3106,15 @@ impl CollectionService {
     }
     pub fn activity(&self, actor: &Principal, id: ItemId) -> Result<serde_json::Value> {
         let item = self.reader.item(id)?;
-        self.authorize(actor, item.collection_id, Action::Browse)?;
+        self.authorize(
+            actor,
+            item.collection_id,
+            if item.deleted {
+                Action::Curate
+            } else {
+                Action::Browse
+            },
+        )?;
         self.content.activity(actor.user_id, id)
     }
     pub fn save_activity(
@@ -3022,6 +3126,9 @@ impl CollectionService {
     ) -> Result<()> {
         let item = self.reader.item(id)?;
         self.authorize(actor, item.collection_id, Action::Browse)?;
+        if item.deleted {
+            return Err(Error::Conflict);
+        }
         if serde_json::to_vec(&value)
             .map_err(|error| Error::Invalid(error.to_string()))?
             .len()
@@ -3056,10 +3163,15 @@ impl CollectionService {
         thumbnail: bool,
     ) -> Result<MediaResource> {
         let item = self.reader.item(item_id)?;
-        let role = self.authorize(actor, item.collection_id, Action::Browse)?;
-        if item.deleted {
-            return Err(Error::NotFound);
-        }
+        let role = self.authorize(
+            actor,
+            item.collection_id,
+            if item.deleted {
+                Action::Curate
+            } else {
+                Action::Browse
+            },
+        )?;
         let state = self
             .content
             .asset_states_for_item(item_id)?
@@ -3077,11 +3189,11 @@ impl CollectionService {
         collection_id: CollectionId,
         asset_id: AssetId,
     ) -> Result<PresentedAsset> {
-        let role = self.authorize(actor, collection_id, Action::Browse)?;
         let state = self.content.asset_state(asset_id)?;
         if state.collection_id != collection_id || state.deleted {
             return Err(Error::NotFound);
         }
+        let role = self.asset_read_role(actor, collection_id, state.asset.subject)?;
         if role == Role::Viewer && state.asset.visibility == Visibility::Curators {
             return Err(Error::Forbidden);
         }
@@ -3094,11 +3206,11 @@ impl CollectionService {
         asset_id: AssetId,
         thumbnail: bool,
     ) -> Result<MediaResource> {
-        let role = self.authorize(actor, collection_id, Action::Browse)?;
         let state = self.content.asset_state(asset_id)?;
         if state.collection_id != collection_id || state.deleted {
             return Err(Error::NotFound);
         }
+        let role = self.asset_read_role(actor, collection_id, state.asset.subject)?;
         if role == Role::Viewer && state.asset.visibility == Visibility::Curators {
             return Err(Error::Forbidden);
         }
@@ -3123,7 +3235,7 @@ impl CollectionService {
         let asset_id = deterministic_new_asset_id(actor.user_id, context.key());
         let request = (asset_id, command.clone(), Digest::sha256(bytes));
         let state = self.execute_command(actor, context, "asset.create", &request, |effects| {
-            effects.create_asset(asset_id, command, bytes)
+            effects.create_asset(asset_id, command, bytes, None)
         })?;
         Ok(PresentedAsset::from_state(state, role))
     }
@@ -3204,6 +3316,7 @@ impl CollectionService {
                         alt_text,
                     },
                     bytes,
+                    Some(item.lifecycle.generation),
                 )
             },
         )?;
@@ -3761,6 +3874,9 @@ impl CollectionService {
         let item = self.reader.item(item_id)?;
         if item.collection_id != collection {
             return Err(Error::NotFound);
+        }
+        if item.deleted {
+            return Err(Error::Conflict);
         }
         let specimen = association
             .specimen_id
@@ -4524,6 +4640,21 @@ impl CollectionService {
                     .ok_or_else(|| Error::Storage("staging job has no Import identity".into()))?
                     .parse()
                     .map_err(|error| Error::Storage(format!("invalid Import identity: {error}")))?;
+                if let Some(representation) = claim
+                    .request
+                    .get("retained_representation_id")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    return self
+                        .provisional_imports
+                        .stage_retained_import(
+                            import_id,
+                            claim.id,
+                            &claim.claim_token,
+                            representation.parse().map_err(|_| Error::Conflict)?,
+                        )
+                        .map(|record| serde_json::json!({"import_id": record.view.id}));
+                }
                 let source_locator = claim
                     .request
                     .get("source_locator")
@@ -4548,12 +4679,20 @@ impl CollectionService {
                     .ok_or_else(|| Error::Storage("publication job has no Import identity".into()))?
                     .parse()
                     .map_err(|error| Error::Storage(format!("invalid Import identity: {error}")))?;
-                if claim.phase != "revision_committed" {
-                    let record = self.provisional_imports.import_record(import_id)?;
-                    let collection_id = record.view.collection_id;
-                    if claim.collection_id != Some(collection_id) {
-                        return Err(Error::Conflict);
-                    }
+                let record = self.provisional_imports.import_record(import_id)?;
+                let collection_id = record.view.collection_id;
+                if claim.collection_id != Some(collection_id) {
+                    return Err(Error::Conflict);
+                }
+                // Archive publication is irreversible. If a crash left the
+                // private receipt behind, finish that receipt even after the
+                // Item was removed or the submitting grant was revoked.
+                let capture_committed = match self.reader.capture(record.view.capture_id) {
+                    Ok(_) => true,
+                    Err(Error::NotFound) => false,
+                    Err(error) => return Err(error),
+                };
+                if !capture_committed {
                     if !self
                         .reader
                         .role(claim.user_id, collection_id)?
@@ -5252,9 +5391,32 @@ impl CollectionService {
         })
         .map(|_| ())
     }
-    pub fn grants(&self, actor: &Principal, collection: CollectionId) -> Result<Vec<GrantView>> {
+    pub fn grants(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<GrantView>> {
         self.authorize(actor, collection, Action::ManageAccess)?;
-        self.access.grants(collection)
+        if search.len() > 256
+            || cursor.is_some_and(|value| value.len() > 256)
+            || !(1..=100).contains(&limit)
+        {
+            return Err(Error::Invalid("invalid access search or page size".into()));
+        }
+        self.access.grants(collection, search, cursor, limit)
+    }
+    pub fn grant_for_username(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        username: &str,
+    ) -> Result<Option<GrantView>> {
+        self.authorize(actor, collection, Action::ManageAccess)?;
+        let user = self.authentication.user_by_name(username)?;
+        self.access.grant_for_user(collection, user)
     }
     pub fn set_grant(
         &self,

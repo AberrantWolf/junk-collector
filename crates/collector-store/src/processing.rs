@@ -989,6 +989,11 @@ impl SnapshotPort for Store {
 }
 
 impl ProcessingPort for Store {
+    fn ensure_snapshot_current(&self, item: ItemId, snapshot: SnapshotId) -> Result<()> {
+        let stale: bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN items i ON i.id=j.item_id WHERE j.item_id=?1 AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id'))=?2 AND COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=j.id),0)<>COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))",params![item.to_string(),snapshot.to_string()],|row|row.get(0)).map_err(storage)?;
+        if stale { Err(Error::Conflict) } else { Ok(()) }
+    }
+
     fn conversion_scratch(&self) -> Result<Box<dyn collector_app::ConversionScratch>> {
         crate::derivatives::scratch(self)
     }
@@ -1443,26 +1448,24 @@ pub(crate) fn project_effective_metadata_search(
         [record.item_id.to_string()],
     )
     .map_err(storage)?;
-    if !item.deleted {
-        tx.execute(
-            "INSERT INTO search VALUES (?,?,?)",
-            params![
-                item.id.to_string(),
-                display.title.value,
-                format!(
-                    "{} {} {}",
-                    display
-                        .subtitle
-                        .as_ref()
-                        .map(|value| value.value.as_str())
-                        .unwrap_or(""),
-                    collector_app::browse_sort_fields(&item).0,
-                    collector_app::browse_sort_fields(&item).1
-                )
-            ],
-        )
-        .map_err(storage)?;
-    }
+    tx.execute(
+        "INSERT INTO search VALUES (?,?,?)",
+        params![
+            item.id.to_string(),
+            display.title.value,
+            format!(
+                "{} {} {}",
+                display
+                    .subtitle
+                    .as_ref()
+                    .map(|value| value.value.as_str())
+                    .unwrap_or(""),
+                collector_app::browse_sort_fields(&item).0,
+                collector_app::browse_sort_fields(&item).1
+            )
+        ],
+    )
+    .map_err(storage)?;
     Ok(())
 }
 

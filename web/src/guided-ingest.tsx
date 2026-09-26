@@ -24,12 +24,13 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  const [plan,setPlan]=useState<Plan>();const [automatic,setAutomatic]=useState(true);const [prepareMusic,setPrepareMusic]=useState(false);const [preserveOnly,setPreserveOnly]=useState(false);
  const [destination,setDestination]=useState<Item|null>(initialItem||null);
  useEffect(()=>{if(initialItem)setDestination(initialItem);},[initialItem?.id,initialItem?.revision]);
- const [detail,setDetail]=useState<Detail>();const [detailOpen,setDetailOpen]=useState(false);const [target,setTarget]=useState<Item|null>(null);
+ const [detail,setDetail]=useState<Detail>();const [detailOpen,setDetailOpen]=useState(false);const [target,setTarget]=useState<Item|null>();
  const [uploadProgress,setUploadProgress]=useState<UploadProgress>();const [activity,setActivity]=useState('');
  const [notice,setNotice]=useState('');const [failure,setFailure]=useState('');
  const lifecycle=useRef(new AbortController());const selection=useRef<AbortController|undefined>(undefined);
  const acceptance=useRef<string|undefined>(undefined);const detailId=useRef<string|undefined>(undefined);
  const targetEdited=useRef(false);
+ const associationChanged=!!detail&&target!==undefined&&(target?.id??null)!==(detail.import.association.item_id??null);
  const callbacks=useRef({onPublished,onError,setBusy});callbacks.current={onPublished,onError,setBusy};
  const notified=useRef(new Map<string,string>());
  useEffect(()=>{onDraftChange?.(!!files.length||!!plan||!!inboxPackages.length&&source==='inbox');},[files,plan,inboxPackages,source,onDraftChange]);
@@ -45,7 +46,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   const marker=JSON.stringify(item);if(notified.current.get(item.id)!==marker){notified.current.set(item.id,marker);callbacks.current.onPublished(item);}
  }
  async function open(id:string){
-  setDetailOpen(true);
+  setDetailOpen(true);setTarget(undefined);
   selection.current?.abort();const controller=new AbortController();selection.current=controller;detailId.current=id;
   try{
    const value=await request<Detail>(`/ingests/${id}`,{signal:controller.signal});setDetail(value);targetEdited.current=false;
@@ -55,7 +56,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  }
  useEffect(()=>{
   lifecycle.current=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
-  async function poll(){try{const id=detailId.current;if(id){const value=await request<Detail>(`/ingests/${id}`);if(detailId.current===id){setDetail(value);if(!targetEdited.current){const associated=value.import.association.item_id;setTarget(associated?await request<Item>(`/items/${associated}`):null);}await publishNotice(value,selection.current?.signal);}}}catch(error){fail(error);}finally{if(!lifecycle.current.signal.aborted)timer=setTimeout(poll,2000);}}
+  async function poll(){try{const id=detailId.current;if(id){const value=await request<Detail>(`/ingests/${id}`);if(detailId.current===id){setDetail(value);if(!targetEdited.current){const associated=value.import.association.item_id;const savedTarget=associated?await request<Item>(`/items/${associated}`,{signal:selection.current?.signal}):null;if(detailId.current===id&&!targetEdited.current)setTarget(savedTarget);}await publishNotice(value,selection.current?.signal);}}}catch(error){fail(error);}finally{if(!lifecycle.current.signal.aborted)timer=setTimeout(poll,2000);}}
   void poll();if(!historyOnly)void request<InboxSource[]>(`/collections/${collectionId}/inboxes?packages=false`).then(value=>{setInboxes(value);setInboxLabel(value[0]?.label||'');}).catch(fail);
   return()=>{lifecycle.current.abort();selection.current?.abort();if(timer)clearTimeout(timer);callbacks.current.setBusy(false);};
  },[collectionId,historyOnly]);
@@ -101,7 +102,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  async function discard(){if(!detail||!confirm(`Discard ${detail.summary.package_name} and reclaim its unpublished staging bytes?`))return;await mutate(async()=>{await request(`/ingests/${detail.summary.import_id}/discard`,{method:'POST',body:JSON.stringify({expected_revision:detail.import.revision})});setNotice('Discard accepted. Cleanup progress is shown below.');await open(detail.summary.import_id);});}
  async function cancel(){if(!detail)return;await mutate(async()=>{setDetail(await request<Detail>(`/ingests/${detail.summary.import_id}/cancel`,{method:'POST',body:JSON.stringify({expected_revision:detail.import.revision})}));});}
  async function retry(jobId?:string|null){if(!detail)return;await mutate(async()=>{setDetail(await request<Detail>(`/ingests/${detail.summary.import_id}/retry`,{method:'POST',body:JSON.stringify({job_id:jobId||null})}));});}
- async function correct(){if(!detail||detail.summary.capture_revision===null)return;await mutate(async()=>{
+ async function correct(){if(!detail||!associationChanged||detail.summary.capture_revision===null)return;await mutate(async()=>{
   const selected=target?await request<Item>(`/items/${target.id}`):null;
   if(selected&&selected.collection_id!==collectionId)throw new Error('The destination is outside this collection.');
   if(selected&&selected.revision!==target?.revision)throw new Error('The destination changed. Search for it again and review its current revision before attaching.');
@@ -138,16 +139,16 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   <button disabled={busy} onClick={()=>window.dispatchEvent(new Event('collector-open-work'))}>Open work &amp; history</button>
   </>}
   {detail&&<details className="ingest-detail" open={detailOpen} onToggle={event=>setDetailOpen(event.currentTarget.open)}><summary>Details: {detail.summary.package_name}</summary>
-   {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {target?.title||'another collection entry'}. Other discs attached to that entry are retained.</p>}
+   {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {target?.id===detail.import.association.item_id?target.title:'its saved collection entry'}. Other discs attached to that entry are retained.</p>}
    {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label="Package staging progress" completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Received bytes and the entry are saved on the server."/>}
    {detail.cleanup&&<p role="status">Reclaimed {detail.cleanup.reclaimed_bytes.toLocaleString()} bytes · {detail.cleanup.pending_bytes.toLocaleString()} pending{detail.cleanup.cleanup_pending?' · cleanup pending':' · cleanup complete'}</p>}
    {detail.attempts.length>0&&<details><summary>Attempt history</summary>{detail.attempts.map((attempt,index)=><p key={`${attempt.job_id}:${attempt.attempt}:${index}`}><strong>{stateLabel(attempt.step)} · attempt {attempt.attempt}</strong> — {stateLabel(attempt.state)}{attempt.diagnostic&&<> · {attempt.diagnostic}</>}</p>)}</details>}
    {detail.summary.capture_id&&<p>Capture {detail.summary.capture_id}</p>}
    <div className="ingest-steps">{detail.steps.map(step=><div key={step.step}><strong>{stateLabel(step.step)}</strong><span>{stateLabel(step.state)}</span>{step.message&&<p>{step.message}</p>}{step.state==='active'&&<WorkProgress label={`${stateLabel(step.step)} in progress`} detail="The server is working; this view refreshes automatically."/>}{step.retryable&&<button disabled={busy} onClick={()=>void retry(step.job_id)}>Retry this step</button>}</div>)}</div>
-   {!uploadProgress&&detail.import.phase==='staging'&&detail.import.source.kind==='browser'&&<form aria-label="Resume guided package" onSubmit={event=>{event.preventDefault();void resume();}}><p>Select the original folder or files. Received bytes will be checked before the upload continues.</p><label>Original folder<input type="file" multiple {...{webkitdirectory:''}} disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><label>Original package files<input aria-label="Resume original package files" type="file" multiple disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><button disabled={busy||!resumeFiles.length}>Resume upload</button></form>}
+   {!uploadProgress&&detail.summary.permissions.can_resume_upload&&<form aria-label="Resume guided package" onSubmit={event=>{event.preventDefault();void resume();}}><p>Select the original folder or files. Received bytes will be checked before the upload continues.</p><label>Original folder<input type="file" multiple {...{webkitdirectory:''}} disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><label>Original package files<input aria-label="Resume original package files" type="file" multiple disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><button disabled={busy||!resumeFiles.length}>Resume upload</button></form>}
    {detail.summary.permissions.can_cancel&&<button disabled={busy} onClick={()=>void cancel()}>Cancel remaining work</button>}{detail.summary.permissions.can_discard&&<button disabled={busy} onClick={()=>void discard()}>Discard unpublished import</button>}
    {detail.summary.outcome==='failed'&&!detail.steps.some(step=>step.retryable)&&<button disabled={busy} onClick={()=>void retry(null)}>Retry optional processing</button>}
-   {detail.summary.permissions.can_correct_association&&<details><summary>Correct destination</summary><DestinationChooser collectionId={collectionId} selected={target} disabled={busy} onSelect={value=>{targetEdited.current=true;setTarget(value);}}/><button disabled={busy||target?.id===detail.import.association.item_id} onClick={()=>void correct()}>Save association</button><p className="muted">This moves only this dump's association. Other discs and original files are retained.</p></details>}
+   {detail.summary.permissions.can_correct_association&&<details><summary>Correct destination</summary>{target===undefined?<p role="status">Loading saved destination…</p>:<><DestinationChooser collectionId={collectionId} selected={target} disabled={busy} onSelect={value=>{targetEdited.current=true;setTarget(value);}}/>{associationChanged?<><p role="status">Destination changed. Save to apply this change.</p><button disabled={busy} onClick={()=>void correct()}>Save association</button><p className="muted">This moves only this dump's association. Other discs and original files are retained.</p></>:<p role="status">{detail.import.association.item_id?'Already attached to this entry. No changes to save.':'This dump is already unattached. No changes to save.'}</p>}</>}</details>}
   </details>}
  </section>;
 }

@@ -97,6 +97,95 @@ submit an explicit reviewed target set with per-target receipts and outcomes, ne
 an unbounded “all matching” mutation. Original payloads and successful evidence
 remain outside cleanup. Generic retry must reject pending clear/dismissed targets.
 
+## FX-05 item lifecycle contract
+
+An Item tombstone is an archive revision, not deletion of its Captures, Assets,
+inventory, loans, metadata authority, or evidence. Application commands own
+Remove and Restore and require collection content-write eligibility, an expected
+Item revision, and an idempotency receipt. Ordinary browse excludes tombstones;
+an explicitly selected removed view uses the same authorized, bounded query.
+Direct Item reads retain role-based redaction so a curator can inspect and restore
+one. Removed Item evidence, activity and owned artwork require the same curator
+role, including their direct backing APIs. A removed Item is ineligible as a
+destination for new work.
+
+Removal must fence accepted guided imports and item-owned Jobs at the same
+writer/publication boundary used by capture publication. Durable import intent
+cancellation survives restart. Direct owners of shared scans remain attached;
+removing an import owner cannot cancel their work. Workers must check the Item
+state and workflow claim again before publishing, including after expensive
+byte reads. A restart reconciler must repeat any cancellation left between the
+archive tombstone and private-state settlement. The archive tombstone remains
+the authoritative source when rebuilding projections.
+If a Capture revision committed before removal, its Import receipt and Evidence
+reference finish after recovery; this narrow finalization can only republish
+the exact current tombstoned Item and cannot change its inventory.
+
+Clean reimport is a new generation of work for the same Item identity. It keeps
+the previous usable Capture until the replacement Capture publishes, validates
+retained bytes while consuming them, then changes the current association
+recoverably. Historical Captures, observations, and evidence remain addressable.
+Manual metadata, inventory, loans and chosen artwork remain by default; explicit
+reset flags govern authority changes. Generation is captured with admission and
+checked at each child admission and final publication, so older work cannot
+become current after a reset. A failed replacement remains resumable without
+creating a second Item.
+
+`Item.lifecycle` stores the generation, historical Capture IDs, and pending
+replacement identity in portable Item revisions. Guided admission stamps Import
+and Job generations in the same private transaction as their ownership records.
+The archive preparation deliberately does not complete the command receipt: an
+interrupted admission replays its deterministic Import identity, then commits
+private admission and its receipt together. Generic retry and worker checkpoints
+reject obsolete generations. Direct scan and derivative owners retain shared
+computation; a committed Capture may still finish its evidence/receipt bookkeeping.
+The final Item revision makes the replacement current and hides only the selected
+old Captures, leaving other discs untouched. Reindex derives the same current view.
+
+Reset choices are reviewed before admission and take effect when the reimport
+starts. Portable metadata-revision cutoffs clear current automatic candidates and,
+only when requested, manual field/domain/selection or artwork authority. Historical
+observations and Asset bytes remain. Later manual edits are resolved against the
+latest inventory revision rather than overwritten by replacement publication.
+Old acquisition snapshots cannot be applied by a new completion after the generation
+changes; receipt replay remains separate from applying an effect again. Provider
+artwork also checks the expected generation under the archive writer before
+publication. Superseded, unfinished replacement Capture IDs stay excluded even
+when an earlier partial publication later completes its bookkeeping.
+
+Retained-original staging is a claimed, cancellable Job. It copies bounded chunks,
+checks recorded lengths and SHA-256 against consumed bytes, and checks cancellation
+during the final staged-file hash too. A stored fingerprint alone is never treated
+as a fresh integrity result. Failed uploads and staging jobs use the existing
+resume/retry flow; retained staging does not offer a browser-upload resume form.
+Player queues keep immutable file coordinates. Their lightweight authenticated
+HEAD checks and media reads can resolve retained historical Captures, while
+rechecking the current Item/Capture association and denying removed Items.
+
+## FX-06 access and recovery contract
+
+Collection access is a collection-scoped task independent of Item selection or
+content-write eligibility. Application authorization checks ManageAccess before
+bounded grant queries and exact grant reads; the Store pages username-ordered
+results. Grant writes retain expected revisions, command receipts, recent
+session authentication, and last-owner rules. Curation route composition controls
+both the panel asset and its backing APIs. Loaded grant rows carry their query
+scope; a collection/search change immediately makes those rows and their cursors
+unavailable, and removal checks that the originating scope is still current.
+
+Signed-out browser recovery consumes the existing one-use code through the auth
+service and uses its returned session cookie. Codes and replacement passwords stay
+in component memory and request bodies; neither is placed in a URL or browser
+storage. The shared API client pauses a sensitive command on the typed recent-auth
+error, obtains a fresh password or passkey session, then retries the original body
+and idempotency key once. Cancellation rejects the pending command and leaves the
+owning form mounted with its draft. An expired or revoked session still goes through
+normal unauthenticated handling. Each prompt has a distinct generation; cancellation
+aborts password/passkey requests and ignores obsolete completions. Authentication
+continues to issue a fresh session under the existing login contract. Revoking a
+row marked Current therefore also invokes the existing logout command before
+clearing the browser UI, revoking any replacement session issued during the retry.
+
 ## Dependency rules
 
 Wave 4 reserves the `collector-api-types` boundary below; its DTO move remains

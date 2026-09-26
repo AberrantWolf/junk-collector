@@ -13,6 +13,8 @@
     "test:scans": "node tests/scans.mjs",
     "test:work": "node tests/work-history.mjs",
     "test:fx04": "node tests/fx04.mjs",
+    "test:fx05": "node tests/fx05.mjs",
+    "test:fx06": "node tests/fx06.mjs",
     "test:fx04-review": "node tests/fx04-review.mjs",
     "test:queue": "node tests/music-queue.mjs"
   },

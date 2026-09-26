@@ -5,6 +5,7 @@ mod browse;
 mod commands;
 mod derivatives;
 mod files;
+mod item_lifecycle;
 mod jobs;
 mod migration;
 mod migration_v3;
@@ -637,9 +638,30 @@ impl Store {
 
     pub(crate) fn publish_under_writer(
         &self,
+        item: Item,
+        expected: Revision,
+        added_evidence: Vec<Evidence>,
+    ) -> Result<Item> {
+        self.publish_under_writer_internal(item, expected, added_evidence, false)
+    }
+
+    /// Complete an already committed Evidence reference after an Item was
+    /// removed. The caller must pass the exact current Item; this cannot
+    /// change tombstoned inventory or resurrect old operational results.
+    pub(crate) fn publish_committed_import_reference_under_writer(
+        &self,
+        item: Item,
+        expected: Revision,
+    ) -> Result<Item> {
+        self.publish_under_writer_internal(item, expected, vec![], true)
+    }
+
+    fn publish_under_writer_internal(
+        &self,
         mut item: Item,
         expected: Revision,
         added_evidence: Vec<Evidence>,
+        committed_reference_only: bool,
     ) -> Result<Item> {
         item.validate()?;
         let representations = item
@@ -666,7 +688,17 @@ impl Store {
         }
         let previous = self.item(item.id);
         let (current, item_path) = match previous {
-            Ok(previous) => (previous.revision, self.item_path(item.id)?),
+            Ok(previous) => {
+                if previous.deleted
+                    && item.deleted
+                    && (!committed_reference_only
+                        || serde_json::to_value(&previous).map_err(storage)?
+                            != serde_json::to_value(&item).map_err(storage)?)
+                {
+                    return Err(Error::Conflict);
+                }
+                (previous.revision, self.item_path(item.id)?)
+            }
             Err(Error::NotFound) => {
                 let dir: String = lock(&self.db)?
                     .query_row(
@@ -1042,13 +1074,18 @@ impl ContentPort for Store {
         self.asset_subject_collection_record(subject)
     }
 
+    fn asset_subject_item(&self, subject: AssetSubject) -> Result<Option<ItemId>> {
+        self.asset_subject_item_record(subject)
+    }
+
     fn create_asset(
         &self,
         asset: AssetId,
         command: CreateAssetCommand,
         bytes: &[u8],
+        expected_generation: Option<u64>,
     ) -> Result<AssetState> {
-        self.create_asset_record(asset, command, bytes)
+        self.create_asset_record(asset, command, bytes, expected_generation)
     }
 
     fn update_asset(
@@ -2021,6 +2058,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         ("anchor_file_index", "INTEGER"),
         ("created_item", "INTEGER NOT NULL DEFAULT 1"),
         ("analysis", "TEXT NOT NULL DEFAULT 'automatic'"),
+        ("clean_reimport", "TEXT"),
     ] {
         let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('guided_ingest_intents','private') WHERE name=?)", [column], |row| row.get(0)).map_err(storage)?;
         if !exists {
@@ -2030,6 +2068,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             .map_err(storage)?;
         }
     }
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.item_job_generations(job_id TEXT PRIMARY KEY, generation INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS private.item_import_generations(import_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)").map_err(storage)?;
     let cleanup_complete_column: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('import_cleanup','private') WHERE name='completed')", [], |row| row.get(0)).map_err(storage)?;
     if !cleanup_complete_column {
         db.execute_batch(
@@ -2729,6 +2768,9 @@ impl Catalog for Store {
     fn save(&self, item: Item, expected: Revision) -> Result<Item> {
         self.publish(item, expected, vec![])
     }
+    fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item> {
+        self.change_item_removed(id, expected, removed)
+    }
     fn retire_item_if_unchanged(
         &self,
         mut item: Item,
@@ -2959,8 +3001,14 @@ impl AccessPort for Store {
         self.grant_record(collection, user)
     }
 
-    fn grants(&self, collection: CollectionId) -> Result<Vec<GrantView>> {
-        self.grants_record(collection)
+    fn grants(
+        &self,
+        collection: CollectionId,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<GrantView>> {
+        self.grants_record(collection, search, cursor, limit)
     }
 
     fn set_grant(
@@ -2997,34 +3045,54 @@ impl Store {
             .transpose()
     }
 
-    fn grants_record(&self, collection: CollectionId) -> Result<Vec<GrantView>> {
+    fn grants_record(
+        &self,
+        collection: CollectionId,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<GrantView>> {
         let db = lock(&self.db)?;
-        let mut statement = db
-            .prepare(
-                "SELECT g.user_id,u.username,g.role,g.revision FROM private.grants g JOIN private.users u ON u.id=g.user_id WHERE g.collection_id=? ORDER BY u.username,g.user_id",
+        let mut statement = db.prepare(
+            "SELECT g.user_id,u.username,g.role,g.revision FROM private.grants g JOIN private.users u ON u.id=g.user_id WHERE g.collection_id=?1 AND u.username>?2 AND instr(lower(u.username),lower(?3))>0 ORDER BY u.username,g.user_id LIMIT ?4",
+        ).map_err(storage)?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![
+                    collection.to_string(),
+                    cursor.unwrap_or(""),
+                    search,
+                    u32::from(limit) + 1
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, u64>(3)?,
+                    ))
+                },
             )
             .map_err(storage)?;
-        let rows = statement
-            .query_map([collection.to_string()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, u64>(3)?,
-                ))
+        let mut items: Vec<GrantView> = rows
+            .map(|row| {
+                let (user, username, role, revision) = row.map_err(storage)?;
+                Ok(GrantView {
+                    collection_id: collection,
+                    user_id: user.parse().map_err(storage)?,
+                    username,
+                    role: role_from_database(role)?,
+                    revision: Revision(revision),
+                })
             })
-            .map_err(storage)?;
-        rows.map(|row| {
-            let (user, username, role, revision) = row.map_err(storage)?;
-            Ok(GrantView {
-                collection_id: collection,
-                user_id: user.parse().map_err(storage)?,
-                username,
-                role: role_from_database(role)?,
-                revision: Revision(revision),
-            })
-        })
-        .collect()
+            .collect::<Result<_>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|grant| grant.username.clone())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
     }
 
     fn set_grant_record(
@@ -3138,22 +3206,20 @@ fn project(tx: &Connection, record: &RevisionRecord, path: &str) -> Result<()> {
     browse::project(tx, item)?;
     tx.execute("DELETE FROM search WHERE id=?", [item.id.to_string()])
         .map_err(storage)?;
-    if !item.deleted {
-        tx.execute(
-            "INSERT INTO search VALUES (?,?,?)",
-            params![
-                item.id.to_string(),
-                item.title,
-                format!(
-                    "{} {} {}",
-                    item.subtitle,
-                    collector_app::browse_sort_fields(item).0,
-                    collector_app::browse_sort_fields(item).1
-                )
-            ],
-        )
-        .map_err(storage)?;
-    }
+    tx.execute(
+        "INSERT INTO search VALUES (?,?,?)",
+        params![
+            item.id.to_string(),
+            item.title,
+            format!(
+                "{} {} {}",
+                item.subtitle,
+                collector_app::browse_sort_fields(item).0,
+                collector_app::browse_sort_fields(item).1
+            )
+        ],
+    )
+    .map_err(storage)?;
     let metadata: Option<String> = tx
         .query_row(
             "SELECT record FROM metadata_authorities WHERE id=?",
@@ -3386,6 +3452,14 @@ fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
     item.captures = rows
         .map(|row| serde_json::from_str(&row.map_err(storage)?).map_err(storage))
         .collect::<Result<Vec<_>>>()?;
+    item.captures.retain(|capture| {
+        !item.lifecycle.historical_captures.contains(&capture.id)
+            && !item
+                .lifecycle
+                .reimport
+                .as_ref()
+                .is_some_and(|pending| !pending.completed && pending.capture_id == capture.id)
+    });
     let mut assets = item
         .assets
         .drain(..)

@@ -1,6 +1,6 @@
 # Usability and lifecycle fixes
 
-Prepared 2026-09-21 at the user's request, combining the [18 UX findings](reviews/ux-2026-09-20/review.md) with related unfinished milestone work. **FX-01–FX-03 are implemented and locally accepted (2026-09-21). FX-04 implementation and local acceptance passed 2026-09-25; FX-05–FX-07 remain proposed.** This document defines a coherent fix set; it does not declare LA3 accepted or silently replace its outstanding second-device qualification.
+Prepared 2026-09-21 at the user's request, combining the [18 UX findings](reviews/ux-2026-09-20/review.md) with related unfinished milestone work. **FX-01–FX-03 are implemented and locally accepted (2026-09-21). FX-04 local acceptance passed 2026-09-25. FX-05 Remove/Restore and clean reimport are implemented and locally accepted (2026-09-26). FX-06 is implemented and locally accepted (2026-09-26); FX-07 remains open.** This document defines a coherent fix set; it does not declare LA3 accepted or silently replace its outstanding second-device qualification.
 
 ## Intended outcome
 
@@ -34,8 +34,8 @@ The new item-removal/clean-reimport and validation-result consolidation requirem
 | FX-02 — One scan, one useful result | Valid defaults, one equivalent active computation, result-first completed state, compact repeat verification history | Existing processing/jobs; durable equivalence contract recorded in architecture | Implemented; local acceptance passed 2026-09-21 |
 | FX-03 — Work and history management | Identify, resume, filter, dismiss, restore and clean selected work; show meaningful analysis targets without losing useful results | FX-02 active-work/result semantics; existing guided history | Implemented and locally accepted 2026-09-21 |
 | FX-04 — Focused editing and consistent intake | Focused views, separate import history/detail navigation, and consistent new/existing-entry intake | FX-02 readiness; FX-03 progress/history destinations | Implemented; local acceptance passed 2026-09-25 |
-| FX-05 — Remove, restore and reimport cleanly | Repair or remove a messy item without duplicates, resurrected old work or lost originals | FX-02/03/04 and publication/recovery contract review | Proposed |
-| FX-06 — Usable access and account recovery | Direct collection management, browser recovery and in-place reauthentication | Existing U02/S02 services; independent of FX-02–05 | Proposed |
+| FX-05 — Remove, restore and reimport cleanly | Repair or remove a messy item without duplicates, resurrected old work or lost originals | FX-02/03/04 and publication/recovery contract review | Implemented and locally accepted 2026-09-26 |
+| FX-06 — Usable access and account recovery | Direct collection management, browser recovery and in-place reauthentication | Existing U02/S02 services; independent of FX-02–05 | Locally accepted 2026-09-26 |
 | FX-07 — Whole-interface completion review | All implemented actions meet the readiness/lifecycle standard with recorded evidence | FX-01–06 | Proposed |
 
 Recommended sequence: FX-01 → FX-02 → FX-03 → FX-04 → FX-05 → FX-06 → FX-07. FX-06 can be brought forward after FX-01 because it has no scan/cleanup dependency. Each implementation delivery includes its own real UI acceptance; FX-07 finds cross-workflow omissions rather than postponing testing.
@@ -201,10 +201,12 @@ All audit findings are assigned: UX-01/02/04/10/11 → FX-01; UX-16/17/18 → FX
 
 FX-01–FX-04 are locally accepted. FX-04 was implemented in the 2026-09-24
 checkpoint; see its [validation record](validation.md#fx-04-focused-editing-and-intake--2026-09-24)
-and [growing-list audit](fx04-scale-audit.md). FX-05 is next. Preserve local user
-data and configuration, and do not absorb FX-06/FX-07 or the outstanding LA3
-second-device gate into FX-05.
+and [growing-list audit](fx04-scale-audit.md). FX-05 now includes Remove/Restore,
+retained-original and replacement-upload reimport, reviewed authority resets,
+recoverable capture switching, generation fences and continued queued playback.
+Local acceptance passed on 2026-09-26; see [validation](validation.md) for the exact checked scope and limitations.
+Preserve local user data and configuration. FX-06 is locally accepted; FX-07 is the next implementation chunk. The outstanding LA3 second-device gate remains separate.
 
 At completion of each delivery, update this ledger, implementation status, the mapped U05/P04/background-work criteria, validation evidence and the next ready-to-send prompt together. Retain dated earlier acceptance records and outstanding LA3/external gates. For FX-02 and FX-05, document durable identities, publication fences, cancellation/ownership and restart recovery before changing their subsystem boundaries.
 
-**Ready-to-send FX-05 prompt:** Implement FX-05 in docs/ux-fix-plan.md as one complete Remove, Restore and clean-reimport delivery. Read AGENTS.md, architecture, release requirements, implementation status, FX-04 validation and this plan. First settle the item lifecycle and command contract: access, active imports, captures, shared work ownership, workflow generation, late publication fences, retained bytes and restart recovery. Expose a removed-items browse view and clear Restore/Reimport actions. Keep the same Item identity; preserve manual metadata, physical inventory, loans and selected artwork by default, and reset overrides only by explicit user choice. Keep the last usable capture until replacement publishes, preserve evidence/history, validate retained bytes before reuse, and show resumable failures. Exercise real browser remove/restore/reimport, revoked access, cancelled/shared work, immediate refresh and restart. Run repository gates and update the child ledger, implementation status, validation and next prompt together. Do not implement FX-06/FX-07 or claim external LA3 qualification.
+**Ready-to-send FX-07 prompt:** Implement the whole-interface completion review in docs/ux-fix-plan.md. Read AGENTS.md, architecture, release requirements, implementation status and current validation. Audit every implemented browser action and growing list against U05.2/U05.3 and P04.6. Verify bounded server search/paging and reaching records beyond the first page, including account and access lists. Exercise setup, recovery and recent authentication, collection/item management, ingestion, work/history, evidence, clean reimport, removal, preparation and actual playback. Correct findings in owning layers, preserve existing security and metadata/evidence guarantees, run repository gates and real-browser journeys, then update the ledgers together. Do not claim external LA3 second-device or hardware qualification without those devices.

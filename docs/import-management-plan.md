@@ -72,7 +72,7 @@ it does not depend on C06 event streaming.
 | Child | State | Scope and dependencies |
 |---|---|---|
 | P04.4 — Identifiable import and attempt history | Implemented and locally accepted in FX-03 | Server search/filter/keyset pages, named workflow groups, attempt detail, dismissed history and server-backed reopening |
-| P04.5 — Import cleanup lifecycle | FX-03 history/unpublished subset locally accepted | Dismiss/restore, selected/bulk cleanup, durable cancellation/settlement and byte/error/retry outcomes; mistaken published-item removal remains FX-05 |
+| P04.5 — Import cleanup lifecycle | FX-03 history/unpublished subset accepted; FX-05 lifecycle implemented 2026-09-26 | Dismiss/restore, selected/bulk cleanup, durable cancellation/settlement and byte/error/retry outcomes; FX-05 adds mistaken published-item removal/restore, retained or uploaded clean reimport, explicit resets and generation-fenced replacement; exact validation and remaining whole-interface coverage are recorded separately |
 | P04.6 — Web completion review | Planned | LA1 real-browser journey is evidence for one path, not the full mixed-role/bulk/mobile completion matrix |
 
 ### P04.4 — Identifiable import and attempt history

@@ -36,7 +36,7 @@ const datPath=path.join(scratch,'fixture.dat');
 await writeFile(datPath,'<datafile><header><name>Browser fixture</name><version>1</version></header><game name="Browser game"><rom name="game.bin" size="5" crc="9271ee57"/></game></datafile>');
 const binary=path.join(root,'target/debug/collector-server');
 if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nallowed_origins = []\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
-if(hasFlac){const slowFlac=path.join(scratch,'slow-flac.sh');await writeFile(slowFlac,`#!/bin/sh\nif [ "$1" != "--version" ]; then sleep 3; fi\nexec "${flacPath}" "$@"\n`);await chmod(slowFlac,0o755);await writeFile(config,`\n[encoders]\nflac = "${slowFlac}"\n`,{flag:'a'});}
+if(hasFlac){const slowFlac=path.join(scratch,'slow-flac.sh');await writeFile(slowFlac,`#!/bin/sh\nif [ "$1" != "--version" ]; then sleep 3; fi\nexec "${flacPath}" "$@"\n`);await chmod(slowFlac,0o755);const probe=spawnSync(slowFlac,['--version'],{encoding:'utf8',timeout:180000});assert.equal(probe.status,0,`Test encoder wrapper could not start: ${probe.error||probe.stderr}`);await writeFile(config,`\n[encoders]\nflac = "${slowFlac}"\n`,{flag:'a'});}
 await writeFile(config,`\n[dat_sources.browser]\npath = "${datPath}"\nsystem = "nes"\ncatalog = "Browser fixture"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`,{flag:'a'});
 await writeFile(config,'\n[providers]\nmusicbrainz_user_agent = "junk-collector-smoke/0.1 (test@example.invalid)"\n',{flag:'a'});
 const init=spawnSync(binary,['--config',config,localSetup?'setup':'init', '--username',localSetup?'collector':'owner'],{input:password,encoding:'utf8'});
@@ -51,7 +51,7 @@ if(localSetup){
 }
 let logs='';let server;
 function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${accurateRipPort}/`,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`}});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
-async function waitForServer(){for(let i=0;i<100;i++){try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server did not become ready');}
+async function waitForServer(){for(let i=0;i<1200;i++){if(server.exitCode!==null)throw new Error('server exited before readiness: '+logs);try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server did not become ready: '+logs);}
 async function stopServer(){if(!server||server.exitCode!==null)return;server.kill('SIGINT');await new Promise(resolve=>server.once('exit',resolve));}
 async function archiveUnavailableOwnerFixture(collectionId,itemId){
  const collectionRoot=path.join(scratch,'archive/collections');
@@ -89,6 +89,7 @@ try{
  await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();
  await security.getByText('Save these codes now.',{exact:false}).waitFor();
  assert.equal(await security.getByRole('listitem').count(),10);
+ page.once('dialog',dialog=>dialog.accept());
  await page.getByRole('button',{name:'Close account and security'}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
  const administration=page.getByRole('dialog',{name:/Make room for a collection/});
@@ -706,7 +707,7 @@ try{
   await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.getByRole('button',{name:/A test pressing/}).click();await rebuiltPlayer.waitFor();
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
 
-  await page.evaluate(async({collectionId})=>{const grants=await(await fetch(`/api/v1/collections/${collectionId}/grants`)).json();const grant=grants.find(value=>value.username==='playback-viewer');const response=await fetch(`/api/v1/collections/${collectionId}/grants/playback-viewer?expected_revision=${grant.revision}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`grant revocation: ${response.status} ${await response.text()}`);},playbackFixture);
+  await page.evaluate(async({collectionId})=>{const grants=await(await fetch(`/api/v1/collections/${collectionId}/grants`)).json();const grant=grants.items.find(value=>value.username==='playback-viewer');const response=await fetch(`/api/v1/collections/${collectionId}/grants/playback-viewer?expected_revision=${grant.revision}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`grant revocation: ${response.status} ${await response.text()}`);},playbackFixture);
   await rebuiltPlayer.getByRole('alert').getByText('Access to this queued album is no longer available.',{exact:false}).waitFor();
   assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'revoked viewer retained an active media request');assert.deepEqual(playbackErrors,[]);
   console.log(`Browser playback qualified: Google Chrome ${browserVersion}; audio/flac=${codec.support}; actual start, pause/resume, seek, next/previous, natural ended advance, clean reload, and grant revocation passed.`);
@@ -763,7 +764,14 @@ try{
  assert.ok(metadataRequests.some(value=>value.startsWith('/ws/2/discid/')),`automatic guided lookup did not use a disc ID: ${metadataRequests.join(', ')}`);
  assert.equal(metadataRequests.some(value=>value.includes('Guided%20smoke%20master')||value.includes('guided-original')),false,'automatic lookup used a package name');
  const guidedItem=await page.evaluate(async()=>{const work=await(await fetch('/api/v1/work?search=Guided%20smoke%20master&limit=10')).json();const id=work.items.find(value=>value.name==='Guided smoke master')?.item_id;if(!id)throw new Error('guided import has no item');return (await(await fetch(`/api/v1/items/${id}`)).json());});
- await page.waitForFunction(async id=>{const item=await(await fetch(`/api/v1/items/${id}`)).json();return item.title==='Provider pressing';},guidedItem.id,{timeout:30000});
+ // Await the actual metadata value before reloading the collection list.
+ let enrichedItem;
+ for(let attempt=0;attempt<150;attempt++){
+  enrichedItem=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),guidedItem.id);
+  if(enrichedItem.title==='Provider pressing')break;
+  await page.waitForTimeout(200);
+ }
+ assert.equal(enrichedItem.title,'Provider pressing','automatic metadata did not settle before reload');
  const discLookupCount=metadataRequests.filter(value=>value.startsWith('/ws/2/discid/')).length;
  await guidedWork.getByRole('button',{name:'Close work history'}).click();
  await page.reload();
@@ -826,6 +834,15 @@ try{
  await associationPanel.getByLabel('Search work').fill('Disc A');
  await associationPanel.locator('.job-list article').filter({hasText:'Disc A'}).getByRole('button',{name:'Open work'}).click();
  await associationPanel.getByText('Correct destination',{exact:true}).click();
+ await associationPanel.getByText('Already attached to this entry. No changes to save.',{exact:true}).waitFor();
+ assert.equal(await associationPanel.getByRole('button',{name:'Save association'}).count(),0);
+ await associationPanel.getByRole('button',{name:'Leave unattached',exact:true}).click();
+ await associationPanel.getByRole('button',{name:'Save association'}).waitFor();
+ await associationPanel.getByRole('button',{name:'Search existing entries'}).click();
+ await associationPanel.getByRole('searchbox',{name:'Search existing entries'}).fill('Disc A');
+ await associationPanel.locator('.destination-results button').filter({hasText:'Disc A'}).click();
+ await associationPanel.getByText('Already attached to this entry. No changes to save.',{exact:true}).waitFor();
+ assert.equal(await associationPanel.getByRole('button',{name:'Save association'}).count(),0);
  await associationPanel.getByRole('button',{name:'Search existing entries'}).click();
  await associationPanel.getByRole('searchbox',{name:'Search existing entries'}).fill('Disc B');
  await associationPanel.locator('.destination-results button').filter({hasText:'Disc B'}).click();
@@ -834,15 +851,17 @@ try{
  await page.waitForFunction(async({id,target})=>{const response=await fetch(`/api/v1/ingests/${id}`);return response.ok&&(await response.json()).import.association.item_id===target;},{id:movedImportId,target:targetItem});
  assert.equal(await associationPanel.locator('.guided-ingest').count(),1,'selected import detail duplicated after reassociation');
  await associationPanel.getByText('Updating import…').waitFor({state:'detached'});
- await page.waitForFunction(async id=>(await fetch(`/api/v1/items/${id}`)).status===404,sourceItem,{timeout:30000});
+ await associationPanel.getByText('Already attached to this entry. No changes to save.',{exact:true}).waitFor();
+ assert.equal(await associationPanel.getByRole('button',{name:'Save association'}).count(),0);
  const mergedDiscs=await page.evaluate(async({sourceItem,targetItem})=>{
   const read=async path=>{const response=await fetch(`/api/v1${path}`);if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
-  const sourceStatus=(await fetch(`/api/v1/items/${sourceItem}`)).status;
+  const source=await read(`/items/${sourceItem}`);
   const target=await read(`/items/${targetItem}`);
   const page=await read(`/items?collection_id=${target.collection_id}&limit=100`);
-  return {sourceStatus,listed:page.items.some(item=>item.id===sourceItem),captures:target.captures.length};
+  return {sourceRemoved:source.deleted,listed:page.items.some(item=>item.id===sourceItem),captures:target.captures.length};
  },{sourceItem,targetItem});
- assert.equal(mergedDiscs.sourceStatus,404,'retired placeholder remained available as an active item');
+ // FX-05 makes tombstones curator-readable for Restore; retirement still hides them from ordinary browsing.
+ assert.equal(mergedDiscs.sourceRemoved,true,'retired placeholder remained an active item');
  assert.equal(mergedDiscs.listed,false,'reassociation left its automatic placeholder in browsing');
  assert.equal(mergedDiscs.captures,2,'reassociation replaced the destination disc');
  if(importAudio){assert.deepEqual(await importAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'background imports displaced the playing album');await importAudio.evaluate(element=>{element.pause();element.loop=false;});}
@@ -867,7 +886,7 @@ try{
   const response=await route.fetch();const item=await response.json();
   await route.fulfill({response,json:{...item,title:'Unsupported schema fixture',domain:{...item.domain,schema_version:99},effective_permissions:{...item.effective_permissions,can_curate:false},content_permissions:{can_edit:false,status:'item_schema_unsupported',message:'Unsupported stored schema fixture.'}}});
  });
- await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:/Edit entry/});await readOnlyForm.getByText('Collection access',{exact:true}).waitFor();await readOnlyForm.getByRole('button',{name:'Details',exact:true}).click();assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).isDisabled(),true);assert.equal(await readOnlyForm.getByRole('button',{name:'Save inventory',exact:true}).isDisabled(),true);await readOnlyForm.getByRole('button',{name:'Close curator'}).click();
+ await fixturePage.reload();await fixturePage.getByRole('button',{name:/Unsupported schema fixture/}).click();assert.equal(await fixturePage.getByRole('button',{name:'Edit / attach files',exact:true}).count(),0);await fixturePage.getByRole('button',{name:'Manage collection access',exact:true}).click();const readOnlyForm=fixturePage.getByRole('dialog',{name:'Collection access'});await readOnlyForm.getByText('Collection owners manage access here',{exact:false}).waitFor();assert.equal(await readOnlyForm.getByLabel('Title',{exact:true}).count(),0);await readOnlyForm.getByRole('button',{name:'Close collection access'}).click();
  await fixturePage.unroute('**/api/v1/collection-types');await fixturePage.route('**/api/v1/collection-types',route=>route.fulfill({json:[]}));await fixturePage.reload();await fixturePage.getByRole('button',{name:'Administration',exact:true}).waitFor();assert.equal(await fixturePage.getByRole('button',{name:'Administration',exact:true}).isEnabled(),true);assert.equal(await fixturePage.getByRole('button',{name:'Manage collections',exact:true}).isEnabled(),true);
  await fixturePage.close();
  const rejectedOwner=await page.evaluate(async()=>{
@@ -898,7 +917,7 @@ try{
   await opaquePlayer.getByRole('button',{name:'Pause',exact:true}).click();
  }
  assert.equal(await page.getByRole('button',{name:'Edit / attach files',exact:true}).count(),0,'unavailable-owner item exposed content editing');
- await page.getByRole('button',{name:'Manage collection access',exact:true}).click();const unavailableManagement=page.getByRole('dialog',{name:/Edit entry/});await unavailableManagement.getByText('Collection access',{exact:true}).waitFor();assert.equal(await unavailableManagement.getByRole('button',{name:'Add physical copy',exact:true}).count(),0,'unavailable-owner item exposed inventory actions');await unavailableManagement.getByRole('button',{name:'Close curator',exact:true}).click();
+ await page.getByRole('region',{name:'Selected entry'}).getByRole('button',{name:'Manage collection access',exact:true}).click();const unavailableManagement=page.getByRole('dialog',{name:'Collection access'});await unavailableManagement.getByText('Collection owners manage access here',{exact:false}).waitFor();assert.equal(await unavailableManagement.getByRole('button',{name:'Add physical copy',exact:true}).count(),0,'unavailable-owner item exposed inventory actions');await unavailableManagement.getByRole('button',{name:'Close collection access',exact:true}).click();
  // Standard browser WebAuthn, with a virtual authenticator instead of a physical password manager.
  if(!localSetup){
  const cdp=await context.newCDPSession(page);await cdp.send('WebAuthn.enable');

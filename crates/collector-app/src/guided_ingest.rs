@@ -88,6 +88,7 @@ impl CollectionService {
     /// transitions also call `advance_guided_ingest`; this bounded sweep only
     /// closes the crash window between a durable transition and its next job.
     pub fn resume_guided_ingests(&self) -> Result<()> {
+        self.provisional_imports.reconcile_removed_item_work()?;
         let cleanup_result = self.provisional_imports.reconcile_guided_cleanup();
         self.jobs
             .reconcile_work_history(&mut |user, target| self.settle_work_clear(user, target))?;
@@ -366,6 +367,13 @@ impl CollectionService {
                     .into(),
             ));
         }
+        if command.clean_reimport.is_some()
+            && (command.destination.is_none() || command.plan.packages.len() != 1)
+        {
+            return Err(Error::Invalid(
+                "clean reimport requires one package and an existing destination".into(),
+            ));
+        }
         let views = self.execute_command(actor, context, "ingest.start", &command, |effects| {
             preflight(&command.plan)?;
             let replanned = self.plan_ingest(
@@ -414,7 +422,8 @@ impl CollectionService {
                 if item.deleted
                     || item.collection_id != command.plan.collection_id
                     || item.domain.module != eligibility.owner
-                    || item.revision != destination.expected_revision
+                    || (command.clean_reimport.is_none()
+                        && item.revision != destination.expected_revision)
                 {
                     return Err(Error::Conflict);
                 }
@@ -516,6 +525,7 @@ impl CollectionService {
                     },
                 });
                 intents.push(GuidedIngestIntent {
+                    clean_reimport: command.clean_reimport.clone(),
                     import_id,
                     user_id: actor.user_id,
                     plan_token: command.plan.token.clone(),
@@ -576,6 +586,7 @@ impl CollectionService {
                     record.view.collection_id,
                 )?;
                 let item = Item {
+                    lifecycle: Default::default(),
                     id: intent.target_item_id,
                     collection_id: record.view.collection_id,
                     revision: Revision(0),
@@ -836,6 +847,23 @@ impl CollectionService {
             return Ok(());
         };
         let mut record = self.provisional_imports.import_record(id)?;
+        if matches!(
+            record.view.phase,
+            ImportPhase::Staging | ImportPhase::Analyzing
+        ) && !intent.cancelled
+            && let Some(representation) = intent
+                .clean_reimport
+                .as_ref()
+                .and_then(|options| options.retained_representation)
+        {
+            self.content_write_eligibility_for_user(intent.user_id, record.view.collection_id)?;
+            self.jobs.enqueue_job(JobSpec {
+                    id: deterministic_job_id(intent.user_id, "guided.retained.stage", &id.to_string()),
+                    user_id: intent.user_id, collection_id: Some(record.view.collection_id), item_id: Some(intent.target_item_id),
+                    kind: "import_staging".into(), phase: "queued".into(), total_units: record.view.files.iter().map(|file|file.bytes.0).sum(),
+                    request: serde_json::json!({"import_id":id,"retained_representation_id":representation,"guided":true}), frozen_input: None,
+                })?;
+        }
         if record.user_id != intent.user_id
             || intent.cancelled
             || intent.settled
@@ -845,6 +873,18 @@ impl CollectionService {
             )
         {
             return Ok(());
+        }
+        if intent
+            .clean_reimport
+            .as_ref()
+            .and_then(|options| options.retained_representation)
+            .is_some()
+        {
+            let staging =
+                deterministic_job_id(intent.user_id, "guided.retained.stage", &id.to_string());
+            if self.jobs.job_record(staging, intent.user_id)?.state != JobState::Completed {
+                return Ok(());
+            }
         }
         self.content_write_eligibility_for_user(intent.user_id, record.view.collection_id)?;
         let item = self.ensure_guided_item(&intent, &record)?;
@@ -1398,6 +1438,7 @@ impl CollectionService {
                     ),
                 },
                 &bytes,
+                Some(item.lifecycle.generation),
             )?;
         }
         self.refresh_provider_metadata_for_job(
@@ -1471,6 +1512,15 @@ impl CollectionService {
             prepare_music: intent.prepare_music,
             updated_at: view.updated_at,
             permissions: IngestPermissions {
+                can_resume_upload: can_write
+                    && !intent.cancelled
+                    && view.phase == ImportPhase::Staging
+                    && view.source.kind == ImportSourceKind::Browser
+                    && intent
+                        .clean_reimport
+                        .as_ref()
+                        .and_then(|options| options.retained_representation)
+                        .is_none(),
                 can_cancel: can_write
                     && !intent.cancelled
                     && (active || !intent.settled)

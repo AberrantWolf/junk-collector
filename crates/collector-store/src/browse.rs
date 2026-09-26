@@ -129,6 +129,7 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
         BrowseFilter::NeedsAttention => {
             "(EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.state='failed') OR EXISTS(SELECT 1 FROM private.imports p WHERE p.item_id=i.id AND p.user_id=?1 AND p.phase='awaiting_review'))"
         }
+        BrowseFilter::Removed => "1",
     };
     let terms = search
         .split_whitespace()
@@ -141,7 +142,13 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
         " AND i.id IN (SELECT id FROM search WHERE search MATCH ?7)"
     };
     let sql = format!(
-        "SELECT i.record,{key},b.title_key FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 WHERE i.deleted=0 AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6"
+        "SELECT i.record,{key},b.title_key FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
+        i64::from(query.filter == BrowseFilter::Removed),
+        if query.filter == BrowseFilter::Removed {
+            "g.role>=1"
+        } else {
+            "1"
+        }
     );
     let mut stmt = db.prepare(&sql).map_err(storage)?;
     let mut rows = stmt

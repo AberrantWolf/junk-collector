@@ -469,6 +469,7 @@ pub fn router(state: AppState) -> Router {
         router = router
             .route("/curate", get(index))
             .route("/curation.js", get(curation_js))
+            .route("/collection-access.js", get(collection_access_js))
             .route("/work-history.js", get(work_history_js))
             .merge(curation_api);
     }
@@ -530,8 +531,14 @@ fn client_api_router() -> OpenApiRouter<AppState> {
 fn curation_api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(routes!(collection_grants))
-        .routes(routes!(set_collection_grant, remove_collection_grant))
+        .routes(routes!(
+            get_collection_grant,
+            set_collection_grant,
+            remove_collection_grant
+        ))
         .routes(routes!(save_item))
+        .routes(routes!(remove_item))
+        .routes(routes!(restore_item))
         .routes(routes!(create_specimen))
         .routes(routes!(update_specimen))
         .routes(routes!(create_component))
@@ -751,6 +758,12 @@ async fn curation_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../../../web/dist/curation.js"),
+    )
+}
+async fn collection_access_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../../../web/dist/collection-access.js"),
     )
 }
 async fn administration_js() -> impl IntoResponse {
@@ -1362,7 +1375,7 @@ struct Wave1SaveItemEnvelope {
 enum SaveItemEnvelope {
     Command(SaveItemCommandEnvelope),
     Edit(SaveItemEditCommandEnvelope),
-    Wave1(Wave1SaveItemEnvelope),
+    Wave1(Box<Wave1SaveItemEnvelope>),
 }
 impl<'de> serde::Deserialize<'de> for SaveItemEnvelope {
     fn deserialize<D: serde::Deserializer<'de>>(
@@ -1437,6 +1450,50 @@ async fn save_item(
                 }
             };
             state.service.item_presented(&actor, saved.id)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemLifecycleCommand {
+    expected_revision: Revision,
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/remove", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = ItemLifecycleCommand, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409)))]
+async fn remove_item(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(input): Json<ItemLifecycleCommand>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .set_item_removed(&actor, id, input.expected_revision, true, &context)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/restore", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = ItemLifecycleCommand, responses((status = 200, body = PresentedItem), (status = 403), (status = 404), (status = 409)))]
+async fn restore_item(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(input): Json<ItemLifecycleCommand>,
+) -> ApiResult<Json<PresentedItem>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .set_item_removed(&actor, id, input.expected_revision, false, &context)
         })
         .await?,
     ))
@@ -3481,20 +3538,46 @@ async fn grant(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/api/v1/collections/{id}/grants", params(("id" = CollectionId, Path)), responses((status = 200, body = Vec<GrantView>), (status = 401), (status = 403)))]
+#[derive(Deserialize, utoipa::IntoParams)]
+struct GrantsQuery {
+    search: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{id}/grants", params(("id" = CollectionId, Path), GrantsQuery), responses((status = 200, body = Page<GrantView>), (status = 401), (status = 403)))]
 async fn collection_grants(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<CollectionId>,
-) -> ApiResult<Json<Vec<GrantView>>> {
+    Query(query): Query<GrantsQuery>,
+) -> ApiResult<Json<Page<GrantView>>> {
     let actor = principal(&state, &headers)?;
-    Ok(Json(state.service.grants(&actor, id)?))
+    Ok(Json(state.service.grants(
+        &actor,
+        id,
+        query.search.as_deref().unwrap_or(""),
+        query.cursor.as_deref(),
+        query.limit.unwrap_or(50),
+    )?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 struct GrantChange {
     expected_revision: Revision,
     role: Role,
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{id}/grants/{username}", params(("id" = CollectionId, Path), ("username" = String, Path)), responses((status = 200, body = Option<GrantView>), (status = 401), (status = 403), (status = 404)))]
+async fn get_collection_grant(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, username)): Path<(CollectionId, String)>,
+) -> ApiResult<Json<Option<GrantView>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        state.service.grant_for_username(&actor, id, &username)?,
+    ))
 }
 
 #[utoipa::path(put, path = "/api/v1/collections/{id}/grants/{username}", params(("id" = CollectionId, Path), ("username" = String, Path), ("Idempotency-Key" = String, Header)), request_body = GrantChange, responses((status = 200, body = GrantView), (status = 401), (status = 403), (status = 409)))]

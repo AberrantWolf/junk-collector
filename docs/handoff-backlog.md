@@ -34,7 +34,7 @@ changes. The integrated alpha/FX-01 checkpoint was committed as `20c4ff0` on 202
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
 
-## Usability fixes — FX-04 implemented; FX-05 next
+## Usability fixes — FX-06 locally accepted; FX-07 next
 
 [FX-01–FX-07](ux-fix-plan.md) maps the combined UX and lifecycle work. FX-01,
 FX-02 and FX-03 were locally accepted on 2026-09-21. The persistent browser
@@ -44,18 +44,21 @@ server-paged destination and inbox package search, shared new/existing guided
 intake, preservation-only processing, derived-disc-ID automatic provider lookup,
 and the mapped artwork, cost and role guidance fixes. Its
 [growing-list audit](fx04-scale-audit.md) distinguishes bounded selectors from
-FX-06 access-list work. A temporary real-server journey passed with 3,000 Items
+the then-planned FX-06 access-list work. A temporary real-server journey passed with 3,000 Items
 and 3,000 imports, including an Item beyond the former 1,000-entry cutoff.
 Local acceptance passed on 2026-09-25; exact checks and limitations are in
 [validation](validation.md).
 
-FX-05 is the next delivery. It owns Remove item, Restore and clean reimport on
-the same identity, including durable workflow-generation fencing, shared-work
-ownership, retained originals and default preservation of manual metadata,
-physical inventory, loans and artwork. Its architecture and command contract
-must be reviewed before implementing state changes. FX-06 handles collection
-access/account recovery; FX-07 audits the entire interface. The outstanding LA3
-second-device qualification and broader release gates remain separate.
+FX-05 now implements archive-backed Remove/Restore and clean reimport on the
+same Item, using retained originals or a replacement upload. Reviewed resets,
+manual authority preservation, background byte validation, recoverable current
+Capture switching and generation fences are delivered together with the browser
+resume flow and retained-file playback. Local acceptance passed on 2026-09-26.
+Exact acceptance and host limitations are
+in [validation](validation.md). FX-06 adds collection-scoped access, bounded grant search, browser recovery and
+recent-authentication retry. Follow the [FX-07 prompt](ux-fix-plan.md) for the
+whole-interface review. FX-07's whole-interface audit, LA3 second-device qualification
+and broader release gates remain separate.
 
 ## How to use this backlog
 
@@ -324,6 +327,12 @@ explicitly unavailable. Independent review is externally unqualified.
 
 ## Security and enrollment
 
+**FX-06 browser follow-up (2026-09-26):** Collection access now opens directly,
+including empty and content-read-only collections; bounded grant pages and exact
+revision lookup replace the full-list editor. The existing owner/admin and
+listener authorization rules remain authoritative. The whole-interface U05 review
+is still assigned to FX-07.
+
 ### S01 — Threat model and recovery/authorization contracts
 
 **Gate · Dependencies:** none. **Owner:** application/security design. **Start:** server middleware/passkeys, store auth, client pairing, exposure tests.
@@ -357,6 +366,13 @@ Planned children: [S02.1 private auth model/migration, S02.2 Origin/freshness/ra
 #### S02.2–S02.5 — Browser defenses, recovery, credential inventory, and authority guards
 
 **Status (2026-09-10): complete; included in Wave 2.** Exact normalized Origin is mandatory for browser ceremonies/cookie mutations; forwarded addresses never choose rate keys, and injected clocks cover the exact five-minute freshness and account/peer/global bucket boundaries. Ten-code 160-bit recovery batches are hash-only, replacement and concurrent consumption are atomic, successful recovery replaces the password/revokes browser sessions/issues one fresh session, and disabled accounts cannot recover online. Passkey inventory/revocation and counter/session CAS fail stale assertions closed. Concurrent account/grant changes cannot remove the last enabled administrator or owner; disabling the default requires reassignment. Explicit stopped-server local recovery holds the private lock, revokes all credential kinds, audits, and preserves grants/administrator state.
+
+**FX-06 browser follow-up (2026-09-26):** Signed-out code redemption and
+one-time copy/download are available in the browser. A shared pending-command
+handler offers password/passkey reauthentication, retains drafts on cancellation,
+and retries with the original receipt after success. Store clock/concurrency tests
+and the real Chrome journey are recorded in [validation](validation.md). Physical
+passkey qualification remains external.
 
 ### S03 — Browser-mediated device enrollment
 

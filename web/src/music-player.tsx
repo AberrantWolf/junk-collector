@@ -1,7 +1,5 @@
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage} from './runtime';
+import React,{useEffect,useRef,useState,ApiRequestError,isApiRequestError,requestErrorMessage} from './runtime';
 import {useMusicQueue,selectMusicTrack,removeMusicTrack,reorderMusicTrack,clearMusicQueue,musicTrackUrl,type QueuedTrack} from './music-queue';
-import type {components} from './generated/api';
-type Availability=components['schemas']['MusicTrackAvailability'];
 const time=(n:number)=>`${Math.floor(n/60)}:${String(Math.floor(n%60)).padStart(2,'0')}`;
 
 export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMusic:boolean;onSessionExpired:()=>void}){
@@ -14,10 +12,11 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
  useEffect(()=>{if(active.current!==current?.id){release();setError('');}},[current?.id]);
  const visible=browsingMusic||queue.tracks.length>0;
  useEffect(()=>{if(!visible)return;const element=dock.current;if(!element)return;const observer=new ResizeObserver(()=>document.documentElement.style.setProperty('--music-dock-height',`${element.getBoundingClientRect().height}px`));observer.observe(element);document.body.classList.add('has-music-dock');return()=>{observer.disconnect();document.body.classList.remove('has-music-dock');document.documentElement.style.removeProperty('--music-dock-height');};},[visible]);
- function available(rows:Availability[],track:QueuedTrack){return rows.some(row=>row.state.status==='available'&&row.state.representation_id===track.representationId&&row.state.file_index===track.fileIndex);}
+ // The queue holds immutable files, including retained historical captures.
  async function checkTrack(track:QueuedTrack,signal:AbortSignal){
-  if(track.original){const item=await api<components['schemas']['PresentedItem']>(`/items/${track.itemId}`,{signal});return !item.deleted&&item.captures.some(c=>c.representations.some(r=>r.id===track.representationId&&r.role==='preservation_master'&&!!r.files[track.fileIndex]));}
-  return available(await api<Availability[]>(`/items/${track.itemId}/music-tracks`,{signal}),track);
+  const response=await fetch(musicTrackUrl(track),{method:'HEAD',credentials:'same-origin',signal,cache:'no-store'});
+  if(!response.ok)throw new ApiRequestError(response.status,`http_${response.status}`,'The queued file could not be accessed.');
+  return true;
  }
  // Revalidate independently of the album view: buffered media must stop on loss
  // of access even while browsing another collection. Transient outages can retry.
