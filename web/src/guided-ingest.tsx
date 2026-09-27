@@ -1,6 +1,6 @@
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {WorkProgress,UploadMeter,bytes} from './work-progress';
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import type {components} from './generated/api';
 import DestinationChooser from './destination-chooser';
 import InboxPackageChooser from './inbox-package-chooser';
@@ -27,7 +27,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  const [detail,setDetail]=useState<Detail>();const [detailOpen,setDetailOpen]=useState(false);const [target,setTarget]=useState<Item|null>();
  const [uploadProgress,setUploadProgress]=useState<UploadProgress>();const [activity,setActivity]=useState('');
  const [notice,setNotice]=useState('');const [failure,setFailure]=useState('');
- const lifecycle=useRef(new AbortController());const selection=useRef<AbortController|undefined>(undefined);
+ const lifecycle=useRef(new AbortController());const reads=useOperationScope(collectionId);const reading=useRef(false);const mutating=useRef(false);
  const acceptance=useRef<string|undefined>(undefined);const detailId=useRef<string|undefined>(undefined);
  const targetEdited=useRef(false);
  const associationChanged=!!detail&&target!==undefined&&(target?.id??null)!==(detail.import.association.item_id??null);
@@ -39,26 +39,25 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   signal.throwIfAborted();const value=await api<T>(path,{...init,signal});signal.throwIfAborted();return value;
  }
  function fail(error:unknown){if(lifecycle.current.signal.aborted||(error instanceof DOMException&&error.name==='AbortError'))return;setFailure(requestErrorMessage(error));setDetailOpen(true);if(isApiRequestError(error)&&error.code==='unauthenticated')callbacks.current.onError(error);}
- async function mutate(action:()=>Promise<void>){setBusy(true);setActivity('Updating import…');setFailure('');try{await action();}catch(error){fail(error);}finally{if(!lifecycle.current.signal.aborted){setBusy(false);setActivity('');setUploadProgress(undefined);}}}
- async function publishNotice(value:Detail,signal?:AbortSignal){
-  if(value.import.phase!=='published'||!value.import.association.item_id)return;
-  const item=await request<Item>(`/items/${value.import.association.item_id}`,{signal});
-  const marker=JSON.stringify(item);if(notified.current.get(item.id)!==marker){notified.current.set(item.id,marker);callbacks.current.onPublished(item);}
+ async function mutate(action:()=>Promise<void>){mutating.current=true;reads.cancel();reading.current=false;setBusy(true);setActivity('Updating import…');setFailure('');try{await action();}catch(error){fail(error);}finally{mutating.current=false;if(!lifecycle.current.signal.aborted){setBusy(false);setActivity('');setUploadProgress(undefined);}}}
+ async function loadDetail(id:string){
+  reading.current=true;
+  await reads.run(async attempt=>{
+   const value=await attempt.wait(request<Detail>(`/ingests/${id}`,{signal:attempt.signal}));
+   const associated=value.import.association.item_id;
+   const item=associated?await request<Item>(`/items/${associated}`,{signal:attempt.signal}):null;
+   return {value,item};
+  },{success:({value,item})=>{
+   setDetail(value);if(!targetEdited.current)setTarget(item);
+   if(value.import.phase==='published'&&item){const marker=JSON.stringify(item);if(notified.current.get(item.id)!==marker){notified.current.set(item.id,marker);callbacks.current.onPublished(item);}}
+  },failure:fail,settled:()=>{reading.current=false;}});
  }
- async function open(id:string){
-  setDetailOpen(true);setTarget(undefined);
-  selection.current?.abort();const controller=new AbortController();selection.current=controller;detailId.current=id;
-  try{
-   const value=await request<Detail>(`/ingests/${id}`,{signal:controller.signal});setDetail(value);targetEdited.current=false;
-   const associated=value.import.association.item_id;setTarget(associated?await request<Item>(`/items/${associated}`,{signal:controller.signal}):null);
-   await publishNotice(value,controller.signal);
-  }catch(error){fail(error);}
- }
+ async function open(id:string){setDetailOpen(true);setTarget(undefined);targetEdited.current=false;detailId.current=id;await loadDetail(id);}
  useEffect(()=>{
   lifecycle.current=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
-  async function poll(){try{const id=detailId.current;if(id){const value=await request<Detail>(`/ingests/${id}`);if(detailId.current===id){setDetail(value);if(!targetEdited.current){const associated=value.import.association.item_id;const savedTarget=associated?await request<Item>(`/items/${associated}`,{signal:selection.current?.signal}):null;if(detailId.current===id&&!targetEdited.current)setTarget(savedTarget);}await publishNotice(value,selection.current?.signal);}}}catch(error){fail(error);}finally{if(!lifecycle.current.signal.aborted)timer=setTimeout(poll,2000);}}
+  async function poll(){const id=detailId.current;if(id&&!reading.current&&!mutating.current)await loadDetail(id);if(!lifecycle.current.signal.aborted)timer=setTimeout(poll,2000);}
   void poll();if(!historyOnly)void request<InboxSource[]>(`/collections/${collectionId}/inboxes?packages=false`).then(value=>{setInboxes(value);setInboxLabel(value[0]?.label||'');}).catch(fail);
-  return()=>{lifecycle.current.abort();selection.current?.abort();if(timer)clearTimeout(timer);callbacks.current.setBusy(false);};
+  return()=>{lifecycle.current.abort();reads.cancel();reading.current=false;if(timer)clearTimeout(timer);callbacks.current.setBusy(false);};
  },[collectionId,historyOnly]);
  useEffect(()=>{if(!uploadProgress)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[!!uploadProgress]);
  useEffect(()=>{if(initialImportId)void open(initialImportId);},[initialImportId]);
@@ -92,7 +91,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   setPlan(undefined);
   for(let index=0;index<accepted.imports.length;index++){
    const summary=accepted.imports[index];setQueueLabel(`Package ${index+1} of ${accepted.imports.length}: ${summary.package_name}`);
-   detailId.current=summary.import_id;const current=await request<Detail>(`/ingests/${summary.import_id}`);setDetail(current);
+   reads.cancel();reading.current=false;targetEdited.current=false;detailId.current=summary.import_id;const current=await request<Detail>(`/ingests/${summary.import_id}`);setDetail(current);
    if(current.import.source.kind==='browser'&&current.import.phase==='staging')await upload(current,selected,false);
   }
   setQueueLabel('');setDetailOpen(true);setFiles([]);setNotice(accepted.rejected.length?`Uploads finished. ${accepted.rejected.length} packages were not accepted: ${accepted.rejected.map(value=>value.reason).join('; ')}`:frozen.packages.every(pkg=>pkg.source.kind==='browser')?'Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.':'Import queued. Your entries are saved. You can close this window; the server will copy the source packages and continue processing.');

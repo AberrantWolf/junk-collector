@@ -484,7 +484,7 @@ impl CollectionService {
                         ),
                     },
                     &bytes,
-                    Some(item.lifecycle.generation),
+                    crate::AssetWriteContext::Item(crate::ItemEffectContext { item_id, generation: item.lifecycle.generation, source: crate::ItemEffectSource::Snapshot(command.snapshot_id) }),
                 )
             },
         )

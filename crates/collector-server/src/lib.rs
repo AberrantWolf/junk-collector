@@ -432,14 +432,27 @@ fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<Authenticat
                 .map(str::trim)
                 .find_map(|p| p.strip_prefix("collector_session="))
         });
-    if let Some(cookie) = cookie {
-        return Ok(state.service.authenticate(cookie)?);
+    let authenticated = if let Some(cookie) = cookie {
+        state.service.authenticate(cookie)?
+    } else {
+        let bearer = bearer.ok_or(Error::Unauthenticated)?;
+        match state.service.authenticate_native(bearer) {
+            Ok(authenticated) => authenticated,
+            Err(_) => state.service.authenticate(bearer)?,
+        }
+    };
+    // This is a precondition, never an alternative source of authentication.
+    // It binds a browser command to its submitting account across cookie changes.
+    if let Some(expected) = headers.get("x-collector-actor") {
+        let expected = expected
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<UserId>().ok());
+        if expected != Some(authenticated.principal.user_id) {
+            return Err(Error::Unauthenticated.into());
+        }
     }
-    let bearer = bearer.ok_or(Error::Unauthenticated)?;
-    match state.service.authenticate_native(bearer) {
-        Ok(authenticated) => Ok(authenticated),
-        Err(_) => state.service.authenticate(bearer).map_err(Into::into),
-    }
+    Ok(authenticated)
 }
 fn principal(state: &AppState, headers: &HeaderMap) -> ApiResult<Principal> {
     Ok(authenticated(state, headers)?.principal)

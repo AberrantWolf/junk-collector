@@ -1083,9 +1083,9 @@ impl ContentPort for Store {
         asset: AssetId,
         command: CreateAssetCommand,
         bytes: &[u8],
-        expected_generation: Option<u64>,
+        context: collector_app::AssetWriteContext,
     ) -> Result<AssetState> {
-        self.create_asset_record(asset, command, bytes, expected_generation)
+        self.create_asset_record(asset, command, bytes, context)
     }
 
     fn update_asset(

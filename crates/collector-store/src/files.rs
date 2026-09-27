@@ -1180,7 +1180,7 @@ impl Store {
         asset_id: AssetId,
         command: CreateAssetCommand,
         bytes: &[u8],
-        expected_generation: Option<u64>,
+        context: collector_app::AssetWriteContext,
     ) -> Result<AssetState> {
         let CreateAssetCommand {
             collection_id,
@@ -1223,14 +1223,12 @@ impl Store {
         let thumbnail = thumbnail.into_inner();
 
         let _writer = lock(&self.writer)?;
-        if let Some(expected) = expected_generation {
-            let item_id = self
-                .asset_subject_item_record(subject)?
-                .ok_or(Error::Conflict)?;
-            let item = self.item(item_id)?;
-            if item.deleted || item.lifecycle.generation != expected {
+        let _publication_gate = lock(&self.job_publication_gate)?;
+        if let collector_app::AssetWriteContext::Item(context) = context {
+            if self.asset_subject_item_record(subject)? != Some(context.item_id) {
                 return Err(Error::Conflict);
             }
+            self.validate_item_effect(context, collection_id)?;
         }
         if self.asset_subject_collection_record(subject)? != collection_id {
             return Err(Error::Invalid(

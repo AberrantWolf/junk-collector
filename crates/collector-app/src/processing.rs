@@ -640,14 +640,12 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
     fn provisional_observations(&self, import: ImportId) -> Result<Vec<ProcessingObservation>>;
     fn publish_processing_record(
         &self,
-        job: collector_core::JobId,
-        claim_token: &str,
+        claim: &crate::JobClaim,
         record: PortableProcessingRecord,
     ) -> Result<()>;
     fn publish_snapshot(
         &self,
-        job: collector_core::JobId,
-        claim_token: &str,
+        claim: &crate::JobClaim,
         record: SnapshotRecord,
         reader: &mut dyn std::io::Read,
         cancelled: &mut dyn FnMut() -> Result<bool>,

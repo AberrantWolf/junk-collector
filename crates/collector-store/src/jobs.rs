@@ -326,7 +326,9 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        if tx.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?",[id.to_string()],|row|row.get::<_,bool>(0)).optional().map_err(storage)?.unwrap_or(false) { return Err(Error::Conflict); }
+        if job_generation_obsolete(&tx, id)? {
+            return Err(Error::Conflict);
+        }
         Self::ensure_work_retry_allowed(&tx, id, user)?;
         let frozen = Self::preparation_batch_input(&tx, id, user)?;
         ensure_album_admission_capacity(&tx, user, id)?;
@@ -1067,16 +1069,17 @@ impl Store {
         id: JobId,
         claim_token: &str,
     ) -> Result<bool> {
-        lock(&self.db)?
-            .query_row(
-                "SELECT state='cancel_requested' OR (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
+        let db = lock(&self.db)?;
+        let cancelled: bool = db.query_row(
+                "SELECT state='cancel_requested' OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
                  WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested')",
                 params![id.to_string(), claim_token],
                 |row| row.get(0),
             )
             .optional()
             .map_err(storage)?
-            .ok_or(Error::CommandInProgress)
+            .ok_or(Error::CommandInProgress)?;
+        Ok(cancelled || job_generation_obsolete(&db, id)?)
     }
 
     pub(crate) fn request_job_cancellation_record(&self, id: JobId, user: UserId) -> Result<()> {
@@ -1271,7 +1274,9 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        if tx.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?",[id.to_string()],|row|row.get::<_,bool>(0)).optional().map_err(storage)?.unwrap_or(false) { return Err(Error::Conflict); }
+        if job_generation_obsolete(&tx, id)? {
+            return Err(Error::Conflict);
+        }
         Self::ensure_work_retry_allowed(&tx, id, user)?;
         let (kind, state, prior_result, error, attempt, failed_at): (
             String,
@@ -1645,4 +1650,10 @@ impl Store {
         tx.commit().map_err(storage)?;
         Ok(())
     }
+}
+
+// Shared computation remains eligible while an independent owner needs it.
+// A committed publication may finish its private receipt after supersession.
+fn job_generation_obsolete(db: &rusqlite::Connection, id: JobId) -> Result<bool> {
+    db.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?", [id.to_string()], |row|row.get::<_,bool>(0)).optional().map_err(storage).map(|value|value.unwrap_or(false))
 }

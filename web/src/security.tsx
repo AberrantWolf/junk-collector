@@ -1,4 +1,4 @@
-import React,{useEffect,useState,api,isApiRequestError,requestErrorMessage} from '@collector/runtime';
+import React,{useEffect,useState,api,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import {useDialogDismiss} from './dialog';
 import type {components} from './generated/api';
 
@@ -9,6 +9,7 @@ type NativeDevice=components['schemas']['NativeDeviceView'];
 
 export default function Security({onClose,onSessionExpired}:{onClose:()=>void;onSessionExpired:()=>void}){
  const dialog=useDialogDismiss(()=>{if(codes&&!window.confirm('Have you saved these one-time recovery codes? They cannot be shown again after closing.'))return;onClose();});
+ const sessionCommands=useOperationScope('security-sessions');
  const [profile,setProfile]=useState<Account>();const [displayName,setDisplayName]=useState('');const [sessions,setSessions]=useState<Session[]>([]);const [passkeys,setPasskeys]=useState<Passkey[]>([]);const [devices,setDevices]=useState<NativeDevice[]>([]);const [codes,setCodes]=useState<string[]>();const [message,setMessage]=useState('');const [busy,setBusy]=useState(false);
  function fail(error:unknown){if(isApiRequestError(error)&&error.code==='unauthenticated'){onSessionExpired();return;}setMessage(requestErrorMessage(error));}
  async function load(){try{const [account,currentSessions,currentPasskeys,currentDevices]=await Promise.all([api<Account>('/me/profile'),api<Session[]>('/security/sessions'),api<Passkey[]>('/security/passkeys'),api<NativeDevice[]>('/security/native-devices')]);setProfile(account);setDisplayName(account.display_name);setSessions(currentSessions);setPasskeys(currentPasskeys);setDevices(currentDevices);}catch(error){fail(error);}}
@@ -17,7 +18,18 @@ export default function Security({onClose,onSessionExpired}:{onClose:()=>void;on
  async function replaceCodes(){setBusy(true);setCodes(undefined);setMessage('');try{setCodes(await api<string[]>('/security/recovery-codes',{method:'POST'}));setMessage('Save these codes now. They will not be shown again.');}catch(error){fail(error);}finally{setBusy(false);}}
  async function copyCodes(){if(!codes)return;try{await navigator.clipboard.writeText(codes.join('\n'));setMessage('Recovery codes copied. Store them somewhere private.');}catch{setMessage('Copy failed. Select and save the displayed codes manually.');}}
  function downloadCodes(){if(!codes)return;const url=URL.createObjectURL(new Blob([codes.join('\n')+'\n'],{type:'text/plain'}));const link=document.createElement('a');link.href=url;link.download='junk-collector-recovery-codes.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setMessage('Recovery codes downloaded. Store the file somewhere private.');}
- async function revokeSession(session:Session){setBusy(true);try{await api(`/devices/${session.id}`,{method:'DELETE'});if(session.current){try{await api('/auth/logout',{method:'POST'});}catch(error){if(!isApiRequestError(error)||error.code!=='unauthenticated')throw error;}onSessionExpired();return;}await load();}catch(error){fail(error);}finally{setBusy(false);}}
+ async function revokeSession(session:Session){
+  setBusy(true);setMessage('');
+  await sessionCommands.run(async attempt=>{
+   let message='';
+   try{
+    await attempt.wait(api(`/devices/${session.id}`,{method:'DELETE',authenticationPolicy:'review',signal:attempt.signal}));
+    if(session.current){attempt.commit(onSessionExpired);return;}
+   }catch(error){if(!isApiRequestError(error)||error.code!=='authentication_review_required')throw error;message=error.message;}
+   const sessions=await api<Session[]>('/security/sessions',{signal:attempt.signal});return {sessions,message};
+  },{success:value=>{if(value){setSessions(value.sessions);setMessage(value.message);}},failure:fail,settled:()=>setBusy(false)});
+ }
+
  async function revokePasskey(passkey:Passkey){setBusy(true);try{await api(`/security/passkeys/${passkey.id}?expected_revision=${passkey.revision}`,{method:'DELETE'});await load();}catch(error){fail(error);}finally{setBusy(false);}}
  async function revokeDevice(device:NativeDevice){setBusy(true);try{await api(`/security/native-devices/${device.id}?expected_revision=${device.revision}`,{method:'DELETE'});await load();}catch(error){fail(error);}finally{setBusy(false);}}
  return <div className="modal-backdrop"><section ref={dialog.ref} data-unsaved={!!profile&&displayName!==profile.display_name} className="modal" role="dialog" aria-modal="true" aria-labelledby="security-title" aria-busy={busy}><button className="close" onClick={dialog.dismiss} aria-label="Close account and security">×</button><p className="eyebrow">Account &amp; security</p><h2 id="security-title">Your durable profile.</h2>

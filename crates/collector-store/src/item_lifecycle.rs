@@ -313,3 +313,41 @@ impl Store {
         Ok(record)
     }
 }
+
+impl Store {
+    /// Caller holds archive writer and publication gate through the durable write.
+    pub(crate) fn validate_item_effect(
+        &self,
+        context: collector_app::ItemEffectContext,
+        collection: CollectionId,
+    ) -> Result<()> {
+        let item = Catalog::item(self, context.item_id)?;
+        if item.deleted
+            || item.collection_id != collection
+            || item.lifecycle.generation != context.generation
+        {
+            return Err(Error::Conflict);
+        }
+        let db = lock(&self.db)?;
+        let valid = match context.source {
+            collector_app::ItemEffectSource::Command => true,
+            collector_app::ItemEffectSource::GuidedImport(import) => db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.guided_ingest_intents g
+                 JOIN private.imports p ON p.id=g.import_id
+                 WHERE g.import_id=?1 AND g.target_item_id=?2 AND g.cancelled=0
+                 AND p.collection_id=?3 AND p.phase<>'cancelled'
+                 AND COALESCE((SELECT generation FROM private.item_import_generations v WHERE v.import_id=p.id),0)=?4)",
+                params![import.to_string(),context.item_id.to_string(),collection.to_string(),context.generation], |row|row.get::<_,bool>(0)
+            ).map_err(storage)?,
+            collector_app::ItemEffectSource::Snapshot(snapshot) => db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN snapshots s ON s.id=?1
+                 WHERE j.item_id=?2 AND j.collection_id=?3 AND s.collection_id=?3
+                 AND j.state='completed'
+                 AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id'))=s.id
+                 AND COALESCE((SELECT generation FROM private.item_job_generations v WHERE v.job_id=j.id),0)=?4)",
+                params![snapshot.to_string(),context.item_id.to_string(),collection.to_string(),context.generation], |row|row.get::<_,bool>(0)
+            ).map_err(storage)?,
+        };
+        if valid { Ok(()) } else { Err(Error::Conflict) }
+    }
+}

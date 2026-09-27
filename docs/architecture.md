@@ -180,11 +180,56 @@ storage. The shared API client pauses a sensitive command on the typed recent-au
 error, obtains a fresh password or passkey session, then retries the original body
 and idempotency key once. Cancellation rejects the pending command and leaves the
 owning form mounted with its draft. An expired or revoked session still goes through
-normal unauthenticated handling. Each prompt has a distinct generation; cancellation
-aborts password/passkey requests and ignores obsolete completions. Authentication
-continues to issue a fresh session under the existing login contract. Revoking a
-row marked Current therefore also invokes the existing logout command before
-clearing the browser UI, revoking any replacement session issued during the retry.
+normal unauthenticated handling. Each prompt has a distinct generation and uses the shared UI operation lifetime.
+The authentication coordinator shares a prompt while retaining each command's own
+abort signal. Cancelling one waiter leaves others alive; cancelling the last waiter
+aborts the prompt. A settled or cancelled prompt cannot settle its successor.
+Commands snapshot their URL, body, headers, idempotency key and submitting account.
+Before retry, the client verifies the authenticated account through `/me`. Every
+account-bound API request also sends `X-Collector-Actor`: the common HTTP
+authentication adapter compares it with the independently authenticated principal
+and rejects a mismatch before dispatch. The header never supplies authority or
+selects an account; it is an optional precondition for other clients. Ordinary
+commands retry once; session-targeted revocation explicitly requires review of the
+refreshed session list after authentication, with no automatic retargeting.
+
+## Work identity and effect boundaries
+
+[Work-context hardening](work-context-hardening.md) retains distinct Item, Import,
+Job, attempt/claim, command receipt and workflow-generation identities. They are
+not interchangeable. UI observation lifetimes are independent of durable execution:
+closing a panel aborts its network reads and callbacks, not a server Job. Explicit
+cancel commands continue to use durable request ownership.
+
+`OperationScope` owns a lane's attempt and abort signal and guards success, failure
+and settlement. A bound React scope is replaced on target/query change, including
+A-to-B-to-A navigation; old closures cannot start work in the replacement scope.
+Separate read and mutation lanes preserve independent operations. Loaded rows also
+carry their scope, so stale rows never become actions against a new target. The
+shared mechanism is used in grant management, destination search, guided import
+selection/polling, metadata reads and authentication. Existing domain-specific
+completion receipts and durable polling/resume identities remain authoritative.
+
+Worker snapshot and processing publication receive the full `JobClaim`. The Store
+validates recorded user, collection, item, attempt and claim token and checks
+cancellation/generation itself during publication; caller checkpoints add policy
+checks, never replace the Store's fence. Exact immutable snapshot replay can return
+an existing record without writing, including after archive-only recovery.
+
+Asset effects explicitly distinguish direct manual uploads, item-bound commands,
+and derived publication. `ItemEffectContext` carries the exact item, generation
+and source (guided import or acquired snapshot). Under the archive writer and
+publication gate, the Store validates the target and source's durable association
+and current generation before writing. Cancelled guided imports and missing or
+foreign snapshot producers cannot publish via a matching item generation alone.
+Historical observations and original bytes remain readable and preserved.
+
+Generic retry, preparation retry and worker cancellation share one obsolete-job
+predicate. It consults durable direct scan/derivative ownership rather than a cached
+ownership boolean, and retains the narrow exception for completing bookkeeping
+after irreversible Capture publication. Scan/derivative request admission and
+last-owner cancellation keep their existing transactional ownership registries;
+this delivery does not introduce a second scheduler or duplicate ownership store.
 
 ## Dependency rules
 

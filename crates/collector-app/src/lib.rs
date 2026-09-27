@@ -236,6 +236,27 @@ impl PresentedAsset {
 
 /// Persistence and file mechanisms after application policy has authorized an
 /// effect. No method receives a Principal or Role.
+#[derive(Clone, Copy, Debug)]
+pub enum AssetWriteContext {
+    /// A direct, authorized upload, unrelated to a background workflow.
+    Manual,
+    Item(ItemEffectContext),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ItemEffectContext {
+    pub item_id: ItemId,
+    pub generation: u64,
+    pub source: ItemEffectSource,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ItemEffectSource {
+    Command,
+    Snapshot(SnapshotId),
+    GuidedImport(ImportId),
+}
+
 pub trait ContentPort: Send + Sync {
     fn activity(&self, user: UserId, item: ItemId) -> Result<serde_json::Value>;
     fn save_activity(&self, user: UserId, item: ItemId, value: serde_json::Value) -> Result<()>;
@@ -255,7 +276,7 @@ pub trait ContentPort: Send + Sync {
         asset: AssetId,
         command: CreateAssetCommand,
         bytes: &[u8],
-        expected_generation: Option<u64>,
+        context: AssetWriteContext,
     ) -> Result<AssetState>;
     fn update_asset(
         &self,
@@ -3235,7 +3256,7 @@ impl CollectionService {
         let asset_id = deterministic_new_asset_id(actor.user_id, context.key());
         let request = (asset_id, command.clone(), Digest::sha256(bytes));
         let state = self.execute_command(actor, context, "asset.create", &request, |effects| {
-            effects.create_asset(asset_id, command, bytes, None)
+            effects.create_asset(asset_id, command, bytes, AssetWriteContext::Manual)
         })?;
         Ok(PresentedAsset::from_state(state, role))
     }
@@ -3316,7 +3337,11 @@ impl CollectionService {
                         alt_text,
                     },
                     bytes,
-                    Some(item.lifecycle.generation),
+                    AssetWriteContext::Item(ItemEffectContext {
+                        item_id,
+                        generation: item.lifecycle.generation,
+                        source: ItemEffectSource::Command,
+                    }),
                 )
             },
         )?;
@@ -4795,8 +4820,7 @@ impl CollectionService {
                     ));
                 }
                 self.processing.publish_snapshot(
-                    claim.id,
-                    &claim.claim_token,
+                    &claim,
                     snapshot,
                     response.reader.as_mut(),
                     &mut || {
@@ -4955,8 +4979,7 @@ impl CollectionService {
                 };
                 observation.validate()?;
                 self.processing.publish_processing_record(
-                    claim.id,
-                    &claim.claim_token,
+                    &claim,
                     PortableProcessingRecord {
                         inputs,
                         observation,

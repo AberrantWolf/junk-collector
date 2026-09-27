@@ -4663,3 +4663,79 @@ async fn metadata_review_routes_are_curation_only_and_effective_display_is_viewe
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn browser_command_account_precondition_cannot_switch_or_supply_authority() {
+    let (_root, state) = state();
+    let user = state
+        .store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let (token, authenticated) = state.store.issue_session(user, "browser").unwrap();
+    let app = router(state);
+    for (expected, status) in [
+        (user.to_string(), StatusCode::OK),
+        (UserId::new().to_string(), StatusCode::UNAUTHORIZED),
+        ("malformed".into(), StatusCode::UNAUTHORIZED),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/me")
+                    .header("cookie", format!("collector_session={token}"))
+                    .header("x-collector-actor", expected)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me")
+                .header("x-collector-actor", user.to_string())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/api/v1/devices/{}",
+                    authenticated.principal.device_id.unwrap()
+                ))
+                .header("cookie", format!("collector_session={token}"))
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "wrong-account-action")
+                .header("x-collector-actor", UserId::new().to_string())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me")
+                .header("cookie", format!("collector_session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "mismatched command revoked the session"
+    );
+}

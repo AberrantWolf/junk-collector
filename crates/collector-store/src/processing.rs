@@ -1123,18 +1123,17 @@ impl ProcessingPort for Store {
     }
     fn publish_processing_record(
         &self,
-        job: JobId,
-        claim_token: &str,
+        claim: &JobClaim,
         record: PortableProcessingRecord,
     ) -> Result<()> {
         let _writer = lock(&self.writer)?;
-        let mut cancelled = || self.cancellation_requested_record(job, claim_token);
-        self.publish_processing_record_under_writer(job, record, &mut cancelled)
+        self.validate_publication_claim(claim, record.observation.collection_id)?;
+        let mut cancelled = || self.cancellation_requested_record(claim.id, &claim.claim_token);
+        self.publish_processing_record_under_writer(claim.id, record, &mut cancelled)
     }
     fn publish_snapshot(
         &self,
-        job: JobId,
-        _claim_token: &str,
+        claim: &JobClaim,
         record: SnapshotRecord,
         reader: &mut dyn Read,
         cancelled: &mut dyn FnMut() -> Result<bool>,
@@ -1154,6 +1153,12 @@ impl ProcessingPort for Store {
                 ))
             };
         }
+        let job = claim.id;
+        self.validate_publication_claim(claim, record.collection_id)?;
+        let mut guarded = || {
+            Ok(self.cancellation_requested_record(claim.id, &claim.claim_token)? || cancelled()?)
+        };
+        let cancelled: &mut dyn FnMut() -> Result<bool> = &mut guarded;
         // Drain potentially network-backed input before taking the archive writer.
         // The journal publisher reads only this local bounded spool and verifies it.
         let mut spool = tempfile::tempfile_in(&self.state).map_err(storage)?;
@@ -1484,4 +1489,22 @@ fn parse_group(
             .ok_or_else(|| Error::Storage("Invalid check date".into()))?,
         occurrences,
     })
+}
+
+impl Store {
+    fn validate_publication_claim(&self, claim: &JobClaim, collection: CollectionId) -> Result<()> {
+        let record = self.job_record(claim.id, claim.user_id)?;
+        if claim.collection_id != Some(collection)
+            || record.collection_id != claim.collection_id
+            || record.item_id != claim.item_id
+            || record.attempt != claim.attempt
+            || record.kind != claim.kind
+        {
+            return Err(Error::Conflict);
+        }
+        if self.cancellation_requested_record(claim.id, &claim.claim_token)? {
+            return Err(Error::JobCancelled);
+        }
+        Ok(())
+    }
 }

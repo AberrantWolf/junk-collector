@@ -5620,7 +5620,7 @@ fn subprocess_command_receipt_worker() {
                             alt_text: "Cover".into(),
                         },
                         png.get_ref(),
-                        None,
+                        collector_app::AssetWriteContext::Manual,
                     )
                     .unwrap(),
             )
@@ -8265,8 +8265,7 @@ fn streamed_snapshot_is_hashed_and_survives_archive_only_rebuild() {
     let mut reader = std::io::Cursor::new(bytes.clone());
     store
         .publish_snapshot(
-            JobId::new(),
-            "fixture-claim",
+            &snapshot_claim(&store, collection.id),
             snapshot.clone(),
             &mut reader,
             &mut || Ok(false),
@@ -8300,8 +8299,7 @@ fn streamed_snapshot_is_hashed_and_survives_archive_only_rebuild() {
     changed.id = SnapshotId::new();
     assert!(matches!(
         archive_only.publish_snapshot(
-            JobId::new(),
-            "fixture-claim",
+            &snapshot_claim(&archive_only, collection.id),
             changed,
             &mut corrupt,
             &mut || Ok(false)
@@ -8327,8 +8325,7 @@ fn streamed_snapshot_cancellation_aborts_before_commit_and_recovers_cleanly() {
     let mut checks = 0;
     assert!(matches!(
         store.publish_snapshot(
-            JobId::new(),
-            "claim",
+            &snapshot_claim(&store, collection.id),
             snapshot.clone(),
             &mut std::io::Cursor::new(bytes),
             &mut || {
@@ -11045,8 +11042,7 @@ fn snapshot_envelope_mismatch_does_not_partially_replace_catalog() {
     };
     store
         .publish_snapshot(
-            JobId::new(),
-            "fixture",
+            &snapshot_claim(&store, collection.id),
             snapshot.clone(),
             &mut std::io::Cursor::new(b"data"),
             &mut || Ok(false),
@@ -15166,7 +15162,11 @@ fn clean_reimport_preserves_artwork_by_default_and_resets_only_explicit_authorit
             alt_text: "Late old provider image".into(),
         },
         &image_bytes,
-        Some(original.lifecycle.generation),
+        collector_app::AssetWriteContext::Item(collector_app::ItemEffectContext {
+            item_id: original.id,
+            generation: original.lifecycle.generation,
+            source: collector_app::ItemEffectSource::Command,
+        }),
     );
     assert!(
         matches!(late_art, Err(Error::Conflict)),
@@ -15297,4 +15297,159 @@ fn clean_reimport_supersedes_a_partially_committed_replacement_without_resurrect
             )
             .is_ok()
     );
+}
+
+fn snapshot_claim(store: &Store, collection: CollectionId) -> collector_app::JobClaim {
+    store
+        .enqueue_job(JobSpec {
+            id: JobId::new(),
+            user_id: UserId::new(),
+            collection_id: Some(collection),
+            item_id: None,
+            kind: "test.snapshot".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    store.claim_job("snapshot-fixture", 300).unwrap().unwrap()
+}
+
+#[test]
+fn snapshot_publication_rejects_foreign_and_cancelled_claims_without_trusting_callback() {
+    let (_root, store, _actor, _service, collection) = setup();
+    let claim = snapshot_claim(&store, collection.id);
+    let snapshot = SnapshotRecord {
+        id: SnapshotId::new(),
+        collection_id: collection.id,
+        provider: ModuleId("org.example.catalog".into()),
+        media_type: "application/octet-stream".into(),
+        bytes: ByteLength(4),
+        digest: Digest::sha256(b"data"),
+        parsed_observation: RawJson::from_value(serde_json::json!({})),
+        created_at: chrono::Utc::now(),
+    };
+    let mut wrong = claim.clone();
+    wrong.claim_token = "obsolete-claim".into();
+    assert!(
+        store
+            .publish_snapshot(
+                &wrong,
+                snapshot.clone(),
+                &mut std::io::Cursor::new(b"data"),
+                &mut || Ok(false)
+            )
+            .is_err()
+    );
+    let mut wrong = claim.clone();
+    wrong.collection_id = Some(CollectionId::new());
+    assert!(matches!(
+        store.publish_snapshot(
+            &wrong,
+            snapshot.clone(),
+            &mut std::io::Cursor::new(b"data"),
+            &mut || Ok(false)
+        ),
+        Err(Error::Conflict)
+    ));
+    let mut wrong = claim.clone();
+    wrong.attempt += 1;
+    assert!(matches!(
+        store.publish_snapshot(
+            &wrong,
+            snapshot.clone(),
+            &mut std::io::Cursor::new(b"data"),
+            &mut || Ok(false)
+        ),
+        Err(Error::Conflict)
+    ));
+    store
+        .request_job_cancellation(claim.id, claim.user_id)
+        .unwrap();
+    assert!(matches!(
+        store.publish_snapshot(
+            &claim,
+            snapshot.clone(),
+            &mut std::io::Cursor::new(b"data"),
+            &mut || Ok(false)
+        ),
+        Err(Error::JobCancelled)
+    ));
+    assert!(matches!(
+        store.snapshot(SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: snapshot.id
+        }),
+        Err(Error::NotFound)
+    ));
+}
+
+#[test]
+fn derived_asset_publication_requires_its_live_source_and_exact_item() {
+    let (_root, store, actor, service, collection) = setup();
+    let original = fx05_original(&store, &service, &actor, collection.id);
+    let accepted = service
+        .start_ingest(
+            &actor,
+            fx05_retained_command(&service, &actor, &original),
+            &command(),
+        )
+        .unwrap();
+    let import = accepted.imports[0].import_id;
+    let item = store.item(original.id).unwrap();
+    let detail = service.ingest_detail(&actor, import).unwrap();
+    service
+        .cancel_ingest(&actor, import, detail.import.revision, &command())
+        .unwrap();
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(4, 4, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    for source in [
+        collector_app::ItemEffectSource::GuidedImport(import),
+        collector_app::ItemEffectSource::Snapshot(SnapshotId::new()),
+    ] {
+        let asset = AssetId::new();
+        let result = ContentPort::create_asset(
+            store.as_ref(),
+            asset,
+            CreateAssetCommand {
+                collection_id: collection.id,
+                subject: AssetSubject::Item { item_id: item.id },
+                kind: AssetKind::Cover,
+                visibility: Visibility::Shared,
+                alt_text: "Obsolete source".into(),
+            },
+            encoded.get_ref(),
+            collector_app::AssetWriteContext::Item(collector_app::ItemEffectContext {
+                item_id: item.id,
+                generation: item.lifecycle.generation,
+                source,
+            }),
+        );
+        assert!(
+            matches!(result, Err(Error::Conflict)),
+            "generation alone admitted {source:?}"
+        );
+        assert!(matches!(store.asset_state(asset), Err(Error::NotFound)));
+    }
+    let result = ContentPort::create_asset(
+        store.as_ref(),
+        AssetId::new(),
+        CreateAssetCommand {
+            collection_id: collection.id,
+            subject: AssetSubject::Item { item_id: item.id },
+            kind: AssetKind::Cover,
+            visibility: Visibility::Shared,
+            alt_text: "Wrong owner".into(),
+        },
+        encoded.get_ref(),
+        collector_app::AssetWriteContext::Item(collector_app::ItemEffectContext {
+            item_id: ItemId::new(),
+            generation: item.lifecycle.generation,
+            source: collector_app::ItemEffectSource::Command,
+        }),
+    );
+    assert!(matches!(result, Err(Error::Conflict)));
 }

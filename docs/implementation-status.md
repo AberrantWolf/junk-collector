@@ -775,3 +775,17 @@ scope, fence and abort cancelled authentication attempts, and log out any fresh
 replacement session when revoking the current session. Security policy, rate limits, revocation and
 listener exposure remain in their existing server owners. Local validation is in
 [validation](validation.md). FX-07 and the separate LA3 second-device qualification remain open.
+
+
+### Work-context hardening — locally accepted 2026-09-26
+
+The delivery in [work-context hardening](work-context-hardening.md) precedes FX-07.
+Shared UI operation scopes guard results, errors and cleanup across target changes
+and unmount. Commands waiting for authentication retain original account/inputs/key
+and independent cancellation ownership. An optional actor precondition is checked
+against the authenticated principal before API dispatch; session-specific revocation requires review
+after authentication changes the session. Worker publication requires full claims,
+derived assets require item generation plus durable source context, and job retry/
+cancellation share generation/independent-owner eligibility. No persistent schema
+or domain-identity replacement was needed. Required gates and browser journeys passed; exact results
+are in [validation](validation.md). FX-07 is next.

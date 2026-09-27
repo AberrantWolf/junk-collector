@@ -34,7 +34,7 @@ changes. The integrated alpha/FX-01 checkpoint was committed as `20c4ff0` on 202
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
 
-## Usability fixes — FX-06 locally accepted; FX-07 next
+## Usability fixes — work-context hardening accepted; FX-07 next
 
 [FX-01–FX-07](ux-fix-plan.md) maps the combined UX and lifecycle work. FX-01,
 FX-02 and FX-03 were locally accepted on 2026-09-21. The persistent browser
@@ -56,7 +56,7 @@ Capture switching and generation fences are delivered together with the browser
 resume flow and retained-file playback. Local acceptance passed on 2026-09-26.
 Exact acceptance and host limitations are
 in [validation](validation.md). FX-06 adds collection-scoped access, bounded grant search, browser recovery and
-recent-authentication retry. Follow the [FX-07 prompt](ux-fix-plan.md) for the
+recent-authentication retry. The user-requested [work-context hardening](work-context-hardening.md) is locally accepted (2026-09-26). Follow the [FX-07 prompt](ux-fix-plan.md) for the
 whole-interface review. FX-07's whole-interface audit, LA3 second-device qualification
 and broader release gates remain separate.
 

@@ -1,4 +1,4 @@
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import type {components} from './generated/api';
 
 type Item=components['schemas']['PresentedItem'];
@@ -40,7 +40,7 @@ export default function MetadataReview({item,onChanged,onSessionExpired}:Props){
  const [titleDraft,setTitleDraft]=useState('');const [subtitleDraft,setSubtitleDraft]=useState('');const draftsTouched=useRef(false);
  const [artworkChoice,setArtworkChoice]=useState('');const [artworkOptions,setArtworkOptions]=useState<ArtworkOption[]>([]);const [pending,setPending]=useState<Pending>();const [job,setJob]=useState<Job>();
  const [completionRetry,setCompletionRetry]=useState(0);const completionConflict=useRef(false);
- const lifecycle=useRef(new AbortController());const loadController=useRef<AbortController|undefined>(undefined);
+ const lifecycle=useRef(new AbortController());const loads=useOperationScope(item.id);
  const latestReview=useRef(review);latestReview.current=review;
  const callbacks=useRef({onChanged,onSessionExpired});callbacks.current={onChanged,onSessionExpired};
  const storageKey=`collector.metadata.${item.id}.pending`;
@@ -52,16 +52,19 @@ export default function MetadataReview({item,onChanged,onSessionExpired}:Props){
  function report(error:unknown,message?:string){if(lifecycle.current.signal.aborted||(error instanceof DOMException&&error.name==='AbortError'))return;if(isApiRequestError(error)&&error.code==='unauthenticated'){callbacks.current.onSessionExpired();return;}setFeedback({kind:'error',text:requestErrorMessage(error,message)});}
  async function refreshItem(signal?:AbortSignal){callbacks.current.onChanged(await request<Item>(`/items/${item.id}`,{signal}));}
  async function load(preserveDraft=true){
-  loadController.current?.abort();const controller=new AbortController();loadController.current=controller;setLoading(true);
-  try{const next=await request<Review>(`/items/${item.id}/metadata`,{signal:controller.signal});setReview(next);latestReview.current=next;
+  setLoading(true);let loaded:Review|undefined;
+  await loads.run(attempt=>request<Review>(`/items/${item.id}/metadata`,{signal:attempt.signal}),{success:next=>{
+   loaded=next;setReview(next);latestReview.current=next;
    if(!preserveDraft||!draftsTouched.current){setTitleDraft(next.authority.field_overrides.find(value=>value.field==='title')?.value??next.display.title.value);setSubtitleDraft(next.authority.field_overrides.find(value=>value.field==='subtitle')?.value??next.display.subtitle?.value??'');draftsTouched.current=false;}
-   setArtworkChoice(next.authority.artwork_choice??next.display.artwork??'');return next;
-  }catch(error){if(!controller.signal.aborted)report(error,'Metadata review is unavailable for this collection role.');}finally{if(!controller.signal.aborted&&!lifecycle.current.signal.aborted)setLoading(false);}
+   setArtworkChoice(next.authority.artwork_choice??next.display.artwork??'');
+  },failure:error=>report(error,'Metadata review is unavailable for this collection role.'),settled:()=>setLoading(false)});
+  return loaded;
  }
+
  useEffect(()=>{
   lifecycle.current=new AbortController();
   const stored=localStorage.getItem(storageKey);if(stored){try{const value=JSON.parse(stored) as Pending;if(typeof value.jobId==='string'&&['metadata','artwork_listing','artwork_image'].includes(value.stage)){rememberPending({...value,commandKey:value.commandKey||crypto.randomUUID()});}else localStorage.removeItem(storageKey);}catch{localStorage.removeItem(storageKey);}}
-  void load(false);return()=>{lifecycle.current.abort();loadController.current?.abort();};
+  void load(false);return()=>{lifecycle.current.abort();loads.cancel();};
  },[item.id]);
  useEffect(()=>{if(!lookupId.startsWith('custom-'))return;setLookupKind(lookupId==='custom-release'?'release_id':lookupId==='custom-disc'?'disc_id':'search');setLookupValue('');},[lookupId]);
  useEffect(()=>{if(!review||lookupId.startsWith('custom-')||review.lookup_choices.some(value=>value.id===lookupId))return;const choice=review.lookup_choices.find(value=>value.recommended)||review.lookup_choices[0];if(choice){setLookupId(choice.id);setLookupKind(choice.kind);setLookupValue(choice.value);}},[review,lookupId]);

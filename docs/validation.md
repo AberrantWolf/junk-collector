@@ -1,5 +1,44 @@
 # Validation recorded for the foundation
 
+## Work-context hardening — 2026-09-26
+
+Checkpoint `5d1fc1a` preserves the accepted FX-05/FX-06 work before this delivery.
+The architecture contract and bounded adoption list are in
+[work-context hardening](work-context-hardening.md).
+
+`cargo test --workspace` passed, including 175 archive tests, 29 HTTP tests,
+nine store unit tests, LAN TLS and the recovery regression suites. The existing
+private owned-CD oracle remains ignored without its user-owned dump/oracle inputs.
+`derived_asset_publication_requires_its_live_source_and_exact_item` also passed
+independently before the final workspace run. It demonstrates that a matching generation cannot authorize cancelled/missing
+sources or a different item. The snapshot regression rejects wrong token, wrong
+collection, wrong attempt and cancellation even when the caller's callback says
+not cancelled. Snapshot preservation fixtures now acquire actual job claims; this
+changes their invalid fixture setup, not the expected preservation behavior.
+
+`test:context` passed stale success/error/cleanup, A-to-B-to-A scope replacement,
+detachment/disposal, independent lanes, independent authentication waiters,
+last-waiter cancellation, obsolete prompts, account mismatch, immutable request
+body/key retry and explicit session review. `test:queue` passed. TypeScript,
+API contract comparison, architecture/link checks, formatting and web build passed.
+No DTO or persistent schema changed. The optional `X-Collector-Actor` transport
+precondition rejects account mismatch before dispatch; its HTTP regression also
+proves it cannot supply authentication and cannot revoke a session when mismatched.
+
+Temporary real-server browser journeys passed clean-reimport recovery and retained
+playback (FX-05), collection access scope switching and cancelled/new authentication
+prompts (FX-06), recovery/revocation and the general smoke suite. FX-06 now explicitly
+checks that session-specific retry requires reviewing the refreshed session list,
+keeps an unsaved profile draft, and leaves `/me` unauthorized after the confirmed
+current-session revocation. Authentication prompts and response delays are injected
+for deterministic race coverage; actual login/logout/recovery and writes use the
+real server. The final embedded server rebuild, repeated FX-05/FX-06 journeys and
+full smoke suite passed. Smoke includes actual FLAC playback and grant revocation,
+virtual WebAuthn registration/login, unavailable-module restart and mobile layouts.
+Strict workspace Clippy passed with warnings denied. This delivery is locally
+accepted; FX-07 and external device/deployment qualifications remain separate.
+
+
 ## FX-06 review fixes — 2026-09-26
 
 The three review findings are corrected using the existing grant, authentication

@@ -1438,7 +1438,11 @@ impl CollectionService {
                     ),
                 },
                 &bytes,
-                Some(item.lifecycle.generation),
+                AssetWriteContext::Item(ItemEffectContext {
+                    item_id: item.id,
+                    generation: item.lifecycle.generation,
+                    source: ItemEffectSource::GuidedImport(record.view.id),
+                }),
             )?;
         }
         self.refresh_provider_metadata_for_job(
