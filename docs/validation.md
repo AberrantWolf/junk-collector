@@ -1,5 +1,78 @@
 # Validation recorded for the foundation
 
+## FX-07 whole-interface local acceptance — 2026-09-27
+
+The [action, growing-list and combined-journey register](fx07-interface-audit.md)
+records local U05.2/U05.3 and P04.6 acceptance for implemented web actions.
+No production archive or profile was used. Independent accessibility/security,
+second-device, physical hardware and deployment qualifications are separate.
+
+The account-administration query now checks administrator authorization and
+search/page bounds in the application, returns username-ordered keyset pages
+from SQLite, and uses an exact single-row account read. Personal sessions,
+passkeys and paired devices now have creation-time/ID keyset pages. Their
+focused security tasks retain profile drafts. The administration panel has
+focused Collections, Game catalogs, Accounts and Server settings tasks.
+Account search is scope-bound, paged, and has loading/empty/error/retry states.
+Catalog rows are hidden immediately when the selected collection changes; a
+completing catalog Job refreshes only its admitting collection. Metadata
+candidate choices render 25 at a time with local search inside the Store's
+4,096-candidate admission bound.
+
+Collection navigation and selectors now use an authorized 50-row keyset query
+with name search and role/module filters. The exact selected collection is read
+with its grant check, so a direct URL or a selection outside the current search
+page remains usable. Curation, access, catalog and work filters share one
+searchable chooser. The former unbounded collection-list HTTP endpoint was
+removed. A Store regression crosses role/module-filtered pages and denies an
+exact read without a grant; `test:fx06` creates 55 additional collections,
+crosses the second page and opens curation for a later result.
+The reviewed debounce race is fixed in both the shared chooser and sidebar:
+rows and cursors belong to their search scope, while same-query refresh retains
+navigation context. `test:fx06` changes search before the old More button can
+run and then crosses the next page. Game catalogs now shows collection lookup
+errors and Retry before selection; configured-source errors have their own Retry.
+`test:smoke` injects the initial collection lookup failure and recovers.
+
+`cargo test --workspace` passed, including 179 archive tests and the new
+multi-page account search/direct-read and personal-security regressions. The
+latter crosses equal-timestamp session, passkey and paired-device pages and
+checks malformed cursors. Strict workspace Clippy,
+architecture/link checks, formatting, generated API comparison, TypeScript,
+web build and `git diff --check` passed. The Rust server was rebuilt after
+embedded web assets changed. `test:queue` and `test:context` passed.
+
+Temporary real-server Chrome 153.0.8010.37 journeys passed: `test:fx06`
+(account and session page crossing, search, focused security tasks, collection
+access, recent authentication, recovery, revocation), `test:fx04` (3,000 Items
+and 3,000 imports), `test:work`
+(53 imports, mixed eligibility and cleanup), `test:fx05` (clean reimport,
+removal/restore and actual historical playback), `test:scans` (64 MiB scan,
+equivalent and independent work, invalid submission without a Job),
+`test:browse` (paging, keyboard and read recovery), and `test:fx04-review`
+(draft preservation and section stability). Final rebuilt `test:smoke` passed
+collection-scoped catalog rows, actual FLAC playback and grant revocation,
+setup, role denial, WebAuthn and mobile layout. Its offline provider fixture
+also returned an explicit no-match response after three ambiguous candidates;
+the completion message reported no match and the earlier alternatives stayed
+available. The metadata completion contract now carries the refresh outcome.
+
+The final rebuilt `test:work` also passed a three-import case with two
+completed analyses and a failed analysis attempted twice; the UI showed all
+package rows, separate analysis work and the previous failure. It injected a
+real staging-directory permission failure, retried cleanup, preserved the
+measured 2-byte result, then restarted with a second pending cleanup and
+verified recovery. The Store regression now repeats completed cleanup and
+checks that its reclaimed amount cannot return to zero. `test:scans` passed
+ambiguous and no-match DAT verification in the real UI using a frozen offline
+catalog and published source bytes. The rebuilt `test:fx05` and
+`test:fx04-review` journeys passed after the collection fixes.
+
+The Music panel links its 50-batch limit to the selected entry’s Work &
+history. Metadata candidate rendering is bounded at 4,096 versions per Item;
+page its response before increasing that limit. This does not claim the
+separate independent audits, LA3 second-device or physical deployment gates.
+
 ## Work-context hardening — 2026-09-26
 
 Checkpoint `5d1fc1a` preserves the accepted FX-05/FX-06 work before this delivery.

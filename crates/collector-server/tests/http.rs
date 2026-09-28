@@ -1684,7 +1684,7 @@ async fn browser_approved_enrollment_issues_and_revokes_native_credential() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/v1/collections")
+                .uri("/api/v1/collection-search")
                 .header("authorization", format!("Bearer {credential}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -1714,7 +1714,7 @@ async fn browser_approved_enrollment_issues_and_revokes_native_credential() {
     let rejected = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/collections")
+                .uri("/api/v1/collection-search")
                 .header("authorization", format!("Bearer {credential}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -2603,8 +2603,10 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 107); // Adds the separate Item Remove and Restore commands.
+    assert_eq!(paths.len(), 108); // Includes bounded collection search and exact collection reads.
     for path in [
+        "/api/v1/collection-search",
+        "/api/v1/collections/{id}",
         "/api/v1/items/{id}/remove",
         "/api/v1/items/{id}/restore",
         "/api/v1/items/{id}/specimens",

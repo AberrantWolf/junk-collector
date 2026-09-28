@@ -25,12 +25,12 @@ try{
  await page.getByRole('button',{name:'Create collection'}).click();const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Review music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection'}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
  const seeded=await page.evaluate(async()=>{
   const request=async(path,init={})=>{const response=await fetch('/api/v1'+path,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(path+': '+await response.text());return response.json();};
-  const collection=(await request('/collections')).find(value=>value.name==='Review music');const id=crypto.randomUUID();
+  const collection=((await request('/collection-search?limit=100')).items).find(value=>value.name==='Review music');const id=crypto.randomUUID();
   const item=await request('/items/'+id,{method:'PUT',body:JSON.stringify({expected_revision:0,edit:{collection_id:collection.id,title:'Existing album',subtitle:'First edition',identity_link:{kind:'none'},domain_edit:{module:'org.junk.music',fields:{artist:'Existing artist'}},identity:'unidentified',translations:[],identifiers:[],wishlist:true}})});
   return {id:item.id,collectionId:collection.id};
  });
  await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog');
- await editor.getByRole('button',{name:'Search existing entries'}).click();await editor.getByRole('searchbox',{name:'Search existing entries'}).fill('Existing album');await editor.locator('.destination-results button').filter({hasText:'Existing album'}).click();
+ await editor.getByRole('button',{name:'Search existing entries'}).click();await editor.getByRole('searchbox',{name:'Search existing entries'}).fill('Existing album');await editor.locator('.destination-chooser .destination-results button').filter({hasText:'Existing album'}).click();
  const cue=Buffer.from('FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n');const pcm=Buffer.alloc(2352*10);
  await editor.getByText('Choose individual files instead').click();await editor.getByLabel('Package files').setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcm}]);await editor.getByRole('button',{name:'Preview import'}).click();await editor.getByText('1 dump packages found.',{exact:false}).waitFor();await editor.getByLabel('Preserve originals without analysis or automatic lookup').check();await editor.getByRole('button',{name:'Preserve 1 package'}).click();
  await page.waitForFunction(async id=>{const response=await fetch('/api/v1/items/'+id);return response.ok&&(await response.json()).captures.length===1;},seeded.id);

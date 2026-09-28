@@ -234,9 +234,16 @@ pub struct CompleteMetadataAcquisitionCommand {
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CompletedMetadataAcquisition {
-    Metadata { review: Box<MetadataReviewView> },
-    ArtworkOptions { options: Vec<MetadataArtworkOption> },
-    ArtworkPublished { asset: Box<crate::PresentedAsset> },
+    Metadata {
+        review: Box<MetadataReviewView>,
+        outcome: MetadataRefreshOutcome,
+    },
+    ArtworkOptions {
+        options: Vec<MetadataArtworkOption>,
+    },
+    ArtworkPublished {
+        asset: Box<crate::PresentedAsset>,
+    },
 }
 
 struct LoadedMetadataAuthority {
@@ -1084,18 +1091,25 @@ impl CollectionService {
             snapshot_id,
         })?;
         if snapshot.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID {
+            let record = self.refresh_provider_metadata(
+                actor,
+                item_id,
+                RefreshProviderMetadataCommand {
+                    expected_revision: command.expected_revision,
+                    snapshot_id,
+                    source_observation_id: None,
+                    artwork: Vec::new(),
+                },
+                context,
+            )?;
+            let outcome = record
+                .observations
+                .last()
+                .ok_or_else(|| Error::Invalid("metadata refresh has no observation".into()))?
+                .outcome;
             return Ok(CompletedMetadataAcquisition::Metadata {
-                review: Box::new(self.apply_metadata_snapshot(
-                    actor,
-                    item_id,
-                    ApplyMetadataSnapshotCommand {
-                        expected_revision: command.expected_revision,
-                        snapshot_id,
-                        source_observation_id: None,
-                        artwork: Vec::new(),
-                    },
-                    context,
-                )?),
+                review: Box::new(self.metadata_review(actor, item_id)?),
+                outcome,
             });
         }
         if snapshot.provider.0 != collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID {

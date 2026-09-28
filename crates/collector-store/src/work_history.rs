@@ -75,7 +75,6 @@ impl Store {
     pub(crate) fn work_page_records(
         &self,
         user: UserId,
-        collections: &[CollectionId],
         query: &WorkQuery,
     ) -> Result<Page<WorkEntry>> {
         let cursor: Option<(i64, String)> = query
@@ -85,7 +84,7 @@ impl Store {
             .transpose()
             .map_err(|_| Error::Invalid("Invalid work cursor".into()))?;
         let sql = format!(
-            "{WORK} WHERE user_id=?1 AND (collection_id IS NULL OR collection_id IN (SELECT value FROM json_each(?2))) AND (?3 IS NULL OR collection_id=?3) AND (?4 IS NULL OR item_id=?4) AND (?5=0 OR item_id IS NULL) AND (?6='' OR instr(lower(name||' '||coalesce(item_title,'')||' '||search_files),lower(?6))>0) AND (?7='' OR status=?7) AND archived=?8 AND (?9 IS NULL OR created_at>=?9) AND (?10 IS NULL OR created_at<=?10) AND (?11 IS NULL OR created_at<?11 OR (created_at=?11 AND key<?12)) ORDER BY created_at DESC,key DESC LIMIT ?13"
+            "{WORK} WHERE user_id=?1 AND (collection_id IS NULL OR EXISTS (SELECT 1 FROM private.grants g WHERE g.user_id=?1 AND g.collection_id=work.collection_id AND g.role>=1)) AND (?2 IS NULL OR collection_id=?2) AND (?3 IS NULL OR item_id=?3) AND (?4=0 OR item_id IS NULL) AND (?5='' OR instr(lower(name||' '||coalesce(item_title,'')||' '||search_files),lower(?5))>0) AND (?6='' OR status=?6) AND archived=?7 AND (?8 IS NULL OR created_at>=?8) AND (?9 IS NULL OR created_at<=?9) AND (?10 IS NULL OR created_at<?10 OR (created_at=?10 AND key<?11)) ORDER BY created_at DESC,key DESC LIMIT ?12"
         );
         let db = lock(&self.db)?;
         let mut statement = db.prepare(&sql).map_err(storage)?;
@@ -93,7 +92,6 @@ impl Store {
             .query_map(
                 params![
                     user.to_string(),
-                    serde_json::to_string(collections).map_err(storage)?,
                     query.collection_id.map(|id| id.to_string()),
                     query.item_id.map(|id| id.to_string()),
                     query.unattached,

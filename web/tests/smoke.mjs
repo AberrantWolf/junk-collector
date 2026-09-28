@@ -27,7 +27,7 @@ const dbar=Buffer.alloc(31);dbar[0]=2;dbar.writeUInt32LE(676,1);dbar.writeUInt32
 for(let index=0;index<2;index++){const offset=13+index*9;dbar[offset]=17;dbar.writeUInt32LE(checksums[index],offset+1);dbar.writeUInt32LE(0,offset+5);}
 const accurateRipServer=createServer((_request,response)=>{response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
 await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
-const metadataRequests=[];const metadataProviderServer=createServer((request,response)=>{metadataRequests.push(request.url);const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const body=Buffer.from(JSON.stringify({id:url.pathname.split('/').at(-1),releases:releases.map(value=>({...value,media:[{discs:[{id:url.pathname.split('/').at(-1)}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const body=Buffer.from(JSON.stringify({releases}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
+const metadataRequests=[];const metadataProviderServer=createServer((request,response)=>{metadataRequests.push(request.url);const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const body=Buffer.from(JSON.stringify({id:url.pathname.split('/').at(-1),releases:releases.map(value=>({...value,media:[{discs:[{id:url.pathname.split('/').at(-1)}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const matches=url.searchParams.get('query')?.includes('unmatched fixture')?[]:releases;const body=Buffer.from(JSON.stringify({releases:matches}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
 await new Promise((resolve,reject)=>{metadataProviderServer.once('error',reject);metadataProviderServer.listen(metadataProviderPort,'127.0.0.1',resolve);});
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
@@ -85,14 +85,14 @@ try{
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
  await page.getByRole('button',{name:'Account & security',exact:true}).click();
- const security=page.getByRole('dialog',{name:/Your durable profile/});
+ const security=page.getByRole('dialog',{name:'Account & security'});
  await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();
  await security.getByText('Save these codes now.',{exact:false}).waitFor();
  assert.equal(await security.getByRole('listitem').count(),10);
  page.once('dialog',dialog=>dialog.accept());
  await page.getByRole('button',{name:'Close account and security'}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
- const administration=page.getByRole('dialog',{name:/Make room for a collection/});
+ const administration=page.getByRole('dialog',{name:'Administration'});
  await administration.getByLabel('Collection name').fill('Shelf & stereo');
  await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
@@ -101,9 +101,19 @@ try{
  await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
  await page.getByText('Collection created.',{exact:false}).waitFor();
- await administration.getByRole('button',{name:'Import immutable snapshot',exact:true}).click();
+ await administration.getByLabel('Collection name').fill('Other cartridges');
+ await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');
+ await administration.getByRole('button',{name:'Create collection',exact:true}).click();
+ await page.getByText('Collection created.',{exact:false}).waitFor();
+ await administration.getByRole('button',{name:'Close administration'}).click();
+ let failedGameLookup=false;const failGameLookup=route=>{const url=new URL(route.request().url());if(url.searchParams.get('module')==='org.junk.games'&&!failedGameLookup){failedGameLookup=true;return route.fulfill({status:503,json:{error:{code:'temporarily_unavailable',message:'Game collections temporarily unavailable'}}});}return route.continue();};await page.route('**/api/v1/collection-search?*',failGameLookup);
+ await page.getByRole('button',{name:'Administration',exact:true}).click();await administration.getByRole('button',{name:'Game catalogs',exact:true}).click();await administration.getByRole('alert').filter({hasText:'Game collections temporarily unavailable'}).waitFor();await administration.getByRole('button',{name:'Retry collections'}).click();await administration.locator('.collection-chooser .destination-results').getByRole('button',{name:/Cartridge shelf/}).click();await page.unroute('**/api/v1/collection-search?*',failGameLookup);await administration.getByRole('button',{name:'Import immutable snapshot',exact:true}).click();
  await administration.getByText('Catalog acquisition: completed',{exact:false}).waitFor();
  await administration.getByRole('button',{name:'Activate',exact:true}).click();
+ await administration.getByRole('button',{name:'Active',exact:true}).waitFor();
+ await administration.locator('.collection-chooser .destination-results').getByRole('button',{name:/Other cartridges/}).click();
+ assert.equal(await administration.getByRole('button',{name:'Active',exact:true}).count(),0,'old collection snapshot remained actionable');
+ await administration.locator('.collection-chooser .destination-results').getByRole('button',{name:/Cartridge shelf/}).click();
  await administration.getByRole('button',{name:'Active',exact:true}).waitFor();
  await page.getByRole('button',{name:'Close administration'}).click();
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).waitFor();
@@ -111,10 +121,10 @@ try{
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
  const addForm=page.getByRole('dialog',{name:/Add or import/});
  await addForm.getByRole('button',{name:'Enter inventory manually',exact:true}).click();
- await addForm.getByLabel('Collection').selectOption({label:'Cartridge shelf'});
+ await addForm.locator('.collection-chooser .destination-results').getByRole('button',{name:/Cartridge shelf/}).click();
  await addForm.getByLabel('Platform',{exact:true}).fill('Fixture console');
  page.once('dialog',dialog=>dialog.accept());
- await addForm.getByLabel('Collection').selectOption({label:'Shelf & stereo'});
+ await addForm.locator('.collection-chooser .destination-results').getByRole('button',{name:/Shelf & stereo/}).click();
  assert.equal(await addForm.getByLabel('Artist',{exact:true}).inputValue(),'','switching collection retained incompatible unsaved domain fields');
  await page.getByText('Music CDs fields are supplied by Music CDs.',{exact:true}).waitFor();
  await page.getByLabel('Title',{exact:true}).fill('A test pressing');
@@ -271,6 +281,11 @@ try{
  await metadataReview.getByText('Metadata refresh completed.',{exact:false}).waitFor();
  assert.equal(await metadataReview.locator('.candidate').count(),3,'provider alternatives were not retained');
  assert.equal(await metadataReview.locator('.candidate.current').count(),3,'fresh search candidates were not current');
+ await sourceSelect.selectOption('custom-search');
+ await metadataReview.getByLabel('Lookup value').fill('unmatched fixture');
+ await metadataReview.getByRole('button',{name:'Find metadata',exact:true}).click();
+ await metadataReview.getByText('No match found for this lookup.',{exact:false}).waitFor();
+ assert.equal(await metadataReview.locator('.candidate').count(),3,'no-match lookup discarded earlier alternatives');
  await metadataReview.getByRole('button',{name:'Clear title override',exact:true}).click();
  await metadataReview.getByRole('button',{name:'Clear subtitle override',exact:true}).click();
  const japaneseCandidate=metadataReview.locator('.candidate').filter({hasText:'試験盤'});
@@ -337,7 +352,7 @@ try{
  page.once('dialog',dialog=>dialog.accept());
  await curator.getByRole('button',{name:'Close curator'}).click();
  await curator.waitFor({state:'detached'});
- await page.getByRole('searchbox').fill('試験盤');await page.waitForTimeout(350);
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('試験盤');await page.waitForTimeout(350);
  assert.equal(await page.locator('.collection-row').count(),1,'effective metadata was not searchable');
  await page.getByRole('button',{name:/試験盤/}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
@@ -378,7 +393,7 @@ try{
  await page.getByRole('button',{name:'Close curator'}).click();
  // FX-01 retains search on reload. Explicitly leave the old provider-title search
  // after overriding that title, so subsequent list selections use all entries.
- await page.getByRole('searchbox').fill('');
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('');
  await page.reload();
  await page.getByRole('button',{name:/A test pressing/}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
@@ -422,7 +437,7 @@ try{
 
  await page.evaluate(async()=>{
   const request=async(path,init={})=>{const response=await fetch(`/api/v1${path}`,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
-  const collection=(await request('/collections',{method:'GET'})).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
+  const collection=((await request('/collection-search?limit=100',{method:'GET'})).items).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
   const itemId=crypto.randomUUID();const itemCommand={collection_id:collection.id,title:'Stale publication fixture',subtitle:'before review',identity_link:{kind:'none'},domain:{module:'org.junk.music',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false};
   const item=await request(`/items/${itemId}`,{method:'PUT',body:JSON.stringify({command:itemCommand,expected_revision:0})});
   const staged=await request('/imports',{method:'POST',body:JSON.stringify({collection_id:collection.id,package_name:'stale-publication-job',files:[{name:'empty.bin',bytes:0,sha256:null}]})});
@@ -607,10 +622,10 @@ try{
  const restoredWork=page.getByRole('dialog',{name:'Work & history'});
  await page.context().setOffline(true);
  await restoredWork.getByRole('button',{name:'Refresh work',exact:true}).click();
- await restoredWork.getByRole('alert').waitFor();
+ await restoredWork.locator(':scope > .notice.error').waitFor();
  await page.context().setOffline(false);
  await restoredWork.getByRole('button',{name:'Refresh work',exact:true}).click();
- await restoredWork.getByRole('alert').waitFor({state:'detached'});
+ await restoredWork.locator(':scope > .notice.error').waitFor({state:'detached'});
  await restoredWork.getByRole('button',{name:'Close work history'}).click();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
@@ -626,7 +641,7 @@ try{
   const playbackPassword=randomBytes(24).toString('hex');
   const playbackFixture=await page.evaluate(async password=>{
    const request=async(path,init={})=>{const needsKey=init.method&&init.method!=='GET'&&!path.startsWith('/auth/');const response=await fetch(`/api/v1${path}`,{...init,headers:{...(init.body?{'content-type':'application/json'}:{}),...(needsKey?{'idempotency-key':crypto.randomUUID()}:{}),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.status===204?undefined:response.json();};
-   const collection=(await request('/collections')).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
+   const collection=((await request('/collection-search?limit=100')).items).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
    const created=await request('/admin/users',{method:'POST',body:JSON.stringify({username:'playback-viewer',password,administrator:false})});
    await request('/admin/grants',{method:'POST',body:JSON.stringify({collection_id:collection.id,user_id:created.user_id,role:'viewer'})});
    return {collectionId:collection.id,itemId:localStorage.getItem('primary-music-item-id')};
@@ -724,11 +739,11 @@ try{
   assert.equal(await clientPage.evaluate(async()=>{const response=await fetch('/administration.js');return response.status;}),404);
   await clientPage.close();
  }
- await page.getByRole('searchbox').fill('pressing');
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('pressing');
  await page.waitForTimeout(350);
  assert.equal(await page.locator('.collection-row').count(),1);
  assert.match(await page.locator('.collection-row').innerText(),/Test ensemble/,'edition text hid the module artist summary');
- await page.getByRole('searchbox').fill('');
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('');
  await page.waitForTimeout(350);
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
@@ -840,12 +855,12 @@ try{
  await associationPanel.getByRole('button',{name:'Save association'}).waitFor();
  await associationPanel.getByRole('button',{name:'Search existing entries'}).click();
  await associationPanel.getByRole('searchbox',{name:'Search existing entries'}).fill('Disc A');
- await associationPanel.locator('.destination-results button').filter({hasText:'Disc A'}).click();
+ await associationPanel.locator('.destination-chooser .destination-results button').filter({hasText:'Disc A'}).click();
  await associationPanel.getByText('Already attached to this entry. No changes to save.',{exact:true}).waitFor();
  assert.equal(await associationPanel.getByRole('button',{name:'Save association'}).count(),0);
  await associationPanel.getByRole('button',{name:'Search existing entries'}).click();
  await associationPanel.getByRole('searchbox',{name:'Search existing entries'}).fill('Disc B');
- await associationPanel.locator('.destination-results button').filter({hasText:'Disc B'}).click();
+ await associationPanel.locator('.destination-chooser .destination-results button').filter({hasText:'Disc B'}).click();
  await associationPanel.getByRole('button',{name:'Save association'}).click();
  const movedImportId=new URL(page.url()).searchParams.get('work').split(':')[1];
  await page.waitForFunction(async({id,target})=>{const response=await fetch(`/api/v1/ingests/${id}`);return response.ok&&(await response.json()).import.association.item_id===target;},{id:movedImportId,target:targetItem});
@@ -866,13 +881,13 @@ try{
  assert.equal(mergedDiscs.captures,2,'reassociation replaced the destination disc');
  if(importAudio){assert.deepEqual(await importAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'background imports displaced the playing album');await importAudio.evaluate(element=>{element.pause();element.loop=false;});}
  await associationPanel.getByRole('button',{name:'Close work history'}).click();
- await page.getByRole('searchbox').fill('pressing');
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('pressing');
  await page.waitForTimeout(350);
  // The generic renderer must accept a third descriptor without a frontend ID branch.
  const fixturePage=await context.newPage();const fixtureCollection=crypto.randomUUID();
  await fixturePage.route('**/api/v1/collection-types',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:'org.example.stamps',schema_version:1,display_name:'Stamp fixture module',collection_type_label:'Postage stamps',fields:[{key:'denomination',label:'Denomination',required:true,editable:true,kind:{type:'integer',minimum:1,maximum:10000}},{key:'unit',label:'Currency unit',required:true,editable:true,kind:{type:'text',maximum_bytes:16}},{key:'perforations',label:'Perforation observations',required:false,editable:false,kind:{type:'structured'}}],capabilities:[]});await route.fulfill({response,json:body});});
- await fixturePage.route('**/api/v1/collections',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:fixtureCollection,revision:1,name:'Browser stamp fixture',created_at:'2026-09-13T00:00:00Z',binding:{state:'assigned',module:'org.example.stamps'},effective_permissions:{role:'owner',can_browse:true,can_curate:true,can_manage_access:true},content_permissions:{can_edit:true,status:'available'}});await route.fulfill({response,json:body});});
- await fixturePage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByRole('button',{name:'Enter inventory manually',exact:true}).click();await stampForm.getByLabel('Collection').selectOption(fixtureCollection);await stampForm.getByText('Postage stamps fields are supplied by Stamp fixture module.',{exact:true}).waitFor();assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('Structured module data is preserved and read-only here.',{exact:true}).waitFor();
+ await fixturePage.route('**/api/v1/collection-search?*',async route=>{const response=await route.fetch();const body=await response.json();body.items.push({id:fixtureCollection,revision:1,name:'Browser stamp fixture',created_at:'2026-09-13T00:00:00Z',binding:{state:'assigned',module:'org.example.stamps'},effective_permissions:{role:'owner',can_browse:true,can_curate:true,can_manage_access:true},content_permissions:{can_edit:true,status:'available'}});await route.fulfill({response,json:body});});
+ await fixturePage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByRole('button',{name:'Enter inventory manually',exact:true}).click();await stampForm.locator('.collection-chooser .destination-results').getByRole('button',{name:/Browser stamp fixture/}).click();await stampForm.getByText('Postage stamps fields are supplied by Stamp fixture module.',{exact:true}).waitFor();assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('Structured module data is preserved and read-only here.',{exact:true}).waitFor();
  let submittedStamp;
  await fixturePage.route('**/api/v1/items/*',async route=>{if(route.request().method()!=='PUT')return route.continue();submittedStamp=route.request().postDataJSON();await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{code:'invalid_request',message:'Renderer fixture: submission inspected without persistence.'}})});});
  await stampForm.getByLabel('Title',{exact:true}).fill('Synthetic stamp');await stampForm.getByLabel('Denomination',{exact:true}).fill('20');await stampForm.getByRole('button',{name:'Add inventory entry',exact:true}).click();await stampForm.getByRole('alert').waitFor();assert.deepEqual(submittedStamp.edit.domain_edit,{module:'org.example.stamps',fields:{unit:'cents',denomination:20}});
@@ -890,7 +905,7 @@ try{
  await fixturePage.unroute('**/api/v1/collection-types');await fixturePage.route('**/api/v1/collection-types',route=>route.fulfill({json:[]}));await fixturePage.reload();await fixturePage.getByRole('button',{name:'Administration',exact:true}).waitFor();assert.equal(await fixturePage.getByRole('button',{name:'Administration',exact:true}).isEnabled(),true);assert.equal(await fixturePage.getByRole('button',{name:'Manage collections',exact:true}).isEnabled(),true);
  await fixturePage.close();
  const rejectedOwner=await page.evaluate(async()=>{
-  const collection=(await(await fetch('/api/v1/collections')).json()).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
+  const collection=((await(await fetch('/api/v1/collection-search?limit=100')).json()).items).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
   const id=crypto.randomUUID();
   const command={collection_id:collection.id,title:'Opaque module fixture',subtitle:'Unavailable schema',identity_link:{kind:'none'},domain:{module:'org.example.absent',schema_version:8,payload:{z:100,a:null}},identity:'unidentified',translations:[],identifiers:[],wishlist:true};
   const response=await fetch(`/api/v1/items/${id}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command,expected_revision:0})});
@@ -898,17 +913,17 @@ try{
  });
  assert.equal(rejectedOwner.status,400,'wrong-owner item was accepted');
  assert.equal(rejectedOwner.body.error.code,'invalid_request');
- await page.getByRole('searchbox').fill('Opaque module');
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('Opaque module');
  await page.waitForTimeout(350);
  assert.equal(await page.locator('.collection-row').count(),0,'rejected item was published');
  // Build a valid temporary archived collection whose assigned owner is absent.
  // This exercises preservation/reindex fallback without forging a mixed-type API write.
- const unavailableFixture=await page.evaluate(async()=>{const collections=await(await fetch('/api/v1/collections')).json();const collection=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');const item=await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}`)).json();if(!item.captures.length)throw new Error('unavailable-owner fixture needs the captured music item');let review=await(await fetch(`/api/v1/items/${item.id}/metadata`)).json();for(const [field,value] of [['title','Opaque module fixture'],['subtitle','Unavailable owner preserved from archive']]){const response=await fetch(`/api/v1/items/${item.id}/metadata`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:review.revision,change:{change:'set_field_override',field,value,language:null}})});if(!response.ok)throw new Error(`unavailable-owner metadata: ${response.status} ${await response.text()}`);review=await response.json();}return {collectionId:collection.id,itemId:item.id};});
+ const unavailableFixture=await page.evaluate(async()=>{const collections=(await(await fetch('/api/v1/collection-search?limit=100')).json()).items;const collection=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');const item=await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}`)).json();if(!item.captures.length)throw new Error('unavailable-owner fixture needs the captured music item');let review=await(await fetch(`/api/v1/items/${item.id}/metadata`)).json();for(const [field,value] of [['title','Opaque module fixture'],['subtitle','Unavailable owner preserved from archive']]){const response=await fetch(`/api/v1/items/${item.id}/metadata`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:review.revision,change:{change:'set_field_override',field,value,language:null}})});if(!response.ok)throw new Error(`unavailable-owner metadata: ${response.status} ${await response.text()}`);review=await response.json();}return {collectionId:collection.id,itemId:item.id};});
  await stopServer();await archiveUnavailableOwnerFixture(unavailableFixture.collectionId,unavailableFixture.itemId);server=startServer();await waitForServer();await page.reload();
  await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
  await page.getByText('Collection content is read-only.',{exact:true}).waitFor();
  await page.getByRole('note').filter({hasText:'org.example.absent'}).waitFor();
- await page.getByRole('searchbox').fill('Opaque module');await page.waitForTimeout(350);
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('Opaque module');await page.waitForTimeout(350);
  const opaqueRow=page.getByRole('button',{name:/Opaque module fixture/});await opaqueRow.waitFor();assert.match(await opaqueRow.innerText(),/Unavailable type · org\.example\.absent/);await opaqueRow.click();
  await page.getByText('Module is not installed; preserved data is not executable.',{exact:false}).waitFor();
  if(hasFlac){const retained=await page.evaluate(async()=>{const [url]=JSON.parse(sessionStorage.getItem('prepared-flac-urls'));const response=await fetch(url,{headers:{Range:'bytes=0-3'}});return {status:response.status,magic:String.fromCharCode(...new Uint8Array(await response.arrayBuffer()))};});assert.deepEqual(retained,{status:206,magic:'fLaC'},'published FLAC was unreadable after restart with its module unavailable');
@@ -948,7 +963,7 @@ try{
  const viewerPassword=randomBytes(24).toString('hex');
  await page.evaluate(async viewerPassword=>{
   const request=async(path,init={})=>{const needsKey=init.method&&init.method!=='GET'&&!path.startsWith('/auth/');const response=await fetch(`/api/v1${path}`,{...init,headers:{...(init.body?{'content-type':'application/json'}:{}),...(needsKey?{'idempotency-key':crypto.randomUUID()}:{}),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.status===204?undefined:response.json();};
-  const collections=await request('/collections');
+  const collections=(await request('/collection-search?limit=100')).items;
   const created=await request('/admin/users',{method:'POST',body:JSON.stringify({username:'viewer',password:viewerPassword,administrator:false})});
   const unavailable=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.example.absent');
   await request('/admin/grants',{method:'POST',body:JSON.stringify({collection_id:unavailable.id,user_id:created.user_id,role:'viewer'})});
@@ -960,19 +975,19 @@ try{
  assert.equal(await page.getByRole('button',{name:'Manage collections',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Add / import',exact:true}).count(),0);
  await page.getByRole('button',{name:/Opaque module fixture/}).waitFor();
- const isolation=await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const importId=sessionStorage.getItem('owner-import-id');const jobId=sessionStorage.getItem('owner-job-id');return {importStatus:(await fetch(`/api/v1/imports/${importId}`)).status,jobStatus:(await fetch(`/api/v1/jobs/${jobId}`)).status,collectionStatus:(await fetch('/api/v1/imports',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({collection_id:collection.id,package_name:'forbidden',files:[{name:'empty.bin',bytes:0,sha256:null}]})})).status};});
+ const isolation=await page.evaluate(async()=>{const collection=((await(await fetch('/api/v1/collection-search?limit=100')).json()).items)[0];const importId=sessionStorage.getItem('owner-import-id');const jobId=sessionStorage.getItem('owner-job-id');return {importStatus:(await fetch(`/api/v1/imports/${importId}`)).status,jobStatus:(await fetch(`/api/v1/jobs/${jobId}`)).status,collectionStatus:(await fetch('/api/v1/imports',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({collection_id:collection.id,package_name:'forbidden',files:[{name:'empty.bin',bytes:0,sha256:null}]})})).status};});
  assert.deepEqual(isolation,{importStatus:404,jobStatus:404,collectionStatus:403},'viewer crossed Import/Job ownership or collection curation scope');
  assert.equal(await page.evaluate(async()=>{const url=sessionStorage.getItem('artwork-preview-url');return (await fetch(url)).status;}),403,'viewer accessed a curator-only provider preview');
  // The artwork-isolation assertion covers the whole collection, not the
  // persisted opaque-module search used above.
- await page.getByRole('searchbox').fill('');
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('');
  await page.waitForFunction(()=>document.querySelectorAll('.collection-row img').length===2);
  assert.equal(await page.locator('.collection-row img').count(),2,'viewer lost existing or automatically imported shared artwork after reindex');
  assert.equal(await page.getByRole('img',{name:'Private archival cover',exact:true}).count(),0,'viewer loaded curator-only artwork');
  await page.getByRole('img',{name:'No artwork attached'}).first().waitFor();
- assert.equal(await page.evaluate(async()=>{const collection=(await(await fetch('/api/v1/collections')).json())[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false},expected_revision:0})});return response.status;}),403);
+ assert.equal(await page.evaluate(async()=>{const collection=((await(await fetch('/api/v1/collection-search?limit=100')).json()).items)[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false},expected_revision:0})});return response.status;}),403);
  await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});
- await page.getByRole('searchbox').fill('session expired');
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('session expired');
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
  console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial, WebAuthn registration/login and mobile layout.');

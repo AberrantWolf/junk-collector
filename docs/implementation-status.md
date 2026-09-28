@@ -414,7 +414,15 @@ CD-operation forms are suppressed using scan readiness while evidence stays read
 FX-03 [local acceptance passed](validation.md#fx-03-work-and-history--2026-09-21) on 2026-09-21; no external release qualification is claimed.
 
 FX-04 implements focused editing/intake (2026-09-24); FX-05 now implements
-Remove/Restore and clean reimport; its current validation is recorded below. FX-06 access/recovery is locally implemented and accepted; FX-07 whole-interface review remains open. See the current sections below.
+Remove/Restore and clean reimport; its current validation is recorded below. FX-06 access/recovery is locally implemented and accepted. FX-07's account and
+personal-security paging, focused administration/security tasks, bounded metadata
+candidate rendering, authorized collection search/pages and exact reads, catalog collection-scope correction,
+and a typed metadata refresh outcome with a browser no-match regression are
+implemented. The reviewed collection-search race and catalog lookup recovery
+are corrected; three-import history, durable cleanup retry/restart and DAT
+no-match/ambiguity passed real-browser journeys. FX-07, U05.1–U05.3 and P04.6
+passed local acceptance with exact evidence in [the interface audit](fx07-interface-audit.md)
+and [validation](validation.md). See the current sections below.
 LA3's second-device qualification and broader release gates remain open.
 
 ## Required before the planned first release
@@ -422,19 +430,19 @@ LA3's second-device qualification and broader release gates remain open.
 - **Album/background-queue gate, added 2026-09-15:**
   [D07.4–D07.5](background-work-plan.md) are reviewed and corrected locally. Whole-album submission, durable per-member state, independent
   enqueueing, retry/restart and shared-safe cancellation now use the existing bounded
-  Jobs. U05 must still audit all other interfaces for unnecessary background-work
-  blocking before web completion; LA2 does not claim that application-wide gate.
+  Jobs. FX-07 audited the other implemented interfaces for unnecessary
+  background-work blocking; LA2 alone did not claim that application-wide gate.
 
 - **Interface readiness gate, added 2026-09-15:** LA1 implements typed readiness,
   unique-anchor defaults and prerequisite guidance for its guided import journey.
   The broader [U05.1–U05.3](interface-readiness-plan.md) operation matrix and
-  application-wide audit remain planned before web UI completion.
+  application-wide audit passed local acceptance in FX-07.
 
 - **Web UI completion gate, added 2026-09-15:** LA1 implements bounded personal
   import/attempt history, reopen, retry/cancel, staging reclamation and published
   association correction for guided intake. P04 search/filter, bulk cleanup,
-  dismiss/archive/restore, cleanup-failure UI and its full completion review remain
-  planned. See the [import-management plan](import-management-plan.md).
+  dismiss/archive/restore, cleanup-failure UI and its completion review passed
+  local acceptance through FX-03–FX-07. See the [import-management plan](import-management-plan.md).
 
 1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
 2. Complete independent accessibility/security review for the locally implemented
@@ -774,7 +782,8 @@ the owning draft on cancellation. Review fixes bind grant rows to their loaded
 scope, fence and abort cancelled authentication attempts, and log out any fresh
 replacement session when revoking the current session. Security policy, rate limits, revocation and
 listener exposure remain in their existing server owners. Local validation is in
-[validation](validation.md). FX-07 and the separate LA3 second-device qualification remain open.
+[validation](validation.md). FX-07 later passed local acceptance; the separate LA3
+second-device qualification remains open.
 
 
 ### Work-context hardening — locally accepted 2026-09-26
@@ -788,4 +797,6 @@ after authentication changes the session. Worker publication requires full claim
 derived assets require item generation plus durable source context, and job retry/
 cancellation share generation/independent-owner eligibility. No persistent schema
 or domain-identity replacement was needed. Required gates and browser journeys passed; exact results
-are in [validation](validation.md). FX-07 is next.
+are in [validation](validation.md). FX-07 later passed local acceptance; its
+[interface audit](fx07-interface-audit.md) records combined coverage and the
+bounded metadata candidate limit.

@@ -100,6 +100,8 @@
   .asset-record > .row-actions { grid-column: 1 / -1; }
   .asset-metadata { grid-column: 1 / -1; }
 }
+.sidebar nav{overflow-y:auto;min-height:0}.sidebar-search{margin:0 0 8px}.sidebar-search input{font-size:13px;padding:8px}.collection-chooser{border:1px solid var(--line);padding:12px;margin:12px 0;border-radius:5px}.collection-chooser .destination-results{max-height:16rem}.collection-chooser .destination-results button{display:grid;gap:2px}.collection-chooser .destination-results button[aria-pressed="true"]{background:#dce4cc}.collection-chooser .destination-results small{font-size:11px}
+@media(max-width:700px){.sidebar nav{overflow-y:visible}.sidebar-search{min-width:12rem}}
 
 .import-workspace {
   border-top: 1px solid var(--line);

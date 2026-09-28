@@ -1186,10 +1186,9 @@ impl JobPort for Store {
     fn work_page(
         &self,
         user: UserId,
-        collections: &[CollectionId],
         query: &collector_app::WorkQuery,
     ) -> Result<Page<collector_app::WorkEntry>> {
-        self.work_page_records(user, collections, query)
+        self.work_page_records(user, query)
     }
     fn work_entry(
         &self,
@@ -1331,8 +1330,13 @@ impl AdministrationPort for Store {
         Store::reindex(self)
     }
 
-    fn accounts(&self) -> Result<Vec<AccountView>> {
-        Store::accounts(self)
+    fn accounts_page(
+        &self,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<AccountView>> {
+        Store::accounts_page(self, search, cursor, limit)
     }
 
     fn account(&self, user: UserId) -> Result<AccountView> {
@@ -1424,6 +1428,16 @@ impl AuthenticationPort for Store {
         Store::sessions(self, user, current)
     }
 
+    fn sessions_page(
+        &self,
+        user: UserId,
+        current: Option<DeviceId>,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<SessionView>> {
+        Store::sessions_page(self, user, current, cursor, limit)
+    }
+
     fn replace_recovery_codes(&self, user: UserId) -> Result<Vec<String>> {
         Store::replace_recovery_codes(self, user)
     }
@@ -1448,6 +1462,15 @@ impl AuthenticationPort for Store {
 
     fn passkeys(&self, user: UserId) -> Result<Vec<StoredPasskey>> {
         Store::passkeys(self, user)
+    }
+
+    fn passkeys_page(
+        &self,
+        user: UserId,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<collector_app::PasskeyView>> {
+        Store::passkeys_page(self, user, cursor, limit)
     }
 
     fn insert_passkey(
@@ -1516,6 +1539,15 @@ impl EnrollmentPort for Store {
 
     fn native_devices(&self, user: UserId) -> Result<Vec<NativeDeviceView>> {
         Store::native_devices(self, user)
+    }
+
+    fn native_devices_page(
+        &self,
+        user: UserId,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<NativeDeviceView>> {
+        Store::native_devices_page(self, user, cursor, limit)
     }
 
     fn revoke_native_device(
@@ -2581,6 +2613,41 @@ impl Catalog for Store {
         values
             .map(|v| serde_json::from_str(&v.map_err(storage)?).map_err(storage))
             .collect()
+    }
+    fn collections_page(
+        &self,
+        user: UserId,
+        search: &str,
+        cursor: Option<CollectionId>,
+        limit: u16,
+        min_role: Option<u8>,
+        module: Option<&str>,
+    ) -> Result<Page<Collection>> {
+        let db = lock(&self.db)?;
+        let mut stmt = db.prepare("SELECT c.record FROM collections c JOIN private.grants g ON c.id=g.collection_id WHERE g.user_id=?1 AND c.id>?2 AND instr(lower(json_extract(c.record,'$.name')),lower(?3))>0 AND (?4 IS NULL OR g.role>=?4) AND (?5 IS NULL OR json_extract(c.record,'$.binding.module')=?5) ORDER BY c.id LIMIT ?6").map_err(storage)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    user.to_string(),
+                    cursor.map(|id| id.to_string()).unwrap_or_default(),
+                    search,
+                    min_role,
+                    module,
+                    u32::from(limit) + 1
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(storage)?;
+        let mut items: Vec<Collection> = rows
+            .map(|row| serde_json::from_str(&row.map_err(storage)?).map_err(storage))
+            .collect::<Result<_>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|collection| collection.id.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
     }
     fn collection(&self, id: CollectionId) -> Result<Collection> {
         let record: Option<String> = lock(&self.db)?

@@ -62,6 +62,15 @@ pub fn browse_sort_fields(item: &Item) -> (String, String) {
 /// the remaining command families behind application policy.
 pub trait Catalog: Send + Sync {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>>;
+    fn collections_page(
+        &self,
+        user: UserId,
+        search: &str,
+        cursor: Option<CollectionId>,
+        limit: u16,
+        min_role: Option<u8>,
+        module: Option<&str>,
+    ) -> Result<Page<Collection>>;
     fn collection(&self, id: CollectionId) -> Result<Collection>;
     fn create_collection(&self, user: UserId, collection: Collection) -> Result<Collection>;
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role>;
@@ -89,6 +98,15 @@ pub trait Catalog: Send + Sync {
 /// what a role is allowed to observe.
 pub trait CollectionReadPort: Send + Sync {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>>;
+    fn collections_page(
+        &self,
+        user: UserId,
+        search: &str,
+        cursor: Option<CollectionId>,
+        limit: u16,
+        min_role: Option<u8>,
+        module: Option<&str>,
+    ) -> Result<Page<Collection>>;
     fn collection(&self, id: CollectionId) -> Result<Collection>;
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role>;
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>>;
@@ -102,6 +120,17 @@ pub trait CollectionReadPort: Send + Sync {
 impl<T: Catalog + ?Sized> CollectionReadPort for T {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>> {
         Catalog::collections(self, user)
+    }
+    fn collections_page(
+        &self,
+        user: UserId,
+        search: &str,
+        cursor: Option<CollectionId>,
+        limit: u16,
+        min_role: Option<u8>,
+        module: Option<&str>,
+    ) -> Result<Page<Collection>> {
+        Catalog::collections_page(self, user, search, cursor, limit, min_role, module)
     }
     fn collection(&self, id: CollectionId) -> Result<Collection> {
         Catalog::collection(self, id)
@@ -870,12 +899,7 @@ fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<Job
 
 pub trait JobPort: Send + Sync {
     fn work_job_records(&self, user: UserId, query: &WorkJobsQuery) -> Result<Page<JobRecord>>;
-    fn work_page(
-        &self,
-        user: UserId,
-        collections: &[CollectionId],
-        query: &WorkQuery,
-    ) -> Result<Page<WorkEntry>>;
+    fn work_page(&self, user: UserId, query: &WorkQuery) -> Result<Page<WorkEntry>>;
     fn work_entry(&self, user: UserId, target: &WorkTarget) -> Result<WorkEntry>;
     fn change_work_history(&self, user: UserId, command: &WorkHistoryCommand) -> Result<()>;
     fn reconcile_work_history(
@@ -931,7 +955,12 @@ pub trait JobPort: Send + Sync {
 pub trait AdministrationPort: Send + Sync {
     fn create_user(&self, username: &str, password: &str, administrator: bool) -> Result<UserId>;
     fn reindex(&self) -> Result<()>;
-    fn accounts(&self) -> Result<Vec<AccountView>>;
+    fn accounts_page(
+        &self,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<AccountView>>;
     fn account(&self, user: UserId) -> Result<AccountView>;
     fn update_account(
         &self,
@@ -962,6 +991,13 @@ pub trait AuthenticationPort: Send + Sync {
     fn authenticate_native(&self, credential: &str) -> Result<AuthenticatedPrincipal>;
     fn revoke_session(&self, user: UserId, device: DeviceId) -> Result<()>;
     fn sessions(&self, user: UserId, current: Option<DeviceId>) -> Result<Vec<SessionView>>;
+    fn sessions_page(
+        &self,
+        user: UserId,
+        current: Option<DeviceId>,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<SessionView>>;
     fn replace_recovery_codes(&self, user: UserId) -> Result<Vec<String>>;
     fn consume_recovery_code(
         &self,
@@ -973,6 +1009,12 @@ pub trait AuthenticationPort: Send + Sync {
     fn username(&self, user: UserId) -> Result<String>;
     fn user_by_name(&self, username: &str) -> Result<UserId>;
     fn passkeys(&self, user: UserId) -> Result<Vec<StoredPasskey>>;
+    fn passkeys_page(
+        &self,
+        user: UserId,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<PasskeyView>>;
     fn insert_passkey(
         &self,
         user: UserId,
@@ -1007,6 +1049,12 @@ pub trait EnrollmentPort: Send + Sync {
         completion_secret: &str,
     ) -> Result<NativeCredentialIssue>;
     fn native_devices(&self, user: UserId) -> Result<Vec<NativeDeviceView>>;
+    fn native_devices_page(
+        &self,
+        user: UserId,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<NativeDeviceView>>;
     fn revoke_native_device(
         &self,
         user: UserId,
@@ -2058,21 +2106,71 @@ impl CollectionService {
         self.reader
             .collections(actor.user_id)?
             .into_iter()
-            .map(|collection| {
-                let role = self.reader.role(actor.user_id, collection.id)?;
-                let (effective_permissions, content_permissions) =
-                    self.presented_content_permissions(role, &collection, None);
-                Ok(PresentedCollection {
-                    id: collection.id,
-                    revision: collection.revision,
-                    name: collection.name,
-                    created_at: collection.created_at,
-                    binding: collection.binding,
-                    effective_permissions,
-                    content_permissions,
-                })
-            })
+            .map(|collection| self.present_collection(actor, collection))
             .collect()
+    }
+
+    fn present_collection(
+        &self,
+        actor: &Principal,
+        collection: Collection,
+    ) -> Result<PresentedCollection> {
+        let role = self.reader.role(actor.user_id, collection.id)?;
+        let (effective_permissions, content_permissions) =
+            self.presented_content_permissions(role, &collection, None);
+        Ok(PresentedCollection {
+            id: collection.id,
+            revision: collection.revision,
+            name: collection.name,
+            created_at: collection.created_at,
+            binding: collection.binding,
+            effective_permissions,
+            content_permissions,
+        })
+    }
+
+    pub fn collections_page(
+        &self,
+        actor: &Principal,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+        min_role: Option<u8>,
+        module: Option<&str>,
+    ) -> Result<Page<PresentedCollection>> {
+        if search.len() > 256
+            || !(1..=100).contains(&limit)
+            || min_role.is_some_and(|value| value > 2)
+            || module.is_some_and(|value| value.len() > 256)
+        {
+            return Err(Error::Invalid(
+                "invalid collection search or page size".into(),
+            ));
+        }
+        let cursor = cursor
+            .map(str::parse::<CollectionId>)
+            .transpose()
+            .map_err(|_| Error::Invalid("invalid collection cursor".into()))?;
+        let page =
+            self.reader
+                .collections_page(actor.user_id, search, cursor, limit, min_role, module)?;
+        Ok(Page {
+            items: page
+                .items
+                .into_iter()
+                .map(|collection| self.present_collection(actor, collection))
+                .collect::<Result<_>>()?,
+            next_cursor: page.next_cursor,
+        })
+    }
+
+    pub fn presented_collection(
+        &self,
+        actor: &Principal,
+        id: CollectionId,
+    ) -> Result<PresentedCollection> {
+        self.authorize(actor, id, Action::Browse)?;
+        self.present_collection(actor, self.reader.collection(id)?)
     }
 
     pub fn create_collection(
@@ -5139,9 +5237,21 @@ impl CollectionService {
             effects.create_user(username, password, administrator)
         })
     }
-    pub fn accounts(&self, authenticated: &AuthenticatedPrincipal) -> Result<Vec<AccountView>> {
+    pub fn accounts(
+        &self,
+        authenticated: &AuthenticatedPrincipal,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<AccountView>> {
         self.require_administrator(&authenticated.principal)?;
-        self.administration.accounts()
+        if search.len() > 256
+            || cursor.is_some_and(|value| value.len() > 256)
+            || !(1..=100).contains(&limit)
+        {
+            return Err(Error::Invalid("invalid account search or page size".into()));
+        }
+        self.administration.accounts_page(search, cursor, limit)
     }
     pub fn update_account(
         &self,
@@ -5258,6 +5368,20 @@ impl CollectionService {
             authenticated.principal.device_id,
         )
     }
+    pub fn sessions_page(
+        &self,
+        authenticated: &AuthenticatedPrincipal,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<SessionView>> {
+        validate_security_page(cursor, limit)?;
+        self.authentication.sessions_page(
+            authenticated.principal.user_id,
+            authenticated.principal.device_id,
+            cursor,
+            limit,
+        )
+    }
     pub fn replace_recovery_codes(
         &self,
         authenticated: &AuthenticatedPrincipal,
@@ -5318,6 +5442,16 @@ impl CollectionService {
         self.enrollments
             .native_devices(authenticated.principal.user_id)
     }
+    pub fn native_devices_page(
+        &self,
+        authenticated: &AuthenticatedPrincipal,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<NativeDeviceView>> {
+        validate_security_page(cursor, limit)?;
+        self.enrollments
+            .native_devices_page(authenticated.principal.user_id, cursor, limit)
+    }
     pub fn revoke_native_device(
         &self,
         authenticated: &AuthenticatedPrincipal,
@@ -5346,6 +5480,16 @@ impl CollectionService {
     }
     pub fn passkeys(&self, user: UserId) -> Result<Vec<StoredPasskey>> {
         self.authentication.passkeys(user)
+    }
+    pub fn passkeys_page(
+        &self,
+        actor: &Principal,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<PasskeyView>> {
+        validate_security_page(cursor, limit)?;
+        self.authentication
+            .passkeys_page(actor.user_id, cursor, limit)
     }
     pub fn register_passkey(
         &self,
@@ -5596,4 +5740,11 @@ fn deterministic_job_id(user: UserId, operation: &str, key: &str) -> JobId {
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     JobId(uuid::Uuid::from_bytes(bytes))
+}
+
+fn validate_security_page(cursor: Option<&str>, limit: u16) -> Result<()> {
+    if cursor.is_some_and(|value| value.len() > 128) || !(1..=100).contains(&limit) {
+        return Err(Error::Invalid("invalid security page".into()));
+    }
+    Ok(())
 }

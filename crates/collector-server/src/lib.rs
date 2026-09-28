@@ -528,7 +528,8 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(native_devices))
         .routes(routes!(revoke_native_device))
         .routes(routes!(collection_types))
-        .routes(routes!(collections))
+        .routes(routes!(collection_search))
+        .routes(routes!(collection_detail))
         .routes(routes!(browse))
         .routes(routes!(item))
         .routes(routes!(evidence))
@@ -969,13 +970,24 @@ async fn revoke(
     state.service.revoke_session(&actor, id, &context)?;
     Ok(StatusCode::NO_CONTENT)
 }
-#[utoipa::path(get, path = "/api/v1/security/sessions", responses((status = 200, body = Vec<SessionView>), (status = 401)))]
+#[derive(Deserialize, utoipa::IntoParams)]
+struct SecurityPageQuery {
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[utoipa::path(get, path = "/api/v1/security/sessions", params(SecurityPageQuery), responses((status = 200, body = Page<SessionView>), (status = 401)))]
 async fn sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> ApiResult<Json<Vec<SessionView>>> {
+    Query(query): Query<SecurityPageQuery>,
+) -> ApiResult<Json<Page<SessionView>>> {
     let actor = authenticated(&state, &headers)?;
-    Ok(Json(state.service.sessions(&actor)?))
+    Ok(Json(state.service.sessions_page(
+        &actor,
+        query.cursor.as_deref(),
+        query.limit.unwrap_or(50),
+    )?))
 }
 
 #[utoipa::path(post, path = "/api/v1/security/recovery-codes", responses((status = 200, body = Vec<String>), (status = 401), (status = 403)))]
@@ -989,19 +1001,18 @@ async fn replace_recovery_codes(
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/security/passkeys", responses((status = 200, body = Vec<PasskeyView>), (status = 401)))]
+#[utoipa::path(get, path = "/api/v1/security/passkeys", params(SecurityPageQuery), responses((status = 200, body = Page<PasskeyView>), (status = 401)))]
 async fn list_passkeys(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> ApiResult<Json<Vec<PasskeyView>>> {
+    Query(query): Query<SecurityPageQuery>,
+) -> ApiResult<Json<Page<PasskeyView>>> {
     let actor = principal(&state, &headers)?;
-    let passkeys = state
-        .service
-        .passkeys(actor.user_id)?
-        .into_iter()
-        .map(|stored| stored.view)
-        .collect();
-    Ok(Json(passkeys))
+    Ok(Json(state.service.passkeys_page(
+        &actor,
+        query.cursor.as_deref(),
+        query.limit.unwrap_or(50),
+    )?))
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -1121,13 +1132,18 @@ async fn cancel_enrollment(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/api/v1/security/native-devices", responses((status = 200, body = Vec<NativeDeviceView>), (status = 401)))]
+#[utoipa::path(get, path = "/api/v1/security/native-devices", params(SecurityPageQuery), responses((status = 200, body = Page<NativeDeviceView>), (status = 401)))]
 async fn native_devices(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> ApiResult<Json<Vec<NativeDeviceView>>> {
+    Query(query): Query<SecurityPageQuery>,
+) -> ApiResult<Json<Page<NativeDeviceView>>> {
     let actor = authenticated(&state, &headers)?;
-    Ok(Json(state.service.native_devices(&actor)?))
+    Ok(Json(state.service.native_devices_page(
+        &actor,
+        query.cursor.as_deref(),
+        query.limit.unwrap_or(50),
+    )?))
 }
 
 #[utoipa::path(delete, path = "/api/v1/security/native-devices/{id}", params(("id" = NativeCredentialId, Path), ExpectedRevision, ("Idempotency-Key" = String, Header)), responses((status = 204), (status = 401), (status = 403), (status = 409)))]
@@ -1152,14 +1168,46 @@ async fn collection_types(
     let actor = principal(&state, &headers)?;
     Ok(Json(state.service.collection_type_descriptors(&actor)))
 }
-#[utoipa::path(get, path = "/api/v1/collections", responses((status = 200, body = Vec<PresentedCollection>), (status = 401)))]
-async fn collections(
+#[derive(Deserialize, utoipa::IntoParams)]
+struct CollectionSearchQuery {
+    search: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+    min_role: Option<u8>,
+    module: Option<String>,
+}
+
+#[utoipa::path(get, path = "/api/v1/collection-search", params(CollectionSearchQuery), responses((status = 200, body = Page<PresentedCollection>), (status = 400), (status = 401)))]
+async fn collection_search(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> ApiResult<Json<Vec<PresentedCollection>>> {
+    Query(query): Query<CollectionSearchQuery>,
+) -> ApiResult<Json<Page<PresentedCollection>>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
-        blocking(move || state.service.collections(&actor)).await?,
+        blocking(move || {
+            state.service.collections_page(
+                &actor,
+                query.search.as_deref().unwrap_or(""),
+                query.cursor.as_deref(),
+                query.limit.unwrap_or(50),
+                query.min_role,
+                query.module.as_deref(),
+            )
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/collections/{id}", params(("id" = CollectionId, Path)), responses((status = 200, body = PresentedCollection), (status = 401), (status = 403), (status = 404)))]
+async fn collection_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+) -> ApiResult<Json<PresentedCollection>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.presented_collection(&actor, id)).await?,
     ))
 }
 #[utoipa::path(get, path = "/api/v1/items", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<PresentedItem>), (status = 401)))]
@@ -3457,13 +3505,26 @@ async fn create_user(
     .await?;
     Ok(Json(serde_json::json!({"user_id":id})))
 }
-#[utoipa::path(get, path = "/api/v1/admin/users", responses((status = 200, body = Vec<AccountView>), (status = 401), (status = 403)))]
+#[derive(Deserialize, utoipa::IntoParams)]
+struct AccountsQuery {
+    search: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[utoipa::path(get, path = "/api/v1/admin/users", params(AccountsQuery), responses((status = 200, body = Page<AccountView>), (status = 401), (status = 403)))]
 async fn list_users(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> ApiResult<Json<Vec<AccountView>>> {
+    Query(query): Query<AccountsQuery>,
+) -> ApiResult<Json<Page<AccountView>>> {
     let actor = authenticated(&state, &headers)?;
-    Ok(Json(state.service.accounts(&actor)?))
+    Ok(Json(state.service.accounts(
+        &actor,
+        query.search.as_deref().unwrap_or(""),
+        query.cursor.as_deref(),
+        query.limit.unwrap_or(50),
+    )?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

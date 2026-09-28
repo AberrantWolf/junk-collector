@@ -3,6 +3,23 @@ use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_ha
 use rand::{RngCore, rngs::OsRng};
 use rusqlite::TransactionBehavior;
 use std::path::Path;
+
+fn security_cursor(cursor: Option<&str>, first: i64) -> Result<(i64, String)> {
+    let Some(cursor) = cursor else {
+        return Ok((first, String::new()));
+    };
+    let (stamp, id) = cursor
+        .split_once('|')
+        .ok_or_else(|| Error::Invalid("invalid security cursor".into()))?;
+    if cursor.len() > 128 || uuid::Uuid::parse_str(id).is_err() {
+        return Err(Error::Invalid("invalid security cursor".into()));
+    }
+    let stamp = stamp
+        .parse::<i64>()
+        .map_err(|_| Error::Invalid("invalid security cursor".into()))?;
+    Ok((stamp, id.to_owned()))
+}
+
 impl Store {
     pub fn start_enrollment(
         &self,
@@ -305,6 +322,55 @@ impl Store {
         .collect()
     }
 
+    pub fn native_devices_page(
+        &self,
+        user: UserId,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<NativeDeviceView>> {
+        let (after, after_id) = security_cursor(cursor, i64::MIN)?;
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("SELECT id,label,revision,created_at,expires_at FROM private.native_credentials WHERE user_id=?1 AND revoked_at IS NULL AND (created_at>?2 OR (created_at=?2 AND id>?3)) ORDER BY created_at,id LIMIT ?4").map_err(storage)?;
+        let rows = statement
+            .query_map(
+                params![user.to_string(), after, after_id, u32::from(limit) + 1],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .map_err(storage)?;
+        let mut items: Vec<NativeDeviceView> = rows
+            .map(|row| {
+                let (id, label, revision, created_at, expires_at) = row.map_err(storage)?;
+                Ok(NativeDeviceView {
+                    id: id.parse().map_err(storage)?,
+                    label,
+                    revision: Revision(revision),
+                    created_at: chrono::DateTime::from_timestamp(created_at, 0).ok_or_else(
+                        || Error::Storage("invalid native credential creation".into()),
+                    )?,
+                    expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
+                        .ok_or_else(|| Error::Storage("invalid native credential expiry".into()))?,
+                })
+            })
+            .collect::<Result<_>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items
+                .last()
+                .map(|item| format!("{}|{}", item.created_at.timestamp(), item.id))
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
     pub fn revoke_native_device(
         &self,
         user: UserId,
@@ -442,11 +508,69 @@ impl Store {
         .collect()
     }
 
+    pub fn accounts_page(
+        &self,
+        search: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<collector_core::Page<AccountView>> {
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare(
+            "SELECT id,username,display_name,administrator,enabled,revision FROM private.users WHERE username>?1 AND (instr(lower(username),lower(?2))>0 OR instr(lower(display_name),lower(?2))>0) ORDER BY username LIMIT ?3"
+        ).map_err(storage)?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![cursor.unwrap_or(""), search, u32::from(limit) + 1],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, bool>(3)?,
+                        row.get::<_, bool>(4)?,
+                        row.get::<_, u64>(5)?,
+                    ))
+                },
+            )
+            .map_err(storage)?;
+        let mut items: Vec<AccountView> = rows
+            .map(|row| {
+                let (id, username, display_name, administrator, enabled, revision) =
+                    row.map_err(storage)?;
+                Ok(AccountView {
+                    id: id.parse().map_err(storage)?,
+                    username,
+                    display_name,
+                    administrator,
+                    enabled,
+                    revision: Revision(revision),
+                })
+            })
+            .collect::<Result<_>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|account| account.username.clone())
+        } else {
+            None
+        };
+        Ok(collector_core::Page { items, next_cursor })
+    }
+
     pub fn account(&self, user: UserId) -> Result<AccountView> {
-        self.accounts()?
-            .into_iter()
-            .find(|account| account.id == user)
-            .ok_or(Error::NotFound)
+        let db = lock(&self.db)?;
+        let row = db.query_row(
+            "SELECT username,display_name,administrator,enabled,revision FROM private.users WHERE id=?",
+            [user.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, bool>(2)?, row.get::<_, bool>(3)?, row.get::<_, u64>(4)?)),
+        ).optional().map_err(storage)?.ok_or(Error::NotFound)?;
+        Ok(AccountView {
+            id: user,
+            username: row.0,
+            display_name: row.1,
+            administrator: row.2,
+            enabled: row.3,
+            revision: Revision(row.4),
+        })
     }
 
     pub fn update_account(
@@ -775,6 +899,52 @@ impl Store {
         })
         .collect()
     }
+
+    pub fn passkeys_page(
+        &self,
+        user: UserId,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<collector_app::PasskeyView>> {
+        let (after, after_id) = security_cursor(cursor, i64::MIN)?;
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("SELECT passkey_id,label,revision,created_at FROM private.passkeys WHERE user_id=?1 AND revoked_at IS NULL AND (created_at>?2 OR (created_at=?2 AND passkey_id>?3)) ORDER BY created_at,passkey_id LIMIT ?4").map_err(storage)?;
+        let rows = statement
+            .query_map(
+                params![user.to_string(), after, after_id, u32::from(limit) + 1],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .map_err(storage)?;
+        let mut items: Vec<collector_app::PasskeyView> = rows
+            .map(|row| {
+                let (id, label, revision, created_at) = row.map_err(storage)?;
+                Ok(collector_app::PasskeyView {
+                    id: id.parse().map_err(storage)?,
+                    label,
+                    revision: Revision(revision),
+                    created_at: chrono::DateTime::from_timestamp(created_at, 0).ok_or_else(
+                        || Error::Storage("invalid passkey creation timestamp".into()),
+                    )?,
+                })
+            })
+            .collect::<Result<_>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items
+                .last()
+                .map(|item| format!("{}|{}", item.created_at.timestamp(), item.id))
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
     pub fn insert_passkey(
         &self,
         user: UserId,
@@ -970,6 +1140,63 @@ impl Store {
             })
         })
         .collect()
+    }
+
+    pub fn sessions_page(
+        &self,
+        user: UserId,
+        current: Option<DeviceId>,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<SessionView>> {
+        let (before, before_id) = security_cursor(cursor, i64::MAX)?;
+        let now = self.clock.now().timestamp();
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("SELECT session_id,label,created_at,expires FROM private.sessions WHERE user_id=?1 AND expires>?2 AND (created_at<?3 OR (created_at=?3 AND session_id>?4)) ORDER BY created_at DESC,session_id LIMIT ?5").map_err(storage)?;
+        let rows = statement
+            .query_map(
+                params![
+                    user.to_string(),
+                    now,
+                    before,
+                    before_id,
+                    u32::from(limit) + 1
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .map_err(storage)?;
+        let mut items: Vec<SessionView> = rows
+            .map(|row| {
+                let (id, label, created_at, expires_at) = row.map_err(storage)?;
+                let parsed_device: DeviceId = id.parse().map_err(storage)?;
+                Ok(SessionView {
+                    id: id.parse().map_err(storage)?,
+                    label,
+                    created_at: chrono::DateTime::from_timestamp(created_at, 0).ok_or_else(
+                        || Error::Storage("invalid session creation timestamp".into()),
+                    )?,
+                    expires_at: chrono::DateTime::from_timestamp(expires_at, 0)
+                        .ok_or_else(|| Error::Storage("invalid session expiry timestamp".into()))?,
+                    current: current == Some(parsed_device),
+                })
+            })
+            .collect::<Result<_>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items
+                .last()
+                .map(|item| format!("{}|{}", item.created_at.timestamp(), item.id))
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
     }
 
     pub fn replace_recovery_codes(&self, user: UserId) -> Result<Vec<String>> {

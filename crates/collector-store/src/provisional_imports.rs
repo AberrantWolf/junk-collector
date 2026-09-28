@@ -1088,13 +1088,21 @@ impl Store {
                 |row| row.get(0),
             )
             .map_err(storage)?;
-        let pending: u64 = lock(&self.db)?
+        let (reclaimed, pending, completed): (u64, u64, bool) = lock(&self.db)?
             .query_row(
-                "SELECT pending_bytes FROM private.import_cleanup WHERE import_id=?",
+                "SELECT reclaimed_bytes,pending_bytes,completed FROM private.import_cleanup WHERE import_id=?",
                 [id.to_string()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(storage)?;
+        if completed {
+            return Ok(IngestDiscardResult {
+                import_id: id,
+                reclaimed_bytes: ByteLength(reclaimed),
+                pending_bytes: ByteLength(pending),
+                cleanup_pending: false,
+            });
+        }
         if active {
             let result = IngestDiscardResult {
                 import_id: id,

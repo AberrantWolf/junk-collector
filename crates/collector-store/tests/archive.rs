@@ -2286,6 +2286,285 @@ fn concurrent_passkey_counter_update_fails_stale_assertion_and_revocation_is_imm
 }
 
 #[test]
+fn account_search_pages_reach_later_users_and_exact_reads() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    for index in 0..7 {
+        let username = format!("user-{index:02}");
+        store
+            .create_user(&username, "a sufficiently long password", index == 0)
+            .unwrap();
+    }
+    let first = store.accounts_page("", None, 3).unwrap();
+    assert_eq!(
+        first
+            .items
+            .iter()
+            .map(|account| account.username.as_str())
+            .collect::<Vec<_>>(),
+        vec!["user-00", "user-01", "user-02"]
+    );
+    let second = store
+        .accounts_page("", first.next_cursor.as_deref(), 3)
+        .unwrap();
+    assert_eq!(
+        second
+            .items
+            .iter()
+            .map(|account| account.username.as_str())
+            .collect::<Vec<_>>(),
+        vec!["user-03", "user-04", "user-05"]
+    );
+    let third = store
+        .accounts_page("", second.next_cursor.as_deref(), 3)
+        .unwrap();
+    assert_eq!(third.items.len(), 1);
+    assert_eq!(third.items[0].username, "user-06");
+    assert!(third.next_cursor.is_none());
+    let target = store.account(third.items[0].id).unwrap();
+    assert_eq!(target.username, "user-06");
+    store
+        .update_account(
+            target.id,
+            target.revision,
+            "Later display name",
+            true,
+            false,
+        )
+        .unwrap();
+    let matched = store.accounts_page("later DISPLAY", None, 3).unwrap();
+    assert_eq!(matched.items.len(), 1);
+    assert_eq!(matched.items[0].id, target.id);
+}
+
+#[test]
+fn collection_search_pages_authorized_rows_and_filters_before_limit() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let owner = store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let other = store
+        .create_user("other", "a sufficiently long password", false)
+        .unwrap();
+    let mut created = Vec::new();
+    for index in 0..8 {
+        let collection = Catalog::create_collection(
+            &store,
+            owner,
+            Collection {
+                id: CollectionId::new(),
+                revision: Revision(1),
+                name: format!("Shelf {index:02}"),
+                created_at: chrono::Utc::now(),
+                binding: CollectionBinding::Assigned {
+                    module: ModuleId(
+                        if index % 2 == 0 {
+                            "org.junk.games"
+                        } else {
+                            "org.junk.music"
+                        }
+                        .into(),
+                    ),
+                },
+            },
+        )
+        .unwrap();
+        if index != 3 {
+            Catalog::grant(
+                &store,
+                collection.id,
+                other,
+                if index % 2 == 0 {
+                    Role::Curator
+                } else {
+                    Role::Viewer
+                },
+            )
+            .unwrap();
+        }
+        created.push(collection);
+    }
+    let first = Catalog::collections_page(
+        &store,
+        other,
+        "Shelf",
+        None,
+        2,
+        Some(1),
+        Some("org.junk.games"),
+    )
+    .unwrap();
+    assert_eq!(first.items.len(), 2);
+    let second = Catalog::collections_page(
+        &store,
+        other,
+        "Shelf",
+        first
+            .next_cursor
+            .as_deref()
+            .map(str::parse)
+            .transpose()
+            .unwrap(),
+        2,
+        Some(1),
+        Some("org.junk.games"),
+    )
+    .unwrap();
+    assert_eq!(second.items.len(), 2);
+    assert!(second.next_cursor.is_none());
+    let ids: std::collections::HashSet<_> = first
+        .items
+        .iter()
+        .chain(second.items.iter())
+        .map(|value| value.id)
+        .collect();
+    assert_eq!(ids.len(), 4);
+    assert!(!ids.contains(&created[3].id));
+    assert!(
+        Catalog::collections_page(&store, other, "Shelf 03", None, 50, None, None)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
+
+#[test]
+fn exact_collection_read_checks_grant_and_rejects_invalid_page_inputs() {
+    let (_root, store, owner, service, collection) = setup();
+    let outsider = Principal {
+        user_id: store
+            .create_user("outsider", "a sufficiently long password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    assert_eq!(
+        service
+            .presented_collection(&owner, collection.id)
+            .unwrap()
+            .id,
+        collection.id
+    );
+    assert!(matches!(
+        service.presented_collection(&outsider, collection.id),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.collections_page(&owner, "", Some("invalid"), 50, None, None),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        service.collections_page(&owner, "", None, 0, None, None),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        service.collections_page(&owner, "", None, 50, Some(3), None),
+        Err(Error::Invalid(_))
+    ));
+}
+
+#[test]
+fn personal_session_pages_preserve_current_marker_and_reject_bad_cursors() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let owner = store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let other = store
+        .create_user("other", "a sufficiently long password", false)
+        .unwrap();
+    let mut current = None;
+    for index in 0..7 {
+        let (_, authenticated) = store
+            .login(
+                "owner",
+                "a sufficiently long password",
+                &format!("Browser {index}"),
+            )
+            .unwrap();
+        if index == 6 {
+            current = authenticated.principal.device_id;
+        }
+    }
+    store
+        .login("other", "a sufficiently long password", "Other browser")
+        .unwrap();
+    let mut cursor = None;
+    let mut seen = Vec::new();
+    loop {
+        let page = store
+            .sessions_page(owner, current, cursor.as_deref(), 3)
+            .unwrap();
+        assert!(page.items.len() <= 3);
+        seen.extend(page.items);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen.len(), 7);
+    assert_eq!(seen.iter().filter(|session| session.current).count(), 1);
+    assert_eq!(
+        store
+            .sessions_page(other, None, None, 3)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert!(
+        store
+            .sessions_page(owner, current, Some("malformed"), 3)
+            .is_err()
+    );
+    for index in 0..7 {
+        store
+            .insert_passkey(
+                owner,
+                &format!("credential-{index}"),
+                serde_json::json!({"counter":index}),
+            )
+            .unwrap();
+    }
+    let mut cursor = None;
+    let mut passkeys = Vec::new();
+    loop {
+        let page = store.passkeys_page(owner, cursor.as_deref(), 3).unwrap();
+        passkeys.extend(page.items);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(passkeys.len(), 7);
+    for index in 0..4 {
+        let enrollment = store
+            .start_enrollment(owner, &format!("Device {index}"), "/pair")
+            .unwrap();
+        store
+            .approve_enrollment(owner, &enrollment.user_code)
+            .unwrap();
+        store
+            .complete_enrollment(enrollment.id, &enrollment.completion_secret)
+            .unwrap();
+    }
+    let first_devices = store.native_devices_page(owner, None, 2).unwrap();
+    let second_devices = store
+        .native_devices_page(owner, first_devices.next_cursor.as_deref(), 2)
+        .unwrap();
+    assert_eq!(first_devices.items.len(), 2);
+    assert_eq!(second_devices.items.len(), 2);
+    assert!(second_devices.next_cursor.is_none());
+    assert!(store.passkeys_page(owner, Some("malformed"), 3).is_err());
+    assert!(
+        store
+            .native_devices_page(owner, Some("malformed"), 3)
+            .is_err()
+    );
+}
+
+#[test]
 fn concurrent_last_authority_changes_cannot_both_commit() {
     let root = tempfile::tempdir().unwrap();
     let store =
@@ -14365,11 +14644,18 @@ fn fx03_history_filters_dismissal_clear_recovery_and_authorization() {
         )
         .unwrap();
     service.resume_guided_ingests().unwrap();
-    assert!(
+    let settled = service.work_history_entry(&actor, &failed_target).unwrap();
+    assert!(settled.archived);
+    assert_eq!(settled.reclaimed_bytes, 4);
+    let repeated = store.cleanup_import(third.id).unwrap();
+    assert_eq!(repeated.reclaimed_bytes, ByteLength(4));
+    assert_eq!(repeated.pending_bytes, ByteLength(0));
+    assert_eq!(
         service
             .work_history_entry(&actor, &failed_target)
             .unwrap()
-            .archived
+            .reclaimed_bytes,
+        4
     );
     assert!(Catalog::capture(&*store, second.capture_id).is_ok());
     let retry_import = reviewed_unattached_import(&service, &actor, collection.id, "retry fence");

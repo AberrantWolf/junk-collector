@@ -173,6 +173,29 @@ both the panel asset and its backing APIs. Loaded grant rows carry their query
 scope; a collection/search change immediately makes those rows and their cursors
 unavailable, and removal checks that the originating scope is still current.
 
+FX-07 uses the same bounded read principle for administrator accounts. The
+administration service checks the administrator role and page/search limits;
+the Store returns username-ordered keyset pages and reads one account directly
+for exact operations. Account rows and cursors are bound to the browser search
+scope. Catalog snapshot rows are likewise bound to their selected collection;
+a catalog Job completion refreshes only the collection that admitted it.
+Authorized collection browsing uses a separate ID-keyset, name-search query
+with optional minimum role and module filters. The Store applies grant and
+search filters before its 50-row page; the application validates inputs and
+computes presented permissions. An exact collection read checks the grant.
+Navigation and management selectors share the paged client chooser and keep
+selected records reachable outside the current page. The former unbounded
+collection-list HTTP response is removed.
+Work history checks an explicitly selected collection in application policy;
+its paged Store query joins grants for unfiltered history instead of first
+materializing every authorized collection ID.
+Personal security histories use bounded creation-time/ID keyset pages. The
+authentication and enrollment mechanisms retain their complete internal reads
+where WebAuthn ceremonies need them; browser sessions, passkey views and native
+device views each have a separate presentation query and no credential secret in
+their page result. The security panel keeps a profile draft across its focused
+tasks and scopes list reads to the panel lifetime.
+
 Signed-out browser recovery consumes the existing one-use code through the auth
 service and uses its returned session cookie. Codes and replacement passwords stay
 in component memory and request bodies; neither is placed in a URL or browser

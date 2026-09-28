@@ -8,15 +8,15 @@ no match, ambiguity and failure need distinct states; original preservation and
 manual metadata authority remain intact. Advanced explicit lookup/retry remains a
 recovery path, not the default journey. Verify requests for timestamp-named dumps.
 
-**Scale follow-up 2026-09-22 (pending FX-04/FX-07):** Existing-entry attachment
-currently lists general collection entries, not detected matches, and stops at
-1,000. Replace it with server-side search and explicit paging, with evidence-backed
+**Historical scale requirement 2026-09-22 (resolved by FX-04/FX-07):** At the time, existing-entry attachment
+listed general collection entries, not detected matches, and stopped at
+1,000. The requirement was server-side search and explicit paging, with evidence-backed
 suggestions clearly separate from general search. Audit all growing record selectors
 for collection preloading, silent caps, disambiguation and access to later results;
 validate with at least 3,000 catalog entries. The manual-import destination search's
-unpaged 50-result limit is also in scope. Fixed small enum choices may remain dropdowns.
+former unpaged 50-result limit was also in scope. Fixed small enum choices may remain dropdowns.
 
-**User requirement 2026-09-22 (pending, owned by FX-04 and reviewed in FX-07):**
+**Historical user requirement 2026-09-22 (resolved by FX-04/FX-07):**
 Import history and current-import details must be distinct navigable views, with no
 global history list embedded in intake/progress/detail panels. Preserve list context
 on return and support direct-link/reload of the selected import. Validate with
@@ -36,17 +36,25 @@ review into integrated fixes with the UX audit. FX-01 completes the browse/navig
 subset with [local acceptance evidence](validation.md#fx-01-browsingnavigation--2026-09-21). U05.1, the remaining U05.2 surfaces and the
 whole-interface U05.3 gate remain open. FX-02 implements the processing-scan subset; its [local acceptance passed](validation.md#fx-02-scan-lifecycle--2026-09-21). FX-03 implements history/cleanup and derivative-target presentation with local acceptance passed; FX-04–FX-07 remain proposed.
 
-**Status update 2026-09-26:** FX-04 is locally accepted. FX-05 implements
+**Status update 2026-09-27:** FX-04–FX-07 are locally accepted. FX-05 implements
 Remove/Restore and clean reimport; exact lifecycle validation is recorded separately.
-The overall U05 gate remains open. FX-06 is locally accepted; FX-07 remains open.
+The implemented web-interface U05 gate passed local acceptance. FX-07 added
+bounded server search/paging for administrator accounts, personal security
+histories and authorized collection selectors. Administration has
+focused tasks and collection-scoped catalog results. The metadata completion
+response distinguishes candidates from no match in the real browser.
+The [FX-07 interface audit](fx07-interface-audit.md) records current action
+coverage and combined journeys. Independent accessibility/security and physical
+device/deployment qualifications remain separate.
 
 **Scheduling update 2026-09-16:** [Local alpha](local-alpha-plan.md) is active.
 LA1–LA3 integrate the relevant acceptance below across layers. Individual child
 assignments at the bottom are reference scope, not separate required handoffs.
 Keep unmet broader criteria open; alpha does not certify every web interface.
 
-User requirement, 2026-09-15. Planned, not implemented. Required alongside
-[P04.4–P04.6](import-management-plan.md) before declaring the web UI complete.
+Historical user requirement, 2026-09-15. The implemented web surface passed
+local acceptance through FX-01–FX-07 alongside
+[P04.4–P04.6](import-management-plan.md).
 Applies to every implemented web surface and to acceptance of future web, native
 and CLI interfaces. It does not require implementing all future clients now or
 block LA1 on unrelated future interfaces.
@@ -112,9 +120,9 @@ Both require the appropriate supporting package members, not just a sidecar.
 
 | Child | State | Scope |
 |---|---|---|
-| U05.1 — Readiness contracts and analysis defaults | LA1 guided and FX-02 scan subsets implemented | LA1 previews typed anchors/blockers/provider availability; FX-02 extends eligible defaults and typed lifecycle to committed-package operations; the remaining interface matrix stays open |
-| U05.2 — Audit and correct all implemented interfaces | Partial: FX-01–FX-06 locally accepted in their mapped scopes; whole-interface audit remains open | U05.1 plus each surface's owning services: enumerate every screen/action, implement findings through their owners |
-| U05.3 — Interface completion review | Planned | U05.2/P04.6: actual user journeys, negative cases and audited completion evidence |
+| U05.1 — Readiness contracts and analysis defaults | Locally accepted for implemented web actions via LA1, FX-02/04 and FX-07 | Typed anchors/blockers/provider availability, eligible defaults, current source/configuration state and invalid submission without a Job |
+| U05.2 — Audit and correct all implemented interfaces | Locally accepted in FX-01–FX-07 | [Action and growing-list register](fx07-interface-audit.md) covers each implemented surface and its owning service |
+| U05.3 — Interface completion review | Locally accepted in FX-07 | [Combined journeys](fx07-interface-audit.md#combined-journeys-and-completion-boundary) include negative cases, roles, mobile, reduced motion, reload/reconnect and real playback |
 
 U05.2 must inventory every implemented screen/action, not just these examples:
 

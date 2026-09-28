@@ -1,6 +1,6 @@
 # Usability and lifecycle fixes
 
-Prepared 2026-09-21 at the user's request, combining the [18 UX findings](reviews/ux-2026-09-20/review.md) with related unfinished milestone work. **FX-01–FX-03 are implemented and locally accepted (2026-09-21). FX-04 local acceptance passed 2026-09-25. FX-05 Remove/Restore and clean reimport are implemented and locally accepted (2026-09-26). FX-06 is implemented and locally accepted (2026-09-26); FX-07 remains open.** This document defines a coherent fix set; it does not declare LA3 accepted or silently replace its outstanding second-device qualification.
+Prepared 2026-09-21 at the user's request, combining the [18 UX findings](reviews/ux-2026-09-20/review.md) with related unfinished milestone work. **FX-01–FX-03 are implemented and locally accepted (2026-09-21). FX-04 local acceptance passed 2026-09-25. FX-05 Remove/Restore and clean reimport are implemented and locally accepted (2026-09-26). FX-06 is locally accepted (2026-09-26), and FX-07 local acceptance passed 2026-09-27.** This document defines a coherent fix set; it does not declare LA3 accepted or silently replace its outstanding second-device qualification.
 
 ## Intended outcome
 
@@ -36,7 +36,7 @@ The new item-removal/clean-reimport and validation-result consolidation requirem
 | FX-04 — Focused editing and consistent intake | Focused views, separate import history/detail navigation, and consistent new/existing-entry intake | FX-02 readiness; FX-03 progress/history destinations | Implemented; local acceptance passed 2026-09-25 |
 | FX-05 — Remove, restore and reimport cleanly | Repair or remove a messy item without duplicates, resurrected old work or lost originals | FX-02/03/04 and publication/recovery contract review | Implemented and locally accepted 2026-09-26 |
 | FX-06 — Usable access and account recovery | Direct collection management, browser recovery and in-place reauthentication | Existing U02/S02 services; independent of FX-02–05 | Locally accepted 2026-09-26 |
-| FX-07 — Whole-interface completion review | All implemented actions meet the readiness/lifecycle standard with recorded evidence | FX-01–06 | Proposed |
+| FX-07 — Whole-interface completion review | All implemented actions meet the readiness/lifecycle standard with recorded evidence | FX-01–06 | Locally accepted 2026-09-27; independent release qualifications remain separate |
 
 Recommended sequence: FX-01 → FX-02 → FX-03 → FX-04 → FX-05 → FX-06 → FX-07. FX-06 can be brought forward after FX-01 because it has no scan/cleanup dependency. Each implementation delivery includes its own real UI acceptance; FX-07 finds cross-workflow omissions rather than postponing testing.
 
@@ -205,8 +205,30 @@ and [growing-list audit](fx04-scale-audit.md). FX-05 now includes Remove/Restore
 retained-original and replacement-upload reimport, reviewed authority resets,
 recoverable capture switching, generation fences and continued queued playback.
 Local acceptance passed on 2026-09-26; see [validation](validation.md) for the exact checked scope and limitations.
-Preserve local user data and configuration. FX-06 is locally accepted. The user-requested [work-context hardening](work-context-hardening.md) is locally accepted (2026-09-26); FX-07 is next. The outstanding LA3 second-device gate remains separate.
+Preserve local user data and configuration. FX-06 and FX-07 are locally accepted. The user-requested [work-context hardening](work-context-hardening.md) is locally accepted (2026-09-26). The outstanding LA3 second-device gate remains separate.
 
 At completion of each delivery, update this ledger, implementation status, the mapped U05/P04/background-work criteria, validation evidence and the next ready-to-send prompt together. Retain dated earlier acceptance records and outstanding LA3/external gates. For FX-02 and FX-05, document durable identities, publication fences, cancellation/ownership and restart recovery before changing their subsystem boundaries.
 
-**Ready-to-send FX-07 prompt:** Implement the whole-interface completion review in docs/ux-fix-plan.md. Read AGENTS.md, architecture, release requirements, implementation status, work-context hardening and current validation. Preserve the shared operation lifetimes, command authentication policies and publication fences. Audit every implemented browser action and growing list against U05.2/U05.3 and P04.6. Verify bounded server search/paging and reaching records beyond the first page, including account and access lists. Exercise setup, recovery and recent authentication, collection/item management, ingestion, work/history, evidence, clean reimport, removal, preparation and actual playback. Correct findings in owning layers, preserve existing security and metadata/evidence guarantees, run repository gates and real-browser journeys, then update the ledgers together. Do not claim external LA3 second-device or hardware qualification without those devices.
+**FX-07 local acceptance, 2026-09-27:** Administrator accounts now use an authorized,
+bounded, searchable keyset query, with later-page and direct-record regression
+coverage. Personal sessions, passkeys and paired devices have bounded pages;
+metadata candidate rendering is progressive within its per-Item limit.
+Administration and security have focused tasks; catalog snapshot rows and completion
+refreshes follow their selected collection. Collection navigation and selectors
+now use an authorized, role/module-filtered server query with 50-row pages,
+search and an exact selected-collection read; the unbounded collection-list
+HTTP endpoint was removed. Metadata completion now carries its actual refresh
+outcome; the real-browser no-match fixture retains earlier ambiguous choices.
+The collection search debounce race and hidden catalog lookup recovery reported
+in review are corrected. A real-browser three-import journey shows two
+successful analyses, two failed attempts, actual cleanup fault/retry and
+restart reclamation. Offline DAT fixtures display ambiguous and no-match
+verification. The [action, scale and combined-journey audit](fx07-interface-audit.md)
+and [validation](validation.md) support local U05.2/U05.3 and P04.6 acceptance.
+
+**Next ready-to-send prompt:** Continue the remaining trusted second-device
+[LA3 qualification](local-alpha-plan.md#ready-to-send-la3-prompt). Use the
+intended second device and record actual LAN playback, download and trust
+behavior. Keep independent accessibility/security and physical deployment
+reviews in their release gates. Page metadata candidate responses before
+raising the current 4,096-version per-Item admission ceiling.

@@ -1,5 +1,11 @@
 # Import history and cleanup — P04 completion follow-up
 
+**Current status 2026-09-27:** P04.4–P04.6 passed local acceptance through
+FX-03–FX-07. The [FX-07 audit](fx07-interface-audit.md) and
+[validation](validation.md) record the real-browser three-import, cleanup
+failure/retry and restart cases. Independent accessibility/security and
+physical deployment reviews remain separate release qualifications.
+
 **Provider lookup requirement 2026-09-22 (FX-04):** Automatically acquire CD
 metadata when supported dump analysis supplies its actual disc identity. Reuse the
 existing guided disc-ID acquisition for other intake paths; do not require a lookup
@@ -8,15 +14,15 @@ no match, ambiguity and failure need distinct states; original preservation and
 manual metadata authority remain intact. Advanced explicit lookup/retry remains a
 recovery path, not the default journey. Verify requests for timestamp-named dumps.
 
-**Scale follow-up 2026-09-22 (pending FX-04/FX-07):** Existing-entry attachment
-currently lists general collection entries, not detected matches, and stops at
-1,000. Replace it with server-side search and explicit paging, with evidence-backed
+**Historical scale requirement 2026-09-22 (resolved by FX-04/FX-07):** At the time, existing-entry attachment
+listed general collection entries, not detected matches, and stopped at
+1,000. The requirement was server-side search and explicit paging, with evidence-backed
 suggestions clearly separate from general search. Audit all growing record selectors
 for collection preloading, silent caps, disambiguation and access to later results;
 validate with at least 3,000 catalog entries. The manual-import destination search's
-unpaged 50-result limit is also in scope. Fixed small enum choices may remain dropdowns.
+former unpaged 50-result limit was also in scope. Fixed small enum choices may remain dropdowns.
 
-**User requirement 2026-09-22 (pending, owned by FX-04 and reviewed in FX-07):**
+**Historical user requirement 2026-09-22 (resolved by FX-04/FX-07):**
 Import history and current-import details must be distinct navigable views, with no
 global history list embedded in intake/progress/detail panels. Preserve list context
 on return and support direct-link/reload of the selected import. Validate with
@@ -40,9 +46,8 @@ LA1 integrates the relevant acceptance below across layers. Individual child
 assignments at the bottom are reference scope, not separate required handoffs.
 Keep unmet broader criteria open; alpha does not certify every web interface.
 
-User requirement, 2026-09-15. LA1 implements the focused single-import journey;
-the broader completion gate remains planned. Required before calling
-the web curation UI complete.
+Historical user requirement, 2026-09-15. LA1 implemented the focused
+single-import journey; FX-03–FX-07 later completed the broader local web gate.
 P04.1–P04.3 remain historically validated but do not satisfy this added gate.
 See the [backlog](handoff-backlog.md#p04--inbox-import-review-and-job-ui) and
 [music-first milestones](music-first-milestones.md).
@@ -73,7 +78,7 @@ it does not depend on C06 event streaming.
 |---|---|---|
 | P04.4 — Identifiable import and attempt history | Implemented and locally accepted in FX-03 | Server search/filter/keyset pages, named workflow groups, attempt detail, dismissed history and server-backed reopening |
 | P04.5 — Import cleanup lifecycle | FX-03 history/unpublished subset accepted; FX-05 lifecycle implemented 2026-09-26 | Dismiss/restore, selected/bulk cleanup, durable cancellation/settlement and byte/error/retry outcomes; FX-05 adds mistaken published-item removal/restore, retained or uploaded clean reimport, explicit resets and generation-fenced replacement; exact validation and remaining whole-interface coverage are recorded separately |
-| P04.6 — Web completion review | Planned | LA1 real-browser journey is evidence for one path, not the full mixed-role/bulk/mobile completion matrix |
+| P04.6 — Web completion review | Locally accepted in FX-07, 2026-09-27 | The [interface audit](fx07-interface-audit.md) and `test:work` cover three imports, two completed analyses, two failed attempts, mixed bulk eligibility, real cleanup fault/retry and restart reclamation; complementary Store and browser suites cover publication races, roles and recovery |
 
 ### P04.4 — Identifiable import and attempt history
 

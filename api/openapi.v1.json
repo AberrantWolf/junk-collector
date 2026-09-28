@@ -434,16 +434,50 @@
     "/api/v1/admin/users": {
       "get": {
         "operationId": "list_users",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AccountView"
-                  }
+                  "$ref": "#/components/schemas/Page_AccountView"
                 }
               }
             }
@@ -947,6 +981,90 @@
         }
       }
     },
+    "/api/v1/collection-search": {
+      "get": {
+        "operationId": "collection_search",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "min_role",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "module",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PresentedCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/collection-types": {
       "get": {
         "operationId": "collection_types",
@@ -959,29 +1077,6 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/ModuleDescriptor"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": ""
-          }
-        }
-      }
-    },
-    "/api/v1/collections": {
-      "get": {
-        "operationId": "collections",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PresentedCollection"
                   }
                 }
               }
@@ -1430,6 +1525,42 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{id}": {
+      "get": {
+        "operationId": "collection_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedCollection"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           }
         }
@@ -4926,16 +5057,39 @@
     "/api/v1/security/native-devices": {
       "get": {
         "operationId": "native_devices",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/NativeDeviceView"
-                  }
+                  "$ref": "#/components/schemas/Page_NativeDeviceView"
                 }
               }
             }
@@ -4994,16 +5148,39 @@
     "/api/v1/security/passkeys": {
       "get": {
         "operationId": "list_passkeys",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PasskeyView"
-                  }
+                  "$ref": "#/components/schemas/Page_PasskeyView"
                 }
               }
             }
@@ -5088,16 +5265,39 @@
     "/api/v1/security/sessions": {
       "get": {
         "operationId": "sessions",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SessionView"
-                  }
+                  "$ref": "#/components/schemas/Page_SessionView"
                 }
               }
             }
@@ -6482,6 +6682,7 @@
             "type": "object",
             "required": [
               "review",
+              "outcome",
               "kind"
             ],
             "properties": {
@@ -6490,6 +6691,9 @@
                 "enum": [
                   "metadata"
                 ]
+              },
+              "outcome": {
+                "$ref": "#/components/schemas/MetadataRefreshOutcome"
               },
               "review": {
                 "$ref": "#/components/schemas/MetadataReviewView"
@@ -9050,6 +9254,14 @@
           }
         }
       },
+      "MetadataRefreshOutcome": {
+        "type": "string",
+        "enum": [
+          "candidates",
+          "no_match",
+          "unavailable"
+        ]
+      },
       "MetadataResolutionKind": {
         "type": "string",
         "enum": [
@@ -10040,6 +10252,54 @@
           }
         ]
       },
+      "Page_AccountView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "username",
+                "display_name",
+                "administrator",
+                "enabled",
+                "revision"
+              ],
+              "properties": {
+                "administrator": {
+                  "type": "boolean"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/UserId"
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision"
+                },
+                "username": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_CatalogSnapshotStatus": {
         "type": "object",
         "required": [
@@ -10330,6 +10590,146 @@
           }
         }
       },
+      "Page_NativeDeviceView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "label",
+                "revision",
+                "created_at",
+                "expires_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/NativeCredentialId"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_PasskeyView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "label",
+                "revision",
+                "created_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/PasskeyId"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_PresentedCollection": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "revision",
+                "name",
+                "created_at",
+                "binding",
+                "effective_permissions",
+                "content_permissions"
+              ],
+              "properties": {
+                "binding": {
+                  "$ref": "#/components/schemas/CollectionBinding"
+                },
+                "content_permissions": {
+                  "$ref": "#/components/schemas/ContentPermissions"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "effective_permissions": {
+                  "$ref": "#/components/schemas/EffectivePermissions"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_PresentedItem": {
         "type": "object",
         "required": [
@@ -10571,6 +10971,52 @@
                 }
               },
               "additionalProperties": false
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_SessionView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "label",
+                "created_at",
+                "expires_at",
+                "current"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "current": {
+                  "type": "boolean"
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/SessionId"
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
             }
           },
           "next_cursor": {

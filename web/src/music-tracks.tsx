@@ -5,7 +5,7 @@ type Availability=components['schemas']['MusicTrackAvailability'];
 type AlbumPlan=components['schemas']['MusicAlbumPreparationPlan'];
 type Batch=components['schemas']['MusicPreparationBatchView'];
 type Item=components['schemas']['PresentedItem'];
-type Props={item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:(item:Item)=>void};
+type Props={item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:(item:Item)=>void;onOpenHistory?:()=>void};
 
 function profileLabel(profile:Availability['profile']):string{
  return profile.codec==='flac'?'FLAC':`Opus ${profile.bitrate_kbps} kbps`;
@@ -27,7 +27,7 @@ function preferredAvailable(group:Availability[]):Availability|undefined{
 function discKey(row:Availability):string{return `${row.capture_id}/${row.source_representation_id}`;}
 function trackKey(row:Availability):string{return `${discKey(row)}/${row.track_position}`;}
 
-export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared}:Props){
+export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared,onOpenHistory}:Props){
  const [rows,setRows]=useState<Availability[]>([]);
  // Captures are independent records; publication need not revise the Item.
  const captureRevisions=item.captures.map(capture=>`${capture.id}:${capture.revision}`).join(',');
@@ -146,7 +146,7 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
    {plan.blockers.map(message=><p className="notice" key={message}>{message}</p>)}
    <button className="primary" disabled={busy||!plan.can_submit||![...includedDiscs].some(capture=>discSources[capture])||plan.discs.some(disc=>includedDiscs.has(disc.capture_id)&&!discSources[disc.capture_id])} onClick={()=>void prepareAlbum()}>{busy?'Submitting…':'Prepare selected album'}</button>
   </section>}
-  {canPrepare&&batches.length>0&&<section className="preparation-batches" aria-label="Album preparation progress"><h4>Preparation history</h4>{batches.length===50&&<p className="muted">Showing the 50 most recent batches. Older work is available in Work &amp; history.</p>}{batches.map(batch=><article key={batch.batch_id}><div className="section-heading"><div><strong>FLAC album batch</strong><small>{new Date(batch.created_at).toLocaleString()} · {batch.batch_id}</small></div><span>{batch.succeeded}/{batch.members.length} ready</span></div><p className="muted">{batch.queued} queued · {batch.running} running · {batch.failed} failed · {batch.cancelled} cancelled · {batch.ineligible} ineligible{batch.cancelled_by_user?' · batch cancelled':''}</p>{batch.admission_error&&<p className="error" role="alert">Batch admission: {batch.admission_error}</p>}<details><summary>Track outcomes</summary>{batch.members.map(member=><p className="batch-member" key={member.member_id}><strong>{member.track_position}. {member.title}</strong><span className={`identity ${member.state}`}>{member.state.replaceAll('_',' ')}</span>{member.error&&<small>{member.error}</small>}</p>)}</details><div className="profile-actions">{batch.can_cancel&&<button disabled={busy} onClick={()=>void batchAction(batch,'cancel')}>Cancel outstanding tracks</button>}{batch.can_retry&&<button disabled={busy} onClick={()=>void batchAction(batch,'retry')}>Retry unfinished tracks</button>}</div></article>)}</section>}
+  {canPrepare&&batches.length>0&&<section className="preparation-batches" aria-label="Album preparation progress"><h4>Preparation history</h4>{batches.length===50&&<p className="muted">Showing the 50 most recent batches. Older track jobs are in this entry’s Work &amp; history. {onOpenHistory&&<button onClick={onOpenHistory}>Open older preparation work</button>}</p>}{batches.map(batch=><article key={batch.batch_id}><div className="section-heading"><div><strong>FLAC album batch</strong><small>{new Date(batch.created_at).toLocaleString()} · {batch.batch_id}</small></div><span>{batch.succeeded}/{batch.members.length} ready</span></div><p className="muted">{batch.queued} queued · {batch.running} running · {batch.failed} failed · {batch.cancelled} cancelled · {batch.ineligible} ineligible{batch.cancelled_by_user?' · batch cancelled':''}</p>{batch.admission_error&&<p className="error" role="alert">Batch admission: {batch.admission_error}</p>}<details><summary>Track outcomes</summary>{batch.members.map(member=><p className="batch-member" key={member.member_id}><strong>{member.track_position}. {member.title}</strong><span className={`identity ${member.state}`}>{member.state.replaceAll('_',' ')}</span>{member.error&&<small>{member.error}</small>}</p>)}</details><div className="profile-actions">{batch.can_cancel&&<button disabled={busy} onClick={()=>void batchAction(batch,'cancel')}>Cancel outstanding tracks</button>}{batch.can_retry&&<button disabled={busy} onClick={()=>void batchAction(batch,'retry')}>Retry unfinished tracks</button>}</div></article>)}</section>}
   {queueNotice&&<p role="status">{queueNotice}</p>}
   {!canPrepare&&discs.some(([,tracks])=>tracks.some(preferredAvailable))&&<button onClick={()=>enqueue(discs.flatMap(([,tracks])=>tracks))}>Add album to queue</button>}
   {discs.map(([key,tracks],discIndex)=><article className="music-disc" key={key} data-disc-key={key}>

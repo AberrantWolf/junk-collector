@@ -179,20 +179,10 @@ impl CollectionService {
         {
             return Err(Error::Invalid("Invalid work history filters".into()));
         }
-        let collections = self
-            .reader
-            .collections(actor.user_id)?
-            .into_iter()
-            .filter(|c| self.authorize(actor, c.id, Action::Curate).is_ok())
-            .map(|c| c.id)
-            .collect::<Vec<_>>();
-        if query
-            .collection_id
-            .is_some_and(|id| !collections.contains(&id))
-        {
-            return Err(Error::Forbidden);
+        if let Some(id) = query.collection_id {
+            self.authorize(actor, id, Action::Curate)?;
         }
-        let mut page = self.jobs.work_page(actor.user_id, &collections, &query)?;
+        let mut page = self.jobs.work_page(actor.user_id, &query)?;
         for entry in &mut page.items {
             self.present_work_actions(actor, entry);
         }

@@ -356,14 +356,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/collection-types": {
+    "/api/v1/collection-search": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["collection_types"];
+        get: operations["collection_search"];
         put?: never;
         post?: never;
         delete?: never;
@@ -372,14 +372,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/collections": {
+    "/api/v1/collection-types": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["collections"];
+        get: operations["collection_types"];
         put?: never;
         post?: never;
         delete?: never;
@@ -494,6 +494,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["stage_inbox_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["collection_detail"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1956,6 +1972,7 @@ export interface components {
         CompletedMetadataAcquisition: {
             /** @enum {string} */
             kind: "metadata";
+            outcome: components["schemas"]["MetadataRefreshOutcome"];
             review: components["schemas"]["MetadataReviewView"];
         } | {
             /** @enum {string} */
@@ -2580,6 +2597,8 @@ export interface components {
             label: string;
         };
         /** @enum {string} */
+        MetadataRefreshOutcome: "candidates" | "no_match" | "unavailable";
+        /** @enum {string} */
         MetadataResolutionKind: "manual" | "selected" | "automatic" | "tentative";
         MetadataReviewView: {
             authority: components["schemas"]["MetadataAuthority"];
@@ -2827,6 +2846,17 @@ export interface components {
             /** @enum {string} */
             scope: "representation";
         };
+        Page_AccountView: {
+            items: {
+                administrator: boolean;
+                display_name: string;
+                enabled: boolean;
+                id: components["schemas"]["UserId"];
+                revision: components["schemas"]["Revision"];
+                username: string;
+            }[];
+            next_cursor?: string | null;
+        };
         Page_CatalogSnapshotStatus: {
             items: {
                 active: boolean;
@@ -2891,6 +2921,41 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_NativeDeviceView: {
+            items: {
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                expires_at: string;
+                id: components["schemas"]["NativeCredentialId"];
+                label: string;
+                revision: components["schemas"]["Revision"];
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_PasskeyView: {
+            items: {
+                /** Format: date-time */
+                created_at: string;
+                id: components["schemas"]["PasskeyId"];
+                label: string;
+                revision: components["schemas"]["Revision"];
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_PresentedCollection: {
+            items: {
+                binding: components["schemas"]["CollectionBinding"];
+                content_permissions: components["schemas"]["ContentPermissions"];
+                /** Format: date-time */
+                created_at: string;
+                effective_permissions: components["schemas"]["EffectivePermissions"];
+                id: components["schemas"]["CollectionId"];
+                name: string;
+                revision: components["schemas"]["Revision"];
+            }[];
+            next_cursor?: string | null;
+        };
         Page_PresentedItem: {
             items: {
                 assets: components["schemas"]["PresentedAsset"][];
@@ -2941,6 +3006,18 @@ export interface components {
                 snapshot_observation?: Record<string, never> | null;
                 source: components["schemas"]["PackageScope"];
                 support: components["schemas"]["OperationSupport"];
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_SessionView: {
+            items: {
+                /** Format: date-time */
+                created_at: string;
+                current: boolean;
+                /** Format: date-time */
+                expires_at: string;
+                id: components["schemas"]["SessionId"];
+                label: string;
             }[];
             next_cursor?: string | null;
         };
@@ -3859,7 +3936,11 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                search: string | null;
+                cursor: string | null;
+                limit: number | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -3869,7 +3950,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccountView"][];
+                    "application/json": components["schemas"]["Page_AccountView"];
                 };
             };
             401: {
@@ -4365,6 +4446,43 @@ export interface operations {
             };
         };
     };
+    collection_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                search: string | null;
+                cursor: string | null;
+                limit: number | null;
+                min_role: number | null;
+                module: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PresentedCollection"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     collection_types: {
         parameters: {
             query?: never;
@@ -4380,31 +4498,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModuleDescriptor"][];
-                };
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    collections: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PresentedCollection"][];
                 };
             };
             401: {
@@ -4742,6 +4835,45 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    collection_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedCollection"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7665,7 +7797,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -7675,7 +7810,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NativeDeviceView"][];
+                    "application/json": components["schemas"]["Page_NativeDeviceView"];
                 };
             };
             401: {
@@ -7730,7 +7865,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -7740,7 +7878,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PasskeyView"][];
+                    "application/json": components["schemas"]["Page_PasskeyView"];
                 };
             };
             401: {
@@ -7826,7 +7964,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -7836,7 +7977,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionView"][];
+                    "application/json": components["schemas"]["Page_SessionView"];
                 };
             };
             401: {
