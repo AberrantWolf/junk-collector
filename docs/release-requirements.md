@@ -75,6 +75,18 @@ Authenticated clients obtain bounded collection-type descriptors and server-comp
 
 ## Release acceptance
 
+- User clarification (2026-09-28): importing raw dumps defaults a newly created
+  entry to one owned physical copy. Manual entry can remain without an owned copy
+  and can be wishlist-only. Music imports should expose proper track names when a
+  matching provider release has them, with an obvious metadata lookup for older
+  albums. Reimport describes replacement of original files; gathering names does
+  not require it.
+- User clarification (2026-09-28): multi-disc albums need a collector-facing
+  per-disc checklist: distinguish each attached original, expose recorded versus
+  release-listed disc IDs and missing media, make uncertain disc assignments
+  explicit, and show how to complete structure and audio checks. Detailed
+  processing history remains accessible but must not dominate the album view.
+
 - User clarification (2026-09-21): provide manual item removal with clear retained
   history/originals semantics and restoration, plus clean reimport of an existing
   item without duplicate visible entries or obsolete work becoming current again.

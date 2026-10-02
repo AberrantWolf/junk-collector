@@ -1124,6 +1124,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/music-disc-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["music_album_coverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/music-tracks": {
         parameters: {
             query?: never;
@@ -1850,6 +1866,8 @@ export interface components {
             /** @enum {string} */
             kind: "edition";
         };
+        /** @enum {string} */
+        AudioVerificationStatus: "verified" | "incomplete_search" | "mismatched" | "no_data" | "ambiguous_offsets" | "unavailable" | "unsupported";
         Availability: {
             /** @enum {string} */
             state: "available";
@@ -2552,11 +2570,15 @@ export interface components {
             artwork?: null | components["schemas"]["AssetId"];
             complete_identity: boolean;
             current: boolean;
+            details: Record<string, never>;
             identity: components["schemas"]["MetadataCandidateIdentity"];
+            /** Format: int32 */
+            provider_priority: number;
             selected: boolean;
             strength: components["schemas"]["MatchStrength"];
             subtitle?: null | components["schemas"]["MetadataText"];
             title: components["schemas"]["MetadataText"];
+            unmatched: boolean;
         };
         MetadataCatalogSourceView: {
             current: boolean;
@@ -2667,6 +2689,12 @@ export interface components {
             /** Format: int64 */
             minor_units: number;
         };
+        MusicAlbumCoverage: {
+            media: components["schemas"]["MusicMediumCoverage"][];
+            release_id?: string | null;
+            release_title?: string | null;
+            sources: components["schemas"]["MusicDiscSourceCoverage"][];
+        };
         MusicAlbumDiscPlan: {
             ambiguous: boolean;
             /** @description Stable representative capture for this disc group; sources retain their actual capture IDs. */
@@ -2696,6 +2724,30 @@ export interface components {
             preparing: number;
             source_representation_id: components["schemas"]["RepresentationId"];
             /** Format: int32 */
+            track_count: number;
+        };
+        /** @enum {string} */
+        MusicDiscMatchState: "no_release" | "no_layout" | "disc_id_matched" | "curator_assigned" | "single_medium" | "needs_assignment" | "disc_id_not_listed" | "ambiguous_disc_id" | "assignment_conflicts_with_disc_id" | "track_layout_mismatch";
+        MusicDiscSourceCoverage: {
+            /** Format: int32 */
+            assigned_medium_position?: number | null;
+            audio_verification?: null | components["schemas"]["AudioVerificationStatus"];
+            capture_id: components["schemas"]["CaptureId"];
+            /** Format: date-time */
+            captured_at: string;
+            file_count: number;
+            file_label: string;
+            match_state: components["schemas"]["MusicDiscMatchState"];
+            /** Format: int32 */
+            medium_position?: number | null;
+            recorded_disc_id?: string | null;
+            source_representation_id: components["schemas"]["RepresentationId"];
+            track_count?: number | null;
+        };
+        MusicMediumCoverage: {
+            /** Format: int32 */
+            position: number;
+            registered_disc_ids: string[];
             track_count: number;
         };
         MusicPreparationBatchView: {
@@ -6612,6 +6664,39 @@ export interface operations {
                 content?: never;
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    music_album_coverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicAlbumCoverage"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

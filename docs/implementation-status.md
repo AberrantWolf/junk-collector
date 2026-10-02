@@ -30,6 +30,24 @@ The full first release, native clients and public deployment remain later target
 
 ## Implemented
 
+- Startup performance follow-up (2026-09-28): startup projects prepared-audio
+  metadata without reading its payloads. Derivative GET checks recorded length
+  and SHA-256 before transfer and reports a specific player error on failure.
+  Debug builds optimize SHA-256, and startup logs cumulative recovery, reindex
+  and private-reconciliation times. Metadata reindex remains unconditional; P06
+  owns incremental indexing and scale qualification. No startup speedup has yet
+  been measured on the owned corpus.
+
+- Album and inventory follow-up (2026-09-28, local changes): new guided imports
+  record one owned physical copy; manual entries may remain without copies or be
+  marked wishlist. MusicBrainz release observations now retain medium-specific
+  track titles, and music browsing uses them only for a matching complete source
+  layout while preserving manually entered titles. Music curation exposes provider
+  lookup beside tracks. Existing provider observations without track lists require
+  a fresh MusicBrainz response; unavailable providers or unmatched layouts still
+  show numbered tracks. The replacement flow is labelled as original-file
+  replacement and keeps its existing capture/history guarantees.
+
 - Web album follow-up (2026-09-20): archived cover choices have authenticated
   thumbnail previews. Cover Art Archive options also show lazy provider previews
   before acquisition, with unavailable/retry states and no automatic archival.
@@ -800,3 +818,34 @@ or domain-identity replacement was needed. Required gates and browser journeys p
 are in [validation](validation.md). FX-07 later passed local acceptance; its
 [interface audit](fx07-interface-audit.md) records combined coverage and the
 bounded metadata candidate limit.
+
+## Metadata candidate refresh and inspection — 2026-09-28
+
+Metadata refresh replaces the active selectable candidate set rather than
+accumulating superseded versions. An equivalent incoming candidate inherits the
+current displayed choice; otherwise that choice remains selected and is marked
+as unmatched. Manual field and artwork authority and archived provider responses
+remain intact. Curators can inspect every active candidate's normalized fields
+and compare two datasets side by side from metadata review. This is descriptive
+metadata only, not catalog or integrity verification.
+
+## Album-disc coverage and evidence presentation — 2026-09-28
+
+The Album discs view orders known media by release position even when capture
+records arrive out of order. Startup projects prepared-audio records without
+reading their payloads; each derivative GET checks bytes against the recorded
+length and digest before transfer. A mismatch has a specific player error.
+Explicit full reindex still checks derivative payloads. Startup remains a full
+metadata reindex, so P06 incremental indexing is still pending.
+
+Music browsing and curation now show release media beside attached original
+packages, their recorded and provider-listed disc IDs, structural track count,
+and AccurateRip outcome. Missing release media and unmatched originals stay
+explicit. Curators can assign a source without a usable disc ID to a release
+medium; a conflicting recorded ID or track layout withholds provider track names.
+Track titles resolve per source/medium, rather than copying a global manual title
+across multi-disc captures. The view offers the next structure, release, file or
+audio-check action. Long processing details remain available in a collapsed
+Advanced evidence panel, not in the primary collection workflow. This does not
+establish that every physical disc or audio byte is correct, and no catalog read
+performs full-payload hashing.

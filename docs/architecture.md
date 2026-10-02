@@ -6,6 +6,21 @@ Junk Collector preserves evidence and owned collection history independently of 
 
 ## Local-alpha guided ingestion
 
+New guided imports create one default owned, present physical copy on their new
+Item. Attaching files to an existing Item preserves its inventory. Manual Item
+creation records no copy unless the curator adds one. The guided copy has a
+deterministic identity, so recovery cannot duplicate it; placeholder retirement
+recognizes only its untouched default state as automatic inventory.
+
+MusicBrainz release observations retain bounded medium-specific track names.
+Music availability resolves the effective candidate under metadata authority and
+uses a medium only when the release is selected or unambiguous, its recorded disc
+ID matches (or no disc ID exists and there is exactly one medium), and its track
+positions cover the source layout.
+Manual music track titles take precedence. Older observations without track lists
+remain valid but need a fresh provider acquisition to gain names. A metadata
+refresh does not replace a Capture or assert audio verification.
+
 Reassociation can retire an otherwise unused, automatically created intake Item.
 Application policy distinguishes placeholders from independent inventory/manual
 information. The committed Capture association and original guided intent form a
@@ -285,8 +300,12 @@ lock. The existing Capture revision journal treats output, immutable recipe and
 validation Evidence as dependencies published before the Capture commit marker.
 Cancellation wins until the final gated revision rename. Committed recovery uses
 retained bytes/evidence without re-encoding or re-authorizing; current Capture
-associations and Item edits survive. Reindex validates derivative references and
-stored payload identity, without claiming a fresh codec or catalog verification.
+associations and Item edits survive. Explicit full reindex validates derivative
+references and stored payload identity, without claiming a fresh codec or catalog
+verification. Startup projects derivative metadata without reading their payloads;
+each derivative GET checks the stored length and SHA-256 before transfer, while
+HEAD remains a lightweight availability check. A failed byte check is reported
+as prepared-media failure and does not imply that the preserved original changed.
 Music layout selection for availability and admission uses the committed source
 fingerprint to find observations; it is not a live integrity check. It must not
 rehash preservation payloads during browsing or once per track during admission.
@@ -390,9 +409,12 @@ The tree above remains the schema-3 layout for existing records. Archive envelop
 MetadataAuthority revisions keep typed common title/subtitle and artwork authority,
 an owner-bound domain override envelope, and preserved unknown historical fields.
 A refresh appends its bounded lossless observation in the same revision as the
-materialized display while leaving authority unchanged. Reindex reads every
-authority revision to rebuild stable provider-record/version candidate history,
-then projects only the newest authority/display revision. Resolution applies field
+materialized display. It replaces the active candidate projection and remaps the
+displayed choice to an equivalent incoming candidate; a nonmatching displayed
+choice remains selected and visibly unmatched. Manual field and artwork authority
+is unchanged. Reindex validates each historical authority revision against its
+then-live candidates, retaining original observations in the archive while
+projecting only the newest active candidates and authority/display revision. Resolution applies field
 overrides, explicit selection, then deterministic automatic ranking by complete
 identity, evidence strength, English preference, provider priority and stable
 provider identity. Metadata identity remains distinct from integrity, catalog
@@ -412,7 +434,8 @@ materialized display against frozen inputs and candidate history at that revisio
 Automatic ambiguity remains tentative even when unrelated manual choices exist.
 
 Authority revisions additionally retain current candidate identities for automatic
-resolution; superseded versions remain available for explicit historical selection.
+resolution. Superseded unused versions leave the selectable projection, but their
+provider observations and immutable archived revisions remain preserved.
 Provider-derived versions include raw/normalized content, ranking and artwork inputs.
 MusicBrainz/CAA adapters join the existing acquisition and catalog-parser registries;
 module DTOs own provider interpretation, and application services share existing Job,
@@ -491,6 +514,18 @@ Native pairing carries server ID, local certificate and its SHA-256 fingerprint.
 Passkeys use one configured HTTPS authentication origin and standard WebAuthn. Challenges are bounded, server-side, expiring and single-use. Registration is bound to the authenticated user and ceremonies retain the original credential record/revision, and counter updates compare-and-swap that verified snapshot together with session issuance. Reloading a newer record after verification is forbidden; zero-counter passkeys retain the WebAuthn library’s verification semantics. Credential IDs are unique across accounts. CLI setup explicitly allowlists the private listener’s localhost browser origin; it does not change public exposure or trust forwarded headers. Browser sessions are HttpOnly, Secure and SameSite; browser ceremonies and cookie mutations require an exact normalized Origin. Native enrollment start/complete are the narrow unauthenticated bootstrap exception: they grant no authority before same-user, recently-authenticated browser approval and authenticate completion with a stored-hash high-entropy secret. The issued 30-day native credential is returned once, stored only as a hash server-side, and selected only by successful native-credential lookup—never by a caller header. Single-user presentation hides account selection; it is not anonymous access.
 
 ## Clients and shared audio
+
+Album-disc coverage is an application read projection over the chosen descriptive
+MusicBrainz release, each active preservation-master Capture, and current
+source-fingerprint-bound CD structure/AccurateRip observations. It never opens or
+hashes original payloads during browsing. The music module owns the typed manual
+source-to-release-medium assignment; the application validates that its source is
+attached and its medium belongs to the currently chosen release. Track-name
+resolution applies a release medium separately to each source, requires complete
+track positions, and withholds names on a recorded disc-ID conflict. The UI may
+show an unmatched original or an unrepresented release medium without claiming
+catalog or audio verification. Technical processing history remains accessible
+behind the collector-facing disc summary.
 
 The bounded browser player has one owner at the authenticated application shell,
 independent of album views, navigation and curation refreshes. Album views enqueue

@@ -3676,6 +3676,39 @@
         }
       }
     },
+    "/api/v1/items/{id}/music-disc-coverage": {
+      "get": {
+        "operationId": "music_album_coverage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicAlbumCoverage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/music-tracks": {
       "get": {
         "operationId": "music_track_availability",
@@ -6223,6 +6256,18 @@
               }
             }
           }
+        ]
+      },
+      "AudioVerificationStatus": {
+        "type": "string",
+        "enum": [
+          "verified",
+          "incomplete_search",
+          "mismatched",
+          "no_data",
+          "ambiguous_offsets",
+          "unavailable",
+          "unsupported"
         ]
       },
       "Availability": {
@@ -9073,7 +9118,10 @@
           "complete_identity",
           "strength",
           "current",
-          "selected"
+          "selected",
+          "unmatched",
+          "provider_priority",
+          "details"
         ],
         "properties": {
           "artwork": {
@@ -9092,8 +9140,16 @@
           "current": {
             "type": "boolean"
           },
+          "details": {
+            "type": "object"
+          },
           "identity": {
             "$ref": "#/components/schemas/MetadataCandidateIdentity"
+          },
+          "provider_priority": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           },
           "selected": {
             "type": "boolean"
@@ -9113,6 +9169,9 @@
           },
           "title": {
             "$ref": "#/components/schemas/MetadataText"
+          },
+          "unmatched": {
+            "type": "boolean"
           }
         }
       },
@@ -9553,6 +9612,39 @@
           }
         }
       },
+      "MusicAlbumCoverage": {
+        "type": "object",
+        "required": [
+          "media",
+          "sources"
+        ],
+        "properties": {
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicMediumCoverage"
+            }
+          },
+          "release_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicDiscSourceCoverage"
+            }
+          }
+        }
+      },
       "MusicAlbumDiscPlan": {
         "type": "object",
         "required": [
@@ -9666,6 +9758,118 @@
           "track_count": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MusicDiscMatchState": {
+        "type": "string",
+        "enum": [
+          "no_release",
+          "no_layout",
+          "disc_id_matched",
+          "curator_assigned",
+          "single_medium",
+          "needs_assignment",
+          "disc_id_not_listed",
+          "ambiguous_disc_id",
+          "assignment_conflicts_with_disc_id",
+          "track_layout_mismatch"
+        ]
+      },
+      "MusicDiscSourceCoverage": {
+        "type": "object",
+        "required": [
+          "capture_id",
+          "captured_at",
+          "source_representation_id",
+          "file_label",
+          "file_count",
+          "match_state"
+        ],
+        "properties": {
+          "assigned_medium_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "audio_verification": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AudioVerificationStatus"
+              }
+            ]
+          },
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "file_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file_label": {
+            "type": "string"
+          },
+          "match_state": {
+            "$ref": "#/components/schemas/MusicDiscMatchState"
+          },
+          "medium_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "recorded_disc_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "track_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "MusicMediumCoverage": {
+        "type": "object",
+        "required": [
+          "position",
+          "track_count",
+          "registered_disc_ids"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "registered_disc_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "track_count": {
+            "type": "integer",
             "minimum": 0
           }
         }

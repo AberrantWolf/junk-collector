@@ -33,6 +33,15 @@ cargo build --locked --release -p collector-server
 ./target/release/collector-server serve
 ```
 
+Startup rebuilds the catalog from archive metadata and checks published snapshot
+bytes, but does not read prepared-audio payloads. A prepared track is checked
+against its recorded length and SHA-256 before each GET transfer; a changed or
+unreadable file is rejected with an actionable player error. Explicit full
+reindex checks prepared-audio bytes too. Startup logs cumulative times for
+recovery, reindexing, and private-state reconciliation. The workspace optimizes
+SHA-256 in debug builds; the release binary remains the recommended server.
+Incremental startup indexing is tracked under P06 in the handoff backlog.
+
 `setup` prompts for a password of at least 12 characters and creates:
 
 - `collector.toml`, the server configuration;

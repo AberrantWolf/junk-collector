@@ -200,6 +200,9 @@ pub struct MediaResource {
     pub media_type: String,
     pub digest: Digest,
     pub download_name: String,
+    /// Published derivatives are checked against this digest before GET transfer.
+    /// HEAD remains a lightweight availability check.
+    pub verify_on_transfer: bool,
 }
 
 impl MediaResource {

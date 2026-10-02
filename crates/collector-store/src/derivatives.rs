@@ -81,7 +81,7 @@ impl Store {
                 project_evidence_record(&tx, &evidence)?;
                 tx.execute("INSERT OR IGNORE INTO conversion_recipes(id,collection_id,record) VALUES(?,?,?)", params![recipe.id.to_string(), frozen.collection_id.to_string(), serde_json::to_string(&recipe).map_err(storage)?]).map_err(storage)?;
                 project_capture(&tx, &record.capture)?;
-                self.validate_derivative_projection(&tx)?;
+                self.validate_derivative_projection(&tx, true)?;
                 tx.commit().map_err(storage)?;
                 capture = record.capture;
             }
@@ -412,10 +412,14 @@ impl Store {
 }
 
 impl Store {
-    /// Reindex checks retained bytes and cross-record identity before projecting a
-    /// derivative as available. This checks stored validation evidence, not a new
+    /// Startup checks derivative record relationships without reading every payload.
+    /// Explicit reindex and recovery also check retained bytes. Neither is a new
     /// codec decode or a new claim of catalog verification.
-    pub(crate) fn validate_derivative_projection(&self, db: &Connection) -> Result<()> {
+    pub(crate) fn validate_derivative_projection(
+        &self,
+        db: &Connection,
+        verify_payload: bool,
+    ) -> Result<()> {
         let mut statement = db.prepare("SELECT record FROM captures").map_err(storage)?;
         let rows = statement
             .query_map([], |r| r.get::<_, String>(0))
@@ -457,6 +461,9 @@ impl Store {
                     projected_record(db, "evidence", &representation.id.to_string())?;
                 let validation =
                     validate_retained_derivative(&capture, representation, &recipe, &evidence)?;
+                if !verify_payload {
+                    continue;
+                }
                 let file = &representation.files[0];
                 crate::files::safe_name(&file.name)?;
                 let path = collection_path(db, &self.archive, capture.collection_id)?

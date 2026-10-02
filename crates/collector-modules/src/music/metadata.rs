@@ -118,6 +118,23 @@ pub struct MusicBrainzReleaseObservation {
     pub artist_ids: Vec<String>,
     pub release_group_id: Option<String>,
     pub disc_ids: Vec<String>,
+    #[serde(default)]
+    pub media: Vec<MusicBrainzMediumObservation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MusicBrainzMediumObservation {
+    pub position: u16,
+    pub disc_ids: Vec<String>,
+    pub tracks: Vec<MusicBrainzTrackObservation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MusicBrainzTrackObservation {
+    pub position: u16,
+    pub title: String,
 }
 
 impl MusicBrainzReleaseObservation {
@@ -140,6 +157,29 @@ impl MusicBrainzReleaseObservation {
             return Err(Error::Invalid(
                 "MusicBrainz release identifiers are oversized".into(),
             ));
+        }
+        if self.media.len() > 128 {
+            return Err(Error::Invalid("too many MusicBrainz media".into()));
+        }
+        let mut positions = std::collections::BTreeSet::new();
+        for medium in &self.media {
+            if medium.position == 0
+                || !positions.insert(medium.position)
+                || medium.tracks.len() > 256
+                || medium.disc_ids.len() > 128
+            {
+                return Err(Error::Invalid("invalid MusicBrainz medium".into()));
+            }
+            let mut track_positions = std::collections::BTreeSet::new();
+            for track in &medium.tracks {
+                if track.position == 0
+                    || track.position > 256
+                    || !track_positions.insert(track.position)
+                {
+                    return Err(Error::Invalid("invalid MusicBrainz track position".into()));
+                }
+                validate_text(&track.title, false)?;
+            }
         }
         Ok(())
     }

@@ -1,5 +1,41 @@
 # Validation recorded for the foundation
 
+## Prepared-audio startup and album display — 2026-09-28
+
+Startup reindexes derivative records without opening or hashing their FLAC
+payloads. The focused HTTP regression checked that an intact prepared track
+survives restart, a same-length changed track permits lightweight HEAD but
+returns `prepared_media_invalid` on GET, and a missing track returns the same
+typed error. Explicit full reindex still rejects changed derivative bytes. The
+browser smoke suite passed disc-position ordering with reversed source input,
+the specific player error after a failed prepared-media request, successful
+retry, actual FLAC playback, and access revocation that releases the media
+element. The suite's first browser launch was denied by the sandbox; a later
+run found and fixed retry and revocation races, and the final Chrome 153 run
+passed. `cargo test --workspace`, strict workspace Clippy, architecture and
+format checks, TypeScript check, web build, server rebuild and `git diff --check`
+passed. This establishes no whole-collection payload check at startup; the
+remaining full metadata reindex is still tracked as P06.
+
+## Album names and import defaults — 2026-09-28
+
+Guided imports now create one owned, present copy for a new Item; the archive
+replay test checks this and confirms attachment to an existing Item preserves its
+inventory. MusicBrainz observations retain medium-specific titles, with provider
+and application tests covering two discs, wrong disc IDs and incomplete layouts.
+Current album-wide lookup is exposed in Music; old observations need a fresh
+provider response, and ambiguous releases require curator selection. These tests
+do not claim a live MusicBrainz track-list qualification or automatic naming when
+no usable provider match exists.
+
+`cargo test --workspace` passed before the final focused matching refactor;
+the guided-import replay test, strict workspace Clippy, architecture check,
+TypeScript check, web build and diff check passed. Chrome 153 browser smoke passed
+the Music lookup entry, metadata workflow, WebAuthn and real FLAC playback. The
+FX-05 browser journey passed retained reuse, replacement upload resume, mobile
+review and historical playback. The first sandboxed smoke attempt failed at
+Chrome launch; the same test passed outside the sandbox with a temporary profile.
+
 ## FX-07 whole-interface local acceptance — 2026-09-27
 
 The [action, growing-list and combined-journey register](fx07-interface-audit.md)
@@ -3802,3 +3838,38 @@ Final local-HTTP Chrome smoke passed: reassociation returned a tombstone-backed
 the destination, and left unrelated real audio playing. The existing reindex and
 Viewer checks passed afterward. Log: `/tmp/collector-retirement-smoke-verified.log`.
 The rebuilt server includes the final chooser and retired-selection handling.
+
+## Metadata candidate replacement and inspection — 2026-09-28
+
+`python3 scripts/check_architecture.py`, `cargo fmt --all -- --check`,
+`cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`npm --prefix web run check`, `npm --prefix web run build`, and
+`npm --prefix web run check:api` passed. The focused archive regression passed
+after the final semantic JSON-equivalence adjustment. The Chrome smoke passed
+with dataset inspection, two-way comparison, no-match replacement, unmatched
+choice retention, re-open persistence and mobile overflow checks. The full
+workspace suite passed with 179 archive tests; the private CD dump oracle remains
+intentionally ignored without user-owned inputs. Raw provider observations remain
+archived, while the browser receives only validated typed dataset details.
+
+## Album-disc coverage and compact processing history — 2026-09-28
+
+`python3 scripts/check_architecture.py`, `cargo fmt --all -- --check`,
+`cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`npm --prefix web run check`, `npm --prefix web run build`, and
+`npm --prefix web run check:api` passed. The generated OpenAPI and TypeScript
+contracts include the viewer-safe album-disc coverage route; the HTTP regression
+checks its response and module-independent track availability. A focused resolver
+test covers two release media, missing IDs, manual assignment, conflicts and
+incomplete positions. The private real-CD oracle remains ignored without its
+user-owned inputs.
+
+The rebuilt server passed the full Chrome smoke: the imported two-track CD layout
+appeared in album coverage before an explicit structure rerun, missing release
+disc-ID linkage remained visible, technical evidence stayed collapsed until
+opened, and prepared audio survived unavailable-module fallback. The separate
+64 MiB processing browser regression also passed with repeat consolidation and
+DAT ambiguity/no-match flows after the Advanced evidence disclosure change.
+These fixture checks do not establish that the user's specific physical discs or
+their audio match a selected release; that requires the recorded disc IDs and
+per-source AccurateRip outcomes shown in the new checklist.

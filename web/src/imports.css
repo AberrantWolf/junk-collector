@@ -135,8 +135,17 @@
   background: #fffefa;
   border-left: 4px solid #6f8760;
   margin-top: 18px;
+  min-width: 0;
+  overflow: hidden;
   padding: 18px;
 }
+
+.import-docket .stored-file > span { min-width: 0; }
+.import-docket .stored-file > span > small { display: block; line-height: 1.5; margin-top: 3px; }
+.processing-raw { margin-top: 8px; max-width: 100%; }
+.processing-raw > summary { color: var(--green); cursor: pointer; }
+.processing-raw[open] { max-height: 320px; overflow: auto; }
+.processing-raw small { display: block; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }
 
 .import-docket > header {
   align-items: start;

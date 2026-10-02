@@ -42,3 +42,7 @@ junk-libs-dat = { path = "../junk-libs/junk-libs-dat" }
 [profile.release]
 lto = "thin"
 strip = true
+
+# Optimize snapshot checks and prepared-media transfers in debug server builds.
+[profile.dev.package.sha2]
+opt-level = 3

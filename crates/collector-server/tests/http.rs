@@ -2223,6 +2223,28 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
     );
     assert!(availability[0].get("selection").is_none());
     assert!(availability[0].get("job_id").is_none());
+    let coverage_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/items/{}/music-disc-coverage", item.id))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(coverage_response.status(), StatusCode::OK);
+    let coverage: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(coverage_response.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(coverage["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(coverage["sources"][0]["match_state"], "no_release");
+    assert_eq!(coverage["sources"][0]["file_count"], 2);
+    assert_eq!(coverage["sources"][0]["track_count"], 1);
 
     let prepare_path = format!(
         "/api/v1/items/{}/captures/{}/music-tracks/1/prepare",
@@ -2587,6 +2609,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
             .all(|row| row["can_prepare"] == false)
     );
     let retained_media = restarted
+        .clone()
         .oneshot(
             Request::builder()
                 .uri(&media_path)
@@ -2597,13 +2620,93 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
         .await
         .unwrap();
     assert_eq!(retained_media.status(), StatusCode::OK);
+    let capture = collector_app::Catalog::capture(reopened.as_ref(), published.capture_id).unwrap();
+    let derivative = capture
+        .representations
+        .iter()
+        .find(|value| value.id.to_string() == representation)
+        .unwrap();
+    let derivative_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .map(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .join("captures")
+                .join(capture.id.to_string())
+                .join("payload")
+                .join(representation)
+                .join(&derivative.files[0].name)
+        })
+        .find(|path| path.exists())
+        .expect("prepared FLAC payload in the test archive");
+    let mut altered = std::fs::read(&derivative_path).unwrap();
+    altered[0] ^= 1;
+    std::fs::write(&derivative_path, altered).unwrap();
+    let lightweight_head = restarted
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("HEAD")
+                .uri(&media_path)
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lightweight_head.status(), StatusCode::OK);
+    let rejected_get = restarted
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected_get.status(), StatusCode::CONFLICT);
+    let failure: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(rejected_get.into_body(), 4096)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(failure["error"]["code"], "prepared_media_invalid");
+    assert!(
+        failure["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("The original is preserved")
+    );
+    std::fs::remove_file(&derivative_path).unwrap();
+    let missing_get = restarted
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("authorization", format!("Bearer {owner_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing_get.status(), StatusCode::CONFLICT);
+    let failure: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(missing_get.into_body(), 4096)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(failure["error"]["code"], "prepared_media_invalid");
 }
 
 #[tokio::test]
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 108); // Includes bounded collection search and exact collection reads.
+    assert_eq!(paths.len(), 109); // Includes album-disc coverage and bounded collection reads.
     for path in [
         "/api/v1/collection-search",
         "/api/v1/collections/{id}",
@@ -2613,6 +2716,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/items/{id}/specimens/{specimen_id}",
         "/api/v1/items/{id}/specimens/{specimen_id}/components",
         "/api/v1/items/{id}/music-tracks",
+        "/api/v1/items/{id}/music-disc-coverage",
         "/api/v1/items/{item}/captures/{capture}/music-tracks/{track}/prepare",
         "/api/v1/items/{item}/music-preparation-plan",
         "/api/v1/items/{item}/music-preparation-batches",

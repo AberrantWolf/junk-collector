@@ -460,6 +460,14 @@ impl Store {
                 collector_core::MetadataCandidateObservation,
             >,
         >::new();
+        let mut candidate_versions = std::collections::BTreeMap::<
+            (
+                CollectionId,
+                collector_core::ItemId,
+                collector_core::MetadataCandidateIdentity,
+            ),
+            collector_core::MetadataCandidateObservation,
+        >::new();
         for collection_dir in directories(&self.archive.join("collections"))? {
             let collection: Collection = toml::from_str(
                 &fs::read_to_string(collection_dir.join("collection.toml")).map_err(storage)?,
@@ -513,6 +521,16 @@ impl Store {
                         return Err(Error::Conflict);
                     }
                     for candidate in &observation.candidates {
+                        let version_key = (
+                            record.collection_id,
+                            record.item_id,
+                            candidate.identity.clone(),
+                        );
+                        if let Some(old) = candidate_versions.insert(version_key, candidate.clone())
+                            && old != *candidate
+                        {
+                            return Err(Error::Conflict);
+                        }
                         let candidates = metadata_candidates
                             .entry((record.collection_id, record.item_id))
                             .or_default();
@@ -534,6 +552,17 @@ impl Store {
                     .map(|values| values.values().cloned().collect::<Vec<_>>())
                     .unwrap_or_default();
                 record.validate_display(&candidates)?;
+                if let Some(current) = &record.current_candidates {
+                    let mut retained = current.iter().collect::<std::collections::BTreeSet<_>>();
+                    if let Some(selected) = &record.authority.selected_candidate {
+                        retained.insert(selected);
+                    }
+                    if let Some(values) =
+                        metadata_candidates.get_mut(&(record.collection_id, record.item_id))
+                    {
+                        values.retain(|identity, _| retained.contains(identity));
+                    }
+                }
                 authorities.insert(record.item_id, record);
             }
         }
@@ -1321,6 +1350,34 @@ impl ProcessingPort for Store {
                 .iter()
                 .flat_map(|observation| &observation.candidates),
         )?;
+        if !record.observations.is_empty() {
+            let db = lock(&self.db)?;
+            let mut statement = db
+                .prepare(
+                    "SELECT record FROM metadata_refreshes WHERE collection_id=? AND item_id=?",
+                )
+                .map_err(storage)?;
+            let rows = statement
+                .query_map(
+                    params![record.collection_id.to_string(), record.item_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(storage)?;
+            for raw in rows {
+                let historical: collector_core::MetadataRefreshObservation =
+                    serde_json::from_str(&raw.map_err(storage)?).map_err(storage)?;
+                for prior in &historical.candidates {
+                    if record
+                        .observations
+                        .iter()
+                        .flat_map(|observation| &observation.candidates)
+                        .any(|incoming| incoming.identity == prior.identity && incoming != prior)
+                    {
+                        return Err(Error::Conflict);
+                    }
+                }
+            }
+        }
         record.validate_display(&candidates)?;
         for observation in &record.observations {
             let existing: Option<(String, String, String)> = lock(&self.db)?
@@ -1357,10 +1414,42 @@ impl ProcessingPort for Store {
         )?;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
+        let retained = record.current_candidates.as_ref().map(|current| {
+            let mut identities = current.iter().collect::<std::collections::BTreeSet<_>>();
+            if let Some(selected) = &record.authority.selected_candidate {
+                identities.insert(selected);
+            }
+            identities
+        });
         for observation in &record.observations {
             tx.execute("INSERT OR IGNORE INTO metadata_refreshes(id,collection_id,item_id,record) VALUES(?,?,?,?)", params![observation.id.to_string(),record.collection_id.to_string(),record.item_id.to_string(),serde_json::to_string(observation).map_err(storage)?]).map_err(storage)?;
-            for candidate in &observation.candidates {
-                project_metadata_candidate(&tx, record.collection_id, record.item_id, candidate)?;
+        }
+        if let Some(retained) = retained {
+            tx.execute(
+                "DELETE FROM metadata_candidates WHERE collection_id=? AND item_id=?",
+                params![record.collection_id.to_string(), record.item_id.to_string()],
+            )
+            .map_err(storage)?;
+            for candidate in &candidates {
+                if retained.contains(&candidate.identity) {
+                    project_metadata_candidate(
+                        &tx,
+                        record.collection_id,
+                        record.item_id,
+                        candidate,
+                    )?;
+                }
+            }
+        } else {
+            for observation in &record.observations {
+                for candidate in &observation.candidates {
+                    project_metadata_candidate(
+                        &tx,
+                        record.collection_id,
+                        record.item_id,
+                        candidate,
+                    )?;
+                }
             }
         }
         tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,record=excluded.record",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;

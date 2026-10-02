@@ -156,6 +156,100 @@ mod tests {
     }
 
     #[test]
+    fn track_names_require_the_right_disc_and_complete_positions() {
+        let release: collector_modules::music::MusicBrainzReleaseObservation =
+            serde_json::from_value(serde_json::json!({
+                "release_id": "00000000-0000-0000-0000-000000000001",
+                "title": "Album",
+                "disambiguation": null,
+                "language": null,
+                "script": null,
+                "artist_credit": null,
+                "artist_ids": [],
+                "release_group_id": null,
+                "disc_ids": ["disc-one", "disc-two"],
+                "media": [
+                    {"position": 1, "disc_ids": ["disc-one"], "tracks": [{"position": 1, "title": "First"}]},
+                    {"position": 2, "disc_ids": ["disc-two"], "tracks": [{"position": 1, "title": "Second"}]}
+                ]
+            }))
+            .unwrap();
+        release.validate().unwrap();
+        let track = ConversionTrack {
+            position: 1,
+            start: PcmFrame(0),
+            length: PcmFrame(588),
+        };
+        assert_eq!(
+            matching_musicbrainz_medium(&release, Some("disc-one"), std::slice::from_ref(&track))
+                .unwrap()
+                .tracks[0]
+                .title,
+            "First"
+        );
+        assert_eq!(
+            matching_musicbrainz_medium(&release, Some("disc-two"), std::slice::from_ref(&track))
+                .unwrap()
+                .tracks[0]
+                .title,
+            "Second"
+        );
+        assert!(
+            matching_musicbrainz_medium(&release, None, std::slice::from_ref(&track)).is_none()
+        );
+        assert!(
+            matching_musicbrainz_medium(&release, Some("other"), std::slice::from_ref(&track))
+                .is_none()
+        );
+        assert!(
+            matching_musicbrainz_medium(
+                &release,
+                Some("disc-one"),
+                &[
+                    track,
+                    ConversionTrack {
+                        position: 2,
+                        start: PcmFrame(588),
+                        length: PcmFrame(588),
+                    }
+                ],
+            )
+            .is_none()
+        );
+        let assignment = collector_modules::music::MusicDiscAssignment {
+            source_representation_id: RepresentationId::new(),
+            release_id: release.release_id.clone(),
+            medium_position: 1,
+        };
+        assert_eq!(
+            resolve_music_medium(Some(&release), None, Some(&assignment), Some(&[1]))
+                .0
+                .unwrap()
+                .tracks[0]
+                .title,
+            "First"
+        );
+        assert_eq!(
+            resolve_music_medium(
+                Some(&release),
+                Some("disc-two"),
+                Some(&assignment),
+                Some(&[1])
+            )
+            .1,
+            MusicDiscMatchState::AssignmentConflictsWithDiscId
+        );
+        assert_eq!(
+            resolve_music_medium(Some(&release), Some("other"), None, Some(&[1])).1,
+            MusicDiscMatchState::DiscIdNotListed
+        );
+        assert_eq!(
+            resolve_music_medium(Some(&release), Some("disc-two"), None, Some(&[1, 2])).1,
+            MusicDiscMatchState::TrackLayoutMismatch
+        );
+    }
+
+    #[test]
     fn presets_seal_exact_music_owned_ranges_and_encoder_identity() {
         let tracks = vec![
             collector_modules::music::ConversionPcmTrack {
@@ -285,6 +379,51 @@ pub struct MusicTrackAvailability {
     pub state: MusicTrackAvailabilityState,
     /// Current actor, module, source and encoder permit explicit preparation.
     pub can_prepare: bool,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MusicAlbumCoverage {
+    pub release_id: Option<String>,
+    pub release_title: Option<String>,
+    pub media: Vec<MusicMediumCoverage>,
+    pub sources: Vec<MusicDiscSourceCoverage>,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MusicMediumCoverage {
+    pub position: u16,
+    pub track_count: usize,
+    pub registered_disc_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MusicDiscSourceCoverage {
+    pub capture_id: CaptureId,
+    pub captured_at: chrono::DateTime<chrono::Utc>,
+    pub source_representation_id: RepresentationId,
+    pub file_label: String,
+    pub file_count: usize,
+    pub recorded_disc_id: Option<String>,
+    pub track_count: Option<usize>,
+    pub assigned_medium_position: Option<u16>,
+    pub medium_position: Option<u16>,
+    pub match_state: MusicDiscMatchState,
+    pub audio_verification: Option<collector_modules::music::AudioVerificationStatus>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicDiscMatchState {
+    NoRelease,
+    NoLayout,
+    DiscIdMatched,
+    CuratorAssigned,
+    SingleMedium,
+    NeedsAssignment,
+    DiscIdNotListed,
+    AmbiguousDiscId,
+    AssignmentConflictsWithDiscId,
+    TrackLayoutMismatch,
 }
 
 #[derive(Clone, Debug)]
@@ -670,6 +809,183 @@ impl CollectionService {
         self.music_track_availability_for_item(actor.user_id, &item)
     }
 
+    pub fn music_album_coverage(
+        &self,
+        actor: &Principal,
+        item_id: collector_core::ItemId,
+    ) -> Result<MusicAlbumCoverage> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, crate::Action::Browse)?;
+        if item.deleted || item.domain.module.0 != "org.junk.music" {
+            return Err(Error::NotFound);
+        }
+        let release = if self.modules.has_module(&item.domain.module)
+            && self.modules.inspect(&item.domain).is_ok()
+        {
+            self.effective_music_release(&item)?
+        } else {
+            None
+        };
+        let assignments = self.music_disc_assignments(&item)?;
+        let mut sources = Vec::new();
+        for capture in item
+            .captures
+            .iter()
+            .filter(|capture| capture.association.item_id == Some(item.id))
+        {
+            for source in capture.representations.iter().filter(|representation| {
+                representation.role == collector_core::RepresentationRole::PreservationMaster
+            }) {
+                let layout = self.recorded_music_layout(item.collection_id, source.id)?;
+                let (disc_id, positions) = match layout {
+                    Some(collector_modules::music::CdProcessingResult::Layout {
+                        tracks,
+                        disc_ids,
+                        ..
+                    }) => (
+                        disc_ids.map(|ids| ids.musicbrainz),
+                        Some(
+                            tracks
+                                .iter()
+                                .map(|track| u16::from(track.position))
+                                .collect::<Vec<_>>(),
+                        ),
+                    ),
+                    _ => (None, None),
+                };
+                let assignment = assignments.iter().find(|value| {
+                    value.source_representation_id == source.id
+                        && release
+                            .as_ref()
+                            .is_some_and(|release| value.release_id == release.release_id)
+                });
+                let (medium, match_state) = resolve_music_medium(
+                    release.as_ref(),
+                    disc_id.as_deref(),
+                    assignment,
+                    positions.as_deref(),
+                );
+                let audio_verification = match self.latest_music_result(
+                    item.collection_id,
+                    source.id,
+                    collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                )? {
+                    Some(collector_modules::music::CdProcessingResult::AudioVerification {
+                        verification,
+                    }) => Some(verification.status),
+                    _ => None,
+                };
+                sources.push(MusicDiscSourceCoverage {
+                    capture_id: capture.id,
+                    captured_at: capture.created_at,
+                    source_representation_id: source.id,
+                    file_label: source
+                        .files
+                        .first()
+                        .map(|file| file.name.clone())
+                        .unwrap_or_else(|| "Original package".into()),
+                    file_count: source.files.len(),
+                    recorded_disc_id: disc_id,
+                    track_count: positions.as_ref().map(Vec::len),
+                    assigned_medium_position: assignment.map(|value| value.medium_position),
+                    medium_position: medium.map(|value| value.position),
+                    match_state,
+                    audio_verification,
+                });
+            }
+        }
+        Ok(MusicAlbumCoverage {
+            release_id: release.as_ref().map(|value| value.release_id.clone()),
+            release_title: release.as_ref().map(|value| value.title.clone()),
+            media: release
+                .as_ref()
+                .map(|value| {
+                    value
+                        .media
+                        .iter()
+                        .map(|medium| MusicMediumCoverage {
+                            position: medium.position,
+                            track_count: medium.tracks.len(),
+                            registered_disc_ids: medium.disc_ids.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            sources,
+        })
+    }
+
+    fn latest_music_result(
+        &self,
+        collection_id: CollectionId,
+        source: RepresentationId,
+        operation: &str,
+    ) -> Result<Option<collector_modules::music::CdProcessingResult>> {
+        let scope = PackageScope::Representation(source);
+        let fingerprint = match self.processing.recorded_source(collection_id, scope) {
+            Ok(value) => value,
+            Err(Error::NotFound) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut after = None;
+        loop {
+            let page = self.processing.observations(&crate::ProcessingQuery {
+                collection_id,
+                source: scope,
+                source_fingerprint: fingerprint.clone(),
+                operation: Some(collector_core::OperationId::new(operation)?),
+                after,
+                limit: 200,
+            })?;
+            for observation in &page.items {
+                if observation.source_fingerprint != fingerprint {
+                    continue;
+                }
+                if operation == "org.junk.music.import-analysis" {
+                    if let Ok(output) = observation
+                        .typed_result
+                        .payload
+                        .parse::<collector_modules::music::MusicImportAnalysisOutput>(
+                    ) && let Some(result) = output.observations.iter().find_map(|value| {
+                        value
+                            .parse::<collector_modules::music::CdProcessingResult>()
+                            .ok()
+                    }) {
+                        return Ok(Some(result));
+                    }
+                } else if let Ok(result) = observation
+                    .typed_result
+                    .payload
+                    .parse::<collector_modules::music::CdProcessingResult>()
+                {
+                    return Ok(Some(result));
+                }
+            }
+            if page.next_cursor.is_none() {
+                return Ok(None);
+            }
+            after = page.items.last().map(|value| value.id);
+        }
+    }
+
+    fn recorded_music_layout(
+        &self,
+        collection_id: CollectionId,
+        source: RepresentationId,
+    ) -> Result<Option<collector_modules::music::CdProcessingResult>> {
+        for operation in [
+            collector_modules::music::CD_STRUCTURE_OPERATION,
+            "org.junk.music.import-analysis",
+        ] {
+            if let Some(layout @ collector_modules::music::CdProcessingResult::Layout { .. }) =
+                self.latest_music_result(collection_id, source, operation)?
+            {
+                return Ok(Some(layout));
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn music_track_availability_for_item(
         &self,
         user_id: collector_core::UserId,
@@ -695,17 +1011,26 @@ impl CollectionService {
             .filter(|_| readable_music_schema)
             .map(|music| music.tracks)
             .unwrap_or_default();
-        let title_for = |position: u16| {
+        let manual_title_for = |position: u16| {
             titles
                 .iter()
                 .find(|track| track.position == position)
                 .map(|track| track.title.trim())
                 .filter(|title| {
-                    !title.is_empty() && title.len() <= 512 && !title.chars().any(char::is_control)
+                    !title.is_empty()
+                        && title.len() <= 512
+                        && !title.chars().any(char::is_control)
+                        && *title != format!("Track {position:02}")
                 })
                 .map(str::to_owned)
-                .unwrap_or_else(|| format!("Track {position:02}"))
         };
+        let release = if readable_music_schema {
+            self.effective_music_release(item)?
+        } else {
+            None
+        };
+        let assignments = self.music_disc_assignments(item)?;
+        let unscoped_manual_titles = item.captures.len() == 1;
         let profiles = [
             ConversionProfile::Flac,
             ConversionProfile::Opus { bitrate_kbps: 96 },
@@ -773,6 +1098,34 @@ impl CollectionService {
                 }
                 tracks.sort_by_key(|track| track.position);
                 tracks.dedup_by_key(|track| track.position);
+                let disc_id = if release.is_some() {
+                    match self.recorded_music_layout(capture.collection_id, source.id)? {
+                        Some(collector_modules::music::CdProcessingResult::Layout {
+                            disc_ids: Some(ids),
+                            ..
+                        }) => Some(ids.musicbrainz),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let assignment = assignments.iter().find(|value| {
+                    value.source_representation_id == source.id
+                        && release
+                            .as_ref()
+                            .is_some_and(|release| value.release_id == release.release_id)
+                });
+                let positions = tracks
+                    .iter()
+                    .map(|track| track.position)
+                    .collect::<Vec<_>>();
+                let medium = resolve_music_medium(
+                    release.as_ref(),
+                    disc_id.as_deref(),
+                    assignment,
+                    Some(&positions),
+                )
+                .0;
                 for track in tracks {
                     for profile in profiles.iter().cloned() {
                         let published = retained
@@ -835,7 +1188,19 @@ impl CollectionService {
                             track_position: track.position,
                             start_frame: track.start,
                             frame_count: track.length,
-                            title: title_for(track.position),
+                            title: unscoped_manual_titles
+                                .then(|| manual_title_for(track.position))
+                                .flatten()
+                                .or_else(|| {
+                                    medium.and_then(|medium| {
+                                        medium
+                                            .tracks
+                                            .iter()
+                                            .find(|named| named.position == track.position)
+                                            .map(|named| named.title.clone())
+                                    })
+                                })
+                                .unwrap_or_else(|| format!("Track {:02}", track.position)),
                             profile,
                             can_prepare: writable_music
                                 && source_readable
@@ -1033,6 +1398,76 @@ pub(super) fn profile_for_recipe(recipe: &ConversionRecipe) -> ConversionProfile
         ConversionSettings::Flac { .. } => ConversionProfile::Flac,
         ConversionSettings::Opus { bitrate_kbps, .. } => ConversionProfile::Opus { bitrate_kbps },
     }
+}
+
+#[cfg(test)]
+fn matching_musicbrainz_medium<'a>(
+    release: &'a collector_modules::music::MusicBrainzReleaseObservation,
+    disc_id: Option<&str>,
+    tracks: &[ConversionTrack],
+) -> Option<&'a collector_modules::music::MusicBrainzMediumObservation> {
+    let positions = tracks
+        .iter()
+        .map(|track| track.position)
+        .collect::<Vec<_>>();
+    resolve_music_medium(Some(release), disc_id, None, Some(&positions)).0
+}
+
+fn resolve_music_medium<'a>(
+    release: Option<&'a collector_modules::music::MusicBrainzReleaseObservation>,
+    disc_id: Option<&str>,
+    assignment: Option<&collector_modules::music::MusicDiscAssignment>,
+    positions: Option<&[u16]>,
+) -> (
+    Option<&'a collector_modules::music::MusicBrainzMediumObservation>,
+    MusicDiscMatchState,
+) {
+    let Some(release) = release else {
+        return (None, MusicDiscMatchState::NoRelease);
+    };
+    let Some(positions) = positions.filter(|positions| !positions.is_empty()) else {
+        return (None, MusicDiscMatchState::NoLayout);
+    };
+    let (medium, state) = if let Some(assignment) = assignment {
+        let Some(medium) = release
+            .media
+            .iter()
+            .find(|medium| medium.position == assignment.medium_position)
+        else {
+            return (None, MusicDiscMatchState::NeedsAssignment);
+        };
+        if disc_id.is_some_and(|id| !medium.disc_ids.iter().any(|value| value == id)) {
+            return (None, MusicDiscMatchState::AssignmentConflictsWithDiscId);
+        }
+        (medium, MusicDiscMatchState::CuratorAssigned)
+    } else if let Some(id) = disc_id {
+        let mut matches = release
+            .media
+            .iter()
+            .filter(|medium| medium.disc_ids.iter().any(|value| value == id));
+        let Some(medium) = matches.next() else {
+            return (None, MusicDiscMatchState::DiscIdNotListed);
+        };
+        if matches.next().is_some() {
+            return (None, MusicDiscMatchState::AmbiguousDiscId);
+        }
+        (medium, MusicDiscMatchState::DiscIdMatched)
+    } else if release.media.len() == 1 {
+        (&release.media[0], MusicDiscMatchState::SingleMedium)
+    } else {
+        return (None, MusicDiscMatchState::NeedsAssignment);
+    };
+    if medium.tracks.len() != positions.len()
+        || positions.iter().any(|position| {
+            !medium
+                .tracks
+                .iter()
+                .any(|track| track.position == *position)
+        })
+    {
+        return (None, MusicDiscMatchState::TrackLayoutMismatch);
+    }
+    (Some(medium), state)
 }
 
 fn profile_order(profile: &ConversionProfile) -> u8 {

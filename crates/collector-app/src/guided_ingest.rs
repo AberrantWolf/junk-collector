@@ -601,7 +601,21 @@ impl CollectionService {
                     identity: IdentityState::Unidentified,
                     translations: vec![],
                     identifiers: vec![],
-                    specimens: vec![],
+                    specimens: vec![Specimen {
+                        id: SpecimenId(super::deterministic_inventory_uuid(
+                            intent.user_id,
+                            "guided-import-copy",
+                            &intent.import_id.to_string(),
+                        )),
+                        label: "Imported copy".into(),
+                        condition: Condition::Unknown,
+                        ownership: Ownership::Owned,
+                        possession: Possession::Present,
+                        components: vec![],
+                        acquisition: None,
+                        private_notes: None,
+                        loans: vec![],
+                    }],
                     wishlist: false,
                     captures: vec![],
                     assets: vec![],
@@ -799,9 +813,24 @@ impl CollectionService {
             return Ok(());
         }
         let item = self.reader.item(intent.target_item_id)?;
+        let automatic_copy = item.specimens.len() == 1
+            && item.specimens[0].id
+                == SpecimenId(super::deterministic_inventory_uuid(
+                    intent.user_id,
+                    "guided-import-copy",
+                    &intent.import_id.to_string(),
+                ))
+            && item.specimens[0].label == "Imported copy"
+            && matches!(item.specimens[0].condition, Condition::Unknown)
+            && matches!(item.specimens[0].ownership, Ownership::Owned)
+            && item.specimens[0].possession == Possession::Present
+            && item.specimens[0].components.is_empty()
+            && item.specimens[0].acquisition.is_none()
+            && item.specimens[0].private_notes.is_none()
+            && item.specimens[0].loans.is_empty();
         if item.deleted
             || !item.captures.is_empty()
-            || !item.specimens.is_empty()
+            || (!item.specimens.is_empty() && !automatic_copy)
             || item.wishlist
             || !item.assets.is_empty()
             || item.title != intent.default_title

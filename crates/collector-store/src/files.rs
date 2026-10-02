@@ -969,7 +969,7 @@ impl Store {
         item_id: ItemId,
         representation: RepresentationId,
         index: usize,
-    ) -> Result<(PathBuf, StoredFile)> {
+    ) -> Result<(PathBuf, StoredFile, bool)> {
         let item = self.item(item_id)?;
         if item.deleted {
             return Err(Error::NotFound);
@@ -1050,11 +1050,18 @@ impl Store {
                 .join("payload")
                 .join(representation.to_string())
         };
-        let path = fs::canonicalize(root.join(&file.name)).map_err(storage)?;
+        let path = fs::canonicalize(root.join(&file.name)).map_err(|error| {
+            if canonical_derivative {
+                tracing::error!(%error, representation = %representation, "prepared media path unavailable");
+                Error::PreparedMediaInvalid
+            } else {
+                storage(error)
+            }
+        })?;
         if !path.starts_with(fs::canonicalize(root).map_err(storage)?) {
             return Err(Error::Forbidden);
         }
-        Ok((path, file))
+        Ok((path, file, canonical_derivative))
     }
     pub(crate) fn asset_state_record(&self, asset_id: AssetId) -> Result<AssetState> {
         let record: String = lock(&self.db)?
@@ -1513,7 +1520,7 @@ impl Store {
             for (index, file) in representation.files.iter().enumerate() {
                 let check = self
                     .representation_path(item.id, representation.id, index)
-                    .and_then(|(path, _)| hash_file(&path));
+                    .and_then(|(path, _, _)| hash_file(&path));
                 let matches = check
                     .is_ok_and(|(length, digest)| length == file.bytes && digest == file.digest);
                 passed &= matches;

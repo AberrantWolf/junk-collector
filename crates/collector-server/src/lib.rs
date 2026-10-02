@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
@@ -19,7 +19,7 @@ use collector_app::{
     CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView,
     ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary, ImportView, IngestDetail,
     IngestDiscardResult, IngestPlan, IngestSummary, JobView, MediaResource, MetadataArtworkOption,
-    MetadataReviewView, MusicAlbumPreparationPlan, MusicPreparationBatchView,
+    MetadataReviewView, MusicAlbumCoverage, MusicAlbumPreparationPlan, MusicPreparationBatchView,
     MusicTrackAvailability, NativeDeviceView, PasskeyView, PlanIngestCommand, PrepareMusicAlbum,
     PrepareMusicTrack, PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem,
     ProcessingSummary, PublishProviderArtworkCommand, RetryIngestCommand, ReturnLoanCommand,
@@ -402,6 +402,11 @@ impl IntoResponse for ApiError {
                     "Storage operation failed; check the server log".into(),
                 )
             }
+            Error::PreparedMediaInvalid => (
+                StatusCode::CONFLICT,
+                "prepared_media_invalid",
+                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is preserved; ask a curator to repair this prepared track.".into(),
+            ),
         };
         (
             status,
@@ -539,6 +544,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(asset_original))
         .routes(routes!(asset_thumbnail))
         .routes(routes!(music_track_availability))
+        .routes(routes!(music_album_coverage))
         .routes(routes!(media))
 }
 
@@ -1840,7 +1846,7 @@ async fn item_asset(
     let actor = principal(&state, &headers)?;
     let resource =
         blocking(move || state.service.asset(&actor, id, asset, query.thumbnail)).await?;
-    file_response(resource, headers).await
+    file_response(resource, headers, false).await
 }
 
 #[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, body = PresentedAsset), (status = 403), (status = 404)))]
@@ -1868,7 +1874,7 @@ async fn asset_original(
             .asset_resource(&actor, collection, asset, false)
     })
     .await?;
-    file_response(resource, headers).await
+    file_response(resource, headers, false).await
 }
 
 #[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}/thumbnail", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, content_type = "image/png"), (status = 206, content_type = "image/png"), (status = 403), (status = 404), (status = 416)))]
@@ -1884,7 +1890,7 @@ async fn asset_thumbnail(
             .asset_resource(&actor, collection, asset, true)
     })
     .await?;
-    file_response(resource, headers).await
+    file_response(resource, headers, false).await
 }
 
 #[derive(Clone, Copy, Deserialize, utoipa::ToSchema)]
@@ -2026,6 +2032,7 @@ async fn tombstone_asset(
 #[utoipa::path(get, path = "/api/v1/items/{id}/representations/{representation}/{index}", params(("id" = ItemId, Path), ("representation" = RepresentationId, Path), ("index" = usize, Path)), responses((status = 200, content_type = "application/octet-stream"), (status = 206, content_type = "application/octet-stream"), (status = 403), (status = 404), (status = 416)))]
 async fn media(
     State(state): State<AppState>,
+    method: Method,
     headers: HeaderMap,
     Path((id, representation, index)): Path<(ItemId, RepresentationId, usize)>,
 ) -> ApiResult<Response> {
@@ -2036,7 +2043,7 @@ async fn media(
             .representation(&actor, id, representation, index)
     })
     .await?;
-    file_response(resource, headers).await
+    file_response(resource, headers, method != Method::HEAD).await
 }
 
 #[utoipa::path(get, path = "/api/v1/items/{id}/music-tracks", params(("id" = ItemId, Path)), responses((status = 200, body = Vec<MusicTrackAvailability>), (status = 403), (status = 404)))]
@@ -2048,6 +2055,18 @@ async fn music_track_availability(
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.music_track_availability(&actor, id)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/items/{id}/music-disc-coverage", params(("id" = ItemId, Path)), responses((status = 200, body = MusicAlbumCoverage), (status = 403), (status = 404)))]
+async fn music_album_coverage(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<Json<MusicAlbumCoverage>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.music_album_coverage(&actor, id)).await?,
     ))
 }
 
@@ -2238,11 +2257,82 @@ mod security_tests {
         assert_eq!(normalized_origin_header("null"), None);
     }
 }
-async fn file_response(resource: MediaResource, headers: HeaderMap) -> ApiResult<Response> {
+fn verify_transfer_bytes(
+    reader: &mut dyn collector_app::MediaReader,
+    length: u64,
+    digest: &Digest,
+) -> Result<()> {
+    use sha2::Digest as _;
+    let mut hash = sha2::Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    let mut read_bytes = 0u64;
+    loop {
+        let count = reader.read(&mut buffer).map_err(|error| {
+            tracing::error!(%error, "prepared media read failed");
+            Error::PreparedMediaInvalid
+        })?;
+        if count == 0 {
+            break;
+        }
+        read_bytes = read_bytes
+            .checked_add(count as u64)
+            .ok_or(Error::Conflict)?;
+        if read_bytes > length {
+            return Err(Error::PreparedMediaInvalid);
+        }
+        hash.update(&buffer[..count]);
+    }
+    if read_bytes != length
+        || digest.algorithm != HashAlgorithm::Sha256
+        || hex::encode(hash.finalize()) != digest.hex
+    {
+        return Err(Error::PreparedMediaInvalid);
+    }
+    reader.seek(SeekFrom::Start(0)).map_err(|error| {
+        tracing::error!(%error, "prepared media rewind failed");
+        Error::PreparedMediaInvalid
+    })?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod derivative_transfer_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn transfer_checks_derivative_bytes_before_serving_them() {
+        let expected = b"published FLAC bytes";
+        let digest = Digest::sha256(expected);
+        let mut intact = Cursor::new(expected.to_vec());
+        verify_transfer_bytes(&mut intact, expected.len() as u64, &digest).unwrap();
+        assert_eq!(intact.position(), 0);
+
+        let mut changed = Cursor::new(b"published fLAC bytes".to_vec());
+        assert!(verify_transfer_bytes(&mut changed, expected.len() as u64, &digest).is_err());
+
+        let mut truncated = Cursor::new(expected[..expected.len() - 1].to_vec());
+        assert!(verify_transfer_bytes(&mut truncated, expected.len() as u64, &digest).is_err());
+    }
+}
+
+async fn file_response(
+    resource: MediaResource,
+    headers: HeaderMap,
+    verify_bytes: bool,
+) -> ApiResult<Response> {
     let length = resource.length;
     let etag = format!("\"{}\"", resource.digest.hex);
     let media_type = resource.media_type;
     let mut reader = resource.reader;
+    if verify_bytes && resource.verify_on_transfer {
+        let digest = resource.digest;
+        reader = blocking(move || {
+            verify_transfer_bytes(reader.as_mut(), length, &digest)?;
+            Ok(reader)
+        })
+        .await?;
+    }
     let range = headers
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())

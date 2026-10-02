@@ -12,6 +12,7 @@ fn authorized_resource_becomes_opaque_audio_source_without_a_path() {
         media_type: "audio/wav".into(),
         digest: Digest::sha256(&bytes),
         download_name: "curator name.WAV".into(),
+        verify_on_transfer: false,
     };
 
     let mut source = resource.into_audio_source();

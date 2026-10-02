@@ -193,6 +193,8 @@ impl Store {
         publication_fault: Arc<dyn PublicationFaultInjector>,
         clock: Arc<dyn Clock>,
     ) -> Result<Self> {
+        let startup = std::time::Instant::now();
+        tracing::info!("opening archive and private state");
         fs::create_dir_all(archive.as_ref()).map_err(storage)?;
         fs::create_dir_all(state.as_ref()).map_err(storage)?;
         let archive = fs::canonicalize(archive).map_err(storage)?;
@@ -253,6 +255,10 @@ impl Store {
         commands::recover(&mut db, &archive, &state)?;
         migration::migrate_schema_one(&archive)?;
         migration_v3::migrate_schema_two(&archive)?;
+        tracing::info!(
+            elapsed_ms = startup.elapsed().as_millis(),
+            "startup recovery and migrations complete"
+        );
         let store = Self {
             archive,
             state,
@@ -269,11 +275,19 @@ impl Store {
             _private_lock: Arc::new(private_lock),
         };
         store.cleanup_derivative_scratch()?;
-        store.reindex()?;
+        store.reindex_catalog(false)?;
+        tracing::info!(
+            elapsed_ms = startup.elapsed().as_millis(),
+            "startup catalog reindex complete"
+        );
         store.rebuild_scan_admissions()?;
         store.recover_private_publications()?;
         store.reconcile_job_publications()?;
         store.reconcile_import_cleanup()?;
+        tracing::info!(
+            elapsed_ms = startup.elapsed().as_millis(),
+            "startup private-state reconciliation complete"
+        );
         let journal_store = publication::PublicationJournalStore::new(&store.archive);
         for transaction_id in &store.recovery_report.committed {
             journal_store.advance(
@@ -282,6 +296,10 @@ impl Store {
             )?;
             journal_store.finish(*transaction_id)?;
         }
+        tracing::info!(
+            elapsed_ms = startup.elapsed().as_millis(),
+            "startup store ready"
+        );
         Ok(store)
     }
     /// Startup's read-only classification of durable publication state.
@@ -310,8 +328,13 @@ impl Store {
         .map_err(storage)?;
         Ok(id)
     }
-    /// Scan only committed metadata revisions, never payload bytes. No grants are reconstructed.
+    /// Rebuild committed metadata and validate prepared derivative payloads.
+    /// No grants are reconstructed. Startup uses the metadata-only variant.
     pub fn reindex(&self) -> Result<()> {
+        self.reindex_catalog(true)
+    }
+
+    fn reindex_catalog(&self, verify_derivative_bytes: bool) -> Result<()> {
         let _writer = lock(&self.writer)?;
         let mut collections = Vec::new();
         let mut records = Vec::new();
@@ -611,7 +634,7 @@ impl Store {
             browse::set_added(&tx, record.item.id, added)?;
         }
         self.project_v4_records(&tx)?;
-        self.validate_derivative_projection(&tx)?;
+        self.validate_derivative_projection(&tx, verify_derivative_bytes)?;
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
         Ok(())
@@ -1019,13 +1042,35 @@ impl ContentPort for Store {
         representation: RepresentationId,
         index: usize,
     ) -> Result<MediaResource> {
-        let (path, file) = self.representation_path(item, representation, index)?;
-        let reader = File::open(&path).map_err(storage)?;
-        let length = reader.metadata().map_err(storage)?.len();
+        let (path, file, verify_on_transfer) =
+            self.representation_path(item, representation, index)?;
+        let reader = File::open(&path).map_err(|error| {
+            if verify_on_transfer {
+                tracing::error!(%error, "prepared media could not be opened");
+                Error::PreparedMediaInvalid
+            } else {
+                storage(error)
+            }
+        })?;
+        let length = reader
+            .metadata()
+            .map_err(|error| {
+                if verify_on_transfer {
+                    tracing::error!(%error, "prepared media metadata unavailable");
+                    Error::PreparedMediaInvalid
+                } else {
+                    storage(error)
+                }
+            })?
+            .len();
         if length != file.bytes.0 {
-            return Err(Error::Storage(
-                "stored representation length disagrees with its immutable record".into(),
-            ));
+            return Err(if verify_on_transfer {
+                Error::PreparedMediaInvalid
+            } else {
+                Error::Storage(
+                    "stored representation length disagrees with its immutable record".into(),
+                )
+            });
         }
         let media_type = match path
             .extension()
@@ -1045,6 +1090,7 @@ impl ContentPort for Store {
             media_type: media_type.into(),
             digest: file.digest,
             download_name: file.name,
+            verify_on_transfer,
         })
     }
 
@@ -1059,6 +1105,7 @@ impl ContentPort for Store {
             media_type,
             digest,
             download_name,
+            verify_on_transfer: false,
         })
     }
 

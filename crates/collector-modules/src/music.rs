@@ -5,7 +5,8 @@ use std::io::{Read, SeekFrom};
 
 use collector_core::{
     ByteLength, CdSector, CdTrackKind, CdTrackLayout, Digest, HashAlgorithm, ModuleData,
-    PackageFileId, PackageInventory, PcmFrame, RawJson, SampleFrame, StereoSampleFrameOffset,
+    PackageFileId, PackageInventory, PcmFrame, RawJson, RepresentationId, SampleFrame,
+    StereoSampleFrameOffset,
 };
 use junk_libs_accuraterip::{
     BoundedDiscReader, DbarFile, DbarResponse, DiscPcmTrack, ExpectedChecksum,
@@ -60,6 +61,16 @@ pub struct MusicItemPatch {
 #[serde(deny_unknown_fields)]
 pub struct MusicMetadataOverrides {
     pub artist: Option<String>,
+    #[serde(default)]
+    pub disc_assignments: Vec<MusicDiscAssignment>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MusicDiscAssignment {
+    pub source_representation_id: RepresentationId,
+    pub release_id: String,
+    pub medium_position: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -2064,7 +2075,20 @@ impl CollectionModule for Music {
             .payload
             .parse()
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
-        validate_texts([&value.artist])
+        validate_texts([&value.artist])?;
+        if value.disc_assignments.len() > 128 {
+            return Err(ModuleError::Invalid("too many disc assignments".into()));
+        }
+        let mut sources = std::collections::BTreeSet::new();
+        for assignment in &value.disc_assignments {
+            if assignment.medium_position == 0
+                || assignment.release_id.len() != 36
+                || !sources.insert(assignment.source_representation_id)
+            {
+                return Err(ModuleError::Invalid("invalid disc assignment".into()));
+            }
+        }
+        Ok(())
     }
 
     fn validate_operation_result(

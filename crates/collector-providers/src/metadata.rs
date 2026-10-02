@@ -191,7 +191,7 @@ impl MusicBrainzProvider {
                 format!("/ws/2/release/{release_id}"),
                 vec![
                     ("fmt", "json".to_owned()),
-                    ("inc", "artist-credits+media+release-groups".to_owned()),
+                    ("inc", "artist-credits+recordings+release-groups".to_owned()),
                 ],
             ),
             MusicBrainzQuery::DiscId { disc_id, .. } => (
@@ -972,7 +972,25 @@ struct Artist {
 #[derive(Deserialize)]
 struct Medium {
     #[serde(default)]
+    position: Option<u16>,
+    #[serde(default)]
     discs: Vec<Disc>,
+    #[serde(default)]
+    tracks: Vec<MusicBrainzTrack>,
+}
+
+#[derive(Deserialize)]
+struct MusicBrainzTrack {
+    position: u16,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    recording: Option<MusicBrainzRecording>,
+}
+
+#[derive(Deserialize)]
+struct MusicBrainzRecording {
+    title: String,
 }
 
 #[derive(Deserialize)]
@@ -1028,11 +1046,36 @@ fn normalize_musicbrainz_release(release: MusicBrainzRelease) -> Result<RawJson>
     }
     artist_ids.sort();
     artist_ids.dedup();
-    let mut disc_ids = release
+    let media = release
         .media
         .into_iter()
-        .flat_map(|medium| medium.discs)
-        .map(|disc| disc.id)
+        .enumerate()
+        .map(
+            |(index, medium)| collector_modules::music::MusicBrainzMediumObservation {
+                position: medium.position.unwrap_or((index + 1) as u16),
+                disc_ids: medium.discs.into_iter().map(|disc| disc.id).collect(),
+                tracks: medium
+                    .tracks
+                    .into_iter()
+                    .filter_map(|track| {
+                        track
+                            .title
+                            .or_else(|| track.recording.map(|value| value.title))
+                            .filter(|title| !title.trim().is_empty())
+                            .map(
+                                |title| collector_modules::music::MusicBrainzTrackObservation {
+                                    position: track.position,
+                                    title,
+                                },
+                            )
+                    })
+                    .collect(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let mut disc_ids = media
+        .iter()
+        .flat_map(|medium| medium.disc_ids.iter().cloned())
         .collect::<Vec<_>>();
     disc_ids.sort();
     disc_ids.dedup();
@@ -1049,6 +1092,7 @@ fn normalize_musicbrainz_release(release: MusicBrainzRelease) -> Result<RawJson>
         artist_ids,
         release_group_id: release.release_group.map(|value| value.id),
         disc_ids,
+        media,
     };
     observation.validate()?;
     Ok(RawJson::from_value(
@@ -1420,6 +1464,22 @@ fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn musicbrainz_tracks_remain_bound_to_their_medium() {
+        let query = MusicBrainzQuery::ReleaseId {
+            release_id: "00000000-0000-0000-0000-000000000001".into(),
+            refresh: false,
+        };
+        let body = br#"{"id":"00000000-0000-0000-0000-000000000001","title":"Album","media":[{"position":1,"discs":[{"id":"disc-one"}],"tracks":[{"position":1,"title":"First"}]},{"position":2,"discs":[{"id":"disc-two"}],"tracks":[{"position":1,"title":"Second"}]}]}"#;
+        let releases = normalize_musicbrainz_body(&query, body).unwrap();
+        let release: MusicBrainzReleaseObservation = releases[0].parse().unwrap();
+        assert_eq!(release.media.len(), 2);
+        assert_eq!(release.media[0].disc_ids, ["disc-one"]);
+        assert_eq!(release.media[0].tracks[0].title, "First");
+        assert_eq!(release.media[1].disc_ids, ["disc-two"]);
+        assert_eq!(release.media[1].tracks[0].title, "Second");
+    }
 
     #[test]
     fn production_destinations_include_archive_storage_but_reject_private_addresses() {

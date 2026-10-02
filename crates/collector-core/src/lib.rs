@@ -1468,6 +1468,8 @@ pub enum Error {
     Unavailable(String),
     #[error("storage failure: {0}")]
     Storage(String),
+    #[error("prepared media is missing, unreadable, or differs from its recorded bytes")]
+    PreparedMediaInvalid,
 }
 pub type Result<T> = std::result::Result<T, Error>;
 

@@ -6458,6 +6458,12 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     let target = detail.summary.target_item_id.unwrap();
     let current_item = store.item(target).unwrap();
     assert_eq!(current_item.title, "Guided album");
+    assert_eq!(current_item.specimens.len(), 1);
+    assert!(matches!(
+        current_item.specimens[0].ownership,
+        Ownership::Owned
+    ));
+    assert_eq!(current_item.specimens[0].possession, Possession::Present);
     let authority = store
         .metadata_authority(collection.id, target)
         .unwrap()
@@ -6801,6 +6807,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
     let saved = store.item(existing.id).unwrap();
     assert_eq!(saved.title, existing.title);
     assert_eq!(saved.subtitle, existing.subtitle);
+    assert_eq!(saved.specimens.len(), existing.specimens.len());
     let mut edited = saved.clone();
     edited.title = "Edited after acceptance".into();
     let edited = store.save(edited, saved.revision).unwrap();
@@ -13248,7 +13255,8 @@ fn derivative_reindex_rejects_corrupt_published_bytes_and_preserves_master() {
     assert_eq!(std::fs::read(master).unwrap(), preserved);
     drop(service);
     drop(store);
-    assert!(Store::open(root.path().join("archive"), root.path().join("state")).is_err());
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(reopened.reindex().is_err());
 }
 
 #[test]
@@ -13606,7 +13614,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
 }
 
 #[test]
-fn metadata_refresh_uses_current_versions_and_keeps_historical_selection() {
+fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let mut candidate = MetadataCandidateObservation {
@@ -13624,9 +13632,10 @@ fn metadata_refresh_uses_current_versions_and_keeps_historical_selection() {
         complete_identity: false,
         strength: MatchStrength::Name,
         provider_priority: 10,
-        observation: RawJson::from_json("{}").unwrap(),
+        observation: RawJson::from_json(r#"{"a":1,"b":2}"#).unwrap(),
     };
     let original = candidate.identity.clone();
+    let old_candidate = candidate.clone();
     let refresh = |expected_revision, candidate| RefreshMetadataCommand {
         expected_revision: Revision(expected_revision),
         observation: MetadataRefreshObservation {
@@ -13660,36 +13669,46 @@ fn metadata_refresh_uses_current_versions_and_keeps_historical_selection() {
         .unwrap();
     assert_eq!(
         new.display.unwrap().title.value,
-        "New title",
-        "old hash order cannot win automatic selection"
+        "Old title",
+        "the displayed candidate must survive a non-equivalent refresh"
     );
+    store.reindex().unwrap();
+    let historical = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(historical.display.title.value, "Old title");
+    assert_eq!(historical.candidates.len(), 2);
+    assert_eq!(
+        historical.authority.selected_candidate,
+        Some(original.clone())
+    );
+    let mut equivalent = old_candidate;
+    equivalent.identity.provider_record_version = Some("equivalent-new".into());
+    equivalent.observation = RawJson::from_json(r#"{"b":2,"a":1}"#).unwrap();
+    service
+        .refresh_metadata(&actor, saved.id, refresh(3, equivalent.clone()), &command())
+        .unwrap();
+    let matched = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(matched.candidates.len(), 1);
+    assert_eq!(
+        matched.authority.selected_candidate,
+        Some(equivalent.identity.clone())
+    );
+    assert_eq!(matched.display.title.value, "Old title");
     store.reindex().unwrap();
     assert_eq!(
         service
             .metadata_view(&actor, saved.id)
             .unwrap()
-            .display
-            .title
-            .value,
-        "New title"
+            .candidates
+            .len(),
+        1
     );
-    service
-        .update_metadata_authority(
-            &actor,
-            saved.id,
-            UpdateMetadataAuthorityCommand {
-                expected_revision: Revision(3),
-                change: MetadataAuthorityChange::SelectCandidate {
-                    candidate: original,
-                },
-            },
-            &command(),
-        )
-        .unwrap();
-    store.reindex().unwrap();
-    let historical = service.metadata_view(&actor, saved.id).unwrap();
-    assert_eq!(historical.display.title.value, "Old title");
-    assert_eq!(historical.candidates.len(), 2);
+    let mut reused_identity = equivalent;
+    reused_identity.identity = original;
+    reused_identity.title.value = "Conflicting reuse".into();
+    assert!(matches!(
+        service.refresh_metadata(&actor, saved.id, refresh(4, reused_identity), &command()),
+        Err(Error::Conflict)
+    ));
 }
 
 #[test]
