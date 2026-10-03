@@ -192,7 +192,7 @@ All audit findings are assigned: UX-01/02/04/10/11 → FX-01; UX-16/17/18 → FX
 
 - **P05 export/full backup tooling remains paused/outside this fix set.** Use the existing stopped-server backup/restore runbook for actual-data changes and test temporary roots. Preserve records needed by future export. Full P05.1–P05.3 is useful later, but not a dependency for reversible removal or history cleanup.
 - **Permanent deletion of published payloads is excluded.** It needs a separate reference/retention/recovery design; none of these controls should imply disk reclamation for preserved masters.
-- **P06 full incremental startup and R02 formal scale/deployment remain deferred.** Add bounded indexes/query tests needed by these screens without absorbing the entire storage/performance milestone.
+- **P06 was deferred from this fix set; its separate user-prioritized delivery is now locally implemented (2026-10-03).** See [P06 validation](validation/p06-indexing.md). R02 formal scale/deployment qualification remains outstanding.
 - **C06 events remain deferred.** Correct polling, pagination and durable reconciliation suffice for this delivery.
 - **Native/offline clients, Trash Amp, TLS rotation/discovery, legacy migration, new providers/formats and document attachments remain deferred.** Their absence must remain honest in the UI.
 - **Completed D06/D07/LA1/LA2 are reused, not restarted.** Revalidate affected behavior without claiming new external qualification.

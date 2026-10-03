@@ -1,5 +1,12 @@
 # Validation recorded for the foundation
 
+## Catalog startup and write performance — 2026-10-03
+
+[P06 validation](validation/p06-indexing.md) records checkpoint reuse, indexed
+write validation, generated scale measurements and recovery/authorization tests.
+It supersedes the unconditional metadata-reindex limitation in the dated records
+below; R02 hardware qualification and P05 backup/export UI remain outstanding.
+
 ## Prepared-audio startup and album display — 2026-09-28
 
 Startup reindexes derivative records without opening or hashing their FLAC

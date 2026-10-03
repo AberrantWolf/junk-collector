@@ -33,14 +33,15 @@ cargo build --locked --release -p collector-server
 ./target/release/collector-server serve
 ```
 
-Startup rebuilds the catalog from archive metadata and checks published snapshot
-bytes, but does not read prepared-audio payloads. A prepared track is checked
-against its recorded length and SHA-256 before each GET transfer; a changed or
-unreadable file is rejected with an actionable player error. Explicit full
-reindex checks prepared-audio bytes too. Startup logs cumulative times for
-recovery, reindexing, and private-state reconciliation. The workspace optimizes
+Startup reuses the maintained catalog when archive metadata and its checkpoint
+are unchanged. It checks file metadata without reading music or snapshot bytes.
+A stale, missing or damaged catalog is rebuilt from the archive; explicit full
+reindex checks prepared-audio bytes too. Prepared tracks are checked against their
+recorded length and SHA-256 before GET transfer, with actionable player errors
+for changed or unreadable files. Startup logs checkpoint reuse and cumulative
+recovery, catalog and private-reconciliation times. The workspace optimizes
 SHA-256 in debug builds; the release binary remains the recommended server.
-Incremental startup indexing is tracked under P06 in the handoff backlog.
+See [P06 measurements and recovery checks](docs/validation/p06-indexing.md).
 
 `setup` prompts for a password of at least 12 characters and creates:
 

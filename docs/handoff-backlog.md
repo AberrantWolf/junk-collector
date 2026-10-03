@@ -34,6 +34,13 @@ changes. The integrated alpha/FX-01 checkpoint was committed as `20c4ff0` on 202
 criteria complete only with corresponding evidence, not because an alpha delivery
 mentions them.
 
+## Performance delivery — P06 locally implemented
+
+2026-10-03: user-prioritized P06 replaces unconditional metadata rebuilds with
+checkpoint reuse and ordinary whole-collection write validation with indexed
+neighborhoods. See [validation](validation/p06-indexing.md). LA3 second-device
+qualification remains outstanding; P05.1 remains paused.
+
 ## Usability fixes — FX-07 locally accepted
 
 [FX-01–FX-07](ux-fix-plan.md) maps the combined UX and lifecycle work. FX-01,
@@ -587,6 +594,8 @@ Implement portable archive export, exportable revisions/tombstones/changes, cons
 ### P06 — Incremental catalog startup and indexing
 
 **Review · Dependencies:** P01, P05. **Owner:** store projection/reindex adapter.
+
+**Status (2026-10-03): implemented locally; validation recorded in [P06 indexing](validation/p06-indexing.md).** User-prioritized performance delivery supersedes the paused serial order. P01 recovery remains mandatory. The P05 dependency is satisfied here only for the projection restore contract: checkpoint/path/change observations cannot override restored archives; absent, stale or damaged catalogs rebuild without replacing private access state. P05 portable backup/export UI remains paused and incomplete. New publications maintain projections/checkpoints incrementally; changed external archives fall back to a complete rebuild. R02 deployment qualification remains outstanding.
 
 Replace unconditional full startup reindex with verified incremental replay/index maintenance, retaining an explicit complete rebuild path. Define checkpoints relative to the archive commit point and handle missing/corrupt projections. Replace whole-collection graph/reference scans on writes with indexed ownership/reference checks, preserving the same invariants and testing write cost at scale.
 

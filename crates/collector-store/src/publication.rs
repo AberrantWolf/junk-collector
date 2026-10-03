@@ -183,6 +183,10 @@ impl<'a> PublicationJournalStore<'a> {
         Ok(())
     }
 
+    pub(crate) fn read_transaction(&self, id: TransactionId) -> Result<PublicationJournal> {
+        self.read(&self.journal_path(id))
+    }
+
     pub(crate) fn phase(&self, transaction_id: TransactionId) -> Result<Option<PublicationPhase>> {
         let path = self.journal_path(transaction_id);
         if !path.exists() {
@@ -426,7 +430,7 @@ impl<'a> PublicationJournalStore<'a> {
     }
 }
 
-fn validate_relative_path(value: &str) -> Result<()> {
+pub(crate) fn validate_relative_path(value: &str) -> Result<()> {
     if value.is_empty() || value.contains('\\') || value.chars().any(char::is_control) {
         return Err(Error::Storage(
             "publication journal path must be a safe archive-relative path".into(),

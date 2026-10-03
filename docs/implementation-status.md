@@ -34,9 +34,13 @@ The full first release, native clients and public deployment remain later target
   metadata without reading its payloads. Derivative GET checks recorded length
   and SHA-256 before transfer and reports a specific player error on failure.
   Debug builds optimize SHA-256, and startup logs cumulative recovery, reindex
-  and private-reconciliation times. Metadata reindex remains unconditional; P06
-  owns incremental indexing and scale qualification. No startup speedup has yet
-  been measured on the owned corpus.
+  and private-reconciliation times. P06 now reuses the maintained projection on
+  unchanged startup and uses indexed graph neighborhoods for ordinary writes
+  (2026-10-03). Stale/restored archives and missing/corrupt/incomplete projections
+  trigger a full rebuild. Generated 100/1,000/10,000-item debug fixtures record
+  startup, edit and browse timings in [P06 validation](validation/p06-indexing.md).
+  Warm startup remains a metadata stat walk plus SQLite quick_check. Owned-corpus,
+  NAS and R02 hardware scale qualification are not claimed.
 
 - Album and inventory follow-up (2026-09-28, local changes): new guided imports
   record one owned physical copy; manual entries may remain without copies or be
@@ -379,7 +383,7 @@ recipes and external-oracle instructions are recorded; schema reservations are
 advisory under the pre-release policy.
 W4.2 durable records and executors are implemented locally, reviewed and corrected.
 D04.1–D04.3 and D05.1–D05.2 are reviewed and corrected locally; D05.3 is reviewed and corrected locally; D07.1 is reviewed and corrected locally; D07.2 is reviewed and corrected locally; D07.3 is reviewed and corrected locally. D06.1 durable metadata authority and deterministic resolution are reviewed and corrected locally; D06.2 providers and artwork are reviewed and corrected locally; D06.3 metadata review and effective presentation are reviewed and corrected locally.
-Archive schema 4 and catalog schema 8 cover processing observations and compact occurrences,
+Archive schema 4 and catalog schema 9 cover processing observations and compact occurrences,
 streamed snapshots, metadata authority, and conversion recipes; private schema 14
 persists frozen Job input, provisional Import observations, active catalog
 selection, guided-ingest intent and restartable staging cleanup. Import publication
@@ -836,7 +840,7 @@ records arrive out of order. Startup projects prepared-audio records without
 reading their payloads; each derivative GET checks bytes against the recorded
 length and digest before transfer. A mismatch has a specific player error.
 Explicit full reindex still checks derivative payloads. Startup remains a full
-metadata reindex, so P06 incremental indexing is still pending.
+metadata reindex in that dated checkpoint; P06 now implements reuse and indexed write validation (see the 2026-10-03 validation record).
 
 Music browsing and curation now show release media beside attached original
 packages, their recorded and provider-listed disc IDs, structural track count,

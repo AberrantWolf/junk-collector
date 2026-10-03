@@ -915,6 +915,7 @@ impl Store {
         let tx = db.transaction().map_err(storage)?;
         project_capture(&tx, &capture)?;
         tx.commit().map_err(storage)?;
+        drop(db);
         finish_v3_publication(self, transaction_id)?;
         Ok(capture)
     }
@@ -1144,42 +1145,21 @@ impl Store {
                 Ok(self.capture(capture_id)?.association.item_id)
             }
             AssetSubject::Specimen { specimen_id } => self
-                .subject_owner(|item| {
-                    item.specimens
-                        .iter()
-                        .any(|specimen| specimen.id == specimen_id)
-                })
+                .subject_owner("specimen", specimen_id.0)
                 .map(|(id, _)| Some(id)),
             AssetSubject::Component { component_id } => self
-                .subject_owner(|item| {
-                    item.specimens.iter().any(|specimen| {
-                        specimen
-                            .components
-                            .iter()
-                            .any(|component| component.id == component_id)
-                    })
-                })
+                .subject_owner("component", component_id.0)
                 .map(|(id, _)| Some(id)),
             AssetSubject::Work { .. } | AssetSubject::Edition { .. } => Ok(None),
         }
     }
 
-    fn subject_owner(&self, matches: impl Fn(&Item) -> bool) -> Result<(ItemId, CollectionId)> {
+    fn subject_owner(&self, kind: &str, id: uuid::Uuid) -> Result<(ItemId, CollectionId)> {
         let db = lock(&self.db)?;
-        let mut statement = db.prepare("SELECT record FROM items").map_err(storage)?;
-        let rows = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(storage)?;
-        let mut owner = None;
-        for row in rows {
-            let item: Item = serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
-            if matches(&item) && owner.replace((item.id, item.collection_id)).is_some() {
-                return Err(Error::Storage(
-                    "asset subject identity has more than one owner".into(),
-                ));
-            }
-        }
-        owner.ok_or(Error::NotFound)
+        db.query_row("SELECT root_id,collection_id FROM entity_owners WHERE kind=? AND id=? AND root_kind='item'",
+            params![kind,id.to_string()], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))
+            .optional().map_err(storage)?.map(|(item,collection)| Ok((ItemId(uuid::Uuid::parse_str(&item).map_err(storage)?),CollectionId(uuid::Uuid::parse_str(&collection).map_err(storage)?))))
+            .unwrap_or(Err(Error::NotFound))
     }
 
     pub(crate) fn create_asset_record(

@@ -1280,10 +1280,14 @@ impl Store {
         capture.validate()?;
         {
             let db = lock(&self.db)?;
-            let mut graph = graph_from_projection(&db, record.view.collection_id)?;
-            graph.captures.retain(|value| value.id != capture.id);
-            graph.captures.push(capture.clone());
-            validate_projected_graph(&db, &graph, record.view.collection_id)?;
+            reference_index::validate_change(
+                &db,
+                CollectionGraph {
+                    captures: vec![capture.clone()],
+                    ..Default::default()
+                },
+                record.view.collection_id,
+            )?;
         }
         let collection = {
             let db = lock(&self.db)?;
@@ -1437,6 +1441,7 @@ impl Store {
             let tx = db.transaction().map_err(storage)?;
             project_evidence_record(&tx, &evidence)?;
             tx.commit().map_err(storage)?;
+            drop(db);
             finish_v3_publication(self, publication)?;
         }
         if let Some(item_id) = record.view.association.item_id {

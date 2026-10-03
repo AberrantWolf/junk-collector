@@ -123,6 +123,7 @@ impl Store {
             params![serde_json::to_string(&vec![record.observation.id]).map_err(storage)?,job.to_string()],
         ).map_err(storage)?;
         tx.commit().map_err(storage)?;
+        drop(db);
         finish_v3_publication(self, txid)
     }
 
@@ -152,29 +153,11 @@ impl Store {
                     .collect::<Result<Vec<_>>>()?
             }
             PackageScope::Representation(id) => {
-                let capture = {
-                    let db = lock(&self.db)?;
-                    let mut statement = db
-                        .prepare("SELECT record FROM captures WHERE collection_id=? ORDER BY id")
-                        .map_err(storage)?;
-                    let rows = statement
-                        .query_map([collection_id.to_string()], |row| row.get::<_, String>(0))
-                        .map_err(storage)?;
-                    let mut found = None;
-                    for value in rows {
-                        let capture: Capture =
-                            serde_json::from_str(&value.map_err(storage)?).map_err(storage)?;
-                        if capture
-                            .representations
-                            .iter()
-                            .any(|representation| representation.id == id)
-                        {
-                            found = Some(capture);
-                            break;
-                        }
-                    }
-                    found.ok_or(Error::NotFound)?
-                };
+                let capture = reference_index::capture_for_representation(
+                    &*lock(&self.db)?,
+                    collection_id,
+                    id,
+                )?;
                 let representation = capture
                     .representations
                     .iter()
@@ -216,25 +199,11 @@ impl Store {
                 .join(id.to_string())
                 .join(format!("{index}.part")),
             PackageScope::Representation(id) => {
-                let db = lock(&self.db)?;
-                let mut statement = db
-                    .prepare("SELECT record FROM captures WHERE collection_id=? ORDER BY id")
-                    .map_err(storage)?;
-                let rows = statement
-                    .query_map([collection_id.to_string()], |row| row.get::<_, String>(0))
-                    .map_err(storage)?;
-                let captures = rows
-                    .collect::<std::result::Result<Vec<_>, _>>()
-                    .map_err(storage)?;
-                drop(statement);
-                drop(db);
-                let capture = captures
-                    .into_iter()
-                    .map(|value| serde_json::from_str::<Capture>(&value).map_err(storage))
-                    .collect::<Result<Vec<_>>>()?
-                    .into_iter()
-                    .find(|capture| capture.representations.iter().any(|value| value.id == id))
-                    .ok_or(Error::NotFound)?;
+                let capture = reference_index::capture_for_representation(
+                    &*lock(&self.db)?,
+                    collection_id,
+                    id,
+                )?;
                 if let Some(item_id) = capture.association.item_id {
                     self.representation_path(item_id, id, index)?.0
                 } else {
@@ -1062,33 +1031,15 @@ impl ProcessingPort for Store {
                 .map(|file| file.digest.ok_or(Error::Conflict))
                 .collect::<Result<Vec<_>>>()?,
             PackageScope::Representation(id) => {
-                let db = lock(&self.db)?;
-                let mut statement = db
-                    .prepare("SELECT record FROM captures WHERE collection_id=?")
-                    .map_err(storage)?;
-                let rows = statement
-                    .query_map([collection.to_string()], |row| row.get::<_, String>(0))
-                    .map_err(storage)?;
-                let mut found = None;
-                for row in rows {
-                    let capture: Capture =
-                        serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
-                    if let Some(representation) = capture
-                        .representations
-                        .into_iter()
-                        .find(|value| value.id == id)
-                    {
-                        found = Some(
-                            representation
-                                .files
-                                .into_iter()
-                                .map(|file| file.digest)
-                                .collect::<Vec<_>>(),
-                        );
-                        break;
-                    }
-                }
-                found.ok_or(Error::NotFound)?
+                reference_index::capture_for_representation(&*lock(&self.db)?, collection, id)?
+                    .representations
+                    .into_iter()
+                    .find(|value| value.id == id)
+                    .ok_or(Error::NotFound)?
+                    .files
+                    .into_iter()
+                    .map(|file| file.digest)
+                    .collect::<Vec<_>>()
             }
         };
         SourceFingerprint::calculate(
@@ -1245,6 +1196,7 @@ impl ProcessingPort for Store {
         tx.execute("INSERT INTO snapshots(id,collection_id,record,payload_path,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING",params![record.id.to_string(),record.collection_id.to_string(),serde_json::to_string(&record).map_err(storage)?,path,record.created_at.timestamp()]).map_err(storage)?;
         tx.execute("UPDATE private.processing_jobs SET output_references=?,checkpoint='snapshot_committed' WHERE job_id=?",params![serde_json::to_string(&vec![record.id]).map_err(storage)?,job.to_string()]).map_err(storage)?;
         tx.commit().map_err(storage)?;
+        drop(db);
         finish_v3_publication(self, txid)
     }
     fn processing_record(&self, id: ObservationId) -> Result<PortableProcessingRecord> {
@@ -1455,6 +1407,7 @@ impl ProcessingPort for Store {
         tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,record=excluded.record",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
         project_effective_metadata_search(&tx, &record)?;
         tx.commit().map_err(storage)?;
+        drop(db);
         finish_v3_publication(self, transaction)
     }
 

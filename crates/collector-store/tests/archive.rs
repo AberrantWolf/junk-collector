@@ -1988,7 +1988,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        8 // FX-02 adds rebuildable result groups; archived fixture bytes remain unchanged.
+        9 // P06 adds rebuildable ownership indexes/checkpoints; archived fixture bytes stay unchanged.
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -13256,6 +13256,7 @@ fn derivative_reindex_rejects_corrupt_published_bytes_and_preserves_master() {
     drop(service);
     drop(store);
     let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(reopened.catalog_reused_at_startup());
     assert!(reopened.reindex().is_err());
 }
 
@@ -15757,4 +15758,202 @@ fn derived_asset_publication_requires_its_live_source_and_exact_item() {
         }),
     );
     assert!(matches!(result, Err(Error::Conflict)));
+}
+
+#[test]
+fn checkpoint_reuses_completed_writes_and_rebuilds_mutated_projection() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(reopened.catalog_reused_at_startup());
+    let expected = serde_json::to_value(reopened.item(saved.id).unwrap()).unwrap();
+    reopened.reindex().unwrap();
+    assert_eq!(
+        serde_json::to_value(reopened.item(saved.id).unwrap()).unwrap(),
+        expected
+    );
+    drop(reopened);
+    let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+    db.execute("DELETE FROM items", []).unwrap();
+    drop(db);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(!reopened.catalog_reused_at_startup());
+    assert_eq!(
+        serde_json::to_value(reopened.item(saved.id).unwrap()).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn checkpoint_missing_malformed_and_incomplete_projection_rebuild_without_losing_access() {
+    for damage in [
+        "DELETE FROM catalog_checkpoint",
+        "UPDATE catalog_checkpoint SET format=999",
+        "DROP TABLE entity_owners",
+        "DROP TABLE items",
+        "DROP TRIGGER references_items_INSERT",
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        drop(service);
+        drop(store);
+        let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+        db.execute_batch(damage).unwrap();
+        drop(db);
+        let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        assert!(!reopened.catalog_reused_at_startup(), "{damage}");
+        assert_eq!(reopened.item(saved.id).unwrap().title, saved.title);
+        let service = CollectionService::new(Arc::new(reopened), Arc::new(Registry::builtins()));
+        assert!(service.item_presented(&actor, saved.id).is_ok());
+    }
+}
+
+#[test]
+fn checkpoint_corrupt_catalog_is_retained_and_private_access_survives() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    drop(service);
+    drop(store);
+    std::fs::write(
+        root.path().join("state/catalog.sqlite"),
+        b"damaged projection",
+    )
+    .unwrap();
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(!reopened.catalog_reused_at_startup());
+    assert!(
+        std::fs::read_dir(root.path().join("state"))
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("catalog.sqlite.corrupt-"))
+    );
+    let service = CollectionService::new(Arc::new(reopened), Arc::new(Registry::builtins()));
+    assert!(service.item_presented(&actor, saved.id).is_ok());
+}
+
+#[test]
+fn checkpoint_detects_restored_archive_and_rejects_changed_metadata() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let old_records = files_named(&root.path().join("archive"), "record.v3.json");
+    let old_revision = old_records[0].parent().unwrap().to_path_buf();
+    let mut changed = saved.clone();
+    changed.title = "Later title".into();
+    save_inventory(&service, &actor, changed, saved.revision).unwrap();
+    drop(service);
+    drop(store);
+    let new_record = files_named(&root.path().join("archive"), "record.v3.json")
+        .into_iter()
+        .find(|path| path.parent().unwrap() != old_revision)
+        .unwrap();
+    std::fs::remove_dir_all(new_record.parent().unwrap()).unwrap();
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(!reopened.catalog_reused_at_startup());
+    assert_eq!(reopened.item(saved.id).unwrap().title, saved.title);
+    drop(reopened);
+    std::fs::write(old_records[0].clone(), b"changed bytes").unwrap();
+    assert!(Store::open(root.path().join("archive"), root.path().join("state")).is_err());
+}
+
+/// Reproducible, offline scale experiment; deliberately excluded from ordinary tests.
+#[test]
+#[ignore = "generated scale timings; run explicitly with --ignored --nocapture"]
+fn checkpoint_generated_scale_measurements() {
+    use std::time::Instant;
+    fn percentile(mut times: Vec<f64>, percentile: usize) -> f64 {
+        times.sort_by(f64::total_cmp);
+        times[(times.len() - 1) * percentile / 100]
+    }
+    for count in [100, 1_000, 10_000] {
+        let (root, store, actor, service, collection) = setup();
+        let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        let record_path = files_named(&root.path().join("archive"), "record.v3.json").remove(0);
+        let record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+        let manifest: toml::Value = toml::from_str(
+            &std::fs::read_to_string(record_path.with_file_name("manifest.v3.toml")).unwrap(),
+        )
+        .unwrap();
+        let items_dir = record_path.ancestors().nth(4).unwrap();
+        for position in 1..count {
+            let id = ItemId::new();
+            let transaction = TransactionId::new();
+            let mut record = record.clone();
+            record["record"]["id"] = serde_json::json!(id);
+            record["record"]["title"] = serde_json::json!(format!("Generated album {position:06}"));
+            record["transaction_id"] = serde_json::json!(transaction);
+            let bytes = serde_json::to_vec_pretty(&record).unwrap();
+            let mut manifest = manifest.clone();
+            manifest["entity_id"] = toml::Value::String(id.to_string());
+            manifest["transaction_id"] = toml::Value::String(transaction.to_string());
+            manifest["record_sha256"] = toml::Value::String(Digest::sha256(&bytes).hex);
+            let dir = items_dir.join(format!("generated--{id}/revisions/00000000000000000001"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("record.v3.json"), bytes).unwrap();
+            std::fs::write(
+                dir.join("manifest.v3.toml"),
+                toml::to_string(&manifest).unwrap(),
+            )
+            .unwrap();
+        }
+        let started = Instant::now();
+        store.reindex().unwrap();
+        let rebuild = started.elapsed().as_secs_f64() * 1000.0;
+        let catalog = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+        assert_eq!(
+            catalog
+                .query_row("SELECT COUNT(*) FROM items", [], |row| row
+                    .get::<_, usize>(0))
+                .unwrap(),
+            count
+        );
+        drop(catalog);
+        let mut writes = vec![];
+        let mut queries = vec![];
+        let mut current = saved;
+        for iteration in 0..30 {
+            current.title = format!("Edited album {iteration}");
+            let started = Instant::now();
+            let revision = current.revision;
+            current = save_inventory(&service, &actor, current, revision).unwrap();
+            writes.push(started.elapsed().as_secs_f64() * 1000.0);
+            let started = Instant::now();
+            service
+                .browse_presented(
+                    &actor,
+                    BrowseQuery {
+                        collection_id: Some(collection.id),
+                        limit: Some(50),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            queries.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+        drop(service);
+        drop(store);
+        let mut startups = vec![];
+        for _ in 0..5 {
+            let started = Instant::now();
+            let reopened =
+                Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+            startups.push(started.elapsed().as_secs_f64() * 1000.0);
+            assert!(reopened.catalog_reused_at_startup());
+            drop(reopened);
+        }
+        println!(
+            "items={count} full_rebuild_ms={rebuild:.1} startup_p50_ms={:.1} startup_p95_ms={:.1} edit_p50_ms={:.1} edit_p95_ms={:.1} browse_p50_ms={:.1} browse_p95_ms={:.1}",
+            percentile(startups.clone(), 50),
+            percentile(startups, 95),
+            percentile(writes.clone(), 50),
+            percentile(writes, 95),
+            percentile(queries.clone(), 50),
+            percentile(queries, 95)
+        );
+    }
 }

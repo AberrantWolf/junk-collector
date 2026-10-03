@@ -9,6 +9,11 @@ active execution plan. It supersedes the
 serial Wave 4/P05.1 assignment and the earlier music-first scheduling proposal.
 It does not mark unfinished work implemented or erase the broader release target.
 
+2026-10-03 user priority: implement P06 startup/write performance first, with the
+archive/private-state recovery guarantees intact. [P06 validation](validation/p06-indexing.md)
+records the locally implemented checkpoint/index delivery; LA3's second-device
+gate and paused P05 scope remain unchanged.
+
 ## User outcome and scope
 
 On a local server, select raw dump packages, add them to a typed collection,

@@ -5,6 +5,7 @@ mod browse;
 mod commands;
 mod derivatives;
 mod files;
+mod index_checkpoint;
 mod item_lifecycle;
 mod jobs;
 mod migration;
@@ -12,6 +13,7 @@ mod migration_v3;
 mod processing;
 mod provisional_imports;
 mod publication;
+mod reference_index;
 mod work_history;
 use chrono::Utc;
 use collector_app::{
@@ -55,6 +57,7 @@ pub struct Store {
     pub(crate) uploads: Arc<Mutex<()>>,
     pub(crate) job_publication_gate: Arc<Mutex<()>>,
     recovery_report: RecoveryReport,
+    catalog_reused: bool,
     receipt: Option<collector_app::CommandReceipt>,
     command_result: Option<serde_json::Value>,
     publication_fault: std::sync::Arc<dyn PublicationFaultInjector>,
@@ -238,7 +241,7 @@ impl Store {
         }
         fs::create_dir_all(state.join("uploads")).map_err(storage)?;
         fs::create_dir_all(state.join("imports")).map_err(storage)?;
-        let mut db = Connection::open(state.join("catalog.sqlite")).map_err(storage)?;
+        let mut db = index_checkpoint::open_catalog(&state)?;
         db.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(storage)?;
         db.pragma_update(None, "journal_mode", "WAL")
@@ -253,13 +256,20 @@ impl Store {
         migrate_databases(&mut db)?;
         reconcile_collection_creations(&mut db, &archive)?;
         commands::recover(&mut db, &archive, &state)?;
-        migration::migrate_schema_one(&archive)?;
-        migration_v3::migrate_schema_two(&archive)?;
+        let (reusable, metadata_files) = index_checkpoint::reusable(&db, &archive)?;
+        let reusable = reusable
+            && recovery_report.pending.is_empty()
+            && recovery_report.committed.is_empty()
+            && recovery_report.completed.is_empty();
+        if !reusable {
+            migration::migrate_schema_one(&archive)?;
+            migration_v3::migrate_schema_two(&archive)?;
+        }
         tracing::info!(
             elapsed_ms = startup.elapsed().as_millis(),
             "startup recovery and migrations complete"
         );
-        let store = Self {
+        let mut store = Self {
             archive,
             state,
             db: Arc::new(Mutex::new(db)),
@@ -267,6 +277,7 @@ impl Store {
             uploads: Arc::new(Mutex::new(())),
             job_publication_gate: Arc::new(Mutex::new(())),
             recovery_report,
+            catalog_reused: false,
             receipt: None,
             command_result: None,
             publication_fault,
@@ -275,10 +286,18 @@ impl Store {
             _private_lock: Arc::new(private_lock),
         };
         store.cleanup_derivative_scratch()?;
-        store.reindex_catalog(false)?;
+        store.catalog_reused = reusable;
+        if !store.catalog_reused {
+            store.reindex_catalog(false)?;
+        }
+        tracing::info!(
+            reused = store.catalog_reused,
+            metadata_files,
+            "startup catalog checkpoint resolved"
+        );
         tracing::info!(
             elapsed_ms = startup.elapsed().as_millis(),
-            "startup catalog reindex complete"
+            "startup catalog ready"
         );
         store.rebuild_scan_admissions()?;
         store.recover_private_publications()?;
@@ -301,6 +320,10 @@ impl Store {
             "startup store ready"
         );
         Ok(store)
+    }
+    /// Whether startup reused the already maintained projection after metadata checks.
+    pub fn catalog_reused_at_startup(&self) -> bool {
+        self.catalog_reused
     }
     /// Startup's read-only classification of durable publication state.
     /// Unknown staging is retained for explicit operator inspection.
@@ -636,6 +659,7 @@ impl Store {
         self.project_v4_records(&tx)?;
         self.validate_derivative_projection(&tx, verify_derivative_bytes)?;
         self.record_command(&tx, &())?;
+        index_checkpoint::rebuilt(&tx, &self.archive)?;
         tx.commit().map_err(storage)?;
         Ok(())
     }
@@ -768,19 +792,16 @@ impl Store {
                     }
                 }
             }
-            let mut graph = graph_from_projection(&db, item.collection_id)?;
-            graph.items.retain(|value| value.id != item.id);
-            graph.items.push(item.clone());
-            for capture in &item.captures {
-                graph.captures.retain(|value| value.id != capture.id);
-                graph.captures.push(capture.clone());
-            }
-            graph.assets.retain(|asset| match asset.subject {
-                AssetSubject::Item { item_id } => item_id != item.id,
-                _ => true,
-            });
-            graph.assets.extend(item.assets.clone());
-            validate_projected_graph(&db, &graph, item.collection_id)?;
+            reference_index::validate_change(
+                &db,
+                CollectionGraph {
+                    items: vec![item.clone()],
+                    captures: item.captures.clone(),
+                    assets: item.assets.clone(),
+                    ..Default::default()
+                },
+                item.collection_id,
+            )?;
         }
         item.revision = Revision(
             current
@@ -975,6 +996,7 @@ impl Store {
             project_capture(&tx, capture)?;
         }
         tx.commit().map_err(storage)?;
+        drop(db);
         for publication in publications {
             finish_v3_publication(self, publication)?;
         }
@@ -2182,7 +2204,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 8 {
+    if catalog_version > 9 {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -2314,8 +2336,15 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         CREATE UNIQUE INDEX IF NOT EXISTS processing_groups_result ON processing_groups(result_key);
         CREATE INDEX IF NOT EXISTS processing_groups_scan ON processing_groups(scan_key);
         CREATE TABLE IF NOT EXISTS processing_members(id TEXT PRIMARY KEY, result_id TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS processing_members_result ON processing_members(result_id,id);
-        PRAGMA main.user_version = 8;").map_err(storage)?;
+        CREATE INDEX IF NOT EXISTS processing_members_result ON processing_members(result_id,id);").map_err(storage)?;
+    reference_index::install(db)?;
+    index_checkpoint::install(db)?;
+    if catalog_version < 9 {
+        db.execute("DELETE FROM catalog_checkpoint", [])
+            .map_err(storage)?;
+        db.execute_batch("PRAGMA main.user_version=9;")
+            .map_err(storage)?;
+    }
     Ok(())
 }
 
@@ -2833,6 +2862,11 @@ impl Catalog for Store {
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
+        index_checkpoint::published(
+            &mut db,
+            &self.archive,
+            &[format!("{}/collection.toml", recovery.relative_path)],
+        )?;
         self.publication_fault
             .check(PublicationFaultPoint::ProjectionApplied)?;
         self.publication_fault
@@ -2927,10 +2961,14 @@ impl Catalog for Store {
                 .checked_add(1)
                 .ok_or_else(|| Error::Invalid("work revision overflow".into()))?,
         );
-        let mut graph = graph_from_projection(&db, work.collection_id)?;
-        graph.works.retain(|value| value.id != work.id);
-        graph.works.push(work.clone());
-        validate_projected_graph(&db, &graph, work.collection_id)?;
+        reference_index::validate_change(
+            &db,
+            CollectionGraph {
+                works: vec![work.clone()],
+                ..Default::default()
+            },
+            work.collection_id,
+        )?;
         let collection = collection_path(&db, &self.archive, work.collection_id)?;
         let publication = publish_v3_revision(
             &self.with_command_result(&work)?,
@@ -2951,6 +2989,7 @@ impl Catalog for Store {
             params![work.id.to_string(), work.collection_id.to_string(), work.revision.0, serde_json::to_string(&work).map_err(storage)?],
         ).map_err(storage)?;
         tx.commit().map_err(storage)?;
+        drop(db);
         finish_v3_publication(self, publication)?;
         Ok(work)
     }
@@ -2975,10 +3014,14 @@ impl Catalog for Store {
                 .checked_add(1)
                 .ok_or_else(|| Error::Invalid("edition revision overflow".into()))?,
         );
-        let mut graph = graph_from_projection(&db, edition.collection_id)?;
-        graph.editions.retain(|value| value.id != edition.id);
-        graph.editions.push(edition.clone());
-        validate_projected_graph(&db, &graph, edition.collection_id)?;
+        reference_index::validate_change(
+            &db,
+            CollectionGraph {
+                editions: vec![edition.clone()],
+                ..Default::default()
+            },
+            edition.collection_id,
+        )?;
         let collection = collection_path(&db, &self.archive, edition.collection_id)?;
         let publication = publish_v3_revision(
             &self.with_command_result(&edition)?,
@@ -2999,6 +3042,7 @@ impl Catalog for Store {
             params![edition.id.to_string(), edition.collection_id.to_string(), edition.revision.0, edition.work_id.map(|id| id.to_string()), serde_json::to_string(&edition).map_err(storage)?],
         ).map_err(storage)?;
         tx.commit().map_err(storage)?;
+        drop(db);
         finish_v3_publication(self, publication)?;
         Ok(edition)
     }
@@ -3028,15 +3072,19 @@ impl Catalog for Store {
             return Err(Error::Conflict);
         }
         let collection_path = collection_path(&db, &self.archive, capture.collection_id)?;
-        let mut graph = graph_from_projection(&db, capture.collection_id)?;
-        graph.captures.retain(|value| value.id != capture.id);
         capture.revision = Revision(
             current
                 .checked_add(1)
                 .ok_or_else(|| Error::Invalid("capture revision overflow".into()))?,
         );
-        graph.captures.push(capture.clone());
-        validate_projected_graph(&db, &graph, capture.collection_id)?;
+        reference_index::validate_change(
+            &db,
+            CollectionGraph {
+                captures: vec![capture.clone()],
+                ..Default::default()
+            },
+            capture.collection_id,
+        )?;
         let legacy_root: Option<(String, String)> = db
             .query_row(
                 "SELECT item_id,relative_path FROM legacy_payload_locators WHERE capture_id=?",
@@ -3072,6 +3120,7 @@ impl Catalog for Store {
         let tx = db.transaction().map_err(storage)?;
         project_capture(&tx, &capture)?;
         tx.commit().map_err(storage)?;
+        drop(db);
         finish_v3_publication(self, publication)?;
         Ok(capture)
     }
@@ -3594,17 +3643,7 @@ fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
         ItemIdentityLink::Work { work_id } => Some(work_id),
         ItemIdentityLink::None => None,
     };
-    let mut statement = db
-        .prepare("SELECT record FROM assets WHERE collection_id=?")
-        .map_err(storage)?;
-    let rows = statement
-        .query_map([item.collection_id.to_string()], |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(storage)?;
-    for row in rows {
-        let record: archive_v3::AssetRecordV3 =
-            serde_json::from_str(&row.map_err(storage)?).map_err(storage)?;
+    for record in reference_index::assets_for_item(db, item, inherited_work)? {
         if asset_belongs_to_item(&record.asset, item, inherited_work) {
             if record.deleted {
                 assets.remove(&record.asset.id);
@@ -3667,31 +3706,6 @@ fn graph_from_projection(db: &Connection, collection: CollectionId) -> Result<Co
             .collect(),
         items,
     })
-}
-
-fn validate_projected_graph(
-    db: &Connection,
-    graph: &CollectionGraph,
-    collection: CollectionId,
-) -> Result<()> {
-    let owner: Collection = projected_record(db, "collections", &collection.to_string())?;
-    if matches!(owner.binding, CollectionBinding::LegacyUnassigned) {
-        return Err(Error::Invalid(
-            "legacy unassigned collections are content-read-only".into(),
-        ));
-    }
-    graph.validate_for_collection(&owner)?;
-    let mut statement = db
-        .prepare("SELECT id FROM collections WHERE id<>?")
-        .map_err(storage)?;
-    let others = statement
-        .query_map([collection.to_string()], |row| row.get::<_, String>(0))
-        .map_err(storage)?;
-    for other in others {
-        let id = other.map_err(storage)?.parse().map_err(storage)?;
-        graph.validate_disjoint(&graph_from_projection(db, id)?)?;
-    }
-    Ok(())
 }
 
 fn projected_record<T: serde::de::DeserializeOwned>(
@@ -4067,6 +4081,16 @@ fn finish_v3_publication(store: &Store, transaction_id: TransactionId) -> Result
     store
         .publication_fault
         .check(PublicationFaultPoint::Completed)?;
+    let journal = journals.read_transaction(transaction_id)?;
+    index_checkpoint::published(
+        &mut *lock(&store.db)?,
+        &store.archive,
+        &journal
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.published_path.clone())
+            .collect::<Vec<_>>(),
+    )?;
     journals.finish(transaction_id)
 }
 
