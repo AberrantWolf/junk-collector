@@ -1,0 +1,102 @@
+import {mkdir,writeFile} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import assert from 'node:assert/strict';
+import {expect} from '@playwright/test';
+
+export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixture}){
+ const nav=page.getByRole('navigation',{name:'Collection tasks'});
+ const folder=path.join(scratch,'Bulk library journey');
+ for(const [name,sectors] of [['Disc 2 discovered first',226],['Disc 1 discovered later',225]]){
+  await mkdir(path.join(folder,name,'tracks'),{recursive:true});
+  await writeFile(path.join(folder,name,'disc.cue'),'FILE "tracks/disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n');
+  await writeFile(path.join(folder,name,'tracks/disc.bin'),Buffer.alloc(sectors*2352,1));
+ }
+ await writeFile(path.join(folder,'notes.txt'),'Keep this unassigned file visible in review.');
+ startProviderFixture();
+ await nav.getByRole('button',{name:'Imports',exact:true}).click();
+ const imports=page.getByRole('region',{name:'Imports workspace'});
+ await imports.getByLabel('Choose folders',{exact:true}).setInputFiles(folder);
+ await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+ assert.equal(await imports.getByLabel('Automatic metadata and artwork').isChecked(),true);
+ assert.equal(await imports.getByLabel('Prepare FLAC after import').isChecked(),false);
+ assert.equal(await imports.locator('.care-row').count(),2,'Nested tracks became separate or unassigned packages');
+ await imports.getByText('1 unsupported or unassigned files will remain outside this import',{exact:true}).click();
+ await imports.getByText(/Bulk library journey\/notes.txt/).waitFor();
+ // Interrupt a real browser transfer, reload, then reselect the entire folder.
+ let releaseUpload;const held=new Promise(resolve=>{releaseUpload=resolve;});
+ await page.route('**/api/v1/imports/*/files/*',async route=>{await held;await route.abort('aborted').catch(()=>{});},{times:1});
+ await imports.getByRole('button',{name:'Start import',exact:true}).click();
+ await imports.getByRole('progressbar',{name:'Uploading package',exact:true}).waitFor();
+ const intakeId=new URL(page.url()).searchParams.get('item');assert.ok(intakeId);
+ releaseUpload();await page.reload({waitUntil:'domcontentloaded'});
+ await expect.poll(async()=>{const count=await page.getByRole('region',{name:'Imports workspace'}).count();if(!count){const status=await page.evaluate(async()=>{const c=new AbortController();setTimeout(()=>c.abort(),2000);try{return (await fetch('/api/v1/me',{signal:c.signal})).status;}catch(e){return String(e);}});console.log('Bulk reload account status:',status);}return count;},{timeout:60000}).toBe(1);
+ await imports.getByLabel('Reselect original folder to resume the complete batch').setInputFiles(folder);
+ await expect.poll(()=>page.evaluate(async id=>{const r=await fetch(`/api/v1/intakes/${id}`);if(!r.ok)return 0;return (await r.json()).preserved;},intakeId),{timeout:60000}).toBe(2);
+ const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);
+ const ids=members.map(m=>m.import.target_item_id);assert.equal(new Set(ids).size,2,'Unconfirmed albums were combined without review');
+ await expect.poll(()=>page.evaluate(async ids=>Promise.all(ids.map(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title)),ids),{timeout:60000}).toEqual(['Bulk resolved album','Bulk resolved album']);
+ await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,intakeId),{timeout:60000}).toBe('completed');
+ await nav.getByRole('button',{name:'Metadata',exact:true}).click();
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('Bulk resolved album');
+ const metadata=page.getByRole('region',{name:'Metadata workspace'});
+ await metadata.getByLabel('Show',{exact:true}).selectOption('all');
+ await metadata.locator(`[data-item-id="${ids[0]}"]`).click();
+ await metadata.getByRole('region',{name:'Review selected metadata'}).getByRole('heading',{name:'Bulk resolved album',exact:true}).waitFor();
+ await metadata.getByRole('button',{name:'Back to metadata results',exact:true}).click();
+ await expect(metadata.locator(`[data-item-id="${ids[0]}"]`)).toBeFocused();
+ assert.equal(await metadata.getByLabel('Show',{exact:true}).inputValue(),'all');
+ for(const id of ids){const row=metadata.locator(`[data-item-id="${id}"]`).locator('..');await row.getByRole('checkbox').check();}
+ await metadata.getByRole('button',{name:'Group into an album',exact:true}).click();
+ const grouping=page.getByRole('region',{name:'Review album grouping'});
+ await grouping.getByLabel('Destination album',{exact:true}).selectOption(ids[1]);
+ for(const field of ['Title','Artist / edition text','Identity link','Album information','Selected artwork'])await grouping.getByLabel(field,{exact:true}).selectOption(ids[1]);
+ await grouping.getByRole('button',{name:'Review grouping',exact:true}).click();
+ await grouping.getByRole('heading',{name:'Grouping consequences'}).waitFor();
+ await page.screenshot({path:fileURLToPath(new URL('../test-results/bulk-metadata-grouping-desktop.png',import.meta.url)),fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Grouping review overflows on mobile');
+ await page.screenshot({path:fileURLToPath(new URL('../test-results/bulk-metadata-grouping-mobile.png',import.meta.url)),fullPage:true});
+ await grouping.getByRole('button',{name:'Confirm album grouping',exact:true}).focus();
+ await page.keyboard.press('Enter');
+ await page.getByRole('region',{name:'Album grouping history'}).getByRole('button',{name:'Undo album grouping'}).waitFor();
+ const destinationId=new URL(page.url()).searchParams.get('item');assert.equal(destinationId,ids[1]);
+ const merged=await page.evaluate(async ids=>Promise.all(ids.map(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()))),ids);
+ assert.equal(merged[0].merged_into,destinationId);assert.equal(merged[1].specimens.length,2);assert.equal(merged[1].captures.length,2);
+ await page.setViewportSize({width:1440,height:1000});
+ if(hasFlac){
+  await nav.getByRole('button',{name:'Music preparation',exact:true}).click();
+  const preparation=page.getByRole('region',{name:'Music preparation workspace'});
+  const row=preparation.locator(`[data-item-id="${destinationId}"]`).locator('..');await row.getByRole('checkbox').check();
+  await preparation.getByRole('button',{name:'Preview FLAC preparation',exact:true}).click();
+  const batch=page.getByRole('region',{name:'Review batch'});
+  await batch.getByText('2 selected tracks · 0 already ready',{exact:true}).waitFor();
+  await batch.getByRole('button',{name:'Start FLAC preparation',exact:true}).click();
+  const batchId=new URL(page.url()).searchParams.get('batch');assert.ok(batchId);
+  await nav.getByRole('button',{name:'Activity',exact:true}).click();
+  await page.getByRole('region',{name:'Activity workspace'}).getByRole('button',{name:/FLAC preparation · 1 albums/}).click();
+  assert.equal(new URL(page.url()).searchParams.get('batch'),batchId);
+  await batch.getByText(/1 successful · 0 need attention · 0 pending/).waitFor({timeout:60000});
+  await batch.getByRole('button',{name:'Open album preparation'}).click();
+  await page.getByRole('region',{name:'Album preparation'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
+  await nav.getByRole('button',{name:'Library',exact:true}).click();
+  await page.getByRole('button',{name:/Bulk resolved album/}).click();
+  const album=page.getByRole('region',{name:'Album tracks'});
+  await album.getByRole('button',{name:'Add album to queue',exact:true}).click();
+  const player=page.getByRole('region',{name:'Music player'});if(!await player.locator('.queue-track').first().isVisible())await player.getByRole('button',{name:/Queue \(/}).click();
+  await player.locator('.queue-track').filter({hasText:'Bulk resolved album'}).last().click();
+  await player.locator('audio').evaluate(audio=>{audio.loop=true;});
+  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
+  const playing=await player.locator('audio').getAttribute('data-representation-id');
+  await nav.getByRole('button',{name:'Metadata',exact:true}).click();
+  await page.getByRole('region',{name:'Metadata workspace'}).getByLabel('Show',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('region',{name:'Metadata workspace'}).getByLabel('Show',{exact:true}).inputValue(),'all','Metadata filter was lost across workspaces');
+  await page.waitForTimeout(300);assert.equal(await player.locator('audio').getAttribute('data-representation-id'),playing);
+  assert.equal(await player.locator('audio').evaluate(a=>a.paused),false,'Workspace navigation stopped actual playback');
+  await player.getByRole('button',{name:'Pause',exact:true}).click();
+  await player.locator('audio').evaluate(audio=>{audio.loop=false;});
+ }
+ await nav.getByRole('button',{name:'Library',exact:true}).click();
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('pressing');
+ console.log('Bulk library journey passed: interrupted folder upload, metadata, confirmed grouping, FLAC preparation, Activity, mobile/keyboard review and actual playback.');
+}

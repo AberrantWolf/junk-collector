@@ -49,7 +49,7 @@ Configured inboxes and resumable browser uploads inventory complete packages, va
 
 Preserve raw ISOs, cartridge images, redumper outputs and BIN/CUE packages. Integrity, structure, game DAT matches, AccurateRip, reconstruction and derivative validation are distinct evidence types. Record exact inputs, tool versions, catalog snapshots, outcomes and limitations. Changed inputs make old evidence historical. AccurateRip is the initial CD verification method; MusicBrainz identity never proves audio correctness. Qualify each analyzer operation with fixtures and independent reference results.
 
-Select useful tentative metadata when ambiguous, retain alternatives and original provider responses, visibly mark uncertainty, and preserve manual overrides across refreshes/outages. Strong identity evidence outranks language; English-preferred display retains original text.
+Select useful tentative metadata when ambiguous, retain alternatives and original provider responses, visibly mark uncertainty, and preserve manual overrides across refreshes/outages. Strong identity evidence outranks language; the persisted default metadata language chooses album variants, with English as the initial account preference, while original text remains retained.
 
 ## Playback and offline use
 

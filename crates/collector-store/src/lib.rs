@@ -1,13 +1,18 @@
 //! Portable immutable revisions plus local SQLite projections and private operational state.
+mod album_grouping;
 mod archive_v3;
 mod auth;
 mod browse;
+mod bulk_intake;
+mod bulk_library;
 mod commands;
 mod derivatives;
 mod files;
+mod group_publication;
 mod index_checkpoint;
 mod item_lifecycle;
 mod jobs;
+mod library_care;
 mod migration;
 mod migration_v3;
 mod processing;
@@ -577,7 +582,7 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
-            "DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
+            "DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
         )
         .map_err(storage)?;
         for (collection, path) in collections {
@@ -658,6 +663,16 @@ impl Store {
         }
         self.project_v4_records(&tx)?;
         self.validate_derivative_projection(&tx, verify_derivative_bytes)?;
+        let ids = tx
+            .prepare("SELECT id FROM items")
+            .map_err(storage)?
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(storage)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?;
+        for id in ids {
+            library_care::project_preparation(&tx, id.parse().map_err(storage)?)?;
+        }
         self.record_command(&tx, &())?;
         index_checkpoint::rebuilt(&tx, &self.archive)?;
         tx.commit().map_err(storage)?;
@@ -1732,7 +1747,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 15 {
+    if private_version > 18 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -2201,10 +2216,15 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     ").map_err(storage)?;
     }
     tx.commit().map_err(storage)?;
+    library_care::install(db)?;
+    bulk_intake::install(db)?;
+    bulk_library::install(db)?;
+    db.execute_batch("PRAGMA private.user_version=18;")
+        .map_err(storage)?;
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 9 {
+    if catalog_version > 11 {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -2345,6 +2365,8 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         db.execute_batch("PRAGMA main.user_version=9;")
             .map_err(storage)?;
     }
+    db.execute_batch("PRAGMA main.user_version=11;")
+        .map_err(storage)?;
     Ok(())
 }
 
@@ -2523,6 +2545,13 @@ impl CollectionTypePort for Store {
                     .map(|input| match input {
                         collector_app::FrozenJobInput::Processing(job) => job.operation,
                         collector_app::FrozenJobInput::Acquisition(job) => job.request.operation,
+                        collector_app::FrozenJobInput::MetadataResolution(job) => {
+                            job.acquisition.request.operation
+                        }
+                        collector_app::FrozenJobInput::ExistingMetadata(_) => {
+                            collector_core::OperationId::new("org.junk.games.metadata")
+                                .expect("static operation")
+                        }
                         collector_app::FrozenJobInput::Derivative(_)
                         | collector_app::FrozenJobInput::DerivativeBatch(_) => {
                             collector_core::OperationId::new("org.junk.music.derivative")
@@ -3567,6 +3596,9 @@ fn project_capture(tx: &Connection, capture: &Capture) -> Result<()> {
         "INSERT INTO captures VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET collection_id=excluded.collection_id,revision=excluded.revision,item_id=excluded.item_id,record=excluded.record",
         params![capture.id.to_string(), capture.collection_id.to_string(), capture.revision.0, capture.association.item_id.map(|id| id.to_string()), serde_json::to_string(capture).map_err(storage)?],
     ).map_err(storage)?;
+    if let Some(item) = capture.association.item_id {
+        library_care::project_preparation(tx, item)?;
+    }
     Ok(())
 }
 
@@ -4263,7 +4295,11 @@ fn directories(path: &Path) -> Result<Vec<PathBuf>> {
         .map_err(storage)?
         .filter_map(|entry| match entry {
             Ok(e) => match e.file_type() {
-                Ok(t) if t.is_dir() => Some(Ok(e.path())),
+                Ok(t) if t.is_dir() => match group_publication::visible_revision(&e.path()) {
+                    Ok(true) => Some(Ok(e.path())),
+                    Ok(false) => None,
+                    Err(error) => Some(Err(error)),
+                },
                 Ok(_) => None,
                 Err(e) => Some(Err(storage(e))),
             },

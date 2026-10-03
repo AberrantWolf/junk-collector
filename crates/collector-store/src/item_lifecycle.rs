@@ -17,6 +17,11 @@ impl Store {
         let _writer = lock(&self.writer)?;
         let _publication_gate = lock(&self.job_publication_gate)?;
         let mut item = Catalog::item(self, id)?;
+        if item.lifecycle.merged_into.is_some() {
+            return Err(Error::Invalid(
+                "Use guarded group undo to restore merged entries.".into(),
+            ));
+        }
         if item.revision != expected || item.deleted == removed {
             return Err(Error::Conflict);
         }
@@ -331,6 +336,10 @@ impl Store {
         let db = lock(&self.db)?;
         let valid = match context.source {
             collector_app::ItemEffectSource::Command => true,
+            collector_app::ItemEffectSource::Job { id, claim } => db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.jobs j WHERE j.id=?1 AND j.item_id=?2 AND j.collection_id=?3 AND j.state='running' AND j.cancellation_requested=0 AND j.claim_token=?4 AND COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=j.id),0)=?5)",
+                params![id.to_string(),context.item_id.to_string(),collection.to_string(),claim.to_string(),context.generation], |row|row.get::<_,bool>(0)
+            ).map_err(storage)?,
             collector_app::ItemEffectSource::GuidedImport(import) => db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM private.guided_ingest_intents g
                  JOIN private.imports p ON p.id=g.import_id

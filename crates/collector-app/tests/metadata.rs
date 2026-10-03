@@ -117,7 +117,9 @@ fn field_override_then_selection_then_automatic_and_ambiguity_are_explicit() {
     let automatic =
         resolve_metadata_display(&item(), &MetadataAuthority::default(), &candidates, "en")
             .unwrap();
-    assert_eq!(automatic.title.value, "Automatic A");
+    // Incomplete candidates are suggestions; an arbitrary first result must
+    // never become the displayed album.
+    assert_eq!(automatic.title.value, "Inventory title");
     assert_eq!(automatic.resolution, MetadataResolutionKind::Tentative);
 
     let selected = MetadataAuthority {
@@ -266,4 +268,135 @@ fn dat_metadata_uses_match_evidence_and_raw_snapshot_version_not_policy_order() 
     )
     .unwrap();
     assert_eq!(display.title.value, "強い DAT 名");
+}
+
+fn album_candidate(
+    release: &str,
+    group: Option<&str>,
+    language: &str,
+    title: &str,
+) -> MetadataCandidateObservation {
+    let mut value = candidate(
+        "org.junk.providers.musicbrainz",
+        release,
+        title,
+        language,
+        true,
+        MatchStrength::DiscLayout,
+        10,
+    );
+    let observation = collector_modules::music::MusicBrainzReleaseObservation {
+        release_id: release.into(),
+        release_group_id: group.map(str::to_string),
+        title: title.into(),
+        language: Some(language.into()),
+        script: None,
+        artist_credit: None,
+        artist_ids: vec![],
+        disambiguation: None,
+        disc_ids: vec![],
+        media: vec![],
+    };
+    value.observation = RawJson::from_value(serde_json::to_value(observation).unwrap());
+    value
+}
+
+#[test]
+fn pressings_and_languages_of_one_album_resolve_without_album_ambiguity() {
+    let group = "11111111-1111-4111-8111-111111111111";
+    let english = album_candidate(
+        "22222222-2222-4222-8222-222222222222",
+        Some(group),
+        "en",
+        "Album",
+    );
+    let japanese = album_candidate(
+        "33333333-3333-4333-8333-333333333333",
+        Some(group),
+        "ja",
+        "アルバム",
+    );
+    for values in [
+        vec![english.clone(), japanese.clone()],
+        vec![japanese.clone(), english.clone()],
+    ] {
+        for (language, title) in [("en", "Album"), ("ja", "アルバム")] {
+            let display =
+                resolve_metadata_display(&item(), &MetadataAuthority::default(), &values, language)
+                    .unwrap();
+            assert_eq!(display.resolution, MetadataResolutionKind::Automatic);
+            assert_eq!(display.title.value, title);
+        }
+    }
+}
+
+#[test]
+fn shared_disc_id_on_different_albums_needs_review_even_in_different_languages() {
+    let first = album_candidate(
+        "22222222-2222-4222-8222-222222222222",
+        Some("11111111-1111-4111-8111-111111111111"),
+        "en",
+        "Album A",
+    );
+    let other = album_candidate(
+        "33333333-3333-4333-8333-333333333333",
+        Some("44444444-4444-4444-8444-444444444444"),
+        "ja",
+        "Album B",
+    );
+    let values = [first.clone(), other];
+    let display =
+        resolve_metadata_display(&item(), &MetadataAuthority::default(), &values, "en").unwrap();
+    assert_eq!(display.resolution, MetadataResolutionKind::Tentative);
+    assert_eq!(display.candidate, None);
+    let authority = MetadataAuthority {
+        automatic_candidate: Some(first.identity.clone()),
+        ..Default::default()
+    };
+    let display = resolve_metadata_display(&item(), &authority, &values, "ja").unwrap();
+    assert_eq!(display.candidate, Some(first.identity));
+    assert_eq!(display.title.value, "Album A");
+    assert_eq!(authority.selected_candidate, None);
+}
+
+#[test]
+fn missing_album_identity_is_inconclusive_and_name_search_never_auto_resolves() {
+    let first = album_candidate(
+        "22222222-2222-4222-8222-222222222222",
+        None,
+        "en",
+        "Album A",
+    );
+    let (resolved, reason) =
+        collector_app::automatic_metadata_candidate(std::slice::from_ref(&first), "en");
+    assert!(resolved.is_none());
+    assert_eq!(
+        reason,
+        Some(collector_app::MetadataReviewReason::IncompleteProviderInformation)
+    );
+    let second = album_candidate(
+        "33333333-3333-4333-8333-333333333333",
+        None,
+        "en",
+        "Album A",
+    );
+    assert!(
+        collector_app::automatic_metadata_candidate(&[first, second], "en")
+            .0
+            .is_none()
+    );
+    let text = candidate(
+        "org.junk.providers.musicbrainz",
+        "search",
+        "Filename guess",
+        "en",
+        true,
+        MatchStrength::Name,
+        1,
+    );
+    assert!(
+        collector_app::automatic_metadata_candidate(&[text], "en")
+            .0
+            .is_none()
+    );
 }

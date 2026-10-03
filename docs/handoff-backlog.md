@@ -4,6 +4,24 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
+## Bulk library delivery — locally accepted
+
+2026-10-03: BL1 shared metadata resolution/review, BL2 durable import and confirmed
+grouping, and BL3 bulk FLAC preparation/Activity are delivered in the accepted
+[ledger](bulk-library-plan.md). [Validation](validation/bulk-library.md) records
+cross-layer, browser, recovery and generated scale acceptance. This supersedes
+the older serial implementation handoff and performance follow-up.
+
+### Ready-to-send next handoff
+
+Continue [LA3 qualification](local-alpha-plan.md#ready-to-send-la3-prompt) using the
+intended trusted second physical LAN device. Read architecture, release requirements,
+current status and the bulk delivery validation first. Preserve actual credentials,
+grants, configuration, raw masters and accepted/manual metadata. Do not repeat passing
+local corpus/restore work unless affected code changes. Record actual second-device
+playback, denied curation and revocation evidence; keep blocked DAT downloads disabled.
+No additional bulk-workflow implementation is currently assigned.
+
 ## Local alpha — remaining external qualification
 
 2026-09-20 review: new DAT-o-MATIC downloads are disabled pending reviewed

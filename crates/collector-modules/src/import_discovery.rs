@@ -14,6 +14,11 @@ pub fn discover(names: &[PackageFileName], cartridge_files: bool) -> Vec<Discove
         .iter()
         .map(|name| name.as_str().to_ascii_lowercase())
         .collect();
+    let by_name: BTreeMap<_, _> = lower
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.as_str(), i))
+        .collect();
     let mut assigned = BTreeSet::new();
     let mut packages = Vec::new();
     // A redumper TOC owns its same-stem sidecars. Multiple dumps may share a folder.
@@ -27,14 +32,16 @@ pub fn discover(names: &[PackageFileName], cartridge_files: bool) -> Vec<Discove
     for (index, name) in anchors {
         let stem = &name[..name.len() - 4];
         let prefix = format!("{stem}.");
-        let file_indices: Vec<_> = lower
-            .iter()
-            .enumerate()
-            .filter(|(i, candidate)| {
-                !assigned.contains(i) && (*i == index || candidate.starts_with(&prefix))
-            })
-            .map(|(i, _)| i)
+        let mut file_indices: Vec<_> = by_name
+            .range(prefix.as_str()..)
+            .take_while(|(n, _)| n.starts_with(&prefix))
+            .map(|(_, i)| *i)
+            .filter(|i| !assigned.contains(i))
             .collect();
+        if !assigned.contains(&index) && !file_indices.contains(&index) {
+            file_indices.push(index);
+        }
+        file_indices.sort_unstable();
         if file_indices.is_empty() {
             continue;
         }
@@ -62,14 +69,17 @@ pub fn discover(names: &[PackageFileName], cartridge_files: bool) -> Vec<Discove
     cue_dirs.sort_by_key(|(directory, _)| std::cmp::Reverse(directory.len()));
     for (directory, index) in cue_dirs {
         let prefix = format!("{directory}/");
-        let file_indices: Vec<_> = lower
-            .iter()
-            .enumerate()
-            .filter(|(i, name)| {
-                !assigned.contains(i) && (directory.is_empty() || name.starts_with(&prefix))
-            })
-            .map(|(i, _)| i)
-            .collect();
+        let mut file_indices: Vec<_> = if directory.is_empty() {
+            (0..names.len()).filter(|i| !assigned.contains(i)).collect()
+        } else {
+            by_name
+                .range(prefix.as_str()..)
+                .take_while(|(n, _)| n.starts_with(&prefix))
+                .map(|(_, i)| *i)
+                .filter(|i| !assigned.contains(i))
+                .collect()
+        };
+        file_indices.sort_unstable();
         if file_indices.is_empty() {
             continue;
         }

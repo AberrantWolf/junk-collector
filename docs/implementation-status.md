@@ -16,6 +16,18 @@ This repository is an executable architecture/server foundation, not the complet
 
 Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation tickets and the [release requirements](release-requirements.md) for the repository-local target specification. The gap list below is a summary, not a substitute for ticket acceptance criteria.
 
+## Bulk library workflows — locally accepted (2026-10-03)
+
+The [bulk library delivery ledger](bulk-library-plan.md) records BL1 shared metadata
+resolution/review, BL2 durable intake/confirmed grouping and BL3 bulk FLAC preparation
+and Activity. Dedicated task pages, persisted metadata language, authoritative computed
+disc matching, manual authority preservation, grouped archive commits/guarded undo,
+frozen selections, rolling admission and per-member recovery are implemented.
+See [validation](validation/bulk-library.md) for the repository gates, real browser
+journey, publication interruption matrix, generated 2,400-package/album measurements
+and separate live response qualification. Multi-terabyte codec processing, NAS and
+second-device qualification are not established by those local tests.
+
 ## Active delivery target — 2026-09-16
 
 D06.3 is committed as `3a6143b`. The accepted [local-alpha plan](local-alpha-plan.md)

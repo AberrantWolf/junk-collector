@@ -1362,6 +1362,7 @@ impl CollectionService {
             .as_ref()
             .ok_or_else(|| Error::Unavailable("audio encoder is not configured".into()))?;
         let mut execution = crate::DurableProcessingContext {
+            progress_base: 0,
             frozen: FrozenJobInput::Derivative(frozen.clone()),
             jobs: self.jobs.clone(),
             id: claim.id,

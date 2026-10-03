@@ -31,6 +31,11 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<PresentedItem> {
         let item = self.reader.item(id)?;
+        if item.lifecycle.merged_into.is_some() {
+            return Err(Error::Invalid(
+                "Use guarded group undo to restore merged entries.".into(),
+            ));
+        }
         self.content_write_eligibility(actor, item.collection_id)?;
         self.execute_command(
             actor,

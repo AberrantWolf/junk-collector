@@ -2,7 +2,7 @@ import {useEffect,useRef} from '@collector/runtime';
 
 // Each editor owns its draft state. Dismissal asks about all drafts in the
 // dialog, including nested forms, without treating saved mutations as drafts.
-export function useDialogDismiss(onClose:()=>void){
+export function useDialogDismiss(onClose:()=>void,enabled=true){
  const ref=useRef<HTMLElement>(null);
  const close=useRef(onClose);close.current=onClose;
  function dismiss(){
@@ -16,6 +16,7 @@ export function useDialogDismiss(onClose:()=>void){
  }
  const latest=useRef(dismiss);latest.current=dismiss;
  useEffect(()=>{
+  if(!enabled)return;
   const previous=document.activeElement as HTMLElement|null;
   const element=ref.current;const overflow=document.body.style.overflow;
   document.body.style.overflow='hidden';element?.querySelector<HTMLButtonElement>('.close')?.focus();
@@ -31,6 +32,6 @@ export function useDialogDismiss(onClose:()=>void){
   }
   document.addEventListener('keydown',keydown,true);
   return()=>{document.removeEventListener('keydown',keydown,true);document.body.style.overflow=overflow;if(previous?.isConnected)previous.focus();};
- },[]);
+ },[enabled]);
  return {ref,dismiss};
 }

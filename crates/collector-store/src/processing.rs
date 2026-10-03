@@ -521,17 +521,6 @@ impl Store {
                     .map(|values| values.values().cloned().collect::<Vec<_>>())
                     .unwrap_or_default();
                 record.validate_display(&candidates)?;
-                if let Some(current) = &record.current_candidates {
-                    let mut retained = current.iter().collect::<std::collections::BTreeSet<_>>();
-                    if let Some(selected) = &record.authority.selected_candidate {
-                        retained.insert(selected);
-                    }
-                    if let Some(values) =
-                        metadata_candidates.get_mut(&(record.collection_id, record.item_id))
-                    {
-                        values.retain(|identity, _| retained.contains(identity));
-                    }
-                }
                 authorities.insert(record.item_id, record);
             }
         }
@@ -759,6 +748,12 @@ fn project_processing(
     let scan_key = record.inputs.as_ref().map(|v| v.key()).transpose()?;
     tx.execute("INSERT INTO processing_groups(id,result_key,scan_key,first_checked_at,last_checked_at,occurrences) VALUES(?,?,?,?,?,1) ON CONFLICT(result_key) DO UPDATE SET first_checked_at=MIN(first_checked_at,excluded.first_checked_at),last_checked_at=MAX(last_checked_at,excluded.last_checked_at),occurrences=occurrences+1",params![record.observation.id.to_string(),key,scan_key,record.observation.created_at.timestamp_millis(),record.observation.created_at.timestamp_millis()]).map_err(storage)?;
     tx.execute("INSERT INTO processing_members(id,result_id) SELECT ?,id FROM processing_groups WHERE result_key=?",params![record.observation.id.to_string(),key]).map_err(storage)?;
+    if let PackageScope::Representation(source) = record.observation.source_fingerprint.source {
+        let item:Option<String>=tx.query_row("SELECT c.item_id FROM entity_owners o JOIN captures c ON c.id=o.root_id WHERE o.kind='representation' AND o.id=?",[source.to_string()],|r|r.get(0)).optional().map_err(storage)?.flatten();
+        if let Some(item) = item {
+            library_care::project_preparation(tx, item.parse().map_err(storage)?)?;
+        }
+    }
     Ok(())
 }
 
@@ -769,9 +764,24 @@ fn project_metadata_candidate(
     candidate: &collector_core::MetadataCandidateObservation,
 ) -> Result<()> {
     let key = serde_json::to_string(&candidate.identity).map_err(storage)?;
+    let raw = serde_json::to_string(candidate).map_err(storage)?;
+    let existing: Option<String> = tx
+        .query_row(
+            "SELECT record FROM metadata_candidates WHERE item_id=? AND candidate_key=?",
+            params![item.to_string(), key],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(storage)?;
+    if let Some(existing) = existing {
+        if existing != raw {
+            return Err(Error::Conflict);
+        }
+        return Ok(());
+    }
     tx.execute(
         "INSERT INTO metadata_candidates(item_id,collection_id,candidate_key,record) VALUES(?,?,?,?)
-         ON CONFLICT(item_id,candidate_key) DO UPDATE SET record=excluded.record",
+         ON CONFLICT(item_id,candidate_key) DO NOTHING",
         params![
             item.to_string(),
             collection.to_string(),
@@ -1267,148 +1277,14 @@ impl ProcessingPort for Store {
         transaction: TransactionId,
         record: MetadataAuthorityRecord,
     ) -> Result<()> {
-        record.validate()?;
-        if self.item(record.item_id)?.collection_id != record.collection_id {
-            return Err(Error::NotFound);
-        }
-        let _writer = lock(&self.writer)?;
-        let current = lock(&self.db)?
-            .query_row(
-                "SELECT revision FROM metadata_authorities WHERE id=?",
-                [record.item_id.to_string()],
-                |row| row.get::<_, u64>(0),
-            )
-            .optional()
-            .map_err(storage)?
-            .unwrap_or(0);
-        if record.revision.0 != current.saturating_add(1) {
-            return Err(Error::Conflict);
-        }
-        let item = self.item(record.item_id)?;
-        if item.deleted
-            || record.inventory.as_ref().is_some_and(|baseline| {
-                baseline.revision != item.revision
-                    || baseline.title != item.title
-                    || baseline.subtitle != item.subtitle
-            })
-        {
-            return Err(Error::Conflict);
-        }
-        let mut candidates = self.metadata_candidates(record.collection_id, record.item_id)?;
-        collector_app::merge_metadata_candidates(
-            &mut candidates,
-            record
-                .observations
-                .iter()
-                .flat_map(|observation| &observation.candidates),
-        )?;
-        if !record.observations.is_empty() {
-            let db = lock(&self.db)?;
-            let mut statement = db
-                .prepare(
-                    "SELECT record FROM metadata_refreshes WHERE collection_id=? AND item_id=?",
-                )
-                .map_err(storage)?;
-            let rows = statement
-                .query_map(
-                    params![record.collection_id.to_string(), record.item_id.to_string()],
-                    |row| row.get::<_, String>(0),
-                )
-                .map_err(storage)?;
-            for raw in rows {
-                let historical: collector_core::MetadataRefreshObservation =
-                    serde_json::from_str(&raw.map_err(storage)?).map_err(storage)?;
-                for prior in &historical.candidates {
-                    if record
-                        .observations
-                        .iter()
-                        .flat_map(|observation| &observation.candidates)
-                        .any(|incoming| incoming.identity == prior.identity && incoming != prior)
-                    {
-                        return Err(Error::Conflict);
-                    }
-                }
-            }
-        }
-        record.validate_display(&candidates)?;
-        for observation in &record.observations {
-            let existing: Option<(String, String, String)> = lock(&self.db)?
-                .query_row(
-                    "SELECT collection_id,item_id,record FROM metadata_refreshes WHERE id=?",
-                    [observation.id.to_string()],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .optional()
-                .map_err(storage)?;
-            if let Some((collection, item, raw)) = existing {
-                let old: collector_core::MetadataRefreshObservation =
-                    serde_json::from_str(&raw).map_err(storage)?;
-                if collection != record.collection_id.to_string()
-                    || item != record.item_id.to_string()
-                    || old != *observation
-                {
-                    return Err(Error::Conflict);
-                }
-            }
-        }
-        let mut never = || Ok(false);
-        self.with_command_result(&record)?.publish_v4(
-            V4Target {
-                transaction_id: transaction,
-                collection_id: record.collection_id,
-                kind: "metadata_authority",
-                id: record.item_id.to_string(),
-                revision: record.revision,
-            },
-            &record,
-            None,
-            &mut never,
-        )?;
-        let mut db = lock(&self.db)?;
-        let tx = db.transaction().map_err(storage)?;
-        let retained = record.current_candidates.as_ref().map(|current| {
-            let mut identities = current.iter().collect::<std::collections::BTreeSet<_>>();
-            if let Some(selected) = &record.authority.selected_candidate {
-                identities.insert(selected);
-            }
-            identities
-        });
-        for observation in &record.observations {
-            tx.execute("INSERT OR IGNORE INTO metadata_refreshes(id,collection_id,item_id,record) VALUES(?,?,?,?)", params![observation.id.to_string(),record.collection_id.to_string(),record.item_id.to_string(),serde_json::to_string(observation).map_err(storage)?]).map_err(storage)?;
-        }
-        if let Some(retained) = retained {
-            tx.execute(
-                "DELETE FROM metadata_candidates WHERE collection_id=? AND item_id=?",
-                params![record.collection_id.to_string(), record.item_id.to_string()],
-            )
-            .map_err(storage)?;
-            for candidate in &candidates {
-                if retained.contains(&candidate.identity) {
-                    project_metadata_candidate(
-                        &tx,
-                        record.collection_id,
-                        record.item_id,
-                        candidate,
-                    )?;
-                }
-            }
-        } else {
-            for observation in &record.observations {
-                for candidate in &observation.candidates {
-                    project_metadata_candidate(
-                        &tx,
-                        record.collection_id,
-                        record.item_id,
-                        candidate,
-                    )?;
-                }
-            }
-        }
-        tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,record=excluded.record",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
-        project_effective_metadata_search(&tx, &record)?;
-        tx.commit().map_err(storage)?;
-        drop(db);
-        finish_v3_publication(self, transaction)
+        self.publish_metadata_record(transaction, record, None)
+    }
+    fn publish_metadata_for_job(
+        &self,
+        claim: &JobClaim,
+        record: MetadataAuthorityRecord,
+    ) -> Result<()> {
+        self.publish_metadata_record(TransactionId::new(), record, Some(claim))
     }
 
     fn metadata_authority(
@@ -1513,7 +1389,7 @@ pub(crate) fn project_effective_metadata_search(
         ],
     )
     .map_err(storage)?;
-    Ok(())
+    library_care::project_health(tx, &item)
 }
 
 fn read_group(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, i64, i64, u64)> {
@@ -1549,4 +1425,171 @@ impl Store {
         }
         Ok(())
     }
+}
+
+impl Store {
+    fn publish_metadata_record(
+        &self,
+        transaction: TransactionId,
+        record: MetadataAuthorityRecord,
+        claim: Option<&JobClaim>,
+    ) -> Result<()> {
+        record.validate()?;
+        if self.item(record.item_id)?.collection_id != record.collection_id {
+            return Err(Error::NotFound);
+        }
+        let _writer = lock(&self.writer)?;
+        if let Some(claim) = claim {
+            self.validate_publication_claim(claim, record.collection_id)?;
+            self.ensure_job_continues(claim.id, Some(&claim.claim_token))?;
+        }
+        let current = lock(&self.db)?
+            .query_row(
+                "SELECT revision FROM metadata_authorities WHERE id=?",
+                [record.item_id.to_string()],
+                |row| row.get::<_, u64>(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .unwrap_or(0);
+        if record.revision.0 != current.saturating_add(1) {
+            return Err(Error::Conflict);
+        }
+        let item = self.item(record.item_id)?;
+        if item.deleted
+            || record.inventory.as_ref().is_some_and(|baseline| {
+                baseline.revision != item.revision
+                    || baseline.title != item.title
+                    || baseline.subtitle != item.subtitle
+            })
+        {
+            return Err(Error::Conflict);
+        }
+        let mut candidates = self.metadata_candidates(record.collection_id, record.item_id)?;
+        collector_app::merge_metadata_candidates(
+            &mut candidates,
+            record
+                .observations
+                .iter()
+                .flat_map(|observation| &observation.candidates),
+        )?;
+        if !record.observations.is_empty() {
+            let db = lock(&self.db)?;
+            let mut statement = db
+                .prepare(
+                    "SELECT record FROM metadata_refreshes WHERE collection_id=? AND item_id=?",
+                )
+                .map_err(storage)?;
+            let rows = statement
+                .query_map(
+                    params![record.collection_id.to_string(), record.item_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(storage)?;
+            for raw in rows {
+                let historical: collector_core::MetadataRefreshObservation =
+                    serde_json::from_str(&raw.map_err(storage)?).map_err(storage)?;
+                for prior in &historical.candidates {
+                    if record
+                        .observations
+                        .iter()
+                        .flat_map(|observation| &observation.candidates)
+                        .any(|incoming| incoming.identity == prior.identity && incoming != prior)
+                    {
+                        return Err(Error::Conflict);
+                    }
+                }
+            }
+        }
+        record.validate_display(&candidates)?;
+        for observation in &record.observations {
+            let existing: Option<(String, String, String)> = lock(&self.db)?
+                .query_row(
+                    "SELECT collection_id,item_id,record FROM metadata_refreshes WHERE id=?",
+                    [observation.id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(storage)?;
+            if let Some((collection, item, raw)) = existing {
+                let old: collector_core::MetadataRefreshObservation =
+                    serde_json::from_str(&raw).map_err(storage)?;
+                if collection != record.collection_id.to_string()
+                    || item != record.item_id.to_string()
+                    || old != *observation
+                {
+                    return Err(Error::Conflict);
+                }
+            }
+        }
+        let mut guarded = || {
+            if let Some(claim) = claim {
+                self.validate_publication_claim(claim, record.collection_id)?;
+                let db = lock(&self.db)?;
+                let allowed:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=? AND u.enabled=1 AND g.collection_id=? AND g.role>=1)",params![claim.user_id.to_string(),record.collection_id.to_string()],|row|row.get(0)).map_err(storage)?;
+                if !allowed {
+                    return Err(Error::Forbidden);
+                }
+                drop(db);
+                if let Some(collector_app::FrozenJobInput::MetadataResolution(frozen)) =
+                    &claim.frozen_input
+                {
+                    self.validate_item_effect(
+                        collector_app::ItemEffectContext {
+                            item_id: frozen.item_id,
+                            generation: frozen.generation,
+                            source: collector_app::ItemEffectSource::Job {
+                                id: claim.id,
+                                claim: claim.claim_token.parse().map_err(storage)?,
+                            },
+                        },
+                        record.collection_id,
+                    )?;
+                }
+                return self.cancellation_requested_record(claim.id, &claim.claim_token);
+            }
+            Ok(false)
+        };
+        self.with_command_result(&record)?.publish_v4(
+            V4Target {
+                transaction_id: transaction,
+                collection_id: record.collection_id,
+                kind: "metadata_authority",
+                id: record.item_id.to_string(),
+                revision: record.revision,
+            },
+            &record,
+            None,
+            &mut guarded,
+        )?;
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        project_authority_revision(&tx, &record, &candidates)?;
+
+        tx.commit().map_err(storage)?;
+        drop(db);
+        finish_v3_publication(self, transaction)
+    }
+}
+
+pub(crate) fn project_authority_revision(
+    tx: &rusqlite::Transaction<'_>,
+    record: &MetadataAuthorityRecord,
+    candidates: &[MetadataCandidateObservation],
+) -> Result<()> {
+    for observation in &record.observations {
+        tx.execute("INSERT OR IGNORE INTO metadata_refreshes(id,collection_id,item_id,record) VALUES(?,?,?,?)", params![observation.id.to_string(),record.collection_id.to_string(),record.item_id.to_string(),serde_json::to_string(observation).map_err(storage)?]).map_err(storage)?;
+    }
+    for candidate in candidates {
+        project_metadata_candidate(tx, record.collection_id, record.item_id, candidate)?;
+    }
+    for observation in &record.observations {
+        for candidate in &observation.candidates {
+            project_metadata_candidate(tx, record.collection_id, record.item_id, candidate)?;
+        }
+    }
+    tx.execute("INSERT INTO metadata_authorities(id,collection_id,revision,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,record=excluded.record",params![record.item_id.to_string(),record.collection_id.to_string(),record.revision.0,serde_json::to_string(&record).map_err(storage)?]).map_err(storage)?;
+    project_effective_metadata_search(tx, record)?;
+
+    Ok(())
 }

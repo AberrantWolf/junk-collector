@@ -2,7 +2,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 4;
 pub(crate) const TABLES: &[&str] = &[
     "collections",
     "items",
@@ -15,6 +15,10 @@ pub(crate) const TABLES: &[&str] = &[
     "legacy_payload_locators",
     "browse_items",
     "metadata_authorities",
+    "metadata_health",
+    "preparation_readiness",
+    "album_group_members",
+    "metadata_language_display",
     "metadata_candidates",
     "metadata_refreshes",
     "processing_observations",
@@ -190,15 +194,23 @@ pub(crate) fn rebuilt(db: &Connection, archive: &Path) -> Result<usize> {
 /// archive writer is held. The journal remains until this transaction commits.
 pub(crate) fn published(db: &mut Connection, archive: &Path, paths: &[String]) -> Result<()> {
     let tx = db.transaction().map_err(storage)?;
+    published_in_transaction(&tx, archive, paths)?;
+    tx.commit().map_err(storage)
+}
+
+pub(crate) fn published_in_transaction(
+    db: &Connection,
+    archive: &Path,
+    paths: &[String],
+) -> Result<()> {
     for path in paths {
         publication::validate_relative_path(path)?;
         if tracked(Path::new(path)) {
-            tx.execute("INSERT INTO archive_index_files VALUES(?,?) ON CONFLICT(path) DO UPDATE SET stamp=excluded.stamp",
+            db.execute("INSERT INTO archive_index_files VALUES(?,?) ON CONFLICT(path) DO UPDATE SET stamp=excluded.stamp",
                 params![path, stamp(&archive.join(path))?]).map_err(storage)?;
         }
     }
-    seal(&tx, archive)?;
-    tx.commit().map_err(storage)
+    seal(db, archive)
 }
 
 /// A corrupt rebuildable SQLite file is retained for diagnosis. Private state is
@@ -223,7 +235,7 @@ pub(crate) fn open_catalog(state: &Path) -> Result<Connection> {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)?;
-        if version == 9 {
+        if version == 11 {
             let mut required = TABLES
                 .iter()
                 .map(|name| name.to_string())

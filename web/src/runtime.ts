@@ -22,7 +22,7 @@ export function requestErrorMessage(error:unknown,forbiddenMessage?:string):stri
 let authentication:AuthenticationCoordinator|undefined;
 let identity:AuthenticationIdentity|undefined;
 export function setApiIdentity(value?:AuthenticationIdentity){
- if(identity?.user_id!==value?.user_id)authentication?.cancel();
+ if(identity?.user_id!==value?.user_id){authentication?.cancel();window.dispatchEvent(new CustomEvent('collector-api-identity-changed',{detail:{userId:value?.user_id}}));}
  identity=value?{...value}:undefined;
 }
 export function setRecentAuthenticationHandler(handler?:AuthenticationHandler){authentication?.cancel();authentication=handler?new AuthenticationCoordinator(handler):undefined;}
@@ -66,7 +66,9 @@ async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean
   }
   throw new ApiRequestError(response.status,code,message);
  }
- return response.status===204?undefined as T:response.json();
+ const result=response.status===204?undefined as T:await response.json() as T;init.signal?.throwIfAborted();
+ if(submittedIdentity&&identity?.user_id!==submittedIdentity.user_id)throw new Error('Account changed. Reopen this task before continuing.');
+ return result;
 }
 
 export {useMusicQueue,addMusicTracks} from './music-queue';

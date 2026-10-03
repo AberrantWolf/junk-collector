@@ -541,6 +541,10 @@ pub struct ItemLifecycle {
     pub automatic_metadata_through: u64,
     pub reset_fields_through: u64,
     pub reset_artwork_through: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_into: Option<ItemId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_group: Option<TransactionId>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ItemReimport {

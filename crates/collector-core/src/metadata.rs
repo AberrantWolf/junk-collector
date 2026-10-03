@@ -175,6 +175,11 @@ pub struct MetadataFieldOverride {
 pub struct MetadataAuthority {
     /// `None` means automatic candidate selection.
     pub selected_candidate: Option<MetadataCandidateIdentity>,
+    /// Last accepted automatic decision, distinct from explicit user selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automatic_candidate: Option<MetadataCandidateIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automatic_language: Option<LanguageTag>,
     pub field_overrides: Vec<MetadataFieldOverride>,
     /// Unrecognized historical field authority, retained verbatim and never applied
     /// as common or domain authority without an explicit owner-aware conversion.
@@ -199,6 +204,10 @@ impl<'de> Deserialize<'de> for MetadataAuthority {
         #[serde(deny_unknown_fields)]
         struct Wire {
             selected_candidate: Option<MetadataCandidateIdentity>,
+            #[serde(default)]
+            automatic_candidate: Option<MetadataCandidateIdentity>,
+            #[serde(default)]
+            automatic_language: Option<LanguageTag>,
             field_overrides: Vec<RawJson>,
             #[serde(default)]
             preserved_field_overrides: Vec<RawJson>,
@@ -214,6 +223,8 @@ impl<'de> Deserialize<'de> for MetadataAuthority {
         let wire = Wire::deserialize(deserializer)?;
         let mut result = Self {
             selected_candidate: wire.selected_candidate,
+            automatic_candidate: wire.automatic_candidate,
+            automatic_language: wire.automatic_language,
             field_overrides: Vec::new(),
             preserved_field_overrides: wire.preserved_field_overrides,
             artwork_choice: wire.artwork_choice,
@@ -236,7 +247,11 @@ impl<'de> Deserialize<'de> for MetadataAuthority {
 
 impl MetadataAuthority {
     pub fn validate(&self) -> Result<()> {
-        if let Some(candidate) = &self.selected_candidate {
+        for candidate in self
+            .selected_candidate
+            .iter()
+            .chain(self.automatic_candidate.iter())
+        {
             validate_candidate_identity(candidate)?;
         }
         if self.preserved_field_overrides.len() > 128

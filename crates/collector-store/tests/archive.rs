@@ -1988,7 +1988,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        9 // P06 adds rebuildable ownership indexes/checkpoints; archived fixture bytes stay unchanged.
+        11 // Library care adds rebuildable health indexes; archived fixture bytes stay unchanged.
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -1996,7 +1996,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        15 // FX-03 adds private visibility/clear intents; original archive bytes stay unchanged.
+        18 // Durable intake extends private state without replacing existing configuration.
     );
     assert_eq!(
         private
@@ -6158,7 +6158,7 @@ fn current_private_schema_preserves_durable_imports_without_private_path_columns
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        15 // Work-history state adds no private paths to Import records.
+        18 // Work-history state adds no private paths to Import records.
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -7523,7 +7523,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         && !request.contains("disk7")));
     drop(requests);
     assert!(
-        service
+        !service
             .run_next_job("guided-provider-art-listing-failure")
             .unwrap()
     );
@@ -7550,7 +7550,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             .run_next_job("guided-provider-art-listing-retry")
             .unwrap()
     );
-    assert!(service.run_next_job("guided-provider-art-image").unwrap());
+    assert!(!service.run_next_job("guided-provider-art-image").unwrap());
     assert!(!service.run_next_job("guided-provider-finished").unwrap());
     let target = service
         .ingest_detail(&actor, id)
@@ -7579,7 +7579,9 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
     let detail = service.ingest_detail(&actor, id).unwrap();
     assert_eq!(
         detail.summary.outcome,
-        collector_app::IngestStepState::Succeeded
+        collector_app::IngestStepState::Succeeded,
+        "{:?}",
+        detail
     );
     assert!(detail.steps.iter().any(|step| {
         step.step == "metadata" && step.state == collector_app::IngestStepState::Succeeded
@@ -9914,6 +9916,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let invalid_authority = MetadataAuthorityRecord {
+        resolution_policy: 2,
         current_candidates: None,
         inventory: None,
         collection_id: collection.id,
@@ -9993,6 +9996,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
     assert_eq!(store.recipe(sealed.id).unwrap().digest, sealed.digest);
 
     let authority = MetadataAuthorityRecord {
+        resolution_policy: 2,
         current_candidates: None,
         inventory: None,
         collection_id: collection.id,
@@ -11386,6 +11390,7 @@ fn historical_domain_authority_rebuilds_without_rewriting_original_records() {
         .publish_metadata_authority(
             TransactionId::new(),
             MetadataAuthorityRecord {
+                resolution_policy: 2,
                 current_candidates: None,
                 inventory: None,
                 collection_id: collection.id,
@@ -13663,10 +13668,25 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
             &command(),
         )
         .unwrap();
+    // Name-only observations are now suggestions. Selection is an explicit
+    // decision, rather than a side effect of a subsequent refresh.
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(2),
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: original.clone(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
     candidate.identity.provider_record_version = Some("z-new".into());
     candidate.title.value = "New title".into();
     let new = service
-        .refresh_metadata(&actor, saved.id, refresh(2, candidate), &command())
+        .refresh_metadata(&actor, saved.id, refresh(3, candidate), &command())
         .unwrap();
     assert_eq!(
         new.display.unwrap().title.value,
@@ -13685,10 +13705,14 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
     equivalent.identity.provider_record_version = Some("equivalent-new".into());
     equivalent.observation = RawJson::from_json(r#"{"b":2,"a":1}"#).unwrap();
     service
-        .refresh_metadata(&actor, saved.id, refresh(3, equivalent.clone()), &command())
+        .refresh_metadata(&actor, saved.id, refresh(4, equivalent.clone()), &command())
         .unwrap();
     let matched = service.metadata_view(&actor, saved.id).unwrap();
-    assert_eq!(matched.candidates.len(), 1);
+    assert_eq!(
+        matched.candidates.len(),
+        3,
+        "Selectable immutable versions are retained separately from current suggestions."
+    );
     assert_eq!(
         matched.authority.selected_candidate,
         Some(equivalent.identity.clone())
@@ -13701,13 +13725,13 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
             .unwrap()
             .candidates
             .len(),
-        1
+        3
     );
     let mut reused_identity = equivalent;
     reused_identity.identity = original;
     reused_identity.title.value = "Conflicting reuse".into();
     assert!(matches!(
-        service.refresh_metadata(&actor, saved.id, refresh(4, reused_identity), &command()),
+        service.refresh_metadata(&actor, saved.id, refresh(5, reused_identity), &command()),
         Err(Error::Conflict)
     ));
 }
@@ -15956,4 +15980,1930 @@ fn checkpoint_generated_scale_measurements() {
             percentile(queries, 95)
         );
     }
+}
+
+#[test]
+fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reopens() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = store.capture(imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    store.save_capture(capture, revision).unwrap();
+    let disc_id = service
+        .metadata_review(&actor, saved.id)
+        .unwrap()
+        .lookup_choices
+        .into_iter()
+        .find(|choice| choice.kind == collector_app::MetadataLookupKind::DiscId)
+        .unwrap()
+        .value;
+    let group = "11111111-1111-4111-8111-111111111111";
+    let body=serde_json::to_vec(&serde_json::json!({"count":2,"releases":[
+        {"id":"22222222-2222-4222-8222-222222222222","title":"Album","text-representation":{"language":"eng","script":"Latn"},"release-group":{"id":group},"media":[{"position":1,"discs":[{"id":disc_id}]}]},
+        {"id":"33333333-3333-4333-8333-333333333333","title":"アルバム","text-representation":{"language":"jpn","script":"Jpan"},"release-group":{"id":group},"media":[{"position":1,"discs":[{"id":disc_id}]}]}
+    ]})).unwrap();
+    let fixture = metadata_fixture_server(vec![("200 OK\r\nContent-Type: application/json", body)]);
+    let provider = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "collector-test/0.1 (test@example.invalid)",
+            &fixture.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let service = service
+        .with_streaming_provider(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(provider.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            provider.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .metadata_preferences(&actor)
+            .unwrap()
+            .language
+            .as_str(),
+        "en"
+    );
+    let preference_command = command();
+    let change = collector_app::UpdateMetadataPreferences {
+        expected_revision: Revision(0),
+        language: LanguageTag::new("ja").unwrap(),
+    };
+    let preferences = service
+        .update_metadata_preferences(&actor, change.clone(), &preference_command)
+        .unwrap();
+    assert_eq!(
+        service
+            .update_metadata_preferences(&actor, change, &preference_command)
+            .unwrap()
+            .revision,
+        preferences.revision
+    );
+    assert!(matches!(
+        service.update_metadata_preferences(
+            &actor,
+            collector_app::UpdateMetadataPreferences {
+                expected_revision: Revision(0),
+                language: LanguageTag::new("fr").unwrap()
+            },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::ClearFieldOverride {
+                    field: MetadataField::Title,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let request = collector_app::ResolveMetadataCommand {
+        lookup: collector_app::AcquireMetadataCommand::MusicBrainzDisc {
+            disc_id: disc_id.clone(),
+            refresh: true,
+        },
+        acquire_artwork: true,
+    };
+    let receipt = command();
+    let job = service
+        .resolve_metadata(&actor, saved.id, request.clone(), &receipt)
+        .unwrap();
+    service
+        .update_metadata_preferences(
+            &actor,
+            collector_app::UpdateMetadataPreferences {
+                expected_revision: preferences.revision,
+                language: LanguageTag::new("en").unwrap(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .resolve_metadata(&actor, saved.id, request.clone(), &receipt)
+            .unwrap(),
+        job
+    );
+    assert!(matches!(
+        service.resolve_metadata(
+            &actor,
+            saved.id,
+            collector_app::ResolveMetadataCommand {
+                acquire_artwork: false,
+                ..request.clone()
+            },
+            &receipt
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    assert!(service.run_next_job("durable-resolution").unwrap());
+    let resolution = service
+        .metadata_resolutions(&actor, saved.id)
+        .unwrap()
+        .into_iter()
+        .find(|value| value.job.id == job)
+        .unwrap();
+    assert_eq!(resolution.job.state, JobState::Completed);
+    assert!(
+        resolution.result.unwrap().artwork_error.is_some(),
+        "unconfigured artwork must not roll back successful text"
+    );
+    assert!(resolution.job.retryable);
+    let authority = store
+        .metadata_authority(collection.id, saved.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        authority.authority.automatic_language.unwrap().as_str(),
+        "ja",
+        "accepted inputs remain frozen after preference changes"
+    );
+    assert_eq!(authority.display.unwrap().title.value, "アルバム");
+    let review = service.metadata_review(&actor, saved.id).unwrap();
+    assert_eq!(
+        review.display.title.value, "Album",
+        "presentation follows the current user's language within the accepted album"
+    );
+    assert!(
+        !review
+            .review_reasons
+            .contains(&collector_app::MetadataReviewReason::AlbumAmbiguity)
+    );
+    assert!(review.authority.selected_candidate.is_none());
+    assert!(review.authority.automatic_candidate.is_some());
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_review(&actor, saved.id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "Album"
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert_eq!(
+        service
+            .metadata_preferences(&actor)
+            .unwrap()
+            .language
+            .as_str(),
+        "en"
+    );
+    assert_eq!(
+        service.metadata_resolutions(&actor, saved.id).unwrap()[0]
+            .job
+            .id,
+        job
+    );
+    let stranger = Principal {
+        user_id: store
+            .create_user("care-stranger", "a long stranger password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.metadata_resolutions(&stranger, saved.id),
+        Err(Error::Forbidden)
+    ));
+    let query = collector_app::MetadataCareQuery {
+        collection_id: Some(collection.id),
+        search: String::new(),
+        reason: None,
+        needs_attention: true,
+        cursor: None,
+        limit: Some(1),
+    };
+    assert_eq!(
+        service
+            .metadata_care(&actor, query.clone())
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert!(matches!(
+        service.metadata_care(&stranger, query),
+        Err(Error::Forbidden)
+    ));
+}
+
+#[test]
+fn album_group_commit_preserves_distinct_inventory_and_guarded_undo() {
+    use collector_app::{AlbumGroupChoices, ConfirmAlbumGroup, GroupEntry, PreviewAlbumGroup};
+    let (_root, store, actor, service, collection) = setup();
+    let mut left = item(collection.id);
+    let mut right = item(collection.id);
+    for (inventory, position) in [(&mut left, 1), (&mut right, 2)] {
+        inventory.wishlist = false;
+        inventory.specimens.push(Specimen {
+            id: SpecimenId::new(),
+            label: format!("Copy {position}"),
+            condition: Condition::Good,
+            ownership: Ownership::Owned,
+            possession: Possession::Present,
+            components: vec![Component {
+                id: ComponentId::new(),
+                label: format!("Disc {position}"),
+                kind: ComponentKind::OpticalDisc,
+                position,
+                carrier: Some(Carrier {
+                    id: CarrierId::new(),
+                    kind: CarrierKind::OpticalDisc,
+                    label: String::new(),
+                }),
+                migration_provenance: None,
+            }],
+            acquisition: None,
+            private_notes: Some("Preserved private note".into()),
+            loans: vec![],
+        });
+    }
+    let left = Catalog::save(&*store, left, Revision(0)).unwrap();
+    let right = Catalog::save(&*store, right, Revision(0)).unwrap();
+    let upload = service
+        .create_upload(
+            &actor,
+            right.id,
+            right.revision,
+            vec![UploadFile {
+                name: "original.bin".into(),
+                bytes: ByteLength(4),
+                sha256: None,
+            }],
+            &command(),
+        )
+        .unwrap();
+    service
+        .upload_chunk(&actor, upload.id, 0, 0, b"data")
+        .unwrap();
+    service
+        .commit_upload(&actor, upload.id, &command())
+        .unwrap();
+    let right = store.item(right.id).unwrap();
+    let original_evidence = store.evidence(right.id).unwrap();
+    assert!(!original_evidence.is_empty());
+    let request = PreviewAlbumGroup {
+        destination: left.id,
+        entries: vec![
+            GroupEntry {
+                item_id: left.id,
+                expected_revision: left.revision,
+            },
+            GroupEntry {
+                item_id: right.id,
+                expected_revision: right.revision,
+            },
+        ],
+        choices: AlbumGroupChoices::default(),
+    };
+    let preview = service
+        .preview_album_group(&actor, request.clone())
+        .unwrap();
+    assert!(preview.can_confirm, "{:?}", preview.conflicts);
+    let context = command();
+    let merged = service
+        .confirm_album_group(
+            &actor,
+            ConfirmAlbumGroup {
+                preview: request.clone(),
+                token: preview.token.clone(),
+            },
+            &context,
+        )
+        .unwrap();
+    store.reindex().unwrap();
+    assert_eq!(
+        store.evidence(right.id).unwrap().len(),
+        original_evidence.len()
+    );
+    assert_eq!(store.item(left.id).unwrap().captures.len(), 1);
+    assert_eq!(
+        service
+            .confirm_album_group(
+                &actor,
+                ConfirmAlbumGroup {
+                    preview: request,
+                    token: preview.token
+                },
+                &context
+            )
+            .unwrap()
+            .group_id,
+        merged.group_id
+    );
+    let destination = Catalog::item(&*store, left.id).unwrap();
+    assert_eq!(destination.specimens.len(), 2);
+    assert_eq!(destination.specimens[0].id, left.specimens[0].id);
+    assert_eq!(
+        destination.specimens[1].components[0]
+            .carrier
+            .as_ref()
+            .unwrap()
+            .id,
+        right.specimens[0].components[0]
+            .carrier
+            .as_ref()
+            .unwrap()
+            .id
+    );
+    let source = Catalog::item(&*store, right.id).unwrap();
+    assert!(source.deleted);
+    assert_eq!(source.lifecycle.merged_into, Some(left.id));
+    assert!(source.specimens.is_empty());
+    store.reindex().unwrap();
+    assert_eq!(
+        serde_json::to_string(&Catalog::item(&*store, left.id).unwrap()).unwrap(),
+        serde_json::to_string(&destination).unwrap()
+    );
+    assert!(
+        service
+            .album_group_undo(&actor, merged.group_id)
+            .unwrap()
+            .can_undo
+    );
+    service
+        .undo_album_group(&actor, merged.group_id, &command())
+        .unwrap();
+    assert_eq!(Catalog::item(&*store, left.id).unwrap().specimens.len(), 1);
+    assert_eq!(
+        Catalog::item(&*store, right.id).unwrap().specimens[0].id,
+        right.specimens[0].id
+    );
+    assert!(
+        !service
+            .album_group_undo(&actor, merged.group_id)
+            .unwrap()
+            .can_undo
+    );
+    store.reindex().unwrap();
+    assert!(!Catalog::item(&*store, right.id).unwrap().deleted);
+}
+
+#[test]
+fn album_group_publication_faults_recover_all_members_or_none() {
+    use collector_app::{AlbumGroupChoices, ConfirmAlbumGroup, GroupEntry, PreviewAlbumGroup};
+    use collector_store::PublicationFaultPoint as Point;
+    for point in publication_points() {
+        let (root, store, actor, service, collection) = setup();
+        let left = Catalog::save(&*store, item(collection.id), Revision(0)).unwrap();
+        let right = Catalog::save(&*store, item(collection.id), Revision(0)).unwrap();
+        drop(service);
+        drop(store);
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                &archive,
+                &state,
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let request = PreviewAlbumGroup {
+            destination: left.id,
+            entries: vec![
+                GroupEntry {
+                    item_id: left.id,
+                    expected_revision: left.revision,
+                },
+                GroupEntry {
+                    item_id: right.id,
+                    expected_revision: right.revision,
+                },
+            ],
+            choices: AlbumGroupChoices::default(),
+        };
+        let preview = service
+            .preview_album_group(&actor, request.clone())
+            .unwrap();
+        let context = command();
+        assert!(
+            service
+                .confirm_album_group(
+                    &actor,
+                    ConfirmAlbumGroup {
+                        preview: request.clone(),
+                        token: preview.token.clone()
+                    },
+                    &context
+                )
+                .is_err(),
+            "{point:?}"
+        );
+        let committed = matches!(
+            point,
+            Point::RevisionCommitted | Point::ProjectionApplied | Point::Completed
+        );
+        if !committed {
+            store.reindex().unwrap();
+            assert_eq!(
+                Catalog::item(&*store, left.id).unwrap().revision,
+                left.revision
+            );
+            assert!(!Catalog::item(&*store, right.id).unwrap().deleted);
+        }
+        drop(service);
+        drop(store);
+        let reopened = Arc::new(Store::open(&archive, &state).unwrap());
+        assert_eq!(
+            Catalog::item(&*reopened, left.id).unwrap().revision,
+            Revision(if committed { 2 } else { 1 }),
+            "{point:?}"
+        );
+        assert_eq!(
+            Catalog::item(&*reopened, right.id).unwrap().deleted,
+            committed,
+            "{point:?}"
+        );
+        let service = CollectionService::new(reopened.clone(), Arc::new(Registry::builtins()));
+        let result = service
+            .confirm_album_group(
+                &actor,
+                ConfirmAlbumGroup {
+                    preview: request,
+                    token: preview.token,
+                },
+                &context,
+            )
+            .unwrap();
+        assert!(
+            service
+                .album_group_undo(&actor, result.group_id)
+                .unwrap()
+                .can_undo,
+            "{point:?}"
+        );
+        assert!(
+            std::fs::read_dir(archive.join(".transactions"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
+    use collector_app::{
+        AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
+    };
+    let (root, store, actor, service, collection) = setup();
+    let mut session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: 70,
+                expected_files: 70,
+                automatic_metadata: false,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let packages = (0..70)
+        .map(|position| IntakePackage {
+            package: IngestPackageSelection {
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: format!("Disc {position}"),
+                },
+                files: vec![UploadFile {
+                    name: "original.bin".into(),
+                    bytes: ByteLength(0),
+                    sha256: None,
+                }],
+                anchor_file_index: None,
+            },
+            destination: if position < 2 {
+                IntakeDestination::AlbumGroup {
+                    key: "two-disc-album".into(),
+                    title: "A confirmed album".into(),
+                    copy_key: "one set".into(),
+                }
+            } else {
+                IntakeDestination::Separate
+            },
+        })
+        .collect::<Vec<_>>();
+    for page in packages.chunks(35) {
+        session = service
+            .append_intake_with_preflight(
+                &actor,
+                session.id,
+                AppendIntake {
+                    expected_revision: session.revision,
+                    packages: page.to_vec(),
+                },
+                &command(),
+                |_| Ok(()),
+            )
+            .unwrap();
+    }
+    assert_eq!(session.package_count, 70);
+    assert_eq!(session.file_count, 70);
+    let page = service
+        .intake_members(&actor, session.id, None, 30)
+        .unwrap();
+    assert_eq!(page.items.len(), 30);
+    assert!(page.next_cursor.is_some());
+    let context = command();
+    let start = StartIntake {
+        expected_revision: session.revision,
+    };
+    session = service
+        .start_intake(&actor, session.id, start.clone(), &context)
+        .unwrap();
+    assert_eq!(
+        service
+            .start_intake(&actor, session.id, start, &context)
+            .unwrap()
+            .id,
+        session.id
+    );
+    assert!(service.run_next_job("bulk-intake-admission").unwrap());
+    assert_eq!(service.intake(&actor, session.id).unwrap().admitted, 70);
+    service.resume_guided_ingests().unwrap();
+    let members = service
+        .intake_members(&actor, session.id, None, 100)
+        .unwrap();
+    assert_eq!(members.items.len(), 70);
+    let first = store
+        .guided_ingest_intent(members.items[0].import_id.unwrap())
+        .unwrap()
+        .unwrap();
+    let second = store
+        .guided_ingest_intent(members.items[1].import_id.unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.target_item_id, second.target_item_id);
+    assert_eq!(
+        first.bulk_context.as_ref().unwrap().copy_id,
+        second.bulk_context.as_ref().unwrap().copy_id
+    );
+    assert_eq!(
+        Catalog::item(&*store, first.target_item_id)
+            .unwrap()
+            .specimens
+            .len(),
+        1
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert_eq!(
+        service
+            .intake_members(&actor, session.id, Some(59), 30)
+            .unwrap()
+            .items
+            .len(),
+        10
+    );
+    assert_eq!(service.intake(&actor, session.id).unwrap().admitted, 70);
+    let stranger = Principal {
+        user_id: UserId::new(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.intake(&stranger, session.id),
+        Err(Error::NotFound)
+    ));
+    service
+        .cancel_intake(&actor, session.id, &command())
+        .unwrap();
+    service.resume_bulk_intakes().unwrap();
+    assert!(matches!(
+        service.intake(&actor, session.id).unwrap().state,
+        collector_app::IntakeState::Cancelled
+    ));
+    for member in members.items {
+        assert_eq!(
+            store
+                .import_record(member.import_id.unwrap())
+                .unwrap()
+                .view
+                .phase,
+            ImportPhase::Cancelled
+        );
+    }
+}
+
+#[test]
+fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_failed_albums() {
+    use collector_app::{
+        BulkLibraryKind, BulkLibraryState, LibrarySelection, MetadataCareQuery, PreviewBulkLibrary,
+    };
+    let (root, store, actor, service, collection) = setup();
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let service = service.with_audio_converter(encoder.clone());
+    let mut albums = Vec::new();
+    let mut imports = Vec::new();
+    for title in ["Bulk healthy", "Bulk damaged"] {
+        let mut inventory = item(collection.id);
+        inventory.title = title.into();
+        let saved = save_inventory(&service, &actor, inventory, Revision(0)).unwrap();
+        let imported = derivative_import(&service, &actor, collection.id);
+        let mut capture = store.capture(imported.capture_id).unwrap();
+        let rev = capture.revision;
+        capture.association.item_id = Some(saved.id);
+        store.save_capture(capture, rev).unwrap();
+        albums.push(saved);
+        imports.push(imported);
+    }
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let damaged = collection_path.join(format!(
+        "captures/{}/payload/{}/disc.bin",
+        imports[1].capture_id, imports[1].representation_id
+    ));
+    let original = std::fs::read(&damaged).unwrap();
+    let mut changed = original.clone();
+    changed[0] ^= 1;
+    std::fs::write(&damaged, changed).unwrap();
+    let query = MetadataCareQuery {
+        collection_id: Some(collection.id),
+        search: "Bulk".into(),
+        reason: None,
+        needs_attention: true,
+        cursor: None,
+        limit: Some(1),
+    };
+    assert_eq!(
+        service
+            .preparation_care(&actor, query.clone())
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    let receipt = command();
+    let input = PreviewBulkLibrary {
+        kind: BulkLibraryKind::MusicPreparation,
+        selection: LibrarySelection::AllMatching {
+            query,
+            exclusions: vec![],
+        },
+        sources: Default::default(),
+    };
+    let preview = service
+        .preview_bulk_library(&actor, input.clone(), &receipt)
+        .unwrap();
+    assert_eq!(preview.selected, 2);
+    assert_eq!(preview.tracks, 4);
+    assert_eq!(preview.excluded, 0);
+    assert_eq!(
+        service
+            .preview_bulk_library(&actor, input, &receipt)
+            .unwrap()
+            .id,
+        preview.id
+    );
+    let mut added = item(collection.id);
+    added.title = "Bulk added after selection".into();
+    save_inventory(&service, &actor, added, Revision(0)).unwrap();
+    let start_receipt = command();
+    service
+        .start_bulk_library(&actor, preview.id, &start_receipt)
+        .unwrap();
+    for _ in 0..40 {
+        while service.run_next_job("bulk-care").unwrap() {}
+        service.resume_bulk_library().unwrap();
+        if service.bulk_library(&actor, preview.id).unwrap().state == BulkLibraryState::Completed {
+            break;
+        }
+    }
+    let result = service.bulk_library(&actor, preview.id).unwrap();
+    assert_eq!(result.state, BulkLibraryState::Completed);
+    assert_eq!(result.succeeded, 1);
+    assert_eq!(result.failed, 1);
+    assert_eq!(encoder.calls.load(Ordering::SeqCst), 2);
+    let first = service
+        .bulk_library_members(&actor, preview.id, None, 1)
+        .unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert!(first.next_cursor.is_some());
+    let next = first.next_cursor.unwrap().parse().unwrap();
+    assert_eq!(
+        service
+            .bulk_library_members(&actor, preview.id, Some(next), 1)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert_eq!(
+        service
+            .start_bulk_library(&actor, preview.id, &start_receipt)
+            .unwrap()
+            .id,
+        preview.id
+    );
+    std::fs::write(damaged, original).unwrap();
+    service
+        .change_bulk_library(&actor, preview.id, false, &command())
+        .unwrap();
+    for _ in 0..40 {
+        while service.run_next_job("bulk-retry").unwrap() {}
+        service.resume_bulk_library().unwrap();
+        if service.bulk_library(&actor, preview.id).unwrap().state == BulkLibraryState::Completed {
+            break;
+        }
+    }
+    let result = service.bulk_library(&actor, preview.id).unwrap();
+    assert_eq!(result.succeeded, 2);
+    assert_eq!(result.failed, 0);
+    assert_eq!(
+        encoder.calls.load(Ordering::SeqCst),
+        4,
+        "Successful albums were not encoded again."
+    );
+    store.reindex().unwrap();
+    assert!(
+        service
+            .preparation_care(
+                &actor,
+                MetadataCareQuery {
+                    collection_id: Some(collection.id),
+                    search: "Bulk healthy".into(),
+                    reason: None,
+                    needs_attention: true,
+                    cursor: None,
+                    limit: None
+                }
+            )
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    drop(service);
+    drop(store);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    assert_eq!(
+        service.bulk_library(&actor, preview.id).unwrap().succeeded,
+        2
+    );
+}
+
+#[test]
+fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_inventory_are_fenced() {
+    use collector_app::{BulkLibraryKind, BulkLibraryState, LibrarySelection, PreviewBulkLibrary};
+    let (_root, store, actor, service, collection) = setup();
+    let inventory = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = store.capture(imported.capture_id).unwrap();
+    let rev = capture.revision;
+    capture.association.item_id = Some(inventory.id);
+    store.save_capture(capture, rev).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let preview = service
+        .preview_bulk_library(
+            &actor,
+            PreviewBulkLibrary {
+                kind: BulkLibraryKind::MusicPreparation,
+                selection: LibrarySelection::Explicit {
+                    items: vec![inventory.id],
+                },
+                sources: Default::default(),
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .start_bulk_library(&actor, preview.id, &command())
+        .unwrap();
+    service
+        .change_bulk_library(&actor, preview.id, true, &command())
+        .unwrap();
+    assert!(!service.run_next_job("cancelled-bulk-parent").unwrap());
+    service.resume_bulk_library().unwrap();
+    assert_eq!(
+        service.bulk_library(&actor, preview.id).unwrap().state,
+        BulkLibraryState::Cancelled
+    );
+    assert!(matches!(
+        service.retry_job(&actor, preview.id, &command()),
+        Err(Error::Conflict) | Err(Error::Invalid(_))
+    ));
+    let next = service
+        .preview_bulk_library(
+            &actor,
+            PreviewBulkLibrary {
+                kind: BulkLibraryKind::MusicPreparation,
+                selection: LibrarySelection::Explicit {
+                    items: vec![inventory.id],
+                },
+                sources: Default::default(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut edited = store.item(inventory.id).unwrap();
+    let rev = edited.revision;
+    edited.title = "Changed after preview".into();
+    save_inventory(&service, &actor, edited, rev).unwrap();
+    service
+        .start_bulk_library(&actor, next.id, &command())
+        .unwrap();
+    assert!(service.run_next_job("changed-frozen-inventory").unwrap());
+    service.resume_bulk_library().unwrap();
+    assert_eq!(service.bulk_library(&actor, next.id).unwrap().failed, 1);
+    assert!(
+        service
+            .bulk_library_members(&actor, next.id, None, 20)
+            .unwrap()
+            .items[0]
+            .job_id
+            .is_none()
+    );
+}
+
+#[test]
+fn bulk_discovery_preserves_nested_members_and_paginates_more_than_one_guided_page() {
+    let (_root, _store, actor, service, collection) = setup();
+    let mut files = Vec::new();
+    for position in 0..130 {
+        for suffix in ["disc.cue", "tracks/audio.bin"] {
+            files.push(UploadFile {
+                name: format!("Albums/{position:04}/{suffix}"),
+                bytes: ByteLength(0),
+                sha256: None,
+            });
+        }
+    }
+    files.push(UploadFile {
+        name: "Albums/readme.txt".into(),
+        bytes: ByteLength(10),
+        sha256: None,
+    });
+    let request = collector_app::DiscoverIngestCommand {
+        collection_id: collection.id,
+        files,
+    };
+    let receipt = command();
+    let discovery = service
+        .discover_bulk_intake(&actor, request.clone(), &receipt)
+        .unwrap();
+    assert_eq!(
+        service
+            .discover_bulk_intake(&actor, request, &receipt)
+            .unwrap()
+            .id,
+        discovery.id
+    );
+    assert_eq!(discovery.package_count, 130);
+    assert_eq!(discovery.unassigned_count, 1);
+    let mut cursor = None;
+    let mut count = 0;
+    loop {
+        let page = service
+            .intake_discovery_page(&actor, discovery.id, cursor, None)
+            .unwrap();
+        assert!(page.packages.items.len() <= 64);
+        for p in &page.packages.items {
+            assert_eq!(p.files.len(), 2);
+            assert!(p.files.iter().any(|f| f.name.ends_with("tracks/audio.bin")));
+        }
+        count += page.packages.items.len();
+        assert_eq!(page.unassigned_files.items, ["Albums/readme.txt"]);
+        let Some(next) = page.packages.next_cursor else {
+            break;
+        };
+        cursor = Some(next.parse().unwrap());
+    }
+    assert_eq!(count, 130);
+}
+
+#[test]
+fn interrupted_intake_manifest_cannot_start_a_partial_batch() {
+    use collector_app::{
+        AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: 2,
+                expected_files: 2,
+                automatic_metadata: false,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let package = IntakePackage {
+        package: IngestPackageSelection {
+            source: ImportSourceSummary {
+                kind: ImportSourceKind::Browser,
+                label: None,
+                package_name: "Unknown original".into(),
+            },
+            files: vec![UploadFile {
+                name: "original.bin".into(),
+                bytes: ByteLength(0),
+                sha256: None,
+            }],
+            anchor_file_index: None,
+        },
+        destination: IntakeDestination::Separate,
+    };
+    let receipt = command();
+    let request = AppendIntake {
+        expected_revision: session.revision,
+        packages: vec![package.clone()],
+    };
+    let session = service
+        .append_intake_with_preflight(&actor, session.id, request.clone(), &receipt, |_| Ok(()))
+        .unwrap();
+    assert_eq!(
+        service
+            .append_intake_with_preflight(&actor, session.id, request, &receipt, |_| panic!(
+                "receipt must bypass preflight"
+            ))
+            .unwrap()
+            .package_count,
+        1
+    );
+    assert!(matches!(
+        service.start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision
+            },
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        store.job_record(session.id, actor.user_id),
+        Err(Error::NotFound)
+    ));
+    let session = service
+        .append_intake_with_preflight(
+            &actor,
+            session.id,
+            AppendIntake {
+                expected_revision: session.revision,
+                packages: vec![package],
+            },
+            &command(),
+            |_| Ok(()),
+        )
+        .unwrap();
+    service
+        .start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision,
+            },
+            &command(),
+        )
+        .unwrap();
+    service.run_next_job("complete-manifest").unwrap();
+    assert_eq!(service.intake(&actor, session.id).unwrap().admitted, 2);
+}
+
+#[test]
+fn album_group_conflicts_copy_assembly_unknown_fields_and_later_edits() {
+    use collector_app::{
+        AlbumGroupChoices, ConfirmAlbumGroup, GroupConflictKind, GroupDiscPosition, GroupEntry,
+        PhysicalSetAssembly, PreviewAlbumGroup,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let mut inventories = Vec::new();
+    for i in 0..2 {
+        let mut v = item(collection.id);
+        v.title = format!("Manual album {i}");
+        v.wishlist = false;
+        v.domain.payload = RawJson::from_value(
+            serde_json::json!({"future_extension":{"copy":i,"unknown":[null,{"keep":true}]}}),
+        );
+        v.specimens.push(Specimen {
+            id: SpecimenId::new(),
+            label: format!("Set {i}"),
+            condition: Condition::Good,
+            ownership: Ownership::Owned,
+            possession: Possession::Present,
+            acquisition: None,
+            private_notes: None,
+            loans: vec![],
+            components: vec![Component {
+                id: ComponentId::new(),
+                label: "Disc".into(),
+                kind: ComponentKind::OpticalDisc,
+                position: 1,
+                carrier: None,
+                migration_provenance: None,
+            }],
+        });
+        inventories.push(Catalog::save(&*store, v, Revision(0)).unwrap());
+    }
+    let left = &inventories[0];
+    let right = &inventories[1];
+    let mut request = PreviewAlbumGroup {
+        destination: left.id,
+        entries: inventories
+            .iter()
+            .map(|i| GroupEntry {
+                item_id: i.id,
+                expected_revision: i.revision,
+            })
+            .collect(),
+        choices: AlbumGroupChoices::default(),
+    };
+    let preview = service
+        .preview_album_group(&actor, request.clone())
+        .unwrap();
+    assert!(!preview.can_confirm);
+    assert!(
+        preview
+            .conflicts
+            .iter()
+            .any(|c| matches!(c.kind, GroupConflictKind::ManualTitle))
+    );
+    assert!(
+        preview
+            .conflicts
+            .iter()
+            .any(|c| matches!(c.kind, GroupConflictKind::DomainInformation))
+    );
+    request.choices.title_from = Some(left.id);
+    request.choices.domain_from = Some(left.id);
+    request.choices.assemblies = vec![PhysicalSetAssembly {
+        destination: left.specimens[0].id,
+        sources: vec![right.specimens[0].id],
+    }];
+    let preview = service
+        .preview_album_group(&actor, request.clone())
+        .unwrap();
+    assert!(
+        preview
+            .conflicts
+            .iter()
+            .any(|c| matches!(c.kind, GroupConflictKind::PhysicalInventory))
+    );
+    request.choices.disc_positions = vec![GroupDiscPosition {
+        component_id: right.specimens[0].components[0].id,
+        position: 2,
+    }];
+    let preview = service
+        .preview_album_group(&actor, request.clone())
+        .unwrap();
+    assert!(preview.can_confirm, "{:?}", preview.conflicts);
+    let group = service
+        .confirm_album_group(
+            &actor,
+            ConfirmAlbumGroup {
+                preview: request,
+                token: preview.token,
+            },
+            &command(),
+        )
+        .unwrap();
+    let merged = Catalog::item(&*store, left.id).unwrap();
+    assert_eq!(merged.specimens.len(), 1);
+    assert_eq!(merged.specimens[0].components.len(), 2);
+    let archived =
+        collector_app::AlbumGroupingPort::album_group_publication(&*store, group.group_id).unwrap();
+    assert_eq!(
+        archived.entries[1].before.domain.payload,
+        right.domain.payload
+    );
+    let mut edited = merged.clone();
+    edited.subtitle = "Edited after grouping".into();
+    Catalog::save(&*store, edited, merged.revision).unwrap();
+    let undo = service.album_group_undo(&actor, group.group_id).unwrap();
+    assert!(!undo.can_undo);
+    assert!(undo.reason.is_some());
+    assert!(matches!(
+        service.undo_album_group(&actor, group.group_id, &command()),
+        Err(Error::Conflict)
+    ));
+    store.reindex().unwrap();
+    assert!(
+        !service
+            .album_group_undo(&actor, group.group_id)
+            .unwrap()
+            .can_undo
+    );
+}
+
+#[test]
+fn album_group_keeps_loaned_copies_distinct_and_blocks_contradictory_set_assembly() {
+    use collector_app::{
+        AlbumGroupChoices, GroupConflictKind, GroupEntry, PhysicalSetAssembly, PreviewAlbumGroup,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let mut inventories = Vec::new();
+    for i in 0..2 {
+        let mut v = item(collection.id);
+        v.wishlist = false;
+        v.specimens.push(Specimen {
+            id: SpecimenId::new(),
+            label: "Copy".into(),
+            condition: Condition::Good,
+            ownership: Ownership::Owned,
+            possession: if i == 0 {
+                Possession::Lent
+            } else {
+                Possession::Present
+            },
+            acquisition: None,
+            private_notes: None,
+            components: vec![],
+            loans: if i == 0 {
+                vec![Loan {
+                    id: LoanId::new(),
+                    contact: "A friend".into(),
+                    lent_at: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+                    due_at: None,
+                    returned_at: None,
+                }]
+            } else {
+                vec![]
+            },
+        });
+        inventories.push(Catalog::save(&*store, v, Revision(0)).unwrap());
+    }
+    let mut request = PreviewAlbumGroup {
+        destination: inventories[0].id,
+        entries: inventories
+            .iter()
+            .map(|i| GroupEntry {
+                item_id: i.id,
+                expected_revision: i.revision,
+            })
+            .collect(),
+        choices: AlbumGroupChoices::default(),
+    };
+    assert!(
+        service
+            .preview_album_group(&actor, request.clone())
+            .unwrap()
+            .can_confirm
+    );
+    request.choices.assemblies = vec![PhysicalSetAssembly {
+        destination: inventories[0].specimens[0].id,
+        sources: vec![inventories[1].specimens[0].id],
+    }];
+    assert!(
+        service
+            .preview_album_group(&actor, request.clone())
+            .unwrap()
+            .conflicts
+            .iter()
+            .any(|c| matches!(c.kind, GroupConflictKind::ActiveLoan))
+    );
+    let mut v = inventories[0].clone();
+    v.specimens[0].loans[0].returned_at =
+        Some(chrono::NaiveDate::from_ymd_opt(2026, 10, 2).unwrap());
+    v.specimens[0].possession = Possession::Elsewhere;
+    let rev = v.revision;
+    let v = Catalog::save(&*store, v, rev).unwrap();
+    request.entries[0].expected_revision = v.revision;
+    assert!(
+        service
+            .preview_album_group(&actor, request)
+            .unwrap()
+            .conflicts
+            .iter()
+            .any(|c| matches!(c.kind, GroupConflictKind::Possession))
+    );
+}
+
+#[test]
+fn subprocess_album_group_worker() {
+    let Ok(archive) = std::env::var("BL_CHILD_ARCHIVE") else {
+        return;
+    };
+    let state = std::env::var("BL_CHILD_STATE").unwrap();
+    let point = parse_publication_point(&std::env::var("BL_CHILD_POINT").unwrap());
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            &archive,
+            &state,
+            Arc::new(BlockAtPublicationPoint(point)),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store, Arc::new(Registry::builtins()));
+    let actor = Principal {
+        user_id: std::env::var("BL_CHILD_USER").unwrap().parse().unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    let request: collector_app::ConfirmAlbumGroup =
+        serde_json::from_slice(&std::fs::read(std::env::var("BL_CHILD_INPUT").unwrap()).unwrap())
+            .unwrap();
+    let context = CommandContext::new(std::env::var("BL_CHILD_KEY").unwrap()).unwrap();
+    service
+        .confirm_album_group(&actor, request, &context)
+        .unwrap();
+    panic!("The fault worker must wait at its phase marker.");
+}
+#[test]
+fn sigkill_group_publication_recovers_all_members_and_the_same_receipt() {
+    use collector_app::{AlbumGroupChoices, ConfirmAlbumGroup, GroupEntry, PreviewAlbumGroup};
+    use collector_store::PublicationFaultPoint as Point;
+    use std::io::BufRead as _;
+    for point in publication_points() {
+        let (root, store, actor, service, collection) = setup();
+        let left = Catalog::save(&*store, item(collection.id), Revision(0)).unwrap();
+        let right = Catalog::save(&*store, item(collection.id), Revision(0)).unwrap();
+        let request = PreviewAlbumGroup {
+            destination: left.id,
+            entries: vec![
+                GroupEntry {
+                    item_id: left.id,
+                    expected_revision: left.revision,
+                },
+                GroupEntry {
+                    item_id: right.id,
+                    expected_revision: right.revision,
+                },
+            ],
+            choices: AlbumGroupChoices::default(),
+        };
+        let preview = service
+            .preview_album_group(&actor, request.clone())
+            .unwrap();
+        let request = ConfirmAlbumGroup {
+            preview: request,
+            token: preview.token,
+        };
+        let context = command();
+        let input = root.path().join("group-input.json");
+        std::fs::write(&input, serde_json::to_vec(&request).unwrap()).unwrap();
+        drop(service);
+        drop(store);
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "subprocess_album_group_worker", "--nocapture"])
+            .env("BL_CHILD_ARCHIVE", &archive)
+            .env("BL_CHILD_STATE", &state)
+            .env("BL_CHILD_POINT", format!("{point:?}"))
+            .env("BL_CHILD_USER", actor.user_id.to_string())
+            .env("BL_CHILD_KEY", context.key())
+            .env("BL_CHILD_INPUT", input)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert_ne!(
+                reader.read_line(&mut line).unwrap(),
+                0,
+                "child exited before marker"
+            );
+            if line.contains("P01_PHASE:") {
+                break;
+            }
+        }
+        child.kill().unwrap();
+        assert!(!child.wait().unwrap().success());
+        let store = Arc::new(Store::open(&archive, &state).unwrap());
+        let committed = matches!(
+            point,
+            Point::RevisionCommitted | Point::ProjectionApplied | Point::Completed
+        );
+        assert_eq!(
+            Catalog::item(&*store, left.id).unwrap().revision,
+            Revision(if committed { 2 } else { 1 }),
+            "{point:?}"
+        );
+        assert_eq!(
+            Catalog::item(&*store, right.id).unwrap().deleted,
+            committed,
+            "{point:?}"
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let result = service
+            .confirm_album_group(&actor, request.clone(), &context)
+            .unwrap();
+        assert_eq!(
+            service
+                .confirm_album_group(&actor, request, &context)
+                .unwrap()
+                .group_id,
+            result.group_id
+        );
+        store.reindex().unwrap();
+        assert!(Catalog::item(&*store, right.id).unwrap().deleted);
+        assert!(
+            service
+                .album_group_undo(&actor, result.group_id)
+                .unwrap()
+                .can_undo
+        );
+    }
+}
+
+#[test]
+#[ignore = "generated 2,400-package/album scale qualification; run explicitly"]
+fn bulk_generated_thousands_query_admission_and_restart_measurements() {
+    use collector_app::{
+        AppendIntake, BulkLibraryKind, CreateIntake, IntakeDestination, IntakePackage,
+        LibrarySelection, MetadataCareQuery, PreviewBulkLibrary, StartIntake,
+    };
+    use std::time::Instant;
+    let count = 2400usize;
+    let (root, store, actor, service, collection) = setup();
+    let mut session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: count as u32,
+                expected_files: count as u32,
+                automatic_metadata: false,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let started = Instant::now();
+    for offset in (0..count).step_by(64) {
+        let packages = (offset..(offset + 64).min(count))
+            .map(|position| IntakePackage {
+                package: IngestPackageSelection {
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: format!("Generated package {position:06}"),
+                    },
+                    files: vec![UploadFile {
+                        name: format!("Originals/{position:06}/disc.bin"),
+                        bytes: ByteLength(0),
+                        sha256: None,
+                    }],
+                    anchor_file_index: None,
+                },
+                destination: IntakeDestination::Separate,
+            })
+            .collect();
+        session = service
+            .append_intake_with_preflight(
+                &actor,
+                session.id,
+                AppendIntake {
+                    expected_revision: session.revision,
+                    packages,
+                },
+                &command(),
+                |_| Ok(()),
+            )
+            .unwrap();
+    }
+    let manifest_ms = started.elapsed().as_secs_f64() * 1000.0;
+    service
+        .start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision,
+            },
+            &command(),
+        )
+        .unwrap();
+    let started = Instant::now();
+    service.run_next_job("scale-intake-admission").unwrap();
+    let admission_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(
+        service.intake(&actor, session.id).unwrap().admitted,
+        count as u32
+    );
+    let mut cursor = None;
+    let mut seen = 0;
+    loop {
+        let p = service
+            .intake_members(&actor, session.id, cursor, 200)
+            .unwrap();
+        seen += p.items.len();
+        let Some(next) = p.next_cursor else { break };
+        cursor = Some(next.parse().unwrap());
+    }
+    assert_eq!(seen, count);
+    service
+        .cancel_intake(&actor, session.id, &command())
+        .unwrap();
+    // Generate valid ordinary archive records directly, avoiding timing thousands
+    // of interactive single-entry saves. The archive reader validates the graph.
+    let saved = Catalog::save(&*store, item(collection.id), Revision(0)).unwrap();
+    let record_path = files_named(&root.path().join("archive"), "record.v3.json")
+        .into_iter()
+        .find(|p| p.to_string_lossy().contains(&saved.id.to_string()))
+        .unwrap();
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+    let manifest: toml::Value = toml::from_str(
+        &std::fs::read_to_string(record_path.with_file_name("manifest.v3.toml")).unwrap(),
+    )
+    .unwrap();
+    let items_dir = record_path.ancestors().nth(4).unwrap();
+    for position in 1..count {
+        let id = ItemId::new();
+        let transaction = TransactionId::new();
+        let mut record = record.clone();
+        record["record"]["id"] = serde_json::json!(id);
+        record["record"]["title"] = serde_json::json!(format!("Generated album {position:06}"));
+        record["transaction_id"] = serde_json::json!(transaction);
+        let bytes = serde_json::to_vec_pretty(&record).unwrap();
+        let mut manifest = manifest.clone();
+        manifest["entity_id"] = toml::Value::String(id.to_string());
+        manifest["transaction_id"] = toml::Value::String(transaction.to_string());
+        manifest["record_sha256"] = toml::Value::String(Digest::sha256(&bytes).hex);
+        let dir = items_dir.join(format!("generated--{id}/revisions/00000000000000000001"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("record.v3.json"), bytes).unwrap();
+        std::fs::write(
+            dir.join("manifest.v3.toml"),
+            toml::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
+    store.reindex().unwrap();
+    let provider = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "collector-scale/0.1 (test@example.invalid)",
+            "http://127.0.0.1:1/",
+            Duration::from_millis(50),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = service
+        .with_streaming_provider(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            Arc::new(FixtureStreamingProvider {
+                calls: calls.clone(),
+                bytes: br#"{"releases":[]}"#.to_vec(),
+            }),
+        )
+        .unwrap()
+        .with_catalog_parser(
+            ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            provider,
+        )
+        .unwrap();
+    let query = MetadataCareQuery {
+        collection_id: Some(collection.id),
+        search: String::new(),
+        reason: None,
+        needs_attention: false,
+        cursor: None,
+        limit: Some(50),
+    };
+    let started = Instant::now();
+    assert_eq!(
+        service
+            .metadata_care(&actor, query.clone())
+            .unwrap()
+            .items
+            .len(),
+        50
+    );
+    let query_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let started = Instant::now();
+    let preview = service
+        .preview_bulk_library(
+            &actor,
+            PreviewBulkLibrary {
+                kind: BulkLibraryKind::Metadata,
+                selection: LibrarySelection::AllMatching {
+                    query,
+                    exclusions: vec![],
+                },
+                sources: Default::default(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let freeze_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(preview.selected, count as u32);
+    assert_eq!(preview.excluded, 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    service
+        .start_bulk_library(&actor, preview.id, &command())
+        .unwrap();
+    let started = Instant::now();
+    service.run_next_job("scale-metadata-admission").unwrap();
+    let metadata_admission_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let before = service
+        .bulk_library_members(&actor, preview.id, None, 200)
+        .unwrap();
+    assert_eq!(
+        before.items.iter().filter(|m| m.job_id.is_some()).count(),
+        16
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "Admission performed provider work"
+    );
+    drop(service);
+    drop(store);
+    let started = Instant::now();
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let restart_ms = started.elapsed().as_secs_f64() * 1000.0;
+    assert!(reopened.catalog_reused_at_startup());
+    let service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    assert_eq!(
+        service.intake(&actor, session.id).unwrap().admitted,
+        count as u32
+    );
+    assert_eq!(
+        service.bulk_library(&actor, preview.id).unwrap().selected,
+        count as u32
+    );
+    let after = service
+        .bulk_library_members(&actor, preview.id, None, 200)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(before.items).unwrap(),
+        serde_json::to_value(after.items).unwrap()
+    );
+    println!(
+        "packages={count} albums={count} manifest_ms={manifest_ms:.1} intake_admission_ms={admission_ms:.1} care_page_ms={query_ms:.1} frozen_selection_ms={freeze_ms:.1} rolling_16_admission_ms={metadata_admission_ms:.1} checkpoint_restart_ms={restart_ms:.1}"
+    );
+}
+
+#[test]
+fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages() {
+    use collector_app::{
+        AppendIntake, CreateIntake, IntakeDestination, IntakePackage, RepairIntakeDestination,
+        StartIntake,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let destination = Catalog::save(&*store, item(collection.id), Revision(0)).unwrap();
+    let session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: 2,
+                expected_files: 2,
+                automatic_metadata: false,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let packages = (0..2)
+        .map(|i| IntakePackage {
+            package: IngestPackageSelection {
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: format!("Pending {i}"),
+                },
+                files: vec![UploadFile {
+                    name: "original.bin".into(),
+                    bytes: ByteLength(0),
+                    sha256: None,
+                }],
+                anchor_file_index: None,
+            },
+            destination: if i == 0 {
+                IntakeDestination::Existing {
+                    item_id: destination.id,
+                    expected_revision: destination.revision,
+                    copy_key: "Original copy".into(),
+                }
+            } else {
+                IntakeDestination::Separate
+            },
+        })
+        .collect();
+    let session = service
+        .append_intake_with_preflight(
+            &actor,
+            session.id,
+            AppendIntake {
+                expected_revision: session.revision,
+                packages,
+            },
+            &command(),
+            |_| Ok(()),
+        )
+        .unwrap();
+    service
+        .start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision,
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut changed = destination.clone();
+    changed.title = "Changed after manifest review".into();
+    Catalog::save(&*store, changed, destination.revision).unwrap();
+    service.run_next_job("destination-conflict").unwrap();
+    let session = service.intake(&actor, session.id).unwrap();
+    assert_eq!(session.admitted, 1);
+    assert_eq!(session.rejected, 1);
+    let members = service
+        .intake_members(&actor, session.id, None, 32)
+        .unwrap();
+    assert!(members.items[0].error.is_some());
+    assert!(members.items[0].import_id.is_none());
+    assert!(members.items[1].import_id.is_some());
+    let receipt = command();
+    let repair = RepairIntakeDestination {
+        expected_revision: session.revision,
+        destination: IntakeDestination::Separate,
+    };
+    service
+        .repair_intake_destination(&actor, session.id, 0, repair.clone(), &receipt)
+        .unwrap();
+    service.run_next_job("repaired-destination").unwrap();
+    assert_eq!(service.intake(&actor, session.id).unwrap().admitted, 2);
+    assert_eq!(service.intake(&actor, session.id).unwrap().rejected, 0);
+    assert_eq!(
+        service
+            .repair_intake_destination(&actor, session.id, 0, repair, &receipt)
+            .unwrap()
+            .id,
+        session.id
+    );
+    service.cancel_job(&actor, session.id, &command()).unwrap();
+    assert!(matches!(
+        service.intake(&actor, session.id).unwrap().state,
+        collector_app::IntakeState::Cancelling
+    ));
+    service.resume_bulk_intakes().unwrap();
+    assert!(matches!(
+        service.intake(&actor, session.id).unwrap().state,
+        collector_app::IntakeState::Cancelled
+    ));
+}
+
+#[test]
+fn bulk_parent_cancellation_preserves_later_direct_and_other_batch_requests() {
+    use collector_app::{BulkLibraryKind, LibrarySelection, PreviewBulkLibrary};
+    let clock = Arc::new(TestClock::new(chrono::Utc::now().timestamp()));
+    let (_root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = store.capture(imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    store.save_capture(capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let request = PreviewBulkLibrary {
+        kind: BulkLibraryKind::MusicPreparation,
+        selection: LibrarySelection::Explicit {
+            items: vec![saved.id],
+        },
+        sources: Default::default(),
+    };
+    let first = service
+        .preview_bulk_library(&actor, request.clone(), &command())
+        .unwrap();
+    service
+        .start_bulk_library(&actor, first.id, &command())
+        .unwrap();
+    clock.advance(1);
+    let second = service
+        .preview_bulk_library(&actor, request, &command())
+        .unwrap();
+    service
+        .start_bulk_library(&actor, second.id, &command())
+        .unwrap();
+    // Both bulk roots precede their album children; both album children precede
+    // their track children. Advancing time defeats accidental timestamp equality.
+    for _ in 0..4 {
+        clock.advance(2);
+        assert!(service.run_next_job("shared-bulk-admission").unwrap());
+    }
+    let child = |id| {
+        service
+            .bulk_library_members(&actor, id, None, 20)
+            .unwrap()
+            .items[0]
+            .job_id
+            .unwrap()
+    };
+    let first_album = service
+        .music_preparation_batch(&actor, child(first.id))
+        .unwrap();
+    let second_album = service
+        .music_preparation_batch(&actor, child(second.id))
+        .unwrap();
+    assert_eq!(
+        first_album.members[0].job_id,
+        second_album.members[0].job_id
+    );
+    let shared = first_album.members[1].job_id.unwrap();
+    let original_timestamp = store.job_record(shared, actor.user_id).unwrap().created_at;
+    clock.advance(10);
+    let direct = service
+        .prepare_configured_music_track(
+            &actor,
+            saved.id,
+            imported.capture_id,
+            PrepareMusicTrack {
+                source_representation_id: imported.representation_id,
+                profile: ConversionProfile::Flac,
+            },
+            first_album.members[0].track_position,
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(Some(direct), first_album.members[0].job_id);
+    assert_eq!(
+        store.job_record(shared, actor.user_id).unwrap().created_at,
+        original_timestamp
+    );
+    service
+        .change_bulk_library(&actor, first.id, true, &command())
+        .unwrap();
+    assert_eq!(
+        store.job_record(shared, actor.user_id).unwrap().state,
+        JobState::Queued
+    );
+    clock.advance(2);
+    service.cancel_job(&actor, second.id, &command()).unwrap();
+    assert_eq!(
+        store.job_record(shared, actor.user_id).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        store.job_record(direct, actor.user_id).unwrap().state,
+        JobState::Queued
+    );
+    assert!(
+        service
+            .run_next_job("direct-survives-bulk-cancellation")
+            .unwrap()
+    );
+    assert_eq!(
+        store.job_record(direct, actor.user_id).unwrap().state,
+        JobState::Completed
+    );
+}
+
+#[test]
+fn bulk_failed_parent_admission_is_actionable_and_retries_without_losing_members() {
+    use collector_app::{BulkLibraryKind, LibrarySelection, PreviewBulkLibrary};
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = store.capture(imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(saved.id);
+    store.save_capture(capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let preview = service
+        .preview_bulk_library(
+            &actor,
+            PreviewBulkLibrary {
+                kind: BulkLibraryKind::MusicPreparation,
+                selection: LibrarySelection::Explicit {
+                    items: vec![saved.id],
+                },
+                sources: Default::default(),
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .start_bulk_library(&actor, preview.id, &command())
+        .unwrap();
+    let claim = store
+        .claim_job("interrupted-admission", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.id, preview.id);
+    store
+        .fail_job(claim.id, &claim.claim_token, "Temporary admission failure")
+        .unwrap();
+    service.resume_bulk_library().unwrap();
+    let summary = service.bulk_library(&actor, preview.id).unwrap();
+    assert!(summary.can_retry);
+    assert_eq!(
+        summary.admission_error.as_deref(),
+        Some("Temporary admission failure")
+    );
+    service
+        .change_bulk_library(&actor, preview.id, false, &command())
+        .unwrap();
+    assert!(service.run_next_job("retried-bulk-root").unwrap());
+    service.resume_bulk_library().unwrap();
+    assert!(
+        service
+            .bulk_library(&actor, preview.id)
+            .unwrap()
+            .admission_error
+            .is_none()
+    );
+    assert!(
+        service
+            .bulk_library_members(&actor, preview.id, None, 20)
+            .unwrap()
+            .items[0]
+            .job_id
+            .is_some()
+    );
+}
+
+#[test]
+fn album_group_cannot_assemble_copies_without_known_disc_inventory() {
+    use collector_app::{
+        AlbumGroupChoices, GroupConflictKind, GroupEntry, PhysicalSetAssembly, PreviewAlbumGroup,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let mut entries = Vec::new();
+    for label in ["Uncatalogued first copy", "Uncatalogued second copy"] {
+        let mut inventory = item(collection.id);
+        inventory.specimens.push(Specimen {
+            id: SpecimenId::new(),
+            label: label.into(),
+            condition: Condition::Unknown,
+            ownership: Ownership::Owned,
+            possession: Possession::Present,
+            components: vec![],
+            acquisition: None,
+            private_notes: None,
+            loans: vec![],
+        });
+        entries.push(Catalog::save(store.as_ref(), inventory, Revision(0)).unwrap());
+    }
+    let preview = service
+        .preview_album_group(
+            &actor,
+            PreviewAlbumGroup {
+                destination: entries[0].id,
+                entries: entries
+                    .iter()
+                    .map(|i| GroupEntry {
+                        item_id: i.id,
+                        expected_revision: i.revision,
+                    })
+                    .collect(),
+                choices: AlbumGroupChoices {
+                    assemblies: vec![PhysicalSetAssembly {
+                        destination: entries[0].specimens[0].id,
+                        sources: vec![entries[1].specimens[0].id],
+                    }],
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+    assert!(!preview.can_confirm);
+    assert!(
+        preview
+            .conflicts
+            .iter()
+            .any(|c| matches!(c.kind, GroupConflictKind::PhysicalInventory))
+    );
 }

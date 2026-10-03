@@ -19,13 +19,14 @@ use collector_app::{
     CreateImportCommand, DisposeSpecimenCommand, EnrollmentStart, EnrollmentView, GrantView,
     ImportCatalogSnapshotCommand, ImportSourceKind, ImportSourceSummary, ImportView, IngestDetail,
     IngestDiscardResult, IngestPlan, IngestSummary, JobView, MediaResource, MetadataArtworkOption,
-    MetadataReviewView, MusicAlbumCoverage, MusicAlbumPreparationPlan, MusicPreparationBatchView,
+    MetadataCareQuery, MetadataPreferences, MetadataResolutionView, MetadataReviewView,
+    MusicAlbumCoverage, MusicAlbumPreparationPlan, MusicPreparationBatchView,
     MusicTrackAvailability, NativeDeviceView, PasskeyView, PlanIngestCommand, PrepareMusicAlbum,
     PrepareMusicTrack, PresentedAsset, PresentedCollection, PresentedEvidence, PresentedItem,
-    ProcessingSummary, PublishProviderArtworkCommand, RetryIngestCommand, ReturnLoanCommand,
-    ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView, SpecimenDetails,
-    StartIngestCommand, StartLoanCommand, StartProcessingCommand, UpdateAssetCommand,
-    UpdateMetadataAuthorityCommand,
+    ProcessingSummary, PublishProviderArtworkCommand, ResolveMetadataCommand, RetryIngestCommand,
+    ReturnLoanCommand, ReviewImportCommand, SaveItemCommand, SaveItemEditCommand, SessionView,
+    SpecimenDetails, StartIngestCommand, StartLoanCommand, StartProcessingCommand,
+    UpdateAssetCommand, UpdateMetadataAuthorityCommand, UpdateMetadataPreferences,
 };
 use collector_client::Pairing;
 use collector_core::*;
@@ -123,6 +124,8 @@ pub fn start_job_workers(state: AppState) -> JobRuntime {
                         let recovery = service.clone();
                         match tokio::task::spawn_blocking(move || {
                             recover_guided_inbox_staging(&recovery_state)?;
+                            recovery.resume_bulk_intakes()?;
+                            recovery.resume_bulk_library()?;
                             recovery.resume_guided_ingests()
                         })
                         .await
@@ -487,6 +490,14 @@ pub fn router(state: AppState) -> Router {
         router = router
             .route("/curate", get(index))
             .route("/curation.js", get(curation_js))
+            .route("/library-care/metadata", get(index))
+            .route("/library-metadata.js", get(library_metadata_js))
+            .route("/imports", get(index))
+            .route("/library-care/music-preparation", get(index))
+            .route("/activity", get(index))
+            .route("/library-preparation.js", get(library_preparation_js))
+            .route("/library-activity.js", get(library_activity_js))
+            .route("/library-imports.js", get(library_imports_js))
             .route("/collection-access.js", get(collection_access_js))
             .route("/work-history.js", get(work_history_js))
             .merge(curation_api);
@@ -520,6 +531,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(passkeys::login_finish))
         .routes(routes!(me))
         .routes(routes!(profile, update_profile))
+        .routes(routes!(metadata_preferences, update_metadata_preferences))
         .routes(routes!(pairing))
         .routes(routes!(revoke))
         .routes(routes!(sessions))
@@ -574,6 +586,14 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(curation_catalog_snapshots))
         .routes(routes!(create_upload))
         .routes(routes!(create_provisional_import))
+        .routes(routes!(create_intake, list_intakes))
+        .routes(routes!(intake_detail))
+        .routes(
+            routes!(append_intake, intake_members).layer(DefaultBodyLimit::max(16 * 1024 * 1024)),
+        )
+        .routes(routes!(repair_intake_destination))
+        .routes(routes!(start_intake))
+        .routes(routes!(cancel_intake))
         .routes(routes!(plan_ingest))
         .routes(routes!(discover_ingest))
         .routes(routes!(start_ingest, list_ingests))
@@ -608,6 +628,22 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_music_preparation_batch))
         .routes(routes!(retry_music_preparation_batch))
         .routes(routes!(metadata_review, update_metadata_authority))
+        .routes(routes!(resolve_metadata, metadata_resolutions))
+        .routes(routes!(metadata_care))
+        .routes(routes!(preparation_care))
+        .routes(routes!(discover_bulk_intake).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
+        .routes(routes!(intake_discovery_page))
+        .routes(routes!(preview_bulk_library))
+        .routes(routes!(bulk_library_page))
+        .routes(routes!(bulk_library_detail))
+        .routes(routes!(bulk_library_members))
+        .routes(routes!(start_bulk_library))
+        .routes(routes!(cancel_bulk_library))
+        .routes(routes!(retry_bulk_library))
+        .routes(routes!(album_group_proposals))
+        .routes(routes!(preview_album_group))
+        .routes(routes!(confirm_album_group))
+        .routes(routes!(album_group_undo, undo_album_group))
         .routes(routes!(acquire_metadata))
         .routes(routes!(complete_metadata_acquisition))
         .routes(routes!(apply_metadata_snapshot))
@@ -774,6 +810,31 @@ async fn security_js() -> impl IntoResponse {
         include_str!("../../../web/dist/security.js"),
     )
 }
+async fn library_preparation_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript")],
+        include_str!("../../../web/dist/library-preparation.js"),
+    )
+}
+async fn library_activity_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript")],
+        include_str!("../../../web/dist/library-activity.js"),
+    )
+}
+async fn library_imports_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript")],
+        include_str!("../../../web/dist/library-imports.js"),
+    )
+}
+
+async fn library_metadata_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../../../web/dist/library-metadata.js"),
+    )
+}
 async fn curation_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
@@ -926,6 +987,34 @@ async fn profile(
     let actor = authenticated(&state, &headers)?;
     Ok(Json(state.service.profile(&actor)?))
 }
+#[utoipa::path(get, path = "/api/v1/me/metadata-preferences", responses((status = 200, body = MetadataPreferences), (status = 401)))]
+async fn metadata_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<MetadataPreferences>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.metadata_preferences(&actor)).await?,
+    ))
+}
+#[utoipa::path(put, path = "/api/v1/me/metadata-preferences", params(("Idempotency-Key" = String, Header)), request_body = UpdateMetadataPreferences, responses((status = 200, body = MetadataPreferences), (status = 401), (status = 409)))]
+async fn update_metadata_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<UpdateMetadataPreferences>,
+) -> ApiResult<Json<MetadataPreferences>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .update_metadata_preferences(&actor, command, &context)
+        })
+        .await?,
+    ))
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 struct RecoverAccount {
     username: String,
@@ -1242,6 +1331,118 @@ async fn item(
 #[derive(serde::Serialize, utoipa::ToSchema)]
 struct JobAccepted {
     job_id: JobId,
+}
+
+#[utoipa::path(get,path="/api/v1/items/{id}/album-group-proposals",params(("id"=ItemId,Path),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<PresentedItem>),(status=403)))]
+async fn album_group_proposals(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Query(query): Query<IntakePageQuery>,
+) -> ApiResult<Json<Page<PresentedItem>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|v| v.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid grouping cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .album_group_proposals(&actor, id, after, query.limit.unwrap_or(25))
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path="/api/v1/album-groups/preview", request_body=collector_app::PreviewAlbumGroup, responses((status=200,body=collector_app::AlbumGroupPreview),(status=403),(status=409)))]
+async fn preview_album_group(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::PreviewAlbumGroup>,
+) -> ApiResult<Json<collector_app::AlbumGroupPreview>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.preview_album_group(&actor, command)).await?,
+    ))
+}
+#[utoipa::path(post, path="/api/v1/album-groups", params(("Idempotency-Key"=String,Header)),request_body=collector_app::ConfirmAlbumGroup, responses((status=200,body=collector_app::AlbumGroupResult),(status=403),(status=409)))]
+async fn confirm_album_group(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::ConfirmAlbumGroup>,
+) -> ApiResult<Json<collector_app::AlbumGroupResult>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.confirm_album_group(&actor, command, &context)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/album-groups/{id}/undo",params(("id"=TransactionId,Path)),responses((status=200,body=collector_app::AlbumGroupUndo),(status=403)))]
+async fn album_group_undo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<TransactionId>,
+) -> ApiResult<Json<collector_app::AlbumGroupUndo>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.album_group_undo(&actor, id)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/album-groups/{id}/undo",params(("id"=TransactionId,Path),("Idempotency-Key"=String,Header)),responses((status=200,body=collector_app::AlbumGroupResult),(status=403),(status=409)))]
+async fn undo_album_group(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<TransactionId>,
+) -> ApiResult<Json<collector_app::AlbumGroupResult>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.undo_album_group(&actor, id, &context)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/library-care/metadata", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("reason" = Option<collector_app::MetadataReviewReason>, Query), ("needs_attention" = Option<bool>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<PresentedItem>), (status = 401), (status = 403)))]
+async fn metadata_care(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<MetadataCareQuery>,
+) -> ApiResult<Json<Page<PresentedItem>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.metadata_care(&actor, query)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/items/{id}/metadata/resolutions", params(("id" = ItemId, Path)), responses((status = 200, body = Vec<MetadataResolutionView>), (status = 401), (status = 403)))]
+async fn metadata_resolutions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<Json<Vec<MetadataResolutionView>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.metadata_resolutions(&actor, id)).await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/metadata/resolutions", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = ResolveMetadataCommand, responses((status = 202, body = JobAccepted), (status = 401), (status = 403), (status = 409)))]
+async fn resolve_metadata(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<ResolveMetadataCommand>,
+) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .resolve_metadata(&actor, id, command, &context)
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(JobAccepted { job_id })))
 }
 
 #[utoipa::path(get, path = "/api/v1/items/{id}/metadata", params(("id" = ItemId, Path)), responses((status = 200, body = MetadataReviewView), (status = 403), (status = 404)))]
@@ -2445,6 +2646,328 @@ async fn discover_ingest(
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.discover_ingest(&actor, command)).await?,
+    ))
+}
+
+#[utoipa::path(get,path="/api/v1/library-care/music-preparation",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("needs_attention"=Option<bool>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::PreparationCareEntry>),(status=403)))]
+async fn preparation_care(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<MetadataCareQuery>,
+) -> ApiResult<Json<Page<collector_app::PreparationCareEntry>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.preparation_care(&actor, query)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/bulk-library/preview",params(("Idempotency-Key"=String,Header)),request_body=collector_app::PreviewBulkLibrary,responses((status=200,body=collector_app::BulkLibrarySummary),(status=403),(status=409)))]
+async fn preview_bulk_library(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::PreviewBulkLibrary>,
+) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .preview_bulk_library(&actor, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/bulk-library",params(("collection_id"=Option<CollectionId>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::BulkLibrarySummary>),(status=403)))]
+async fn bulk_library_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<IntakePageQuery>,
+) -> ApiResult<Json<Page<collector_app::BulkLibrarySummary>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|v| v.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid batch cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state.service.bulk_library_page(
+                &actor,
+                query.collection_id,
+                after,
+                query.limit.unwrap_or(50),
+            )
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/bulk-library/{id}",params(("id"=JobId,Path)),responses((status=200,body=collector_app::BulkLibrarySummary),(status=403)))]
+async fn bulk_library_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.bulk_library(&actor, id)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/bulk-library/{id}/members",params(("id"=JobId,Path),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::BulkLibraryMemberView>),(status=403)))]
+async fn bulk_library_members(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+    Query(query): Query<IntakePageQuery>,
+) -> ApiResult<Json<Page<collector_app::BulkLibraryMemberView>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|v| v.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid batch member cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .bulk_library_members(&actor, id, after, query.limit.unwrap_or(50))
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/bulk-library/{id}/start",params(("id"=JobId,Path),("Idempotency-Key"=String,Header)),responses((status=200,body=collector_app::BulkLibrarySummary),(status=403),(status=409)))]
+async fn start_bulk_library(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.start_bulk_library(&actor, id, &context)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/bulk-library/{id}/cancel",params(("id"=JobId,Path),("Idempotency-Key"=String,Header)),responses((status=200,body=collector_app::BulkLibrarySummary),(status=403)))]
+async fn cancel_bulk_library(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .change_bulk_library(&actor, id, true, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/bulk-library/{id}/retry",params(("id"=JobId,Path),("Idempotency-Key"=String,Header)),responses((status=200,body=collector_app::BulkLibrarySummary),(status=403),(status=409)))]
+async fn retry_bulk_library(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .change_bulk_library(&actor, id, false, &context)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct IntakePageQuery {
+    collection_id: Option<CollectionId>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+#[utoipa::path(post,path="/api/v1/intake-discoveries",params(("Idempotency-Key"=String,Header)),request_body=collector_app::DiscoverIngestCommand,responses((status=200,body=collector_app::IntakeDiscovery),(status=403),(status=422)))]
+async fn discover_bulk_intake(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::DiscoverIngestCommand>,
+) -> ApiResult<Json<collector_app::IntakeDiscovery>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .discover_bulk_intake(&actor, command, &context)
+        })
+        .await?,
+    ))
+}
+#[derive(Deserialize)]
+struct DiscoveryPageQuery {
+    cursor: Option<u32>,
+    unassigned_cursor: Option<u32>,
+}
+#[utoipa::path(get,path="/api/v1/intake-discoveries/{id}",params(("id"=JobId,Path),("cursor"=Option<u32>,Query),("unassigned_cursor"=Option<u32>,Query)),responses((status=200,body=collector_app::IntakeDiscoveryPage),(status=403)))]
+async fn intake_discovery_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+    Query(q): Query<DiscoveryPageQuery>,
+) -> ApiResult<Json<collector_app::IntakeDiscoveryPage>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .intake_discovery_page(&actor, id, q.cursor, q.unassigned_cursor)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/intakes",params(("Idempotency-Key"=String,Header)),request_body=collector_app::CreateIntake,responses((status=200,body=collector_app::IntakeSession),(status=403)))]
+async fn create_intake(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::CreateIntake>,
+) -> ApiResult<Json<collector_app::IntakeSession>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.create_intake(&actor, command, &context)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/intakes",params(("collection_id"=Option<CollectionId>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::IntakeSession>),(status=403)))]
+async fn list_intakes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<IntakePageQuery>,
+) -> ApiResult<Json<Page<collector_app::IntakeSession>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|v| v.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid intake cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state.service.intake_sessions(
+                &actor,
+                query.collection_id,
+                after,
+                query.limit.unwrap_or(50),
+            )
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/intakes/{id}",params(("id"=JobId,Path)),responses((status=200,body=collector_app::IntakeSession),(status=403)))]
+async fn intake_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<collector_app::IntakeSession>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.intake(&actor, id)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/intakes/{id}/members",params(("id"=JobId,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::AppendIntake,responses((status=200,body=collector_app::IntakeSession),(status=403),(status=409),(status=422)))]
+async fn append_intake(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+    Json(command): Json<collector_app::AppendIntake>,
+) -> ApiResult<Json<collector_app::IntakeSession>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .append_intake_with_preflight(&actor, id, command, &context, |plan| {
+                    for package in &plan.packages {
+                        if package.source.kind == ImportSourceKind::Inbox {
+                            let (_, files) = resolve_inbox_package(&state, &package.source)?;
+                            if serde_json::to_value(files)
+                                .map_err(|e| Error::Invalid(e.to_string()))?
+                                != serde_json::to_value(&package.files)
+                                    .map_err(|e| Error::Invalid(e.to_string()))?
+                            {
+                                return Err(Error::Conflict);
+                            }
+                        }
+                    }
+                    Ok(())
+                })
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/intakes/{id}/members",params(("id"=JobId,Path),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::IntakeMemberView>),(status=403)))]
+async fn intake_members(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+    Query(query): Query<IntakePageQuery>,
+) -> ApiResult<Json<Page<collector_app::IntakeMemberView>>> {
+    let actor = principal(&state, &headers)?;
+    let after = query
+        .cursor
+        .map(|v| v.parse())
+        .transpose()
+        .map_err(|_| Error::Invalid("invalid member cursor".into()))?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .intake_members(&actor, id, after, query.limit.unwrap_or(32))
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/intakes/{id}/members/{position}/destination",params(("id"=JobId,Path),("position"=u32,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::RepairIntakeDestination,responses((status=200,body=collector_app::IntakeSession),(status=403),(status=409)))]
+async fn repair_intake_destination(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, position)): Path<(JobId, u32)>,
+    Json(command): Json<collector_app::RepairIntakeDestination>,
+) -> ApiResult<Json<collector_app::IntakeSession>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .repair_intake_destination(&actor, id, position, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/intakes/{id}/start",params(("id"=JobId,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::StartIntake,responses((status=200,body=collector_app::IntakeSession),(status=403),(status=409)))]
+async fn start_intake(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+    Json(command): Json<collector_app::StartIntake>,
+) -> ApiResult<Json<collector_app::IntakeSession>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.start_intake(&actor, id, command, &context)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/intakes/{id}/cancel",params(("id"=JobId,Path),("Idempotency-Key"=String,Header)),responses((status=200,body=collector_app::IntakeSession),(status=403)))]
+async fn cancel_intake(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<JobId>,
+) -> ApiResult<Json<collector_app::IntakeSession>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.cancel_intake(&actor, id, &context)).await?,
     ))
 }
 

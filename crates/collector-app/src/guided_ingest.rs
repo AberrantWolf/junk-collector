@@ -1,14 +1,6 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-struct GuidedProviderStep {
-    id: JobId,
-    provider: ModuleId,
-    operation: OperationId,
-    query: RawJson,
-    maximum_response_bytes: u64,
-}
-
 fn completed_snapshot_id(result: Option<&serde_json::Value>) -> Option<SnapshotId> {
     let result = result?;
     result
@@ -45,10 +37,13 @@ fn safe_package_title(name: &str) -> Result<String> {
 }
 
 fn validate_plan_files(files: &[UploadFile]) -> Result<()> {
-    if files.is_empty() || files.len() > 10_000 {
-        return Err(Error::Invalid(
-            "package inventory must contain 1..=10000 files".into(),
-        ));
+    validate_intake_files(files, 10_000)
+}
+pub(crate) fn validate_intake_files(files: &[UploadFile], limit: usize) -> Result<()> {
+    if files.is_empty() || files.len() > limit {
+        return Err(Error::Invalid(format!(
+            "Inventory must contain 1–{limit} files. Split larger selections into another intake."
+        )));
     }
     let total = files
         .iter()
@@ -353,7 +348,7 @@ impl CollectionService {
         context: &CommandContext,
         preflight: impl FnOnce(&IngestPlan) -> Result<()>,
     ) -> Result<AcceptedIngest> {
-        let eligibility = self.content_write_eligibility(actor, command.plan.collection_id)?;
+        self.authorize(actor, command.plan.collection_id, Action::Curate)?;
         if command.destination.is_some() && command.plan.packages.len() != 1 {
             return Err(Error::Invalid(
                 "an existing destination accepts one package at a time".into(),
@@ -416,139 +411,8 @@ impl CollectionService {
                     }),
                 ));
             }
-            let now = self.authentication.now();
-            if let Some(destination) = &command.destination {
-                let item = self.reader.item(destination.item_id)?;
-                if item.deleted
-                    || item.collection_id != command.plan.collection_id
-                    || item.domain.module != eligibility.owner
-                    || (command.clean_reimport.is_none()
-                        && item.revision != destination.expected_revision)
-                {
-                    return Err(Error::Conflict);
-                }
-            }
-            let mut records = Vec::new();
-            let mut intents = Vec::new();
-            for package in &command.plan.packages {
-                let key = format!("{}:{}", context.key(), package.position);
-                let import_id = ImportId(super::deterministic_inventory_uuid(
-                    actor.user_id,
-                    "guided-import",
-                    &key,
-                ));
-                let target_item_id = command
-                    .destination
-                    .as_ref()
-                    .map(|value| value.item_id)
-                    .unwrap_or_else(|| {
-                        ItemId(super::deterministic_inventory_uuid(
-                            actor.user_id,
-                            "guided-item",
-                            &key,
-                        ))
-                    });
-                let capture_id = CaptureId(super::deterministic_inventory_uuid(
-                    actor.user_id,
-                    "guided-capture",
-                    &key,
-                ));
-                let representation_id = RepresentationId(super::deterministic_inventory_uuid(
-                    actor.user_id,
-                    "guided-representation",
-                    &key,
-                ));
-                let empty_digest = Digest::sha256(b"");
-                let files = package
-                    .files
-                    .iter()
-                    .map(|file| {
-                        let supplied = file
-                            .sha256
-                            .as_ref()
-                            .map(|value| Digest::new(HashAlgorithm::Sha256, value.clone()))
-                            .transpose()?;
-                        if file.bytes.0 == 0
-                            && supplied
-                                .as_ref()
-                                .is_some_and(|value| value != &empty_digest)
-                        {
-                            return Err(Error::Invalid(
-                                "declared digest does not match the empty file".into(),
-                            ));
-                        }
-                        Ok(ImportDeclaredFile {
-                            name: file.name.clone(),
-                            bytes: file.bytes,
-                            received_bytes: ByteLength(0),
-                            digest: if file.bytes.0 == 0 {
-                                Some(empty_digest.clone())
-                            } else {
-                                supplied
-                            },
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                records.push(ImportRecord {
-                    user_id: actor.user_id,
-                    view: ImportView {
-                        id: import_id,
-                        revision: 1,
-                        collection_id: command.plan.collection_id,
-                        source: package.source.clone(),
-                        files,
-                        capture_id,
-                        representation_id,
-                        association: CaptureAssociation {
-                            item_id: command.destination.as_ref().map(|value| value.item_id),
-                            ..Default::default()
-                        },
-                        expected_item_revision: command
-                            .destination
-                            .as_ref()
-                            .map(|value| value.expected_revision),
-                        candidates: vec![],
-                        limitations: package
-                            .blockers
-                            .iter()
-                            .map(|value| value.message.clone())
-                            .collect(),
-                        review: None,
-                        analysis_job_id: None,
-                        phase: if package.files.iter().all(|file| file.bytes.0 == 0) {
-                            ImportPhase::Analyzing
-                        } else {
-                            ImportPhase::Staging
-                        },
-                        created_at: now,
-                        updated_at: now,
-                    },
-                });
-                intents.push(GuidedIngestIntent {
-                    clean_reimport: command.clean_reimport.clone(),
-                    import_id,
-                    user_id: actor.user_id,
-                    plan_token: command.plan.token.clone(),
-                    target_item_id,
-                    created_item: command.destination.is_none(),
-                    default_title: package.default_title.clone(),
-                    anchor_file_index: package
-                        .anchors
-                        .iter()
-                        .find(|anchor| anchor.selected)
-                        .map(|anchor| anchor.file_index),
-                    analysis: command.analysis,
-                    enrichment: command.enrichment,
-                    enrichment_error: None,
-                    prepare_music: command.prepare_music,
-                    preparation_batch_id: None,
-                    preparation_error: None,
-                    settled: false,
-                    cancelled: false,
-                    created_at: now,
-                    updated_at: now,
-                });
-            }
+            let (records, intents) =
+                self.build_guided_import_records(actor.user_id, &command, context.key())?;
             effects.accept_guided_imports(records, intents)
         })?;
         for view in &views {
@@ -563,13 +427,158 @@ impl CollectionService {
         })
     }
 
+    pub(crate) fn build_guided_import_records(
+        &self,
+        user: UserId,
+        command: &StartIngestCommand,
+        key: &str,
+    ) -> Result<(Vec<ImportRecord>, Vec<GuidedIngestIntent>)> {
+        let eligibility =
+            self.content_write_eligibility_for_user(user, command.plan.collection_id)?;
+        let now = self.authentication.now();
+        if let Some(destination) = &command.destination {
+            let item = self.reader.item(destination.item_id)?;
+            if item.deleted
+                || item.collection_id != command.plan.collection_id
+                || item.domain.module != eligibility.owner
+                || (command.clean_reimport.is_none()
+                    && item.revision != destination.expected_revision)
+            {
+                return Err(Error::Conflict);
+            }
+        }
+        let mut records = Vec::new();
+        let mut intents = Vec::new();
+        for package in &command.plan.packages {
+            let key = format!("{}:{}", key, package.position);
+            let import_id = ImportId(super::deterministic_inventory_uuid(
+                user,
+                "guided-import",
+                &key,
+            ));
+            let target_item_id = command
+                .destination
+                .as_ref()
+                .map(|value| value.item_id)
+                .unwrap_or_else(|| {
+                    ItemId(super::deterministic_inventory_uuid(
+                        user,
+                        "guided-item",
+                        &key,
+                    ))
+                });
+            let capture_id = CaptureId(super::deterministic_inventory_uuid(
+                user,
+                "guided-capture",
+                &key,
+            ));
+            let representation_id = RepresentationId(super::deterministic_inventory_uuid(
+                user,
+                "guided-representation",
+                &key,
+            ));
+            let empty_digest = Digest::sha256(b"");
+            let files = package
+                .files
+                .iter()
+                .map(|file| {
+                    let supplied = file
+                        .sha256
+                        .as_ref()
+                        .map(|value| Digest::new(HashAlgorithm::Sha256, value.clone()))
+                        .transpose()?;
+                    if file.bytes.0 == 0
+                        && supplied
+                            .as_ref()
+                            .is_some_and(|value| value != &empty_digest)
+                    {
+                        return Err(Error::Invalid(
+                            "declared digest does not match the empty file".into(),
+                        ));
+                    }
+                    Ok(ImportDeclaredFile {
+                        name: file.name.clone(),
+                        bytes: file.bytes,
+                        received_bytes: ByteLength(0),
+                        digest: if file.bytes.0 == 0 {
+                            Some(empty_digest.clone())
+                        } else {
+                            supplied
+                        },
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            records.push(ImportRecord {
+                user_id: user,
+                view: ImportView {
+                    id: import_id,
+                    revision: 1,
+                    collection_id: command.plan.collection_id,
+                    source: package.source.clone(),
+                    files,
+                    capture_id,
+                    representation_id,
+                    association: CaptureAssociation {
+                        item_id: command.destination.as_ref().map(|value| value.item_id),
+                        ..Default::default()
+                    },
+                    expected_item_revision: command
+                        .destination
+                        .as_ref()
+                        .map(|value| value.expected_revision),
+                    candidates: vec![],
+                    limitations: package
+                        .blockers
+                        .iter()
+                        .map(|value| value.message.clone())
+                        .collect(),
+                    review: None,
+                    analysis_job_id: None,
+                    phase: if package.files.iter().all(|file| file.bytes.0 == 0) {
+                        ImportPhase::Analyzing
+                    } else {
+                        ImportPhase::Staging
+                    },
+                    created_at: now,
+                    updated_at: now,
+                },
+            });
+            intents.push(GuidedIngestIntent {
+                clean_reimport: command.clean_reimport.clone(),
+                bulk_context: None,
+                import_id,
+                user_id: user,
+                plan_token: command.plan.token.clone(),
+                target_item_id,
+                created_item: command.destination.is_none(),
+                default_title: package.default_title.clone(),
+                anchor_file_index: package
+                    .anchors
+                    .iter()
+                    .find(|anchor| anchor.selected)
+                    .map(|anchor| anchor.file_index),
+                analysis: command.analysis,
+                enrichment: command.enrichment,
+                enrichment_error: None,
+                prepare_music: command.prepare_music,
+                preparation_batch_id: None,
+                preparation_error: None,
+                settled: false,
+                cancelled: false,
+                created_at: now,
+                updated_at: now,
+            });
+        }
+        Ok((records, intents))
+    }
+
     fn ensure_guided_item(
         &self,
         intent: &GuidedIngestIntent,
         record: &ImportRecord,
     ) -> Result<Item> {
         self.content_write_eligibility_for_user(intent.user_id, record.view.collection_id)?;
-        let item = match self.reader.item(intent.target_item_id) {
+        let mut item = match self.reader.item(intent.target_item_id) {
             Ok(item) => {
                 if item.deleted || item.collection_id != record.view.collection_id {
                     return Err(Error::Conflict);
@@ -602,12 +611,22 @@ impl CollectionService {
                     translations: vec![],
                     identifiers: vec![],
                     specimens: vec![Specimen {
-                        id: SpecimenId(super::deterministic_inventory_uuid(
-                            intent.user_id,
-                            "guided-import-copy",
-                            &intent.import_id.to_string(),
-                        )),
-                        label: "Imported copy".into(),
+                        id: intent
+                            .bulk_context
+                            .as_ref()
+                            .map(|context| context.copy_id)
+                            .unwrap_or_else(|| {
+                                SpecimenId(super::deterministic_inventory_uuid(
+                                    intent.user_id,
+                                    "guided-import-copy",
+                                    &intent.import_id.to_string(),
+                                ))
+                            }),
+                        label: intent
+                            .bulk_context
+                            .as_ref()
+                            .map(|context| context.copy_label.clone())
+                            .unwrap_or_else(|| "Imported copy".into()),
                         condition: Condition::Unknown,
                         ownership: Ownership::Owned,
                         possession: Possession::Present,
@@ -628,6 +647,23 @@ impl CollectionService {
             }
             Err(error) => return Err(error),
         };
+        if let Some(context) = &intent.bulk_context
+            && !item.specimens.iter().any(|copy| copy.id == context.copy_id)
+        {
+            let expected = item.revision;
+            item.specimens.push(Specimen {
+                id: context.copy_id,
+                label: context.copy_label.clone(),
+                condition: Condition::Unknown,
+                ownership: Ownership::Owned,
+                possession: Possession::Present,
+                components: vec![],
+                acquisition: None,
+                private_notes: None,
+                loans: vec![],
+            });
+            item = self.writer.save(item, expected)?;
+        }
         if intent.created_item
             && self
                 .processing
@@ -635,7 +671,13 @@ impl CollectionService {
                 .is_none()
         {
             let mut authority = MetadataAuthority::default();
-            if item.title != intent.default_title {
+            if item.title != intent.default_title
+                || intent
+                    .bulk_context
+                    .as_ref()
+                    .and_then(|context| context.manual_title.as_ref())
+                    .is_some()
+            {
                 authority.field_overrides.push(MetadataFieldOverride {
                     field: MetadataField::Title,
                     value: item.title.clone(),
@@ -657,6 +699,7 @@ impl CollectionService {
                     &intent.import_id.to_string(),
                 )),
                 MetadataAuthorityRecord {
+                    resolution_policy: 2,
                     current_candidates: Some(vec![]),
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
@@ -922,11 +965,21 @@ impl CollectionService {
         {
             record.view.association = CaptureAssociation {
                 item_id: Some(item.id),
+                specimen_id: intent.bulk_context.as_ref().map(|context| context.copy_id),
                 ..Default::default()
             };
-            if intent.created_item {
+            if intent.created_item || intent.bulk_context.is_some() {
                 record.view.expected_item_revision = Some(item.revision);
             }
+            let revision = record.view.revision;
+            record = self.provisional_imports.save_import(record, revision)?;
+        }
+        if let Some(context) = &intent.bulk_context
+            && record.view.association.specimen_id != Some(context.copy_id)
+            && record.view.phase != ImportPhase::Published
+        {
+            record.view.association.specimen_id = Some(context.copy_id);
+            record.view.expected_item_revision = Some(item.revision);
             let revision = record.view.revision;
             record = self.provisional_imports.save_import(record, revision)?;
         }
@@ -989,7 +1042,7 @@ impl CollectionService {
                         },
                         association: record.view.association,
                     });
-                    if intent.created_item {
+                    if intent.created_item || intent.bulk_context.is_some() {
                         record.view.expected_item_revision =
                             Some(self.reader.item(item.id)?.revision);
                     }
@@ -1004,6 +1057,15 @@ impl CollectionService {
                 }
             }
             ImportPhase::Published => {
+                if let Some(context) = &intent.bulk_context
+                    && !self.intake_port.intake_album_preservation_settled(
+                        intent.user_id,
+                        context.intake_id,
+                        intent.target_item_id,
+                    )?
+                {
+                    return Ok(());
+                }
                 let enrichment_done = if intent.enrichment == IngestEnrichmentPolicy::None
                     || intent.enrichment_error.is_some()
                 {
@@ -1123,57 +1185,24 @@ impl CollectionService {
         record: &ImportRecord,
         item: &Item,
     ) -> Result<bool> {
-        if !self
-            .streaming_providers
-            .contains_key(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
-            || !self
-                .catalog_parsers
-                .contains_key(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
-        {
-            return Err(Error::Unavailable(
-                "MusicBrainz is not configured; originals remain preserved".into(),
-            ));
-        }
-        let jobs = self
-            .provisional_imports
-            .import_job_records(record.view.id, intent.user_id)?;
         let job_id = super::deterministic_job_id(
             intent.user_id,
             "guided.musicbrainz",
             &record.view.id.to_string(),
         );
-        if let Some(job) = jobs.iter().find(|job| job.id == job_id) {
-            return match job.state {
-                JobState::Completed => {
-                    let snapshot_id =
-                        completed_snapshot_id(job.result.as_ref()).ok_or_else(|| {
-                            Error::Storage("guided MusicBrainz job has no snapshot".into())
-                        })?;
-                    let authority = self.refresh_provider_metadata_for_job(
-                        intent.user_id,
-                        item,
-                        snapshot_id,
-                        None,
-                        vec![],
-                        ObservationId(super::deterministic_inventory_uuid(
-                            intent.user_id,
-                            "guided-music-metadata",
-                            &record.view.id.to_string(),
-                        )),
-                    )?;
-                    let Some(candidate) = authority.display.and_then(|display| display.candidate)
-                    else {
-                        return Ok(true);
-                    };
-                    self.advance_guided_music_artwork(intent, record, item, snapshot_id, candidate)
-                }
-                JobState::Failed => Err(Error::Unavailable(
-                    job.error
-                        .clone()
-                        .unwrap_or_else(|| "MusicBrainz lookup failed".into()),
-                )),
-                _ => Ok(false),
-            };
+        match self.jobs.job_record(job_id, intent.user_id) {
+            Ok(job) => {
+                return match job.state {
+                    JobState::Completed => Ok(true),
+                    JobState::Failed => Err(Error::Unavailable(job.error.unwrap_or_else(|| {
+                        "Metadata resolution failed; originals remain preserved".into()
+                    }))),
+                    JobState::Cancelled => Err(Error::JobCancelled),
+                    _ => Ok(false),
+                };
+            }
+            Err(Error::NotFound) => {}
+            Err(error) => return Err(error),
         }
         let analysis = record
             .view
@@ -1199,297 +1228,20 @@ impl CollectionService {
                 "the supported CD layout produced no MusicBrainz disc identifier".into(),
             ));
         };
-        let disc_id = ids.musicbrainz;
-        let query = collector_modules::music::MusicBrainzQuery::DiscId {
-            disc_id,
-            refresh: false,
-        };
-        let eligibility =
-            self.content_write_eligibility_for_user(intent.user_id, item.collection_id)?;
-        let frozen = FrozenAcquisitionJob {
-            request: ProviderRequest {
-                collection_id: item.collection_id,
-                provider: ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
-                operation: OperationId::new(
-                    collector_modules::music::MUSICBRAINZ_ACQUIRE_OPERATION,
-                )?,
-                source_fingerprint: None,
-                query: RawJson::from_value(
-                    serde_json::to_value(query)
-                        .map_err(|error| Error::Invalid(error.to_string()))?,
-                ),
-                maximum_response_bytes: 8 * 1024 * 1024,
+        let frozen = self.freeze_metadata_resolution(
+            intent.user_id,
+            item,
+            ResolveMetadataCommand {
+                lookup: AcquireMetadataCommand::MusicBrainzDisc {
+                    disc_id: ids.musicbrainz,
+                    refresh: false,
+                },
+                acquire_artwork: true,
             },
-            collection_binding: eligibility.binding,
-            item_id: Some(item.id),
-            snapshot_id: SnapshotId(job_id.0),
-            created_at: intent.created_at,
-        };
-        self.jobs.enqueue_job(JobSpec { id: job_id, user_id: intent.user_id, collection_id: Some(item.collection_id), item_id: Some(item.id), kind: "catalog_acquisition".into(), phase: "queued".into(), total_units: 8 * 1024 * 1024, request: serde_json::json!({"provider":collector_modules::music::MUSICBRAINZ_PROVIDER_ID,"snapshot_id":frozen.snapshot_id,"import_id":record.view.id,"guided":true}), frozen_input: Some(FrozenJobInput::Acquisition(frozen)) })?;
-        Ok(false)
-    }
-
-    fn enqueue_guided_provider(
-        &self,
-        intent: &GuidedIngestIntent,
-        record: &ImportRecord,
-        item: &Item,
-        step: GuidedProviderStep,
-    ) -> Result<JobId> {
-        let eligibility =
-            self.content_write_eligibility_for_user(intent.user_id, item.collection_id)?;
-        let frozen = FrozenAcquisitionJob {
-            request: ProviderRequest {
-                collection_id: item.collection_id,
-                provider: step.provider.clone(),
-                operation: step.operation,
-                source_fingerprint: None,
-                query: step.query,
-                maximum_response_bytes: step.maximum_response_bytes,
-            },
-            collection_binding: eligibility.binding,
-            item_id: Some(item.id),
-            snapshot_id: SnapshotId(step.id.0),
-            created_at: intent.created_at,
-        };
-        self.jobs.enqueue_job(JobSpec {
-            id: step.id,
-            user_id: intent.user_id,
-            collection_id: Some(item.collection_id),
-            item_id: Some(item.id),
-            kind: "catalog_acquisition".into(),
-            phase: "queued".into(),
-            total_units: step.maximum_response_bytes,
-            request: serde_json::json!({"provider":step.provider,"snapshot_id":frozen.snapshot_id,"import_id":record.view.id,"guided":true}),
-            frozen_input: Some(FrozenJobInput::Acquisition(frozen)),
-        })
-    }
-
-    fn advance_guided_music_artwork(
-        &self,
-        intent: &GuidedIngestIntent,
-        record: &ImportRecord,
-        item: &Item,
-        musicbrainz_snapshot: SnapshotId,
-        mut candidate: MetadataCandidateIdentity,
-    ) -> Result<bool> {
-        if !self
-            .streaming_providers
-            .contains_key(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID)
-            || !self
-                .catalog_parsers
-                .contains_key(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID)
-        {
-            return Err(Error::Unavailable(
-                "Cover Art Archive is not configured; metadata and originals remain available"
-                    .into(),
-            ));
-        }
-        let jobs = self
-            .provisional_imports
-            .import_job_records(record.view.id, intent.user_id)?;
-        let listing_job = super::deterministic_job_id(
-            intent.user_id,
-            "guided.cover-art.listing",
-            &record.view.id.to_string(),
-        );
-        let Some(listing) = jobs.iter().find(|job| job.id == listing_job) else {
-            self.enqueue_guided_provider(
-                intent,
-                record,
-                item,
-                GuidedProviderStep {
-                    id: listing_job,
-                    provider: ModuleId(
-                        collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into(),
-                    ),
-                    operation: OperationId::new(
-                        collector_modules::music::COVER_ART_ARCHIVE_ACQUIRE_OPERATION,
-                    )?,
-                    query: RawJson::from_value(
-                        serde_json::to_value(
-                            collector_modules::music::CoverArtArchiveQuery::Listing {
-                                release_id: candidate.provider_record_id.clone(),
-                            },
-                        )
-                        .map_err(|error| Error::Invalid(error.to_string()))?,
-                    ),
-                    maximum_response_bytes: 8 * 1024 * 1024,
-                },
-            )?;
-            return Ok(false);
-        };
-        match listing.state {
-            JobState::Failed => {
-                return Err(Error::Unavailable(
-                    listing
-                        .error
-                        .clone()
-                        .unwrap_or_else(|| "Cover Art Archive listing failed".into()),
-                ));
-            }
-            JobState::Completed => {}
-            _ => return Ok(false),
-        }
-        let listing_snapshot = completed_snapshot_id(listing.result.as_ref())
-            .ok_or_else(|| Error::Storage("guided artwork listing has no snapshot".into()))?;
-        let snapshot = self.processing.snapshot(SnapshotQuery {
-            collection_id: item.collection_id,
-            snapshot_id: listing_snapshot,
-        })?;
-        // Resume from the acquired release, not a subsequently changed display choice.
-        let listing_observation: collector_modules::music::CoverArtArchiveSnapshotObservation =
-            snapshot.parsed_observation.parse()?;
-        let collector_modules::music::CoverArtArchiveQuery::Listing { release_id } =
-            listing_observation.query
-        else {
-            return Err(Error::Invalid(
-                "guided artwork snapshot is not a listing".into(),
-            ));
-        };
-        candidate.provider_record_id = release_id.clone();
-        let parser = self
-            .catalog_parsers
-            .get(&snapshot.provider.0)
-            .ok_or_else(|| Error::Unavailable("artwork provider parser is unavailable".into()))?;
-        let mut reader = self.processing.snapshot_bytes(SnapshotQuery {
-            collection_id: item.collection_id,
-            snapshot_id: listing_snapshot,
-        })?;
-        let parsed = parser.parse_snapshot(&snapshot, reader.as_mut(), &mut || Ok(false))?;
-        let mut options = parsed
-            .entries
-            .into_iter()
-            .map(|raw| raw.parse::<collector_modules::music::CoverArtObservation>())
-            .collect::<Result<Vec<_>>>()?;
-        options.sort_by_key(|option| (!option.front, !option.approved, option.image_id.clone()));
-        let Some(option) = options.first() else {
-            return Ok(true);
-        };
-        if option.release_id != release_id {
-            return Err(Error::Invalid(
-                "artwork listing belongs to a different release".into(),
-            ));
-        }
-        let image_job = super::deterministic_job_id(
-            intent.user_id,
-            "guided.cover-art.image",
-            &record.view.id.to_string(),
-        );
-        let Some(image) = jobs.iter().find(|job| job.id == image_job) else {
-            self.enqueue_guided_provider(
-                intent,
-                record,
-                item,
-                GuidedProviderStep {
-                    id: image_job,
-                    provider: ModuleId(
-                        collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into(),
-                    ),
-                    operation: OperationId::new(
-                        collector_modules::music::COVER_ART_ARCHIVE_ACQUIRE_OPERATION,
-                    )?,
-                    query: RawJson::from_value(
-                        serde_json::to_value(
-                            collector_modules::music::CoverArtArchiveQuery::Image {
-                                release_id: option.release_id.clone(),
-                                image_id: option.image_id.clone(),
-                            },
-                        )
-                        .map_err(|error| Error::Invalid(error.to_string()))?,
-                    ),
-                    maximum_response_bytes: 20 * 1024 * 1024,
-                },
-            )?;
-            return Ok(false);
-        };
-        match image.state {
-            JobState::Failed => {
-                return Err(Error::Unavailable(
-                    image
-                        .error
-                        .clone()
-                        .unwrap_or_else(|| "Cover Art Archive image failed".into()),
-                ));
-            }
-            JobState::Completed => {}
-            _ => return Ok(false),
-        }
-        let image_snapshot = completed_snapshot_id(image.result.as_ref())
-            .ok_or_else(|| Error::Storage("guided artwork image has no snapshot".into()))?;
-        let asset_id = AssetId(super::deterministic_inventory_uuid(
-            intent.user_id,
-            "guided-cover-asset",
-            &record.view.id.to_string(),
-        ));
-        let asset_missing = match self.content.asset_state(asset_id) {
-            Ok(_) => false,
-            Err(Error::NotFound) => true,
-            Err(error) => return Err(error),
-        };
-        if asset_missing {
-            let snapshot = self.processing.snapshot(SnapshotQuery {
-                collection_id: item.collection_id,
-                snapshot_id: image_snapshot,
-            })?;
-            let observation: collector_modules::music::CoverArtArchiveSnapshotObservation =
-                snapshot.parsed_observation.parse()?;
-            let (release_id, image_id) = match observation.query {
-                collector_modules::music::CoverArtArchiveQuery::Image {
-                    release_id,
-                    image_id,
-                } => (release_id, image_id),
-                _ => {
-                    return Err(Error::Invalid(
-                        "guided artwork snapshot is not an image".into(),
-                    ));
-                }
-            };
-            if release_id != candidate.provider_record_id || image_id != option.image_id {
-                return Err(Error::Invalid(
-                    "artwork image does not match the selected listing".into(),
-                ));
-            }
-            let bytes = super::metadata::read_exact_snapshot_bytes(
-                self.processing.as_ref(),
-                &snapshot,
-                20 * 1024 * 1024,
-            )?;
-            self.content.create_asset(
-                asset_id,
-                CreateAssetCommand {
-                    collection_id: item.collection_id,
-                    subject: AssetSubject::Item { item_id: item.id },
-                    kind: AssetKind::Cover,
-                    visibility: Visibility::Shared,
-                    alt_text: format!(
-                        "Cover Art Archive image {image_id} for MusicBrainz release {release_id}"
-                    ),
-                },
-                &bytes,
-                AssetWriteContext::Item(ItemEffectContext {
-                    item_id: item.id,
-                    generation: item.lifecycle.generation,
-                    source: ItemEffectSource::GuidedImport(record.view.id),
-                }),
-            )?;
-        }
-        self.refresh_provider_metadata_for_job(
-            intent.user_id,
-            &self.reader.item(item.id)?,
-            musicbrainz_snapshot,
-            None,
-            vec![ProviderArtworkLink {
-                provider_record_id: candidate.provider_record_id,
-                asset_id,
-            }],
-            ObservationId(super::deterministic_inventory_uuid(
-                intent.user_id,
-                "guided-music-artwork",
-                &record.view.id.to_string(),
-            )),
+            SnapshotId(job_id.0),
         )?;
-        Ok(true)
+        self.jobs.enqueue_job(JobSpec {id:job_id,user_id:intent.user_id,collection_id:Some(item.collection_id),item_id:Some(item.id),kind:"metadata_resolution".into(),phase:"queued".into(),total_units:36*1024*1024,request:serde_json::json!({"import_id":record.view.id,"guided":true,"metadata_resolution":true}),frozen_input:Some(FrozenJobInput::MetadataResolution(frozen))})?;
+        Ok(false)
     }
 
     fn ingest_summary(&self, actor: &Principal, view: ImportView) -> Result<IngestSummary> {
@@ -1500,8 +1252,10 @@ impl CollectionService {
         let jobs = self
             .provisional_imports
             .import_job_records(view.id, actor.user_id)?;
-        let failed = jobs.iter().any(|job| job.state == JobState::Failed)
-            || intent.enrichment_error.is_some()
+        let failed = jobs.iter().any(|job| {
+            job.state == JobState::Failed
+                || super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some()
+        }) || intent.enrichment_error.is_some()
             || intent.preparation_error.is_some();
         let active = jobs.iter().any(|job| {
             matches!(
@@ -1646,7 +1400,11 @@ impl CollectionService {
                 let Some(job) = job else {
                     return IngestStepView {
                         step: name.into(),
-                        state: IngestStepState::Pending,
+                        state: if message.is_some() {
+                            IngestStepState::Failed
+                        } else {
+                            IngestStepState::Pending
+                        },
                         job_id: None,
                         attempt: None,
                         message,
@@ -1665,7 +1423,10 @@ impl CollectionService {
                     job_id: Some(job.id),
                     attempt: Some(job.attempt),
                     message: job.error.clone().or(message),
-                    retryable: !intent.cancelled && job.state == JobState::Failed,
+                    retryable: !intent.cancelled
+                        && (job.state == JobState::Failed
+                            || super::metadata_artwork_error(&job.kind, job.result.as_ref())
+                                .is_some()),
                 }
             };
         let owner = match self.reader.item(intent.target_item_id) {
@@ -1721,7 +1482,7 @@ impl CollectionService {
                 collector_modules::music::MetadataProviderOutcome::Candidates
                     if observation.release_count > 1 =>
                 {
-                    format!("{} possible MusicBrainz releases were recorded for review; this is descriptive identity, not verification", observation.release_count)
+                    format!("{} MusicBrainz releases were recorded; album ambiguity is shown separately in Metadata", observation.release_count)
                 }
                 collector_modules::music::MetadataProviderOutcome::Candidates => {
                     "MusicBrainz release metadata was recorded from the derived disc identifier".into()
@@ -1759,29 +1520,29 @@ impl CollectionService {
                 retryable: false,
             }
         };
-        let artwork_step = if intent.enrichment == IngestEnrichmentPolicy::None || !music {
-            job_step("artwork", None, true, None)
-        } else if let Some(error) = intent.enrichment_error.clone() {
-            IngestStepView {
-                step: "artwork".into(),
-                state: IngestStepState::Failed,
-                job_id: artwork_image_job.or(artwork_listing_job).map(|job| job.id),
-                attempt: artwork_image_job
-                    .or(artwork_listing_job)
-                    .map(|job| job.attempt),
-                message: Some(error),
-                retryable: !intent.cancelled
-                    && artwork_image_job
-                        .or(artwork_listing_job)
-                        .is_some_and(|job| job.state == JobState::Failed),
+        let artwork_step = if metadata_job.is_some_and(|job| job.kind == "metadata_resolution") {
+            let error = metadata_job
+                .and_then(|job| job.result.as_ref())
+                .and_then(|value| {
+                    value
+                        .get("completion")
+                        .unwrap_or(value)
+                        .get("artwork_error")
+                })
+                .and_then(serde_json::Value::as_str);
+            let mut step = job_step("artwork", metadata_job, false, error.map(str::to_string));
+            if error.is_some() {
+                step.state = IngestStepState::Failed;
             }
+            step
+        } else if intent.enrichment == IngestEnrichmentPolicy::None || !music {
+            job_step("artwork", None, true, None)
         } else {
             job_step(
                 "artwork",
                 artwork_image_job.or(artwork_listing_job),
-                intent.settled && artwork_image_job.is_none(),
-                (intent.settled && artwork_image_job.is_none())
-                    .then(|| "No automatic artwork was selected".into()),
+                intent.settled && artwork_image_job.is_none() && intent.enrichment_error.is_none(),
+                intent.enrichment_error.clone(),
             )
         };
         let preparation_step = if !intent.prepare_music {
@@ -1974,7 +1735,10 @@ impl CollectionService {
                         .retry_preparation_batch(job_id, actor.user_id)
                         .map(|()| job_id);
                 }
-                if job.state != JobState::Failed {
+                if job.state != JobState::Failed
+                    && !(job.state == JobState::Completed
+                        && super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some())
+                {
                     return Err(Error::Conflict);
                 }
                 effects.retry_failed_job(job_id, actor.user_id)

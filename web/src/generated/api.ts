@@ -196,6 +196,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/album-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["confirm_album_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/album-groups/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["preview_album_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/album-groups/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["album_group_undo"];
+        put?: never;
+        post: operations["undo_album_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -302,6 +350,118 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["recover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["bulk_library_page"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-library/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["preview_bulk_library"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-library/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["bulk_library_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-library/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_bulk_library"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-library/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["bulk_library_members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-library/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retry_bulk_library"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-library/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["start_bulk_library"];
         delete?: never;
         options?: never;
         head?: never;
@@ -932,6 +1092,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/intake-discoveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["discover_bulk_intake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intake-discoveries/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["intake_discovery_page"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intakes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_intakes"];
+        put?: never;
+        post: operations["create_intake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intakes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["intake_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intakes/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_intake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intakes/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["intake_members"];
+        put?: never;
+        post: operations["append_intake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intakes/{id}/members/{position}/destination": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["repair_intake_destination"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/intakes/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["start_intake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items": {
         parameters: {
             query?: never;
@@ -973,6 +1261,22 @@ export interface paths {
         };
         get: operations["activity"];
         put: operations["save_activity"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/album-group-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["album_group_proposals"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1118,6 +1422,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["apply_metadata_snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/metadata/resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metadata_resolutions"];
+        put?: never;
+        post: operations["resolve_metadata"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1444,6 +1764,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library-care/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metadata_care"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library-care/music-preparation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["preparation_care"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -1453,6 +1805,22 @@ export interface paths {
         };
         get: operations["me"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/metadata-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metadata_preferences"];
+        put: operations["update_metadata_preferences"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1811,8 +2179,41 @@ export interface components {
         };
         /** @enum {string} */
         ActiveOwnership: "owned" | "borrowed" | "unknown";
+        AlbumGroupChoices: {
+            artwork_from?: null | components["schemas"]["ItemId"];
+            assemblies?: components["schemas"]["PhysicalSetAssembly"][];
+            disc_positions?: components["schemas"]["GroupDiscPosition"][];
+            domain_from?: null | components["schemas"]["ItemId"];
+            identity_from?: null | components["schemas"]["ItemId"];
+            subtitle_from?: null | components["schemas"]["ItemId"];
+            title_from?: null | components["schemas"]["ItemId"];
+        };
+        AlbumGroupPreview: {
+            can_confirm: boolean;
+            conflicts: components["schemas"]["GroupConflict"][];
+            destination: components["schemas"]["ItemId"];
+            entries: components["schemas"]["Item"][];
+            /** Format: int32 */
+            physical_copies: number;
+            proposed_disc_positions: components["schemas"]["GroupDiscPosition"][];
+            token: string;
+        };
+        AlbumGroupResult: {
+            destination: components["schemas"]["ItemId"];
+            group_id: components["schemas"]["TransactionId"];
+            sources: components["schemas"]["ItemId"][];
+        };
+        AlbumGroupUndo: {
+            can_undo: boolean;
+            group: components["schemas"]["AlbumGroupResult"];
+            reason?: string | null;
+        };
         AnalyzeProvisionalImport: {
             module: components["schemas"]["ModuleId"];
+        };
+        AppendIntake: {
+            expected_revision: components["schemas"]["Revision"];
+            packages: components["schemas"]["IntakePackage"][];
         };
         ApplyMetadataSnapshotCommand: {
             artwork?: components["schemas"]["ProviderArtworkLink"][];
@@ -1881,6 +2282,55 @@ export interface components {
         Begin: {
             username: string;
         };
+        /** @enum {string} */
+        BulkLibraryKind: "metadata" | "music_preparation";
+        BulkLibraryMemberView: {
+            /** Format: int32 */
+            already_ready: number;
+            artwork_asset_id?: null | components["schemas"]["AssetId"];
+            collection_id: components["schemas"]["CollectionId"];
+            item_id: components["schemas"]["ItemId"];
+            job_id?: null | components["schemas"]["JobId"];
+            /** Format: int32 */
+            position: number;
+            reason?: string | null;
+            state: components["schemas"]["BulkMemberState"];
+            title: string;
+            /** Format: int32 */
+            tracks: number;
+        };
+        /** @enum {string} */
+        BulkLibraryState: "preview" | "accepted" | "completed" | "cancelling" | "cancelled";
+        BulkLibrarySummary: {
+            admission_error?: string | null;
+            /** Format: int32 */
+            already_ready: number;
+            can_cancel: boolean;
+            can_retry: boolean;
+            can_start: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            excluded: number;
+            /** Format: int32 */
+            failed: number;
+            id: components["schemas"]["JobId"];
+            kind: components["schemas"]["BulkLibraryKind"];
+            /** Format: int32 */
+            pending: number;
+            /** Format: int32 */
+            selected: number;
+            source_bytes: components["schemas"]["ByteLength"];
+            state: components["schemas"]["BulkLibraryState"];
+            /** Format: int32 */
+            succeeded: number;
+            /** Format: int32 */
+            tracks: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @enum {string} */
+        BulkMemberState: "ready" | "excluded" | "queued" | "running" | "succeeded" | "failed" | "review" | "cancelled";
         /** Format: int64 */
         ByteLength: number;
         Capability: {
@@ -2027,6 +2477,10 @@ export interface components {
         ComponentKind: "cartridge" | "optical_disc" | "tape" | "memory_card" | "case" | "booklet" | "insert" | "other_data" | "other_physical";
         /** @enum {string} */
         Condition: "unknown" | "sealed" | "excellent" | "good" | "fair" | "poor" | "incomplete";
+        ConfirmAlbumGroup: {
+            preview: components["schemas"]["PreviewAlbumGroup"];
+            token: string;
+        };
         /** @enum {string} */
         ContentAvailabilityStatus: "available" | "legacy_unassigned" | "owner_unavailable" | "item_schema_unsupported";
         ContentPermissions: {
@@ -2057,6 +2511,15 @@ export interface components {
         CreateCollectionCommand: {
             module: components["schemas"]["ModuleId"];
             name: string;
+        };
+        CreateIntake: {
+            automatic_metadata?: boolean;
+            collection_id: components["schemas"]["CollectionId"];
+            /** Format: int32 */
+            expected_files: number;
+            /** Format: int32 */
+            expected_packages: number;
+            prepare_music?: boolean;
         };
         CurrencyCode: string;
         /** Format: uuid */
@@ -2187,6 +2650,21 @@ export interface components {
             role: components["schemas"]["Role"];
             user_id: components["schemas"]["UserId"];
             username: string;
+        };
+        GroupConflict: {
+            kind: components["schemas"]["GroupConflictKind"];
+            message: string;
+        };
+        /** @enum {string} */
+        GroupConflictKind: "manual_title" | "manual_subtitle" | "identity_link" | "domain_information" | "artwork" | "physical_inventory" | "active_loan" | "possession" | "changed_record";
+        GroupDiscPosition: {
+            component_id: components["schemas"]["ComponentId"];
+            /** Format: int32 */
+            position: number;
+        };
+        GroupEntry: {
+            expected_revision: components["schemas"]["Revision"];
+            item_id: components["schemas"]["ItemId"];
         };
         /** @enum {string} */
         HashAlgorithm: "sha256" | "sha1" | "md5" | "crc32" | "accurate_rip_v1" | "accurate_rip_v2";
@@ -2376,6 +2854,78 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        IntakeDestination: {
+            /** @enum {string} */
+            destination: "separate";
+        } | {
+            copy_key: string;
+            /** @enum {string} */
+            destination: "album_group";
+            key: string;
+            title: string;
+        } | {
+            copy_key: string;
+            /** @enum {string} */
+            destination: "existing";
+            expected_revision: components["schemas"]["Revision"];
+            item_id: components["schemas"]["ItemId"];
+        };
+        IntakeDiscovery: {
+            collection_id: components["schemas"]["CollectionId"];
+            id: components["schemas"]["JobId"];
+            /** Format: int32 */
+            package_count: number;
+            /** Format: int32 */
+            unassigned_count: number;
+        };
+        IntakeDiscoveryPage: {
+            discovery: components["schemas"]["IntakeDiscovery"];
+            packages: components["schemas"]["Page_IngestPlanPackage"];
+            unassigned_files: components["schemas"]["Page_String"];
+        };
+        IntakeMemberView: {
+            destination: components["schemas"]["IntakeDestination"];
+            error?: string | null;
+            import?: null | components["schemas"]["IngestSummary"];
+            import_id?: null | components["schemas"]["ImportId"];
+            plan: components["schemas"]["IngestPlanPackage"];
+            /** Format: int32 */
+            position: number;
+        };
+        IntakePackage: {
+            destination: components["schemas"]["IntakeDestination"];
+            package: components["schemas"]["IngestPackageSelection"];
+        };
+        IntakeSession: {
+            /** Format: int32 */
+            admitted: number;
+            automatic_metadata: boolean;
+            collection_id: components["schemas"]["CollectionId"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            expected_files: number;
+            /** Format: int32 */
+            expected_packages: number;
+            /** Format: int32 */
+            file_count: number;
+            id: components["schemas"]["JobId"];
+            /** Format: int32 */
+            needs_attention: number;
+            /** Format: int32 */
+            package_count: number;
+            prepare_music: boolean;
+            /** Format: int32 */
+            preserved: number;
+            /** Format: int32 */
+            rejected: number;
+            revision: components["schemas"]["Revision"];
+            state: components["schemas"]["IntakeState"];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @enum {string} */
+        IntakeState: "draft" | "accepted" | "completed" | "cancelling" | "cancelled";
         Item: {
             assets: components["schemas"]["Asset"][];
             captures: components["schemas"]["Capture"][];
@@ -2418,6 +2968,8 @@ export interface components {
             /** Format: int64 */
             generation: number;
             historical_captures: components["schemas"]["CaptureId"][];
+            merge_group?: null | components["schemas"]["TransactionId"];
+            merged_into?: null | components["schemas"]["ItemId"];
             reimport?: null | components["schemas"]["ItemReimport"];
             /** Format: int64 */
             reset_artwork_through: number;
@@ -2475,6 +3027,16 @@ export interface components {
             /** Format: int32 */
             legacy_position?: number | null;
         };
+        LibrarySelection: {
+            items: components["schemas"]["ItemId"][];
+            /** @enum {string} */
+            selection: "explicit";
+        } | {
+            exclusions: components["schemas"]["ItemId"][];
+            query: components["schemas"]["MetadataCareQuery"];
+            /** @enum {string} */
+            selection: "all_matching";
+        };
         Loan: {
             contact: string;
             /** Format: date */
@@ -2509,6 +3071,8 @@ export interface components {
         };
         MetadataAuthority: {
             artwork_choice?: null | components["schemas"]["AssetId"];
+            automatic_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+            automatic_language?: null | components["schemas"]["LanguageTag"];
             domain_overrides?: null | components["schemas"]["ModuleData"];
             field_overrides: components["schemas"]["MetadataFieldOverride"][];
             /**
@@ -2567,11 +3131,13 @@ export interface components {
             provider_record_version?: string | null;
         };
         MetadataCandidateView: {
+            accepted_automatically: boolean;
             artwork?: null | components["schemas"]["AssetId"];
             complete_identity: boolean;
             current: boolean;
             details: Record<string, never>;
             identity: components["schemas"]["MetadataCandidateIdentity"];
+            music_layout?: null | components["schemas"]["MetadataMusicLayout"];
             /** Format: int32 */
             provider_priority: number;
             selected: boolean;
@@ -2579,6 +3145,15 @@ export interface components {
             subtitle?: null | components["schemas"]["MetadataText"];
             title: components["schemas"]["MetadataText"];
             unmatched: boolean;
+        };
+        MetadataCareQuery: {
+            collection_id?: null | components["schemas"]["CollectionId"];
+            cursor?: string | null;
+            /** Format: int32 */
+            limit?: number | null;
+            needs_attention?: boolean;
+            reason?: null | components["schemas"]["MetadataReviewReason"];
+            search?: string;
         };
         MetadataCatalogSourceView: {
             current: boolean;
@@ -2606,8 +3181,25 @@ export interface components {
         };
         /** @enum {string} */
         MetadataLookupKind: "release_id" | "disc_id" | "search";
+        MetadataMediumLayout: {
+            disc_ids: string[];
+            /** Format: int32 */
+            position: number;
+            tracks: components["schemas"]["MetadataTrackTitle"][];
+        };
+        MetadataMusicLayout: {
+            album_id?: string | null;
+            artist?: string | null;
+            discs: components["schemas"]["MetadataMediumLayout"][];
+            edition?: string | null;
+            release_id: string;
+        };
         MetadataPermissions: {
             can_update: boolean;
+        };
+        MetadataPreferences: {
+            language: components["schemas"]["LanguageTag"];
+            revision: components["schemas"]["Revision"];
         };
         /** @enum {string} */
         MetadataProviderAvailability: "available" | "unconfigured" | "inapplicable";
@@ -2622,6 +3214,19 @@ export interface components {
         MetadataRefreshOutcome: "candidates" | "no_match" | "unavailable";
         /** @enum {string} */
         MetadataResolutionKind: "manual" | "selected" | "automatic" | "tentative";
+        MetadataResolutionResult: {
+            artwork_error?: string | null;
+            artwork_options: components["schemas"]["MetadataArtworkOption"][];
+            item_id: components["schemas"]["ItemId"];
+            outcome?: null | components["schemas"]["MetadataRefreshOutcome"];
+            snapshot_id: components["schemas"]["SnapshotId"];
+        };
+        MetadataResolutionView: {
+            job: components["schemas"]["JobView"];
+            result?: null | components["schemas"]["MetadataResolutionResult"];
+        };
+        /** @enum {string} */
+        MetadataReviewReason: "missing_name" | "missing_artwork" | "album_ambiguity" | "incomplete_provider_information" | "no_match" | "lookup_failed" | "manual_conflict" | "grouping_proposal";
         MetadataReviewView: {
             authority: components["schemas"]["MetadataAuthority"];
             candidates: components["schemas"]["MetadataCandidateView"][];
@@ -2630,7 +3235,10 @@ export interface components {
             item_id: components["schemas"]["ItemId"];
             lookup_choices: components["schemas"]["MetadataLookupChoice"][];
             permissions: components["schemas"]["MetadataPermissions"];
+            preferred_language: components["schemas"]["LanguageTag"];
+            proposed_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
             providers: components["schemas"]["MetadataProviderView"][];
+            review_reasons: components["schemas"]["MetadataReviewReason"][];
             revision: components["schemas"]["Revision"];
         };
         MetadataState: {
@@ -2643,6 +3251,11 @@ export interface components {
         MetadataText: {
             language?: null | components["schemas"]["LanguageTag"];
             value: string;
+        };
+        MetadataTrackTitle: {
+            /** Format: int32 */
+            position: number;
+            title: string;
         };
         MetadataValueSource: {
             /** @enum {string} */
@@ -2909,6 +3522,55 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_BulkLibraryMemberView: {
+            items: {
+                /** Format: int32 */
+                already_ready: number;
+                artwork_asset_id?: null | components["schemas"]["AssetId"];
+                collection_id: components["schemas"]["CollectionId"];
+                item_id: components["schemas"]["ItemId"];
+                job_id?: null | components["schemas"]["JobId"];
+                /** Format: int32 */
+                position: number;
+                reason?: string | null;
+                state: components["schemas"]["BulkMemberState"];
+                title: string;
+                /** Format: int32 */
+                tracks: number;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_BulkLibrarySummary: {
+            items: {
+                admission_error?: string | null;
+                /** Format: int32 */
+                already_ready: number;
+                can_cancel: boolean;
+                can_retry: boolean;
+                can_start: boolean;
+                /** Format: date-time */
+                created_at: string;
+                /** Format: int32 */
+                excluded: number;
+                /** Format: int32 */
+                failed: number;
+                id: components["schemas"]["JobId"];
+                kind: components["schemas"]["BulkLibraryKind"];
+                /** Format: int32 */
+                pending: number;
+                /** Format: int32 */
+                selected: number;
+                source_bytes: components["schemas"]["ByteLength"];
+                state: components["schemas"]["BulkLibraryState"];
+                /** Format: int32 */
+                succeeded: number;
+                /** Format: int32 */
+                tracks: number;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            next_cursor?: string | null;
+        };
         Page_CatalogSnapshotStatus: {
             items: {
                 active: boolean;
@@ -2923,6 +3585,23 @@ export interface components {
                 role: components["schemas"]["Role"];
                 user_id: components["schemas"]["UserId"];
                 username: string;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_IngestPlanPackage: {
+            items: {
+                analysis_available: boolean;
+                anchors: components["schemas"]["IngestAnchorChoice"][];
+                artwork_available: boolean;
+                blockers: components["schemas"]["IngestBlocker"][];
+                default_title: string;
+                files: components["schemas"]["UploadFile"][];
+                metadata_available: boolean;
+                /** Format: int32 */
+                position: number;
+                preparation_available: boolean;
+                preparation_reason?: string | null;
+                source: components["schemas"]["ImportSourceSummary"];
             }[];
             next_cursor?: string | null;
         };
@@ -2942,6 +3621,49 @@ export interface components {
                 prepare_music: boolean;
                 target_item_id?: null | components["schemas"]["ItemId"];
                 total_bytes: components["schemas"]["ByteLength"];
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_IntakeMemberView: {
+            items: {
+                destination: components["schemas"]["IntakeDestination"];
+                error?: string | null;
+                import?: null | components["schemas"]["IngestSummary"];
+                import_id?: null | components["schemas"]["ImportId"];
+                plan: components["schemas"]["IngestPlanPackage"];
+                /** Format: int32 */
+                position: number;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_IntakeSession: {
+            items: {
+                /** Format: int32 */
+                admitted: number;
+                automatic_metadata: boolean;
+                collection_id: components["schemas"]["CollectionId"];
+                /** Format: date-time */
+                created_at: string;
+                /** Format: int32 */
+                expected_files: number;
+                /** Format: int32 */
+                expected_packages: number;
+                /** Format: int32 */
+                file_count: number;
+                id: components["schemas"]["JobId"];
+                /** Format: int32 */
+                needs_attention: number;
+                /** Format: int32 */
+                package_count: number;
+                prepare_music: boolean;
+                /** Format: int32 */
+                preserved: number;
+                /** Format: int32 */
+                rejected: number;
+                revision: components["schemas"]["Revision"];
+                state: components["schemas"]["IntakeState"];
                 /** Format: date-time */
                 updated_at: string;
             }[];
@@ -2995,6 +3717,13 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_PreparationCareEntry: {
+            items: {
+                item: components["schemas"]["PresentedItem"];
+                plan: components["schemas"]["MusicAlbumPreparationPlan"];
+            }[];
+            next_cursor?: string | null;
+        };
         Page_PresentedCollection: {
             items: {
                 binding: components["schemas"]["CollectionBinding"];
@@ -3024,6 +3753,8 @@ export interface components {
                 identity_link: components["schemas"]["ItemIdentityLink"];
                 inventory_subtitle?: string | null;
                 inventory_title?: string | null;
+                merge_group?: null | components["schemas"]["TransactionId"];
+                merged_into?: null | components["schemas"]["ItemId"];
                 presentation: components["schemas"]["ModulePresentation"];
                 primary_artwork?: null | components["schemas"]["AssetId"];
                 reimport_import_id?: null | components["schemas"]["ImportId"];
@@ -3071,6 +3802,10 @@ export interface components {
                 id: components["schemas"]["SessionId"];
                 label: string;
             }[];
+            next_cursor?: string | null;
+        };
+        Page_String: {
+            items: string[];
             next_cursor?: string | null;
         };
         Page_WorkEntry: {
@@ -3131,12 +3866,20 @@ export interface components {
         };
         /** Format: int64 */
         PcmFrame: number;
+        PhysicalSetAssembly: {
+            destination: components["schemas"]["SpecimenId"];
+            sources: components["schemas"]["SpecimenId"][];
+        };
         PlanIngestCommand: {
             collection_id: components["schemas"]["CollectionId"];
             packages: components["schemas"]["IngestPackageSelection"][];
         };
         /** @enum {string} */
         Possession: "present" | "lent" | "elsewhere" | "unknown";
+        PreparationCareEntry: {
+            item: components["schemas"]["PresentedItem"];
+            plan: components["schemas"]["MusicAlbumPreparationPlan"];
+        };
         PrepareMusicAlbum: {
             source_representation_ids: components["schemas"]["RepresentationId"][];
         };
@@ -3223,6 +3966,8 @@ export interface components {
             identity_link: components["schemas"]["ItemIdentityLink"];
             inventory_subtitle?: string | null;
             inventory_title?: string | null;
+            merge_group?: null | components["schemas"]["TransactionId"];
+            merged_into?: null | components["schemas"]["ItemId"];
             presentation: components["schemas"]["ModulePresentation"];
             primary_artwork?: null | components["schemas"]["AssetId"];
             reimport_import_id?: null | components["schemas"]["ImportId"];
@@ -3253,6 +3998,18 @@ export interface components {
             ownership: components["schemas"]["Ownership"];
             possession: components["schemas"]["Possession"];
             private_notes?: string | null;
+        };
+        PreviewAlbumGroup: {
+            choices?: components["schemas"]["AlbumGroupChoices"];
+            destination: components["schemas"]["ItemId"];
+            entries: components["schemas"]["GroupEntry"][];
+        };
+        PreviewBulkLibrary: {
+            kind: components["schemas"]["BulkLibraryKind"];
+            selection: components["schemas"]["LibrarySelection"];
+            sources?: {
+                [key: string]: components["schemas"]["RepresentationId"][];
+            };
         };
         Principal: {
             administrator: boolean;
@@ -3298,6 +4055,10 @@ export interface components {
             new_password: string;
             username: string;
         };
+        RepairIntakeDestination: {
+            destination: components["schemas"]["IntakeDestination"];
+            expected_revision: components["schemas"]["Revision"];
+        };
         Representation: {
             files: components["schemas"]["StoredFile"][];
             format: string;
@@ -3310,6 +4071,10 @@ export interface components {
         RepresentationId: string;
         /** @enum {string} */
         RepresentationRole: "preservation_master" | "lossless_derivative" | "lossy_derivative";
+        ResolveMetadataCommand: {
+            acquire_artwork?: boolean;
+            lookup: components["schemas"]["AcquireMetadataCommand"];
+        };
         ResolvedMetadataDisplay: {
             artwork?: null | components["schemas"]["AssetId"];
             candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
@@ -3468,6 +4233,9 @@ export interface components {
             plan: components["schemas"]["IngestPlan"];
             prepare_music?: boolean;
         };
+        StartIntake: {
+            expected_revision: components["schemas"]["Revision"];
+        };
         StartLoan: {
             command: components["schemas"]["StartLoanCommand"];
             expected_revision: components["schemas"]["Revision"];
@@ -3492,6 +4260,8 @@ export interface components {
             digest: components["schemas"]["Digest"];
             name: string;
         };
+        /** Format: uuid */
+        TransactionId: string;
         UpdateAssetCommand: {
             alt_text: string;
             visibility: components["schemas"]["Visibility"];
@@ -3503,6 +4273,10 @@ export interface components {
         UpdateMetadataAuthorityCommand: {
             change: components["schemas"]["MetadataAuthorityChange"];
             expected_revision: components["schemas"]["Revision"];
+        };
+        UpdateMetadataPreferences: {
+            expected_revision: components["schemas"]["Revision"];
+            language: components["schemas"]["LanguageTag"];
         };
         Upload: {
             capture_id: components["schemas"]["CaptureId"];
@@ -4101,6 +4875,140 @@ export interface operations {
             };
         };
     };
+    confirm_album_group: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmAlbumGroup"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumGroupResult"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview_album_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewAlbumGroup"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumGroupPreview"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    album_group_undo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["TransactionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumGroupUndo"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    undo_album_group: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["TransactionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumGroupResult"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -4303,6 +5211,228 @@ export interface operations {
                 content?: never;
             };
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    bulk_library_page: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_BulkLibrarySummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview_bulk_library: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewBulkLibrary"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLibrarySummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    bulk_library_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLibrarySummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancel_bulk_library: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLibrarySummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    bulk_library_members: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_BulkLibraryMemberView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    retry_bulk_library: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLibrarySummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_bulk_library: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLibrarySummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6016,6 +7146,343 @@ export interface operations {
             };
         };
     };
+    discover_bulk_intake: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscoverIngestCommand"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeDiscovery"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    intake_discovery_page: {
+        parameters: {
+            query?: {
+                cursor?: number;
+                unassigned_cursor?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeDiscoveryPage"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_intakes: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_IntakeSession"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_intake: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateIntake"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSession"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    intake_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSession"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cancel_intake: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSession"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    intake_members: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_IntakeMemberView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    append_intake: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppendIntake"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSession"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    repair_intake_destination: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+                position: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairIntakeDestination"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSession"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_intake: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartIntake"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeSession"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     browse: {
         parameters: {
             query?: {
@@ -6177,6 +7644,36 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    album_group_proposals: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PresentedItem"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6664,6 +8161,84 @@ export interface operations {
                 content?: never;
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metadata_resolutions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataResolutionView"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resolve_metadata: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveMetadataCommand"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7639,6 +9214,75 @@ export interface operations {
             };
         };
     };
+    metadata_care: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                search?: string;
+                reason?: components["schemas"]["MetadataReviewReason"];
+                needs_attention?: boolean;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PresentedItem"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preparation_care: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                search?: string;
+                needs_attention?: boolean;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PreparationCareEntry"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     me: {
         parameters: {
             query?: never;
@@ -7657,6 +9301,68 @@ export interface operations {
                 };
             };
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metadata_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataPreferences"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_metadata_preferences: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMetadataPreferences"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataPreferences"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

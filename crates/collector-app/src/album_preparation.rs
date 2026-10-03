@@ -268,7 +268,7 @@ impl CollectionService {
         self.music_preparation_batch(actor, batch_id)
     }
 
-    fn freeze_music_album_batch(
+    pub(crate) fn freeze_music_album_batch(
         &self,
         user_id: collector_core::UserId,
         item: &collector_core::Item,
@@ -1087,6 +1087,38 @@ fn preparation_member_id(
 /// Evaluated with transactionally loaded ownership facts by the storage adapter.
 pub fn may_cancel_preparation_child(direct_request: bool, other_batch_requests: bool) -> bool {
     !direct_request && !other_batch_requests
+}
+
+/// Compact rebuildable care coverage from current recorded layout evidence.
+/// This neither inspects media bytes nor asserts catalog verification.
+pub fn preparation_layout_projection(
+    observation: &collector_core::ProcessingObservation,
+    source: &collector_core::Representation,
+) -> collector_core::Result<Option<(String, u16)>> {
+    if observation.source_fingerprint.files.len() != source.files.len()
+        || observation
+            .source_fingerprint
+            .files
+            .iter()
+            .zip(&source.files)
+            .any(|(f, s)| f.sha256 != s.digest || f.bytes != s.bytes)
+    {
+        return Ok(None);
+    }
+    if let Some(collector_modules::music::CdProcessingResult::Layout {
+        tracks, disc_ids, ..
+    }) = crate::metadata::recorded_music_layout(observation)?
+    {
+        let total = tracks
+            .iter()
+            .filter(|t| t.kind == collector_core::CdTrackKind::Audio)
+            .count() as u16;
+        return Ok(Some((
+            disc_ids.map_or_else(|| source.id.to_string(), |ids| ids.musicbrainz),
+            total,
+        )));
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

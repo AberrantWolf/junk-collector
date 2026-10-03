@@ -313,11 +313,15 @@ pub enum FrozenJobInput {
     Acquisition(FrozenAcquisitionJob),
     Derivative(crate::FrozenDerivativeJob),
     DerivativeBatch(crate::FrozenDerivativeBatchJob),
+    MetadataResolution(crate::FrozenMetadataResolution),
+    ExistingMetadata(crate::FrozenExistingMetadata),
 }
 impl FrozenJobInput {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Processing(job) => job.validate(),
+            Self::MetadataResolution(job) => job.validate(),
+            Self::ExistingMetadata(job) => job.validate(),
             Self::Derivative(job) => job.validate(),
             Self::DerivativeBatch(job) => job.validate(),
             Self::Acquisition(job) => {
@@ -519,6 +523,10 @@ impl From<&collector_core::Item> for MetadataInventoryState {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataAuthorityRecord {
+    /// Historical materializations retain their original decision algorithm.
+    /// New publications use v2; current presentation always applies v2 policy.
+    #[serde(default = "legacy_metadata_policy")]
+    pub resolution_policy: u32,
     /// Current versions used for automatic resolution; history remains selectable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_candidates: Option<Vec<collector_core::MetadataCandidateIdentity>>,
@@ -539,6 +547,10 @@ pub struct MetadataAuthorityRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+fn legacy_metadata_policy() -> u32 {
+    1
+}
+
 impl MetadataAuthorityRecord {
     /// Check the materialized projection against its frozen inventory inputs and
     /// the candidate history available at this revision, including during reindex.
@@ -552,12 +564,16 @@ impl MetadataAuthorityRecord {
                 candidates,
                 self.current_candidates.as_deref(),
             )?;
-            let expected = crate::metadata::resolve_metadata_fields(
+            let expected = crate::metadata::resolve_metadata_fields_with_policy(
                 &inventory.title,
                 &inventory.subtitle,
                 &self.authority,
                 &current,
-                "en",
+                self.authority
+                    .automatic_language
+                    .as_ref()
+                    .map_or("en", collector_core::LanguageTag::as_str),
+                self.resolution_policy == 1,
             )?;
             if self.display.as_ref() != Some(&expected) || inventory.revision.0 == 0 {
                 return Err(collector_core::Error::Invalid(
@@ -569,6 +585,11 @@ impl MetadataAuthorityRecord {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if !matches!(self.resolution_policy, 1 | 2) {
+            return Err(collector_core::Error::Unavailable(
+                "unknown metadata resolution policy".into(),
+            ));
+        }
         if self.revision.0 == 0 {
             return Err(collector_core::Error::Invalid(
                 "metadata authority revision is required".into(),
@@ -657,6 +678,11 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         job: collector_core::JobId,
         collection: CollectionId,
         recipe: collector_core::ConversionRecipe,
+    ) -> Result<()>;
+    fn publish_metadata_for_job(
+        &self,
+        claim: &crate::JobClaim,
+        record: MetadataAuthorityRecord,
     ) -> Result<()>;
     fn publish_metadata_authority(
         &self,

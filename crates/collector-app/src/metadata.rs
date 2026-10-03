@@ -12,7 +12,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{
     AssetState, CollectionService, CommandContext, CreateAssetCommand, FrozenAcquisitionJob,
-    MetadataAuthorityRecord, Principal, ProcessingPort, ProviderRequest, SnapshotQuery,
+    FrozenMetadataResolution, JobClaim, MetadataAuthorityRecord, Principal, ProcessingPort,
+    ProviderRequest, SnapshotQuery, deterministic_inventory_uuid,
 };
 
 /// Ephemeral provider thumbnail; never an archived Asset or verification evidence.
@@ -148,10 +149,64 @@ pub struct MetadataCandidateView {
     pub strength: MatchStrength,
     pub current: bool,
     pub selected: bool,
+    pub accepted_automatically: bool,
+    pub music_layout: Option<MetadataMusicLayout>,
     pub unmatched: bool,
     pub provider_priority: u16,
     #[schema(value_type = Object)]
     pub details: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataMusicLayout {
+    pub release_id: String,
+    pub album_id: Option<String>,
+    pub artist: Option<String>,
+    pub edition: Option<String>,
+    pub discs: Vec<MetadataMediumLayout>,
+}
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataMediumLayout {
+    pub position: u16,
+    pub disc_ids: Vec<String>,
+    pub tracks: Vec<MetadataTrackTitle>,
+}
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataTrackTitle {
+    pub position: u16,
+    pub title: String,
+}
+fn music_layout(candidate: &MetadataCandidateObservation) -> Option<MetadataMusicLayout> {
+    if candidate.identity.provider.0 != collector_modules::music::MUSICBRAINZ_PROVIDER_ID {
+        return None;
+    }
+    let release: collector_modules::music::MusicBrainzReleaseObservation =
+        candidate.observation.parse().ok()?;
+    if release.validate().is_err() || release.release_id != candidate.identity.provider_record_id {
+        return None;
+    }
+    Some(MetadataMusicLayout {
+        release_id: release.release_id,
+        album_id: release.release_group_id,
+        artist: release.artist_credit,
+        edition: release.disambiguation,
+        discs: release
+            .media
+            .into_iter()
+            .map(|medium| MetadataMediumLayout {
+                position: medium.position,
+                disc_ids: medium.disc_ids,
+                tracks: medium
+                    .tracks
+                    .into_iter()
+                    .map(|track| MetadataTrackTitle {
+                        position: track.position,
+                        title: track.title,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -167,6 +222,19 @@ pub struct MetadataPermissions {
     pub can_update: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataReviewReason {
+    MissingName,
+    MissingArtwork,
+    AlbumAmbiguity,
+    IncompleteProviderInformation,
+    NoMatch,
+    LookupFailed,
+    ManualConflict,
+    GroupingProposal,
+}
+
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MetadataReviewView {
     pub item_id: ItemId,
@@ -174,6 +242,9 @@ pub struct MetadataReviewView {
     pub authority: MetadataAuthority,
     pub display: ResolvedMetadataDisplay,
     pub candidates: Vec<MetadataCandidateView>,
+    pub review_reasons: Vec<MetadataReviewReason>,
+    pub proposed_candidate: Option<MetadataCandidateIdentity>,
+    pub preferred_language: LanguageTag,
     pub providers: Vec<MetadataProviderView>,
     pub lookup_choices: Vec<MetadataLookupChoice>,
     pub catalog_sources: Vec<MetadataCatalogSourceView>,
@@ -217,7 +288,7 @@ pub struct ApplyMetadataSnapshotCommand {
     pub artwork: Vec<ProviderArtworkLink>,
 }
 
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MetadataArtworkOption {
     pub snapshot_id: SnapshotId,
     pub release_id: String,
@@ -258,9 +329,10 @@ struct LoadedMetadataAuthority {
 }
 
 impl CollectionService {
-    pub(crate) fn effective_metadata_for_item(
+    pub(crate) fn effective_metadata_for_user(
         &self,
         item: &Item,
+        user: UserId,
     ) -> Result<ResolvedMetadataDisplay> {
         let LoadedMetadataAuthority {
             authority,
@@ -279,7 +351,7 @@ impl CollectionService {
             item,
             &authority,
             &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
-            "en",
+            &self.metadata_language(user)?,
         )
     }
 
@@ -556,7 +628,14 @@ impl CollectionService {
                     expected_revision: command.expected_revision,
                     observation,
                 };
-                self.refresh_metadata_effect(&item, &eligibility.owner, &refresh, effects)
+                self.refresh_metadata_effect(
+                    &item,
+                    &eligibility.owner,
+                    &refresh,
+                    &self.metadata_language(actor.user_id)?,
+                    None,
+                    effects,
+                )
             },
         )
     }
@@ -607,7 +686,14 @@ impl CollectionService {
             expected_revision: revision,
             observation,
         };
-        self.refresh_metadata_effect(item, &eligibility.owner, &refresh, self.processing.as_ref())
+        self.refresh_metadata_effect(
+            item,
+            &eligibility.owner,
+            &refresh,
+            &self.metadata_language(user_id)?,
+            None,
+            self.processing.as_ref(),
+        )
     }
 
     fn provider_metadata_observation(
@@ -616,6 +702,23 @@ impl CollectionService {
         owner: &ModuleId,
         command: &RefreshProviderMetadataCommand,
         observation_id: ObservationId,
+    ) -> Result<MetadataRefreshObservation> {
+        self.provider_metadata_observation_controlled(
+            item,
+            owner,
+            command,
+            observation_id,
+            &mut || Ok(false),
+        )
+    }
+
+    fn provider_metadata_observation_controlled(
+        &self,
+        item: &Item,
+        owner: &ModuleId,
+        command: &RefreshProviderMetadataCommand,
+        observation_id: ObservationId,
+        cancelled: &mut dyn FnMut() -> Result<bool>,
     ) -> Result<MetadataRefreshObservation> {
         let snapshot_id = command.snapshot_id;
         let source_observation_id = command.source_observation_id;
@@ -628,11 +731,18 @@ impl CollectionService {
             .catalog_parsers
             .get(&snapshot.provider.0)
             .ok_or_else(|| Error::Unavailable("metadata provider parser is unavailable".into()))?;
-        let mut reader = self.processing.snapshot_bytes(SnapshotQuery {
-            collection_id: item.collection_id,
-            snapshot_id,
-        })?;
-        let parsed = parser.parse_snapshot(&snapshot, reader.as_mut(), &mut || Ok(false))?;
+        let bytes = read_exact_snapshot_bytes_controlled(
+            self.processing.as_ref(),
+            &snapshot,
+            if owner.0 == "org.junk.games" {
+                512 * 1024 * 1024
+            } else {
+                8 * 1024 * 1024
+            },
+            cancelled,
+        )?;
+        let parsed =
+            parser.parse_snapshot(&snapshot, &mut std::io::Cursor::new(&bytes), cancelled)?;
         let artwork = artwork_links
             .iter()
             .map(|value| (value.provider_record_id.clone(), value.asset_id))
@@ -647,17 +757,30 @@ impl CollectionService {
             }
             let observation: collector_modules::music::MusicBrainzSnapshotObservation =
                 parsed.observation.parse()?;
-            let candidates = collector_modules::music::musicbrainz_metadata_candidates(
+            let mut candidates = collector_modules::music::musicbrainz_metadata_candidates(
                 &snapshot.digest,
                 &observation,
                 &parsed.entries,
                 &artwork,
             )?;
-            let raw = exact_json_or_snapshot_reference(
-                self.processing.as_ref(),
-                &snapshot,
-                8 * 1024 * 1024,
-            )?;
+            if let collector_modules::music::MusicBrainzQuery::DiscId { disc_id, .. } =
+                &observation.query
+                && !self.has_computed_disc_id(item, disc_id)?
+            {
+                for candidate in &mut candidates {
+                    candidate.complete_identity = false;
+                    candidate.strength = MatchStrength::Name;
+                    candidate.identity.provider_record_version = Some(format!(
+                        "sha256:{}",
+                        Digest::sha256(
+                            &serde_json::to_vec(candidate)
+                                .map_err(|e| Error::Storage(e.to_string()))?
+                        )
+                        .hex
+                    ));
+                }
+            }
+            let raw = json_or_snapshot_reference(&snapshot, bytes);
             (candidates, raw)
         } else if owner.0 == "org.junk.games"
             && snapshot.provider.0 == "org.junk.providers.local-dat"
@@ -696,6 +819,13 @@ impl CollectionService {
                 return Err(Error::Invalid(
                     "DAT metadata evidence is not associated with this item".into(),
                 ));
+            }
+            if self
+                .processing
+                .recorded_source(item.collection_id, source.source_fingerprint.source)?
+                != source.source_fingerprint
+            {
+                return Err(Error::Conflict);
             }
             let catalog = if source.operation.as_str() == "org.junk.games.catalog-verification" {
                 match source
@@ -798,7 +928,7 @@ impl CollectionService {
             &item,
             &authority,
             &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
-            "en",
+            &self.metadata_language(actor.user_id)?,
         )?;
         let current_candidates = current.unwrap_or_else(|| {
             candidates
@@ -814,6 +944,50 @@ impl CollectionService {
             candidates,
             current_candidates,
         })
+    }
+
+    pub(crate) fn has_computed_disc_id(&self, item: &Item, disc_id: &str) -> Result<bool> {
+        for representation in item
+            .captures
+            .iter()
+            .flat_map(|capture| &capture.representations)
+        {
+            let source = PackageScope::Representation(representation.id);
+            let fingerprint = self
+                .processing
+                .recorded_source(item.collection_id, source)?;
+            let mut after = None;
+            loop {
+                let page = self.processing.observations(&crate::ProcessingQuery {
+                    collection_id: item.collection_id,
+                    source,
+                    source_fingerprint: fingerprint.clone(),
+                    operation: None,
+                    after,
+                    limit: 100,
+                })?;
+                for observation in &page.items {
+                    if observation.source_fingerprint == fingerprint
+                        && let Some(collector_modules::music::CdProcessingResult::Layout {
+                            disc_ids: Some(ids),
+                            ..
+                        }) = recorded_music_layout(observation)?
+                        && ids.musicbrainz == disc_id
+                    {
+                        return Ok(true);
+                    }
+                }
+                let Some(cursor) = page.next_cursor else {
+                    break;
+                };
+                after = Some(
+                    cursor
+                        .parse()
+                        .map_err(|_| Error::Storage("invalid layout cursor".into()))?,
+                );
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn effective_music_release(
@@ -834,7 +1008,15 @@ impl CollectionService {
             legacy.iter().flat_map(|value| &value.candidates),
         )?;
         let current = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
-        let display = resolve_metadata_display(item, &authority, &current, "en")?;
+        let display = resolve_metadata_display(
+            item,
+            &authority,
+            &current,
+            authority
+                .automatic_language
+                .as_ref()
+                .map_or("en", LanguageTag::as_str),
+        )?;
         if display.resolution == MetadataResolutionKind::Tentative {
             return Ok(None);
         }
@@ -954,42 +1136,50 @@ impl CollectionService {
                     let fingerprint = self
                         .processing
                         .recorded_source(item.collection_id, source)?;
-                    let page = self.processing.observations(&crate::ProcessingQuery {
-                        collection_id: item.collection_id,
-                        source,
-                        source_fingerprint: fingerprint.clone(),
-                        operation: Some(OperationId::new(
-                            collector_modules::music::CD_STRUCTURE_OPERATION,
-                        )?),
-                        after: None,
-                        limit: 50,
-                    })?;
-                    for observation in page.items {
-                        if observation.source_fingerprint != fingerprint {
-                            continue;
-                        }
-                        if let Ok(collector_modules::music::CdProcessingResult::Layout {
-                            disc_ids: Some(ids),
-                            ..
-                        }) = observation.typed_result.payload.parse()
-                        {
-                            if !lookup_choices.iter().any(|choice| {
-                                choice.kind == MetadataLookupKind::DiscId
-                                    && choice.value == ids.musicbrainz
-                            }) {
-                                lookup_choices.push(MetadataLookupChoice {
-                                    id: format!("layout:{}", observation.id),
-                                    kind: MetadataLookupKind::DiscId,
-                                    label: format!(
-                                        "Disc identifier from recorded layout: {}",
-                                        ids.musicbrainz
-                                    ),
-                                    value: ids.musicbrainz,
-                                    recommended: false,
-                                });
+                    let mut after = None;
+                    loop {
+                        let page = self.processing.observations(&crate::ProcessingQuery {
+                            collection_id: item.collection_id,
+                            source,
+                            source_fingerprint: fingerprint.clone(),
+                            operation: None,
+                            after,
+                            limit: 100,
+                        })?;
+                        let next = page.items.last().map(|o| o.id);
+                        let mut found = false;
+                        for observation in page.items {
+                            if observation.source_fingerprint != fingerprint {
+                                continue;
                             }
+                            if let Some(collector_modules::music::CdProcessingResult::Layout {
+                                disc_ids: Some(ids),
+                                ..
+                            }) = recorded_music_layout(&observation)?
+                            {
+                                if !lookup_choices.iter().any(|choice| {
+                                    choice.kind == MetadataLookupKind::DiscId
+                                        && choice.value == ids.musicbrainz
+                                }) {
+                                    lookup_choices.push(MetadataLookupChoice {
+                                        id: format!("layout:{}", observation.id),
+                                        kind: MetadataLookupKind::DiscId,
+                                        label: format!(
+                                            "Disc identifier from recorded layout: {}",
+                                            ids.musicbrainz
+                                        ),
+                                        value: ids.musicbrainz,
+                                        recommended: false,
+                                    });
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                        if found || page.next_cursor.is_none() {
                             break;
                         }
+                        after = next;
                     }
                 }
             }
@@ -1084,16 +1274,76 @@ impl CollectionService {
                 .cmp(&left.current)
                 .then_with(|| left.observation_id.cmp(&right.observation_id))
         });
+        let preferred_language = LanguageTag::new(self.metadata_language(actor.user_id)?)?;
+        let current_candidates = view
+            .candidates
+            .iter()
+            .filter(|candidate| current.contains(&candidate.identity))
+            .cloned()
+            .collect::<Vec<_>>();
+        let (proposed, uncertain) =
+            automatic_metadata_candidate(&current_candidates, preferred_language.as_str());
+        let mut review_reasons = Vec::new();
+        if view.display.candidate.is_none() && view.authority.field_overrides.is_empty() {
+            review_reasons.push(MetadataReviewReason::MissingName);
+        }
+        if view.display.artwork.is_none() {
+            review_reasons.push(MetadataReviewReason::MissingArtwork);
+        }
+        if let Some(reason) = uncertain {
+            review_reasons.push(reason);
+        }
+        if self
+            .processing
+            .metadata_authority(item.collection_id, item.id)?
+            .is_some_and(|record| {
+                record
+                    .observations
+                    .last()
+                    .is_some_and(|value| value.outcome == MetadataRefreshOutcome::NoMatch)
+            })
+        {
+            review_reasons.push(MetadataReviewReason::NoMatch);
+        }
+        if self
+            .care
+            .metadata_resolution_jobs(actor.user_id, item.id)?
+            .first()
+            .is_some_and(|job| job.state == JobState::Failed)
+        {
+            review_reasons.push(MetadataReviewReason::LookupFailed);
+        }
+        if let Some(proposed) = proposed
+            && view
+                .authority
+                .field_overrides
+                .iter()
+                .any(|field| match field.field {
+                    MetadataField::Title => field.value != proposed.title.value,
+                    MetadataField::Subtitle => {
+                        Some(field.value.as_str())
+                            != proposed.subtitle.as_ref().map(|value| value.value.as_str())
+                    }
+                })
+        {
+            review_reasons.push(MetadataReviewReason::ManualConflict);
+        }
+        let proposed_candidate = proposed.map(|value| value.identity.clone());
         let candidates = view
             .candidates
             .into_iter()
             .map(|candidate| MetadataCandidateView {
                 current: current.contains(&candidate.identity),
                 selected: view.authority.selected_candidate.as_ref() == Some(&candidate.identity),
-                unmatched: view.authority.selected_candidate.as_ref() == Some(&candidate.identity)
+                unmatched: (view.authority.selected_candidate.as_ref()
+                    == Some(&candidate.identity)
+                    || view.authority.automatic_candidate.as_ref() == Some(&candidate.identity))
                     && !current.contains(&candidate.identity),
                 provider_priority: candidate.provider_priority,
                 details: safe_candidate_details(&candidate),
+                music_layout: music_layout(&candidate),
+                accepted_automatically: view.authority.selected_candidate.is_none()
+                    && view.display.candidate.as_ref() == Some(&candidate.identity),
                 identity: candidate.identity,
                 title: candidate.title,
                 subtitle: candidate.subtitle,
@@ -1125,6 +1375,9 @@ impl CollectionService {
             lookup_choices,
             catalog_sources,
             permissions: MetadataPermissions { can_update },
+            review_reasons,
+            proposed_candidate,
+            preferred_language,
         })
     }
 
@@ -1487,7 +1740,10 @@ impl CollectionService {
                         "metadata artwork choice is not an active asset for this item".into(),
                     ));
                 }
+                authority.automatic_language =
+                    Some(LanguageTag::new(self.metadata_language(actor.user_id)?)?);
                 let record = MetadataAuthorityRecord {
+                    resolution_policy: 2,
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
                     item_id,
@@ -1496,7 +1752,7 @@ impl CollectionService {
                         &item,
                         &authority,
                         &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
-                        "en",
+                        &self.metadata_language(actor.user_id)?,
                     )?),
                     authority,
                     observations: legacy,
@@ -1526,15 +1782,24 @@ impl CollectionService {
         self.validate_owned_domain(&eligibility, &item.domain)?;
         let request = (item_id, &command);
         self.execute_command(actor, context, "metadata.refresh", &request, |effects| {
-            self.refresh_metadata_effect(&item, &eligibility.owner, &command, effects)
+            self.refresh_metadata_effect(
+                &item,
+                &eligibility.owner,
+                &command,
+                &self.metadata_language(actor.user_id)?,
+                None,
+                effects,
+            )
         })
     }
 
-    fn refresh_metadata_effect(
+    pub(crate) fn refresh_metadata_effect(
         &self,
         item: &Item,
         owner: &ModuleId,
         command: &RefreshMetadataCommand,
+        preferred_language: &str,
+        claim: Option<&JobClaim>,
         effects: &dyn ProcessingPort,
     ) -> Result<MetadataAuthorityRecord> {
         command.observation.validate()?;
@@ -1576,16 +1841,9 @@ impl CollectionService {
                 .map(|candidate| candidate.identity.clone())
                 .collect()
         });
-        let previous_display = resolve_metadata_display(
-            item,
-            &authority,
-            &current_metadata_candidates(&authority, &candidates, Some(&previous_current))?,
-            "en",
-        )?;
         let previous_choice = authority
             .selected_candidate
             .as_ref()
-            .or(previous_display.candidate.as_ref())
             .and_then(|identity| candidates.iter().find(|value| &value.identity == identity))
             .cloned();
         let available = command.observation.outcome != MetadataRefreshOutcome::Unavailable;
@@ -1613,11 +1871,20 @@ impl CollectionService {
                     .unwrap_or(previous.identity),
             );
         }
+        authority.automatic_language = Some(LanguageTag::new(preferred_language)?);
+        if available && authority.selected_candidate.is_none() {
+            let (automatic, _) =
+                automatic_metadata_candidate(&command.observation.candidates, preferred_language);
+            if let Some(automatic) = automatic {
+                authority.automatic_candidate = Some(automatic.identity.clone());
+            }
+        }
         observations.push(command.observation.clone());
         self.modules
             .validate_metadata_authority(owner, &authority)
             .map_err(Error::from)?;
         let record = MetadataAuthorityRecord {
+            resolution_policy: 2,
             inventory: Some(item.into()),
             collection_id: item.collection_id,
             item_id: item.id,
@@ -1626,7 +1893,7 @@ impl CollectionService {
                 item,
                 &authority,
                 &current_metadata_candidates(&authority, &candidates, Some(&current))?,
-                "en",
+                preferred_language,
             )?),
             authority,
             observations,
@@ -1634,8 +1901,239 @@ impl CollectionService {
             updated_at: self.authentication.now(),
         };
         record.validate()?;
-        effects.publish_metadata_authority(TransactionId::new(), record.clone())?;
+        if let Some(claim) = claim {
+            effects.publish_metadata_for_job(claim, record.clone())?;
+        } else {
+            effects.publish_metadata_authority(TransactionId::new(), record.clone())?;
+        }
         Ok(record)
+    }
+
+    pub(crate) fn freeze_existing_dat_metadata(
+        &self,
+        user: UserId,
+        item: &Item,
+        job_id: collector_core::JobId,
+    ) -> Result<crate::FrozenJobInput> {
+        let eligibility = self.content_write_eligibility_for_user(user, item.collection_id)?;
+        for representation in item.captures.iter().flat_map(|c| &c.representations) {
+            let source = PackageScope::Representation(representation.id);
+            let fingerprint = self
+                .processing
+                .recorded_source(item.collection_id, source)?;
+            let mut after = None;
+            loop {
+                let page = self.processing.observations(&crate::ProcessingQuery {
+                    collection_id: item.collection_id,
+                    source,
+                    source_fingerprint: fingerprint.clone(),
+                    operation: None,
+                    after,
+                    limit: 100,
+                })?;
+                for observation in page.items {
+                    if observation.source_fingerprint == fingerprint
+                        && observation.typed_result.module.0 == "org.junk.games"
+                        && matches!(
+                            observation.operation.as_str(),
+                            "org.junk.games.catalog-verification"
+                                | "org.junk.games.import-analysis"
+                        )
+                        && let Some(snapshot_id) = observation.snapshot_id
+                    {
+                        self.processing
+                            .ensure_snapshot_current(item.id, snapshot_id)?;
+                        return Ok(crate::FrozenJobInput::ExistingMetadata(
+                            crate::FrozenExistingMetadata {
+                                job_id,
+                                item_id: item.id,
+                                collection_id: item.collection_id,
+                                inventory_revision: item.revision,
+                                generation: item.lifecycle.generation,
+                                snapshot_id,
+                                source_observation_id: observation.id,
+                                source: fingerprint,
+                                binding: eligibility.binding,
+                                language: LanguageTag::new(self.metadata_language(user)?)?,
+                            },
+                        ));
+                    }
+                }
+                let Some(next) = page.next_cursor else {
+                    break;
+                };
+                after = Some(
+                    next.parse()
+                        .map_err(|_| Error::Storage("invalid DAT observation cursor".into()))?,
+                );
+            }
+        }
+        Err(Error::Unavailable("Analyze the original package with the configured DAT catalog before refreshing metadata.".into()))
+    }
+    pub(crate) fn run_existing_metadata(&self, claim: &JobClaim) -> Result<serde_json::Value> {
+        let Some(crate::FrozenJobInput::ExistingMetadata(frozen)) = &claim.frozen_input else {
+            return Err(Error::Conflict);
+        };
+        frozen.validate()?;
+        let item = self.reader.item(frozen.item_id)?;
+        let eligibility =
+            self.content_write_eligibility_for_user(claim.user_id, item.collection_id)?;
+        self.validate_frozen_binding(&eligibility, &frozen.binding)?;
+        if item.deleted
+            || item.revision != frozen.inventory_revision
+            || item.lifecycle.generation != frozen.generation
+            || self
+                .processing
+                .recorded_source(item.collection_id, frozen.source.source)?
+                != frozen.source
+        {
+            return Err(Error::Conflict);
+        }
+        self.processing
+            .ensure_snapshot_current(item.id, frozen.snapshot_id)?;
+        let observation_id = ObservationId(claim.id.0);
+        if !self.processing.metadata_refresh_observed(
+            item.collection_id,
+            item.id,
+            observation_id,
+        )? {
+            let revision = self.authority_or_inventory(&item)?.revision;
+            let observation = self.provider_metadata_observation_controlled(
+                &item,
+                &eligibility.owner,
+                &RefreshProviderMetadataCommand {
+                    expected_revision: revision,
+                    snapshot_id: frozen.snapshot_id,
+                    source_observation_id: Some(frozen.source_observation_id),
+                    artwork: vec![],
+                },
+                observation_id,
+                &mut || {
+                    self.jobs
+                        .cancellation_requested(claim.id, &claim.claim_token)
+                },
+            )?;
+            self.refresh_metadata_effect(
+                &item,
+                &eligibility.owner,
+                &RefreshMetadataCommand {
+                    expected_revision: revision,
+                    observation,
+                },
+                frozen.language.as_str(),
+                Some(claim),
+                self.processing.as_ref(),
+            )?;
+        }
+        Ok(serde_json::json!({"item_id":item.id,"snapshot_id":frozen.snapshot_id}))
+    }
+
+    pub(crate) fn refresh_resolution_metadata(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenMetadataResolution,
+        snapshot_id: SnapshotId,
+        artwork: Vec<ProviderArtworkLink>,
+        stage: &str,
+    ) -> Result<MetadataAuthorityRecord> {
+        let item = self.resolution_item(claim, frozen)?;
+        let observation_id = ObservationId(deterministic_inventory_uuid(
+            claim.user_id,
+            stage,
+            &claim.id.to_string(),
+        ));
+        if self
+            .processing
+            .metadata_refresh_observed(item.collection_id, item.id, observation_id)?
+        {
+            return self
+                .processing
+                .metadata_authority(item.collection_id, item.id)?
+                .ok_or(Error::Conflict);
+        }
+        let revision = self.authority_or_inventory(&item)?.revision;
+        let eligibility =
+            self.content_write_eligibility_for_user(claim.user_id, item.collection_id)?;
+        let observation = self.provider_metadata_observation_controlled(
+            &item,
+            &eligibility.owner,
+            &RefreshProviderMetadataCommand {
+                expected_revision: revision,
+                snapshot_id,
+                source_observation_id: None,
+                artwork,
+            },
+            observation_id,
+            &mut || {
+                self.jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)
+            },
+        )?;
+        self.refresh_metadata_effect(
+            &item,
+            &eligibility.owner,
+            &RefreshMetadataCommand {
+                expected_revision: revision,
+                observation,
+            },
+            frozen.language.as_str(),
+            Some(claim),
+            self.processing.as_ref(),
+        )
+    }
+
+    pub(crate) fn select_resolution_artwork(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenMetadataResolution,
+        asset: AssetId,
+    ) -> Result<()> {
+        let item = self.resolution_item(claim, frozen)?;
+        let LoadedMetadataAuthority {
+            revision,
+            mut authority,
+            legacy: observations,
+            current,
+        } = self.authority_or_inventory(&item)?;
+        if authority.artwork_choice == Some(asset) {
+            return Ok(());
+        }
+        if revision != frozen.authority_revision {
+            return Err(Error::Conflict);
+        }
+        let mut candidates = self
+            .processing
+            .metadata_candidates(item.collection_id, item.id)?;
+        merge_metadata_candidates(
+            &mut candidates,
+            observations.iter().flat_map(|value| &value.candidates),
+        )?;
+        apply_authority_change(
+            &mut authority,
+            &MetadataAuthorityChange::SetArtworkChoice { asset_id: asset },
+            &candidates,
+        )?;
+        let display = resolve_metadata_display(
+            &item,
+            &authority,
+            &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
+            frozen.language.as_str(),
+        )?;
+        self.processing.publish_metadata_for_job(
+            claim,
+            MetadataAuthorityRecord {
+                resolution_policy: 2,
+                inventory: Some((&item).into()),
+                collection_id: item.collection_id,
+                item_id: item.id,
+                revision: Revision(revision.0.checked_add(1).ok_or(Error::Conflict)?),
+                authority,
+                observations,
+                current_candidates: current,
+                display: Some(display),
+                updated_at: self.authentication.now(),
+            },
+        )
     }
 
     fn authority_or_inventory(&self, item: &Item) -> Result<LoadedMetadataAuthority> {
@@ -1799,7 +2297,15 @@ fn validate_music_disc_assignment_change(
     if changed.is_empty() {
         return Ok(());
     }
-    let display = resolve_metadata_display(item, authority, candidates, "en")?;
+    let display = resolve_metadata_display(
+        item,
+        authority,
+        candidates,
+        authority
+            .automatic_language
+            .as_ref()
+            .map_or("en", LanguageTag::as_str),
+    )?;
     let release = display
         .candidate
         .as_ref()
@@ -1852,6 +2358,11 @@ pub fn metadata_authority_for_inventory(
         authority.field_overrides.clear();
         authority.selected_candidate = None;
         authority.domain_overrides = None;
+    }
+    if record.revision.0 <= item.lifecycle.automatic_metadata_through
+        && item.lifecycle.automatic_metadata_through > 0
+    {
+        authority.automatic_candidate = None;
     }
     if record.revision.0 <= item.lifecycle.reset_artwork_through
         && item.lifecycle.reset_artwork_through > 0
@@ -1920,7 +2431,15 @@ pub fn resolve_record_metadata(
             record.current_candidates.as_deref()
         },
     )?;
-    resolve_metadata_display(item, &authority, &current, "en")
+    resolve_metadata_display(
+        item,
+        &authority,
+        &current,
+        authority
+            .automatic_language
+            .as_ref()
+            .map_or("en", LanguageTag::as_str),
+    )
 }
 
 pub(crate) fn current_metadata_candidates(
@@ -1942,7 +2461,11 @@ pub(crate) fn current_metadata_candidates(
     if identities.len() != current.len() {
         return Err(Error::Invalid("duplicate current metadata identity".into()));
     }
-    if let Some(selected) = &authority.selected_candidate {
+    for selected in authority
+        .selected_candidate
+        .iter()
+        .chain(authority.automatic_candidate.iter())
+    {
         identities.insert(selected);
     }
     identities
@@ -1980,6 +2503,24 @@ pub(crate) fn resolve_metadata_fields(
     candidates: &[MetadataCandidateObservation],
     preferred_language: &str,
 ) -> Result<ResolvedMetadataDisplay> {
+    resolve_metadata_fields_with_policy(
+        inventory_title,
+        inventory_subtitle,
+        authority,
+        candidates,
+        preferred_language,
+        false,
+    )
+}
+
+pub(crate) fn resolve_metadata_fields_with_policy(
+    inventory_title: &str,
+    inventory_subtitle: &str,
+    authority: &MetadataAuthority,
+    candidates: &[MetadataCandidateObservation],
+    preferred_language: &str,
+    historical: bool,
+) -> Result<ResolvedMetadataDisplay> {
     authority.validate()?;
     let mut checked = Vec::new();
     merge_metadata_candidates(&mut checked, candidates)?;
@@ -1993,19 +2534,45 @@ pub(crate) fn resolve_metadata_fields(
                 .ok_or_else(|| Error::Invalid("selected metadata candidate is absent".into()))
         })
         .transpose()?;
-    let automatic = if selected.is_none() {
-        candidates
+    let (proposed, uncertain) = if historical {
+        let best = candidates
             .iter()
-            .max_by(|left, right| compare_candidate(left, right, preferred_language))
+            .max_by(|left, right| compare_candidate(left, right, preferred_language));
+        let uncertain = best.is_some_and(|best| {
+            candidates.iter().any(|other| {
+                other.identity != best.identity
+                    && policy_rank(other, preferred_language)
+                        == policy_rank(best, preferred_language)
+            })
+        });
+        (
+            best,
+            uncertain.then_some(MetadataReviewReason::AlbumAmbiguity),
+        )
     } else {
-        None
+        automatic_metadata_candidate(candidates, preferred_language)
     };
-    let candidate = selected.or(automatic);
-    let ambiguous = automatic.is_some_and(|best| {
-        candidates.iter().any(|other| {
-            other.identity != best.identity && same_policy_rank(best, other, preferred_language)
+    let accepted = authority
+        .automatic_candidate
+        .as_ref()
+        .and_then(|identity| candidates.iter().find(|value| &value.identity == identity));
+    // Read language variants only within the accepted album. A candidate for a
+    // different album never replaces a recorded automatic decision during reads.
+    let automatic = accepted
+        .map(|accepted| {
+            candidates
+                .iter()
+                .filter(|value| {
+                    value.complete_identity
+                        && value.strength != MatchStrength::Name
+                        && same_metadata_album(accepted, value)
+                })
+                .max_by(|left, right| compare_candidate(left, right, preferred_language))
+                .unwrap_or(accepted)
         })
-    });
+        .or(proposed);
+    let candidate = selected.or(automatic);
+    let ambiguous = selected.is_none() && accepted.is_none() && uncertain.is_some();
     let field = |kind: MetadataField| {
         authority
             .field_overrides
@@ -2158,6 +2725,91 @@ pub fn merge_metadata_candidates<'a>(
     Ok(())
 }
 
+/// Domain identity, not release language or provider array order, defines album
+/// ambiguity. A missing release-group identity stays conservatively release-bound.
+pub fn same_metadata_album(
+    left: &MetadataCandidateObservation,
+    right: &MetadataCandidateObservation,
+) -> bool {
+    if left.identity.provider != right.identity.provider {
+        return false;
+    }
+    if left.identity.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID {
+        let parse = |value: &MetadataCandidateObservation| {
+            value
+                .observation
+                .parse::<collector_modules::music::MusicBrainzReleaseObservation>()
+                .ok()
+                .filter(|release| {
+                    release.validate().is_ok()
+                        && release.release_id == value.identity.provider_record_id
+                })
+        };
+        if let (Some(left), Some(right)) = (parse(left), parse(right)) {
+            return left.release_id == right.release_id
+                || left.release_group_id.is_some()
+                    && left.release_group_id == right.release_group_id;
+        }
+    }
+    left.identity.provider_record_id == right.identity.provider_record_id
+}
+
+pub fn automatic_metadata_candidate<'a>(
+    candidates: &'a [MetadataCandidateObservation],
+    language: &str,
+) -> (
+    Option<&'a MetadataCandidateObservation>,
+    Option<MetadataReviewReason>,
+) {
+    let eligible = candidates
+        .iter()
+        .filter(|value| value.complete_identity && value.strength != MatchStrength::Name)
+        .collect::<Vec<_>>();
+    let Some(best) = eligible
+        .iter()
+        .max_by(|left, right| compare_candidate(left, right, language))
+        .copied()
+    else {
+        return (
+            None,
+            (!candidates.is_empty()).then_some(MetadataReviewReason::IncompleteProviderInformation),
+        );
+    };
+    let lacks_album_identity = |candidate: &MetadataCandidateObservation| {
+        candidate.identity.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+            && candidate
+                .observation
+                .parse::<collector_modules::music::MusicBrainzReleaseObservation>()
+                .ok()
+                .is_none_or(|value| value.validate().is_err() || value.release_group_id.is_none())
+    };
+    if lacks_album_identity(best) {
+        return (
+            None,
+            Some(MetadataReviewReason::IncompleteProviderInformation),
+        );
+    }
+    let alternatives = eligible
+        .iter()
+        .filter(|other| {
+            other.strength == best.strength
+                && other.provider_priority == best.provider_priority
+                && !same_metadata_album(best, other)
+        })
+        .collect::<Vec<_>>();
+    if alternatives.is_empty() {
+        return (Some(best), None);
+    }
+    let reason = if lacks_album_identity(best)
+        || alternatives.iter().any(|other| lacks_album_identity(other))
+    {
+        MetadataReviewReason::IncompleteProviderInformation
+    } else {
+        MetadataReviewReason::AlbumAmbiguity
+    };
+    (None, Some(reason))
+}
+
 fn compare_candidate(
     left: &MetadataCandidateObservation,
     right: &MetadataCandidateObservation,
@@ -2166,14 +2818,6 @@ fn compare_candidate(
     policy_rank(left, preferred_language)
         .cmp(&policy_rank(right, preferred_language))
         .then_with(|| right.identity.cmp(&left.identity))
-}
-
-fn same_policy_rank(
-    left: &MetadataCandidateObservation,
-    right: &MetadataCandidateObservation,
-    preferred_language: &str,
-) -> bool {
-    policy_rank(left, preferred_language) == policy_rank(right, preferred_language)
 }
 
 fn policy_rank(
@@ -2197,7 +2841,8 @@ fn language_matches(language: &str, preferred: &str) -> bool {
         || language
             .split('-')
             .next()
-            .is_some_and(|value| value.eq_ignore_ascii_case(preferred))
+            .zip(preferred.split('-').next())
+            .is_some_and(|(language, preferred)| language.eq_ignore_ascii_case(preferred))
 }
 
 fn legacy_observation_id(item: ItemId) -> ObservationId {
@@ -2232,6 +2877,15 @@ pub(crate) fn read_exact_snapshot_bytes(
     snapshot: &crate::SnapshotRecord,
     maximum: u64,
 ) -> Result<Vec<u8>> {
+    read_exact_snapshot_bytes_controlled(processing, snapshot, maximum, &mut || Ok(false))
+}
+
+pub(crate) fn read_exact_snapshot_bytes_controlled(
+    processing: &dyn crate::ProcessingPort,
+    snapshot: &crate::SnapshotRecord,
+    maximum: u64,
+    cancelled: &mut dyn FnMut() -> Result<bool>,
+) -> Result<Vec<u8>> {
     if snapshot.bytes.0 > maximum {
         return Err(Error::Invalid(
             "provider snapshot exceeds its resource bound".into(),
@@ -2244,12 +2898,38 @@ pub(crate) fn read_exact_snapshot_bytes(
     let capacity = usize::try_from(snapshot.bytes.0)
         .map_err(|_| Error::Invalid("provider snapshot length does not fit memory".into()))?;
     let mut bytes = Vec::with_capacity(capacity);
-    reader
-        .by_ref()
-        .take(snapshot.bytes.0.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|error| Error::Unavailable(format!("provider snapshot read: {error}")))?;
-    if bytes.len() as u64 != snapshot.bytes.0 || Digest::sha256(&bytes) != snapshot.digest {
+    use sha2::{Digest as _, Sha256};
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 65536];
+    loop {
+        if cancelled()? {
+            return Err(Error::Unavailable(
+                "provider snapshot read cancelled".into(),
+            ));
+        }
+        let allowed = (snapshot.bytes.0 + 1)
+            .saturating_sub(bytes.len() as u64)
+            .min(buffer.len() as u64) as usize;
+        if allowed == 0 {
+            break;
+        }
+        let length = reader
+            .read(&mut buffer[..allowed])
+            .map_err(|error| Error::Unavailable(format!("provider snapshot read: {error}")))?;
+        if length == 0 {
+            break;
+        }
+        hasher.update(&buffer[..length]);
+        bytes.extend_from_slice(&buffer[..length]);
+    }
+    if cancelled()? {
+        return Err(Error::Unavailable(
+            "provider snapshot read cancelled".into(),
+        ));
+    }
+    if bytes.len() as u64 != snapshot.bytes.0
+        || hex::encode(hasher.finalize()) != snapshot.digest.hex
+    {
         return Err(Error::Invalid(
             "provider snapshot length or digest mismatch".into(),
         ));
@@ -2257,19 +2937,14 @@ pub(crate) fn read_exact_snapshot_bytes(
     Ok(bytes)
 }
 
-fn exact_json_or_snapshot_reference(
-    processing: &dyn crate::ProcessingPort,
-    snapshot: &crate::SnapshotRecord,
-    maximum: u64,
-) -> Result<RawJson> {
-    let bytes = read_exact_snapshot_bytes(processing, snapshot, maximum)?;
+fn json_or_snapshot_reference(snapshot: &crate::SnapshotRecord, bytes: Vec<u8>) -> RawJson {
     if bytes.is_empty() {
-        return Ok(RawJson::from_value(serde_json::json!({
+        return RawJson::from_value(serde_json::json!({
             "provider":snapshot.provider,
             "snapshot_id":snapshot.id,
             "snapshot_digest":snapshot.digest,
             "outcome":"no_match"
-        })));
+        }));
     }
     // A provider 404 may have an HTML/plain-text body. Its exact bytes remain
     // archived; the authority links that snapshot rather than inventing JSON.
@@ -2277,12 +2952,69 @@ fn exact_json_or_snapshot_reference(
         .ok()
         .and_then(|json| RawJson::from_json(json).ok())
     {
-        Some(raw) => Ok(raw),
-        None => Ok(RawJson::from_value(serde_json::json!({
+        Some(raw) => raw,
+        None => RawJson::from_value(serde_json::json!({
             "provider":snapshot.provider, "snapshot_id":snapshot.id,
             "snapshot_digest":snapshot.digest, "observation":snapshot.parsed_observation
-        }))),
+        })),
     }
+}
+
+pub(crate) fn recorded_music_layout(
+    observation: &collector_core::ProcessingObservation,
+) -> Result<Option<collector_modules::music::CdProcessingResult>> {
+    if observation.typed_result.module.0 != "org.junk.music"
+        || !matches!(
+            observation.support,
+            collector_core::OperationSupport::Supported
+        )
+    {
+        return Ok(None);
+    }
+    match observation.operation.as_str() {
+        collector_modules::music::CD_STRUCTURE_OPERATION => {
+            Ok(Some(observation.typed_result.payload.parse()?))
+        }
+        "org.junk.music.import-analysis" => {
+            let output: collector_modules::music::MusicImportAnalysisOutput =
+                observation.typed_result.payload.parse()?;
+            output
+                .observations
+                .first()
+                .map(|raw| raw.parse())
+                .transpose()
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Album identity comes from an accepted provider observation, never title similarity.
+pub fn accepted_album_group_key(
+    item: &Item,
+    record: &MetadataAuthorityRecord,
+    candidates: &[MetadataCandidateObservation],
+) -> Result<Option<String>> {
+    let display = resolve_record_metadata(item, record, candidates)?;
+    let Some(identity) = display.candidate else {
+        return Ok(None);
+    };
+    if display.resolution == MetadataResolutionKind::Tentative {
+        return Ok(None);
+    }
+    let Some(candidate) = candidates.iter().find(|v| v.identity == identity) else {
+        return Ok(None);
+    };
+    if candidate.identity.provider.0 != collector_modules::music::MUSICBRAINZ_PROVIDER_ID {
+        return Ok(None);
+    }
+    // Historical observations remain selectable even when they predate the
+    // module's current release schema. Missing identity cannot propose a merge.
+    Ok(candidate
+        .observation
+        .parse::<collector_modules::music::MusicBrainzReleaseObservation>()
+        .ok()
+        .filter(|release| release.validate().is_ok())
+        .and_then(|release| release.release_group_id))
 }
 
 #[cfg(test)]

@@ -586,6 +586,153 @@
         }
       }
     },
+    "/api/v1/album-groups": {
+      "post": {
+        "operationId": "confirm_album_group",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmAlbumGroup"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumGroupResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/album-groups/preview": {
+      "post": {
+        "operationId": "preview_album_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewAlbumGroup"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumGroupPreview"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/album-groups/{id}/undo": {
+      "get": {
+        "operationId": "album_group_undo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TransactionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumGroupUndo"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "undo_album_group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TransactionId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumGroupResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login",
@@ -757,6 +904,296 @@
             "description": ""
           },
           "429": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/bulk-library": {
+      "get": {
+        "operationId": "bulk_library_page",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BulkLibrarySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/bulk-library/preview": {
+      "post": {
+        "operationId": "preview_bulk_library",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewBulkLibrary"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLibrarySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/bulk-library/{id}": {
+      "get": {
+        "operationId": "bulk_library_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLibrarySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/bulk-library/{id}/cancel": {
+      "post": {
+        "operationId": "cancel_bulk_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLibrarySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/bulk-library/{id}/members": {
+      "get": {
+        "operationId": "bulk_library_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BulkLibraryMemberView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/bulk-library/{id}/retry": {
+      "post": {
+        "operationId": "retry_bulk_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLibrarySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/bulk-library/{id}/start": {
+      "post": {
+        "operationId": "start_bulk_library",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLibrarySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
             "description": ""
           }
         }
@@ -2870,6 +3307,470 @@
         }
       }
     },
+    "/api/v1/intake-discoveries": {
+      "post": {
+        "operationId": "discover_bulk_intake",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverIngestCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeDiscovery"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/intake-discoveries/{id}": {
+      "get": {
+        "operationId": "intake_discovery_page",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "unassigned_cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeDiscoveryPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/intakes": {
+      "get": {
+        "operationId": "list_intakes",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_IntakeSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_intake",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIntake"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/intakes/{id}": {
+      "get": {
+        "operationId": "intake_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/intakes/{id}/cancel": {
+      "post": {
+        "operationId": "cancel_intake",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/intakes/{id}/members": {
+      "get": {
+        "operationId": "intake_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_IntakeMemberView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "append_intake",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppendIntake"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/intakes/{id}/members/{position}/destination": {
+      "post": {
+        "operationId": "repair_intake_destination",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "position",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairIntakeDestination"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/intakes/{id}/start": {
+      "post": {
+        "operationId": "start_intake",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartIntake"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntakeSession"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items": {
       "get": {
         "operationId": "browse",
@@ -3103,6 +4004,54 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/album-group-proposals": {
+      "get": {
+        "operationId": "album_group_proposals",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PresentedItem"
+                }
+              }
+            }
+          },
+          "403": {
             "description": ""
           }
         }
@@ -3671,6 +4620,95 @@
             "description": ""
           },
           "422": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/metadata/resolutions": {
+      "get": {
+        "operationId": "metadata_resolutions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MetadataResolutionView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "resolve_metadata",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveMetadataCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
             "description": ""
           }
         }
@@ -4858,6 +5896,145 @@
         }
       }
     },
+    "/api/v1/library-care/metadata": {
+      "get": {
+        "operationId": "metadata_care",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MetadataReviewReason"
+            }
+          },
+          {
+            "name": "needs_attention",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PresentedItem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/library-care/music-preparation": {
+      "get": {
+        "operationId": "preparation_care",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "needs_attention",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PreparationCareEntry"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/me": {
       "get": {
         "operationId": "me",
@@ -4873,6 +6050,68 @@
             }
           },
           "401": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/me/metadata-preferences": {
+      "get": {
+        "operationId": "metadata_preferences",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataPreferences"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_metadata_preferences",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMetadataPreferences"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataPreferences"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "409": {
             "description": ""
           }
         }
@@ -6017,6 +7256,163 @@
           "unknown"
         ]
       },
+      "AlbumGroupChoices": {
+        "type": "object",
+        "properties": {
+          "artwork_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          },
+          "assemblies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhysicalSetAssembly"
+            }
+          },
+          "disc_positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupDiscPosition"
+            }
+          },
+          "domain_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          },
+          "identity_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          },
+          "subtitle_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          },
+          "title_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AlbumGroupPreview": {
+        "type": "object",
+        "required": [
+          "token",
+          "destination",
+          "entries",
+          "conflicts",
+          "can_confirm",
+          "physical_copies",
+          "proposed_disc_positions"
+        ],
+        "properties": {
+          "can_confirm": {
+            "type": "boolean"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupConflict"
+            }
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          },
+          "physical_copies": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "proposed_disc_positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupDiscPosition"
+            }
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "AlbumGroupResult": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "destination",
+          "sources"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "group_id": {
+            "$ref": "#/components/schemas/TransactionId"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        }
+      },
+      "AlbumGroupUndo": {
+        "type": "object",
+        "required": [
+          "group",
+          "can_undo"
+        ],
+        "properties": {
+          "can_undo": {
+            "type": "boolean"
+          },
+          "group": {
+            "$ref": "#/components/schemas/AlbumGroupResult"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "AnalyzeProvisionalImport": {
         "type": "object",
         "required": [
@@ -6025,6 +7421,25 @@
         "properties": {
           "module": {
             "$ref": "#/components/schemas/ModuleId"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AppendIntake": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "packages"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntakePackage"
+            }
           }
         },
         "additionalProperties": false
@@ -6325,6 +7740,196 @@
             "type": "string"
           }
         }
+      },
+      "BulkLibraryKind": {
+        "type": "string",
+        "enum": [
+          "metadata",
+          "music_preparation"
+        ]
+      },
+      "BulkLibraryMemberView": {
+        "type": "object",
+        "required": [
+          "position",
+          "item_id",
+          "collection_id",
+          "title",
+          "state",
+          "tracks",
+          "already_ready"
+        ],
+        "properties": {
+          "already_ready": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "artwork_asset_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssetId"
+              }
+            ]
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "job_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/BulkMemberState"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "BulkLibraryState": {
+        "type": "string",
+        "enum": [
+          "preview",
+          "accepted",
+          "completed",
+          "cancelling",
+          "cancelled"
+        ]
+      },
+      "BulkLibrarySummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "selected",
+          "tracks",
+          "already_ready",
+          "excluded",
+          "succeeded",
+          "failed",
+          "pending",
+          "source_bytes",
+          "can_start",
+          "can_cancel",
+          "can_retry",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "admission_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "already_ready": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "can_retry": {
+            "type": "boolean"
+          },
+          "can_start": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "excluded": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BulkLibraryKind"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "selected": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BulkLibraryState"
+          },
+          "succeeded": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BulkMemberState": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "excluded",
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "review",
+          "cancelled"
+        ]
       },
       "ByteLength": {
         "type": "integer",
@@ -6909,6 +8514,22 @@
           "incomplete"
         ]
       },
+      "ConfirmAlbumGroup": {
+        "type": "object",
+        "required": [
+          "preview",
+          "token"
+        ],
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/PreviewAlbumGroup"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "ContentAvailabilityStatus": {
         "type": "string",
         "enum": [
@@ -7024,6 +8645,36 @@
             "type": "string"
           }
         }
+      },
+      "CreateIntake": {
+        "type": "object",
+        "required": [
+          "collection_id",
+          "expected_packages",
+          "expected_files"
+        ],
+        "properties": {
+          "automatic_metadata": {
+            "type": "boolean"
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "expected_files": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "expected_packages": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "prepare_music": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "CurrencyCode": {
         "type": "string"
@@ -7497,6 +9148,69 @@
             "type": "string"
           }
         }
+      },
+      "GroupConflict": {
+        "type": "object",
+        "required": [
+          "kind",
+          "message"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/GroupConflictKind"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "GroupConflictKind": {
+        "type": "string",
+        "enum": [
+          "manual_title",
+          "manual_subtitle",
+          "identity_link",
+          "domain_information",
+          "artwork",
+          "physical_inventory",
+          "active_loan",
+          "possession",
+          "changed_record"
+        ]
+      },
+      "GroupDiscPosition": {
+        "type": "object",
+        "required": [
+          "component_id",
+          "position"
+        ],
+        "properties": {
+          "component_id": {
+            "$ref": "#/components/schemas/ComponentId"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "GroupEntry": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          }
+        },
+        "additionalProperties": false
       },
       "HashAlgorithm": {
         "type": "string",
@@ -8316,6 +10030,284 @@
           }
         }
       },
+      "IntakeDestination": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "destination"
+            ],
+            "properties": {
+              "destination": {
+                "type": "string",
+                "enum": [
+                  "separate"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "key",
+              "title",
+              "copy_key",
+              "destination"
+            ],
+            "properties": {
+              "copy_key": {
+                "type": "string"
+              },
+              "destination": {
+                "type": "string",
+                "enum": [
+                  "album_group"
+                ]
+              },
+              "key": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "item_id",
+              "expected_revision",
+              "copy_key",
+              "destination"
+            ],
+            "properties": {
+              "copy_key": {
+                "type": "string"
+              },
+              "destination": {
+                "type": "string",
+                "enum": [
+                  "existing"
+                ]
+              },
+              "expected_revision": {
+                "$ref": "#/components/schemas/Revision"
+              },
+              "item_id": {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            }
+          }
+        ]
+      },
+      "IntakeDiscovery": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection_id",
+          "package_count",
+          "unassigned_count"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "package_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "unassigned_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "IntakeDiscoveryPage": {
+        "type": "object",
+        "required": [
+          "discovery",
+          "packages",
+          "unassigned_files"
+        ],
+        "properties": {
+          "discovery": {
+            "$ref": "#/components/schemas/IntakeDiscovery"
+          },
+          "packages": {
+            "$ref": "#/components/schemas/Page_IngestPlanPackage"
+          },
+          "unassigned_files": {
+            "$ref": "#/components/schemas/Page_String"
+          }
+        }
+      },
+      "IntakeMemberView": {
+        "type": "object",
+        "required": [
+          "position",
+          "plan",
+          "destination"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/IntakeDestination"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "import": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IngestSummary"
+              }
+            ]
+          },
+          "import_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImportId"
+              }
+            ]
+          },
+          "plan": {
+            "$ref": "#/components/schemas/IngestPlanPackage"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "IntakePackage": {
+        "type": "object",
+        "required": [
+          "package",
+          "destination"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/IntakeDestination"
+          },
+          "package": {
+            "$ref": "#/components/schemas/IngestPackageSelection"
+          }
+        },
+        "additionalProperties": false
+      },
+      "IntakeSession": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection_id",
+          "revision",
+          "state",
+          "package_count",
+          "file_count",
+          "expected_packages",
+          "expected_files",
+          "admitted",
+          "rejected",
+          "preserved",
+          "needs_attention",
+          "automatic_metadata",
+          "prepare_music",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "admitted": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "automatic_metadata": {
+            "type": "boolean"
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expected_files": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "expected_packages": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "file_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "needs_attention": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "package_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "prepare_music": {
+            "type": "boolean"
+          },
+          "preserved": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "rejected": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IntakeState"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IntakeState": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "accepted",
+          "completed",
+          "cancelling",
+          "cancelled"
+        ]
+      },
       "Item": {
         "type": "object",
         "required": [
@@ -8494,6 +10486,26 @@
             "items": {
               "$ref": "#/components/schemas/CaptureId"
             }
+          },
+          "merge_group": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TransactionId"
+              }
+            ]
+          },
+          "merged_into": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
           },
           "reimport": {
             "oneOf": [
@@ -8730,6 +10742,56 @@
           }
         }
       },
+      "LibrarySelection": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "items",
+              "selection"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ItemId"
+                }
+              },
+              "selection": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "query",
+              "exclusions",
+              "selection"
+            ],
+            "properties": {
+              "exclusions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ItemId"
+                }
+              },
+              "query": {
+                "$ref": "#/components/schemas/MetadataCareQuery"
+              },
+              "selection": {
+                "type": "string",
+                "enum": [
+                  "all_matching"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "Loan": {
         "type": "object",
         "required": [
@@ -8862,6 +10924,27 @@
               },
               {
                 "$ref": "#/components/schemas/AssetId"
+              }
+            ]
+          },
+          "automatic_candidate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity",
+                "description": "Last accepted automatic decision, distinct from explicit user selection."
+              }
+            ]
+          },
+          "automatic_language": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LanguageTag"
               }
             ]
           },
@@ -9119,11 +11202,15 @@
           "strength",
           "current",
           "selected",
+          "accepted_automatically",
           "unmatched",
           "provider_priority",
           "details"
         ],
         "properties": {
+          "accepted_automatically": {
+            "type": "boolean"
+          },
           "artwork": {
             "oneOf": [
               {
@@ -9145,6 +11232,16 @@
           },
           "identity": {
             "$ref": "#/components/schemas/MetadataCandidateIdentity"
+          },
+          "music_layout": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataMusicLayout"
+              }
+            ]
           },
           "provider_priority": {
             "type": "integer",
@@ -9174,6 +11271,52 @@
             "type": "boolean"
           }
         }
+      },
+      "MetadataCareQuery": {
+        "type": "object",
+        "properties": {
+          "collection_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectionId"
+              }
+            ]
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "needs_attention": {
+            "type": "boolean"
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataReviewReason"
+              }
+            ]
+          },
+          "search": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "MetadataCatalogSourceView": {
         "type": "object",
@@ -9267,6 +11410,69 @@
           "search"
         ]
       },
+      "MetadataMediumLayout": {
+        "type": "object",
+        "required": [
+          "position",
+          "disc_ids",
+          "tracks"
+        ],
+        "properties": {
+          "disc_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataTrackTitle"
+            }
+          }
+        }
+      },
+      "MetadataMusicLayout": {
+        "type": "object",
+        "required": [
+          "release_id",
+          "discs"
+        ],
+        "properties": {
+          "album_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataMediumLayout"
+            }
+          },
+          "edition": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_id": {
+            "type": "string"
+          }
+        }
+      },
       "MetadataPermissions": {
         "type": "object",
         "required": [
@@ -9275,6 +11481,21 @@
         "properties": {
           "can_update": {
             "type": "boolean"
+          }
+        }
+      },
+      "MetadataPreferences": {
+        "type": "object",
+        "required": [
+          "revision",
+          "language"
+        ],
+        "properties": {
+          "language": {
+            "$ref": "#/components/schemas/LanguageTag"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
           }
         }
       },
@@ -9330,6 +11551,78 @@
           "tentative"
         ]
       },
+      "MetadataResolutionResult": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "snapshot_id",
+          "artwork_options"
+        ],
+        "properties": {
+          "artwork_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artwork_options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataArtworkOption"
+            }
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataRefreshOutcome"
+              }
+            ]
+          },
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          }
+        }
+      },
+      "MetadataResolutionView": {
+        "type": "object",
+        "required": [
+          "job"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobView"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataResolutionResult"
+              }
+            ]
+          }
+        }
+      },
+      "MetadataReviewReason": {
+        "type": "string",
+        "enum": [
+          "missing_name",
+          "missing_artwork",
+          "album_ambiguity",
+          "incomplete_provider_information",
+          "no_match",
+          "lookup_failed",
+          "manual_conflict",
+          "grouping_proposal"
+        ]
+      },
       "MetadataReviewView": {
         "type": "object",
         "required": [
@@ -9338,6 +11631,8 @@
           "authority",
           "display",
           "candidates",
+          "review_reasons",
+          "preferred_language",
           "providers",
           "lookup_choices",
           "catalog_sources",
@@ -9374,10 +11669,29 @@
           "permissions": {
             "$ref": "#/components/schemas/MetadataPermissions"
           },
+          "preferred_language": {
+            "$ref": "#/components/schemas/LanguageTag"
+          },
+          "proposed_candidate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataCandidateIdentity"
+              }
+            ]
+          },
           "providers": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/MetadataProviderView"
+            }
+          },
+          "review_reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataReviewReason"
             }
           },
           "revision": {
@@ -9434,6 +11748,23 @@
           }
         },
         "additionalProperties": false
+      },
+      "MetadataTrackTitle": {
+        "type": "object",
+        "required": [
+          "position",
+          "title"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string"
+          }
+        }
       },
       "MetadataValueSource": {
         "oneOf": [
@@ -10504,6 +12835,200 @@
           }
         }
       },
+      "Page_BulkLibraryMemberView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "position",
+                "item_id",
+                "collection_id",
+                "title",
+                "state",
+                "tracks",
+                "already_ready"
+              ],
+              "properties": {
+                "already_ready": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "artwork_asset_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AssetId"
+                    }
+                  ]
+                },
+                "collection_id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "item_id": {
+                  "$ref": "#/components/schemas/ItemId"
+                },
+                "job_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/JobId"
+                    }
+                  ]
+                },
+                "position": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "state": {
+                  "$ref": "#/components/schemas/BulkMemberState"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "tracks": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_BulkLibrarySummary": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "kind",
+                "state",
+                "selected",
+                "tracks",
+                "already_ready",
+                "excluded",
+                "succeeded",
+                "failed",
+                "pending",
+                "source_bytes",
+                "can_start",
+                "can_cancel",
+                "can_retry",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "admission_error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "already_ready": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "can_cancel": {
+                  "type": "boolean"
+                },
+                "can_retry": {
+                  "type": "boolean"
+                },
+                "can_start": {
+                  "type": "boolean"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "excluded": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "failed": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "id": {
+                  "$ref": "#/components/schemas/JobId"
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/BulkLibraryKind"
+                },
+                "pending": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "selected": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "source_bytes": {
+                  "$ref": "#/components/schemas/ByteLength"
+                },
+                "state": {
+                  "$ref": "#/components/schemas/BulkLibraryState"
+                },
+                "succeeded": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "tracks": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_CatalogSnapshotStatus": {
         "type": "object",
         "required": [
@@ -10569,6 +13094,87 @@
                 },
                 "username": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_IngestPlanPackage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "position",
+                "source",
+                "files",
+                "default_title",
+                "anchors",
+                "blockers",
+                "analysis_available",
+                "metadata_available",
+                "artwork_available",
+                "preparation_available"
+              ],
+              "properties": {
+                "analysis_available": {
+                  "type": "boolean"
+                },
+                "anchors": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestAnchorChoice"
+                  }
+                },
+                "artwork_available": {
+                  "type": "boolean"
+                },
+                "blockers": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestBlocker"
+                  }
+                },
+                "default_title": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UploadFile"
+                  }
+                },
+                "metadata_available": {
+                  "type": "boolean"
+                },
+                "position": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "preparation_available": {
+                  "type": "boolean"
+                },
+                "preparation_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source": {
+                  "$ref": "#/components/schemas/ImportSourceSummary"
                 }
               }
             }
@@ -10660,6 +13266,176 @@
                 },
                 "total_bytes": {
                   "$ref": "#/components/schemas/ByteLength"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_IntakeMemberView": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "position",
+                "plan",
+                "destination"
+              ],
+              "properties": {
+                "destination": {
+                  "$ref": "#/components/schemas/IntakeDestination"
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "import": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IngestSummary"
+                    }
+                  ]
+                },
+                "import_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImportId"
+                    }
+                  ]
+                },
+                "plan": {
+                  "$ref": "#/components/schemas/IngestPlanPackage"
+                },
+                "position": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_IntakeSession": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "collection_id",
+                "revision",
+                "state",
+                "package_count",
+                "file_count",
+                "expected_packages",
+                "expected_files",
+                "admitted",
+                "rejected",
+                "preserved",
+                "needs_attention",
+                "automatic_metadata",
+                "prepare_music",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "admitted": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "automatic_metadata": {
+                  "type": "boolean"
+                },
+                "collection_id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expected_files": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "expected_packages": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "file_count": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "id": {
+                  "$ref": "#/components/schemas/JobId"
+                },
+                "needs_attention": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "package_count": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "prepare_music": {
+                  "type": "boolean"
+                },
+                "preserved": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "rejected": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision"
+                },
+                "state": {
+                  "$ref": "#/components/schemas/IntakeState"
                 },
                 "updated_at": {
                   "type": "string",
@@ -10881,6 +13657,38 @@
           }
         }
       },
+      "Page_PreparationCareEntry": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "item",
+                "plan"
+              ],
+              "properties": {
+                "item": {
+                  "$ref": "#/components/schemas/PresentedItem"
+                },
+                "plan": {
+                  "$ref": "#/components/schemas/MusicAlbumPreparationPlan"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_PresentedCollection": {
         "type": "object",
         "required": [
@@ -11024,6 +13832,26 @@
                   "type": [
                     "string",
                     "null"
+                  ]
+                },
+                "merge_group": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TransactionId"
+                    }
+                  ]
+                },
+                "merged_into": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ItemId"
+                    }
                   ]
                 },
                 "presentation": {
@@ -11221,6 +14049,26 @@
                   "type": "string"
                 }
               }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_String": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
           "next_cursor": {
@@ -11473,6 +14321,25 @@
         "format": "int64",
         "minimum": 0
       },
+      "PhysicalSetAssembly": {
+        "type": "object",
+        "required": [
+          "destination",
+          "sources"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/SpecimenId"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpecimenId"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "PlanIngestCommand": {
         "type": "object",
         "required": [
@@ -11500,6 +14367,21 @@
           "elsewhere",
           "unknown"
         ]
+      },
+      "PreparationCareEntry": {
+        "type": "object",
+        "required": [
+          "item",
+          "plan"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/PresentedItem"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/MusicAlbumPreparationPlan"
+          }
+        }
       },
       "PrepareMusicAlbum": {
         "type": "object",
@@ -11870,6 +14752,26 @@
               "null"
             ]
           },
+          "merge_group": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TransactionId"
+              }
+            ]
+          },
+          "merged_into": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ItemId"
+              }
+            ]
+          },
           "presentation": {
             "$ref": "#/components/schemas/ModulePresentation"
           },
@@ -12004,6 +14906,57 @@
             ]
           }
         }
+      },
+      "PreviewAlbumGroup": {
+        "type": "object",
+        "required": [
+          "destination",
+          "entries"
+        ],
+        "properties": {
+          "choices": {
+            "$ref": "#/components/schemas/AlbumGroupChoices"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupEntry"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewBulkLibrary": {
+        "type": "object",
+        "required": [
+          "kind",
+          "selection"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/BulkLibraryKind"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/LibrarySelection"
+          },
+          "sources": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/RepresentationId"
+              }
+            },
+            "propertyNames": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "Principal": {
         "type": "object",
@@ -12185,6 +15138,22 @@
           }
         }
       },
+      "RepairIntakeDestination": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "destination"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/IntakeDestination"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
       "Representation": {
         "type": "object",
         "required": [
@@ -12242,6 +15211,21 @@
           "lossless_derivative",
           "lossy_derivative"
         ]
+      },
+      "ResolveMetadataCommand": {
+        "type": "object",
+        "required": [
+          "lookup"
+        ],
+        "properties": {
+          "acquire_artwork": {
+            "type": "boolean"
+          },
+          "lookup": {
+            "$ref": "#/components/schemas/AcquireMetadataCommand"
+          }
+        },
+        "additionalProperties": false
       },
       "ResolvedMetadataDisplay": {
         "type": "object",
@@ -12918,6 +15902,18 @@
         },
         "additionalProperties": false
       },
+      "StartIntake": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
       "StartLoan": {
         "type": "object",
         "required": [
@@ -13013,6 +16009,10 @@
           }
         }
       },
+      "TransactionId": {
+        "type": "string",
+        "format": "uuid"
+      },
       "UpdateAssetCommand": {
         "type": "object",
         "required": [
@@ -13057,6 +16057,22 @@
           },
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateMetadataPreferences": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "language"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "language": {
+            "$ref": "#/components/schemas/LanguageTag"
           }
         },
         "additionalProperties": false

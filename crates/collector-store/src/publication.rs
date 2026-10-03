@@ -58,6 +58,8 @@ impl PublicationFaultInjector for NoPublicationFault {
 pub enum ArtifactKind {
     Payload,
     Revision,
+    GroupRevision,
+    GroupCommit,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -273,7 +275,10 @@ impl<'a> PublicationJournalStore<'a> {
                 }
                 if published.exists() {
                     verify_file(&published, &artifact.sha256)?;
-                    if artifact.kind == ArtifactKind::Revision {
+                    if matches!(
+                        artifact.kind,
+                        ArtifactKind::Revision | ArtifactKind::GroupCommit
+                    ) {
                         revision_published = true;
                     }
                 }
@@ -323,8 +328,10 @@ impl<'a> PublicationJournalStore<'a> {
         // Check the commit marker before deleting *any* payload. A rename may
         // have committed even if advancing the journal failed afterward.
         for artifact in &journal.artifacts {
-            if artifact.kind == ArtifactKind::Revision
-                && self.resolve(&artifact.published_path)?.exists()
+            if matches!(
+                artifact.kind,
+                ArtifactKind::Revision | ArtifactKind::GroupCommit
+            ) && self.resolve(&artifact.published_path)?.exists()
             {
                 return Err(Error::Storage(
                     "cannot abort committed revision bytes".into(),
@@ -334,7 +341,10 @@ impl<'a> PublicationJournalStore<'a> {
         for artifact in &journal.artifacts {
             let published = self.resolve(&artifact.published_path)?;
             if published.exists() {
-                if artifact.kind == ArtifactKind::Revision {
+                if matches!(
+                    artifact.kind,
+                    ArtifactKind::Revision | ArtifactKind::GroupCommit
+                ) {
                     return Err(Error::Storage(
                         "cannot abort a publication with committed revision bytes".into(),
                     ));

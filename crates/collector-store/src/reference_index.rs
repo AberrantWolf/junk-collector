@@ -272,8 +272,17 @@ fn add_root(
 
 pub(crate) fn validate_change(
     db: &Connection,
+    graph: CollectionGraph,
+    collection: CollectionId,
+) -> Result<()> {
+    validate_group_change(db, graph, collection, &BTreeSet::new())
+}
+
+pub(crate) fn validate_group_change(
+    db: &Connection,
     mut graph: CollectionGraph,
     collection: CollectionId,
+    transferred_roots: &BTreeSet<String>,
 ) -> Result<()> {
     let owner: Collection = projected_record(db, "collections", &collection.to_string())?;
     if matches!(owner.binding, CollectionBinding::LegacyUnassigned) {
@@ -297,7 +306,12 @@ pub(crate) fn validate_change(
                     "entity identity is reused across collections".into(),
                 ));
             }
-            if existing_kind != *root_kind || existing_id != root_id.to_string() {
+            if (existing_kind != *root_kind || existing_id != root_id.to_string())
+                && !(existing_kind == "item"
+                    && *root_kind == "item"
+                    && transferred_roots.contains(&existing_id)
+                    && transferred_roots.contains(&root_id.to_string()))
+            {
                 return Err(Error::Invalid(
                     "entity identity is reused by another owner".into(),
                 ));

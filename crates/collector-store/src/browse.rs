@@ -22,7 +22,8 @@ pub(super) fn project(db: &Connection, item: &Item) -> Result<()> {
         }
     };
     db.execute("INSERT INTO browse_items VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title_key=excluded.title_key,artist_key=excluded.artist_key,platform_key=excluded.platform_key", params![item.id.to_string(),item.collection_id.to_string(),item.title.to_lowercase(),missing_last(artist),missing_last(platform),recent_key(item.updated_at)]).map_err(storage)?;
-    Ok(())
+    library_care::project_preparation(db, item.id)?;
+    library_care::project_health(db, item)
 }
 fn recent_key(time: chrono::DateTime<chrono::Utc>) -> String {
     // Fixed width gives newest-first lexicographic ordering without offsets.

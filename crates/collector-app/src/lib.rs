@@ -1,4 +1,10 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod bulk_library;
+pub use bulk_library::*;
+mod bulk_intake;
+pub use bulk_intake::*;
+mod album_grouping;
+pub use album_grouping::*;
 mod album_preparation;
 pub use album_preparation::*;
 mod collection_types;
@@ -8,6 +14,10 @@ pub use derivatives::*;
 mod guided_ingest;
 mod item_lifecycle;
 pub use item_lifecycle::prepare_clean_reimport;
+mod library_care;
+mod metadata_resolution;
+pub use library_care::*;
+pub use metadata_resolution::*;
 mod metadata;
 pub use metadata::*;
 mod work_history;
@@ -287,6 +297,7 @@ pub enum ItemEffectSource {
     Command,
     Snapshot(SnapshotId),
     GuidedImport(ImportId),
+    Job { id: JobId, claim: TransactionId },
 }
 
 pub trait ContentPort: Send + Sync {
@@ -544,7 +555,19 @@ pub struct IngestDestination {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuidedBulkContext {
+    pub intake_id: JobId,
+    pub copy_id: SpecimenId,
+    pub copy_label: String,
+    #[serde(default)]
+    pub manual_title: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GuidedIngestIntent {
+    #[serde(default)]
+    pub bulk_context: Option<GuidedBulkContext>,
     pub clean_reimport: Option<CleanReimportOptions>,
     pub import_id: ImportId,
     pub user_id: UserId,
@@ -823,6 +846,17 @@ pub struct JobRecord {
     pub result: Option<serde_json::Value>,
 }
 
+pub fn metadata_artwork_error<'a>(
+    kind: &str,
+    result: Option<&'a serde_json::Value>,
+) -> Option<&'a str> {
+    if kind != "metadata_resolution" {
+        return None;
+    }
+    let result = result.map(|value| value.get("completion").unwrap_or(value))?;
+    result.get("artwork_error")?.as_str()
+}
+
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobResultView {
@@ -866,7 +900,12 @@ impl From<JobRecord> for JobView {
                     | "processing_operation"
                     | "music_derivative"
                     | "music_derivative_batch"
-            );
+                    | "metadata_resolution"
+                    | "bulk_intake"
+                    | "metadata_existing"
+            )
+            || record.state == JobState::Completed
+                && metadata_artwork_error(&record.kind, record.result.as_ref()).is_some();
         let result = safe_job_result(&record.kind, record.result.as_ref());
         Self {
             id: record.id,
@@ -1228,6 +1267,10 @@ pub trait CommandEffects:
     + JobPort
     + ProvisionalImportPort
     + ProcessingPort
+    + LibraryCarePort
+    + AlbumGroupingPort
+    + BulkIntakePort
+    + BulkLibraryPort
 {
 }
 impl<T> CommandEffects for T where
@@ -1241,6 +1284,10 @@ impl<T> CommandEffects for T where
         + JobPort
         + ProvisionalImportPort
         + ProcessingPort
+        + LibraryCarePort
+        + AlbumGroupingPort
+        + BulkIntakePort
+        + BulkLibraryPort
 {
 }
 
@@ -1326,6 +1373,10 @@ pub struct CollectionService {
     idempotency: Arc<dyn IdempotencyPort>,
     jobs: Arc<dyn JobPort>,
     processing: Arc<dyn ProcessingPort>,
+    care: Arc<dyn LibraryCarePort>,
+    grouping: Arc<dyn AlbumGroupingPort>,
+    intake_port: Arc<dyn BulkIntakePort>,
+    bulk_port: Arc<dyn BulkLibraryPort>,
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
     artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
@@ -1373,6 +1424,7 @@ struct ProcessingHost<'a> {
 }
 
 struct DurableProcessingContext {
+    progress_base: u64,
     frozen: FrozenJobInput,
     jobs: Arc<dyn JobPort>,
     id: JobId,
@@ -1423,8 +1475,15 @@ impl ProcessingExecutionContext for DurableProcessingContext {
         if total_units == 0 || completed_units > total_units {
             return Err(Error::Invalid("processing progress is invalid".into()));
         }
-        self.jobs
-            .heartbeat_job(self.id, &self.claim_token, phase, completed_units, 30)
+        self.jobs.heartbeat_job(
+            self.id,
+            &self.claim_token,
+            phase,
+            self.progress_base
+                .checked_add(completed_units)
+                .ok_or(Error::Conflict)?,
+            30,
+        )
     }
 
     fn cancellation_requested(&self) -> Result<bool> {
@@ -1707,6 +1766,8 @@ impl From<Capture> for PresentedCapture {
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
     pub workflow_generation: u64,
+    pub merged_into: Option<ItemId>,
+    pub merge_group: Option<TransactionId>,
     pub reimport_import_id: Option<ImportId>,
     pub id: ItemId,
     pub collection_id: CollectionId,
@@ -1982,6 +2043,10 @@ impl CollectionService {
             + JobPort
             + ProvisionalImportPort
             + ProcessingPort
+            + LibraryCarePort
+            + AlbumGroupingPort
+            + BulkIntakePort
+            + BulkLibraryPort
             + 'static,
     {
         let reader: Arc<dyn CollectionReadPort> = catalog.clone();
@@ -1996,6 +2061,10 @@ impl CollectionService {
         let jobs: Arc<dyn JobPort> = catalog.clone();
         let access: Arc<dyn AccessPort> = catalog.clone();
         let processing: Arc<dyn ProcessingPort> = catalog.clone();
+        let care: Arc<dyn LibraryCarePort> = catalog.clone();
+        let grouping: Arc<dyn AlbumGroupingPort> = catalog.clone();
+        let intake_port: Arc<dyn BulkIntakePort> = catalog.clone();
+        let bulk_port: Arc<dyn BulkLibraryPort> = catalog.clone();
         Self {
             reader,
             writer,
@@ -2010,6 +2079,10 @@ impl CollectionService {
             idempotency,
             jobs,
             processing,
+            care,
+            grouping,
+            intake_port,
+            bulk_port,
             audio_converter: None,
             artwork_preview: None,
             streaming_providers: Arc::new(Default::default()),
@@ -2246,7 +2319,7 @@ impl CollectionService {
         let mut items = Vec::with_capacity(page.items.len());
         for mut item in page.items {
             let role = self.authorize(actor, item.collection_id, Action::Browse)?;
-            let effective_metadata = self.effective_metadata_for_item(&item)?;
+            let effective_metadata = self.effective_metadata_for_user(&item, actor.user_id)?;
             item.redact_for(role);
             items.push(self.presented(item, role, actor.user_id, effective_metadata)?);
         }
@@ -2266,7 +2339,7 @@ impl CollectionService {
                 Action::Browse
             },
         )?;
-        let effective_metadata = self.effective_metadata_for_item(&item)?;
+        let effective_metadata = self.effective_metadata_for_user(&item, actor.user_id)?;
         item.redact_for(role);
         self.presented(item, role, actor.user_id, effective_metadata)
     }
@@ -2329,6 +2402,8 @@ impl CollectionService {
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
             workflow_generation: item.lifecycle.generation,
+            merged_into: item.lifecycle.merged_into,
+            merge_group: item.lifecycle.merge_group,
             reimport_import_id: if private {
                 item.lifecycle
                     .reimport
@@ -4875,67 +4950,13 @@ impl CollectionService {
                     Some(FrozenJobInput::Acquisition(value)) => value,
                     _ => return Err(Error::Storage("acquisition job has no frozen input".into())),
                 };
-                if let Ok(existing) = self.processing.snapshot(SnapshotQuery {
-                    collection_id: frozen.request.collection_id,
-                    snapshot_id: frozen.snapshot_id,
-                }) {
-                    return Ok(serde_json::json!({"snapshot_id":existing.id}));
-                }
-                FrozenJobInput::Acquisition(frozen.clone()).validate()?;
-                let eligibility = self.content_write_eligibility_for_job(
-                    claim.user_id,
-                    claim.collection_id,
-                    claim.item_id,
-                )?;
-                self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
-                let mut execution = DurableProcessingContext {
-                    frozen: FrozenJobInput::Acquisition(frozen.clone()),
-                    jobs: self.jobs.clone(),
-                    id: claim.id,
-                    claim_token: claim.claim_token.clone(),
-                };
-                if execution.cancellation_requested()? {
-                    return Err(Error::JobCancelled);
-                }
-                let provider = self
-                    .streaming_providers
-                    .get(&frozen.request.provider.0)
-                    .ok_or_else(|| {
-                        Error::Unavailable("configured provider is unavailable".into())
-                    })?;
-                let mut response = provider.acquire_stream(&frozen.request, &mut execution)?;
-                let snapshot = SnapshotRecord {
-                    id: frozen.snapshot_id,
-                    collection_id: frozen.request.collection_id,
-                    provider: frozen.request.provider.clone(),
-                    media_type: response.media_type,
-                    bytes: response.bytes,
-                    digest: response.digest,
-                    parsed_observation: response.parsed_observation,
-                    created_at: frozen.created_at,
-                };
-                snapshot.validate()?;
-                if snapshot.bytes.0 > frozen.request.maximum_response_bytes {
-                    return Err(Error::Invalid(
-                        "provider stream exceeds its frozen request limit".into(),
-                    ));
-                }
-                self.processing.publish_snapshot(
-                    &claim,
-                    snapshot,
-                    response.reader.as_mut(),
-                    &mut || {
-                        let current = self.content_write_eligibility_for_job(
-                            claim.user_id,
-                            claim.collection_id,
-                            claim.item_id,
-                        )?;
-                        self.validate_frozen_binding(&current, &frozen.collection_binding)?;
-                        execution.cancellation_requested()
-                    },
-                )?;
-                Ok(serde_json::json!({"snapshot_id":frozen.snapshot_id}))
+                self.acquire_snapshot_for_job(&claim, &frozen)
+                    .map(|snapshot_id| serde_json::json!({"snapshot_id":snapshot_id}))
             })(),
+            "metadata_resolution" => self.run_metadata_resolution(&claim),
+            "bulk_intake" => self.run_bulk_intake(&claim),
+            "bulk_library" => self.run_bulk_library(&claim),
+            "metadata_existing" => self.run_existing_metadata(&claim),
             "music_derivative" => self.run_music_derivative(&claim),
             "music_derivative_batch" => self.run_music_derivative_batch(&claim),
             "processing_operation" => (|| {
@@ -5097,6 +5118,12 @@ impl CollectionService {
         heartbeat.stop()?;
         match result {
             Ok(result) => {
+                if claim.kind == "bulk_library"
+                    && result.get("yielded").and_then(serde_json::Value::as_bool) == Some(true)
+                {
+                    self.bulk_port.yield_bulk_library(&claim)?;
+                    return Ok(true);
+                }
                 self.jobs
                     .complete_job(claim.id, &claim.claim_token, result)?;
             }
@@ -5133,6 +5160,73 @@ impl CollectionService {
             self.reconcile_guided_ingest(id)?;
         }
         Ok(true)
+    }
+    pub(crate) fn acquire_snapshot_for_job(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenAcquisitionJob,
+    ) -> Result<SnapshotId> {
+        if let Ok(existing) = self.processing.snapshot(SnapshotQuery {
+            collection_id: frozen.request.collection_id,
+            snapshot_id: frozen.snapshot_id,
+        }) {
+            return Ok(existing.id);
+        }
+        FrozenJobInput::Acquisition(frozen.clone()).validate()?;
+        let eligibility = self.content_write_eligibility_for_job(
+            claim.user_id,
+            claim.collection_id,
+            claim.item_id,
+        )?;
+        self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+        let mut execution = DurableProcessingContext {
+            progress_base: if claim.kind == "metadata_resolution" {
+                self.jobs
+                    .job_record(claim.id, claim.user_id)?
+                    .completed_units
+            } else {
+                0
+            },
+            frozen: FrozenJobInput::Acquisition(frozen.clone()),
+            jobs: self.jobs.clone(),
+            id: claim.id,
+            claim_token: claim.claim_token.clone(),
+        };
+        if execution.cancellation_requested()? {
+            return Err(Error::JobCancelled);
+        }
+        let provider = self
+            .streaming_providers
+            .get(&frozen.request.provider.0)
+            .ok_or_else(|| Error::Unavailable("configured provider is unavailable".into()))?;
+        let mut response = provider.acquire_stream(&frozen.request, &mut execution)?;
+        let snapshot = SnapshotRecord {
+            id: frozen.snapshot_id,
+            collection_id: frozen.request.collection_id,
+            provider: frozen.request.provider.clone(),
+            media_type: response.media_type,
+            bytes: response.bytes,
+            digest: response.digest,
+            parsed_observation: response.parsed_observation,
+            created_at: frozen.created_at,
+        };
+        snapshot.validate()?;
+        if snapshot.bytes.0 > frozen.request.maximum_response_bytes {
+            return Err(Error::Invalid(
+                "provider stream exceeds its frozen request limit".into(),
+            ));
+        }
+        self.processing
+            .publish_snapshot(claim, snapshot, response.reader.as_mut(), &mut || {
+                let current = self.content_write_eligibility_for_job(
+                    claim.user_id,
+                    claim.collection_id,
+                    claim.item_id,
+                )?;
+                self.validate_frozen_binding(&current, &frozen.collection_binding)?;
+                execution.cancellation_requested()
+            })?;
+        Ok(frozen.snapshot_id)
     }
     pub fn jobs(&self, actor: &Principal) -> Result<Vec<Job>> {
         let jobs = self.imports.jobs(actor.user_id)?;
@@ -5188,11 +5282,17 @@ impl CollectionService {
                 | "processing_operation"
                 | "music_derivative"
                 | "music_derivative_batch"
+                | "metadata_resolution"
+                | "bulk_intake"
+                | "metadata_existing"
         ) {
             self.content_write_eligibility_for_job(actor.user_id, job.collection_id, job.item_id)?;
         }
         self.execute_command(actor, context, "job.retry", &id, |effects| {
-            if job.state != JobState::Failed {
+            if job.state != JobState::Failed
+                && !(job.state == JobState::Completed
+                    && metadata_artwork_error(&job.kind, job.result.as_ref()).is_some())
+            {
                 return Err(Error::Conflict);
             }
             match job.kind.as_str() {
@@ -5202,6 +5302,9 @@ impl CollectionService {
                 | "import_analysis"
                 | "import_publication"
                 | "catalog_acquisition"
+                | "metadata_resolution"
+                | "bulk_intake"
+                | "metadata_existing"
                 | "music_derivative"
                 | "processing_operation" => effects.retry_failed_job(id, actor.user_id),
                 "music_derivative_batch" => effects

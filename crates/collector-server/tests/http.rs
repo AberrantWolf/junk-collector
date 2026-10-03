@@ -2706,7 +2706,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 109); // Includes album-disc coverage and bounded collection reads.
+    assert_eq!(paths.len(), 132); // Dedicated care, intake, grouping and bulk workflow contracts.
     for path in [
         "/api/v1/collection-search",
         "/api/v1/collections/{id}",
@@ -2753,6 +2753,9 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/collections/{collection}/inboxes/{label}/stage",
         "/api/v1/collection-types",
         "/api/v1/items/{id}/metadata",
+        "/api/v1/me/metadata-preferences",
+        "/api/v1/library-care/metadata",
+        "/api/v1/items/{id}/metadata/resolutions",
         "/api/v1/items/{id}/metadata/acquisitions",
         "/api/v1/items/{id}/metadata/refresh",
         "/api/v1/items/{id}/metadata/artwork",
@@ -4531,8 +4534,9 @@ async fn metadata_review_routes_are_curation_only_and_effective_display_is_viewe
     assert!(!text.contains("javascript:"));
     assert!(!text.contains("<script>"));
     let review: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(review["display"]["title"]["value"], "Effective album");
-    assert_eq!(review["display"]["resolution"], "automatic");
+    // A name-only suggestion remains available for explicit selection.
+    assert_eq!(review["display"]["title"]["value"], "Inventory title");
+    assert_eq!(review["display"]["resolution"], "tentative");
     assert_eq!(review["candidates"][0]["current"], true);
     assert_eq!(review["candidates"][0]["title"]["language"], "ja");
     assert_eq!(review["permissions"]["can_update"], true);
@@ -4583,13 +4587,14 @@ async fn metadata_review_routes_are_curation_only_and_effective_display_is_viewe
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let selected: serde_json::Value = serde_json::from_slice(
         &axum::body::to_bytes(response.into_body(), 128 * 1024)
             .await
             .unwrap(),
     )
     .unwrap();
+    assert_eq!(status, StatusCode::OK, "{selected}");
     assert_eq!(selected["display"]["resolution"], "selected");
     assert_eq!(selected["candidates"][0]["selected"], true);
 

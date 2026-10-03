@@ -3880,3 +3880,13 @@ DAT ambiguity/no-match flows after the Advanced evidence disclosure change.
 These fixture checks do not establish that the user's specific physical discs or
 their audio match a selected release; that requires the recorded disc IDs and
 per-source AccurateRip outcomes shown in the new checklist.
+
+## Bulk import, metadata repair and music preparation — 2026-10-03
+
+BL1–BL3 local acceptance and its limits are recorded in
+[bulk library validation](validation/bulk-library.md), including the shared metadata
+pipeline, durable intake, confirmed atomic grouping/undo, frozen FLAC batches,
+shared cancellation, real browser playback and the generated 2,400-member run.
+The [delivery ledger](bulk-library-plan.md) and handoff/status summaries are updated
+together. Trusted second-device and wider deployment/scale qualification remain
+separate; blocked DAT downloads remain disabled.

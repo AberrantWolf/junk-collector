@@ -326,13 +326,31 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        if job_generation_obsolete(&tx, id)? {
+        Self::retry_preparation_batch_in_tx(&tx, id, user, self.clock.now().timestamp())?;
+        self.record_command(&tx, &())?;
+        tx.commit().map_err(storage)
+    }
+
+    pub(crate) fn retry_preparation_batch_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        id: JobId,
+        user: UserId,
+        now: i64,
+    ) -> Result<()> {
+        if job_generation_obsolete(tx, id)? {
             return Err(Error::Conflict);
         }
-        Self::ensure_work_retry_allowed(&tx, id, user)?;
-        let frozen = Self::preparation_batch_input(&tx, id, user)?;
-        ensure_album_admission_capacity(&tx, user, id)?;
-        let now = self.clock.now().timestamp();
+        Self::ensure_work_retry_allowed(tx, id, user)?;
+        let frozen = Self::preparation_batch_input(tx, id, user)?;
+        let request: String = tx
+            .query_row(
+                "SELECT request FROM private.jobs WHERE id=?",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        ensure_bulk_allows_work(tx, &serde_json::from_str(&request).map_err(storage)?)?;
+        ensure_album_admission_capacity(tx, user, id)?;
         let mut missing = false;
         for member in &frozen.members {
             let collector_app::FrozenPreparationMember::Prepare { job_id, .. } = member else {
@@ -348,7 +366,7 @@ impl Store {
                 .map_err(storage)?;
             match state.as_deref() {
                 Some("failed" | "cancelled") => {
-                    requeue_failed_preparation(&tx, *job_id, user, now)?;
+                    requeue_failed_preparation(tx, *job_id, user, now)?;
                 }
                 Some("cancel_requested") => return Err(Error::CommandInProgress),
                 None => missing = true,
@@ -363,11 +381,11 @@ impl Store {
             )
             .map_err(storage)?;
         let request: serde_json::Value = serde_json::from_str(&parent_request).map_err(storage)?;
-        ensure_import_allows_work(&tx, &request)?;
+        ensure_import_allows_work(tx, &request)?;
         if parent_state == "cancel_requested" {
             return Err(Error::CommandInProgress);
         }
-        requeue_failed_preparation(&tx, id, user, now)?;
+        requeue_failed_preparation(tx, id, user, now)?;
         if missing || matches!(parent_state.as_str(), "failed" | "cancelled") {
             tx.execute(
                 "UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,
@@ -398,8 +416,7 @@ impl Store {
             )
             .map_err(storage)?;
         }
-        self.record_command(&tx, &())?;
-        tx.commit().map_err(storage)
+        Ok(())
     }
 
     pub(crate) fn reconcile_job_publications(&self) -> Result<()> {
@@ -555,6 +572,14 @@ impl Store {
         spec: JobSpec,
         batch: Option<(JobId, &str)>,
     ) -> Result<JobId> {
+        self.enqueue_job_record_with_owners(spec, batch, None)
+    }
+    pub(crate) fn enqueue_job_record_with_owners(
+        &self,
+        spec: JobSpec,
+        batch: Option<(JobId, &str)>,
+        bulk: Option<(JobId, &str, u32)>,
+    ) -> Result<JobId> {
         if spec.kind.is_empty()
             || spec.kind.len() > 120
             || spec.phase.is_empty()
@@ -582,6 +607,13 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        if let Some((parent, token, position)) = bulk {
+            let allowed:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN private.bulk_library b ON b.id=j.id JOIN private.bulk_library_members m ON m.batch_id=b.id WHERE j.id=? AND j.user_id=? AND j.claim_token=? AND j.state='running' AND j.cancellation_requested=0 AND b.state='accepted' AND m.position=? AND m.state='ready' AND m.item_id=? AND m.collection_id=? AND EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=j.user_id AND u.enabled=1 AND g.collection_id=m.collection_id AND g.role>=1))",params![parent.to_string(),spec.user_id.to_string(),token,position,spec.item_id.map(|v|v.to_string()),spec.collection_id.map(|v|v.to_string())],|r|r.get(0)).map_err(storage)?;
+            if !allowed {
+                return Err(Error::JobCancelled);
+            }
+        }
+        ensure_bulk_allows_work(&tx, &spec.request)?;
         if let Some(item_id) = spec.item_id {
             let removed: bool = tx
                 .query_row(
@@ -592,6 +624,12 @@ impl Store {
                 .map_err(storage)?;
             if removed {
                 return Err(Error::Conflict);
+            }
+        }
+        if spec.kind == "metadata_resolution" {
+            let count: u32 = tx.query_row("SELECT count(*) FROM private.jobs WHERE user_id=? AND item_id=? AND kind='metadata_resolution' AND state IN ('queued','running','cancel_requested') AND id<>?",params![spec.user_id.to_string(),spec.item_id.map(|id| id.to_string()),spec.id.to_string()], |row| row.get(0)).map_err(storage)?;
+            if count >= 16 {
+                return Err(Error::Unavailable("This entry already has 16 unfinished metadata requests; finish or cancel a request before starting another.".into()));
             }
         }
         ensure_import_allows_work(&tx, &spec.request)?;
@@ -611,6 +649,17 @@ impl Store {
                     |row| row.get(0),
                 )
                 .map_err(storage)?;
+            let parent_request: String = tx
+                .query_row(
+                    "SELECT request FROM private.jobs WHERE id=?",
+                    [parent.to_string()],
+                    |r| r.get(0),
+                )
+                .map_err(storage)?;
+            ensure_bulk_allows_work(
+                &tx,
+                &serde_json::from_str(&parent_request).map_err(storage)?,
+            )?;
             if !allowed {
                 return Err(Error::JobCancelled);
             }
@@ -781,6 +830,14 @@ impl Store {
         }
         if spec.kind == "music_derivative" {
             requeue_failed_preparation(&tx, spec.id, spec.user_id, now)?;
+        }
+        if let Some((parent, _, position)) = bulk {
+            let raw:String=tx.query_row("SELECT record FROM private.bulk_library_members WHERE batch_id=? AND position=?",params![parent.to_string(),position],|r|r.get(0)).map_err(storage)?;
+            let mut member: collector_app::FrozenBulkLibraryMember =
+                serde_json::from_str(&raw).map_err(storage)?;
+            member.view.job_id = Some(spec.id);
+            member.view.state = collector_app::BulkMemberState::Queued;
+            tx.execute("UPDATE private.bulk_library_members SET job_id=?,state='queued',record=? WHERE batch_id=? AND position=?",params![spec.id.to_string(),serde_json::to_string(&member).map_err(storage)?,parent.to_string(),position]).map_err(storage)?;
         }
         self.record_command(&tx, &spec.id)?;
         tx.commit().map_err(storage)?;
@@ -1083,6 +1140,15 @@ impl Store {
     }
 
     pub(crate) fn request_job_cancellation_record(&self, id: JobId, user: UserId) -> Result<()> {
+        let kind = self.job_record(id, user)?.kind;
+        if kind == "bulk_intake" {
+            return self.cancel_intake_record(user, id, false).map(|_| ());
+        }
+        if kind == "bulk_library" {
+            return self
+                .change_bulk_library_record(user, id, true, false)
+                .map(|_| ());
+        }
         let _publication_gate = lock(&self.job_publication_gate)?;
         if publication::PublicationJournalStore::new(&self.archive)
             .phase(TransactionId(id.0))?
@@ -1274,10 +1340,21 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        if job_generation_obsolete(&tx, id)? {
+        let result = self.retry_failed_job_in_tx(&tx, id, user)?;
+        self.record_command(&tx, &result)?;
+        tx.commit().map_err(storage)?;
+        Ok(result)
+    }
+    pub(crate) fn retry_failed_job_in_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        id: JobId,
+        user: UserId,
+    ) -> Result<JobId> {
+        if job_generation_obsolete(tx, id)? {
             return Err(Error::Conflict);
         }
-        Self::ensure_work_retry_allowed(&tx, id, user)?;
+        Self::ensure_work_retry_allowed(tx, id, user)?;
         let (kind, state, prior_result, error, attempt, failed_at): (
             String,
             String,
@@ -1304,7 +1381,14 @@ impl Store {
             .optional()
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
-        if state != "failed"
+        let parsed_result: Option<serde_json::Value> = prior_result
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(storage)?;
+        let artwork_error = collector_app::metadata_artwork_error(&kind, parsed_result.as_ref())
+            .map(str::to_string);
+        if (state != "failed" && !(state == "completed" && artwork_error.is_some()))
             || !matches!(
                 kind.as_str(),
                 "integrity_verification"
@@ -1314,6 +1398,9 @@ impl Store {
                     | "catalog_acquisition"
                     | "processing_operation"
                     | "music_derivative"
+                    | "metadata_resolution"
+                    | "bulk_intake"
+                    | "metadata_existing"
             )
         {
             return Err(Error::Conflict);
@@ -1326,8 +1413,15 @@ impl Store {
             )
             .map_err(storage)?;
         let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
+        ensure_bulk_allows_work(tx, &request)?;
+        if kind == "bulk_intake" {
+            let accepted:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.intake_sessions WHERE id=? AND state='accepted')",[id.to_string()],|r|r.get(0)).map_err(storage)?;
+            if !accepted {
+                return Err(Error::JobCancelled);
+            }
+        }
         let direct:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.scan_requests WHERE job_id=? AND kind='direct' AND owner=?)",params![id.to_string(),user.to_string()],|row|row.get(0)).map_err(storage)?;
-        ensure_import_work(&tx, &request, direct && kind == "import_analysis")?;
+        ensure_import_work(tx, &request, direct && kind == "import_analysis")?;
         let scan_key: Option<String> = tx
             .query_row(
                 "SELECT scan_key FROM private.scan_admissions WHERE job_id=?",
@@ -1337,15 +1431,13 @@ impl Store {
             .optional()
             .map_err(storage)?;
         if let Some(key) = scan_key {
-            if let Some(active) = active_scan(&tx, user, &key, Some(id))? {
-                Self::ensure_work_retry_allowed(&tx, active, user)?;
+            if let Some(active) = active_scan(tx, user, &key, Some(id))? {
+                Self::ensure_work_retry_allowed(tx, active, user)?;
                 tx.execute(
                     "INSERT OR IGNORE INTO private.scan_requests VALUES(?,'direct',?)",
                     params![active.to_string(), user.to_string()],
                 )
                 .map_err(storage)?;
-                self.record_command(&tx, &active)?;
-                tx.commit().map_err(storage)?;
                 return Ok(active);
             }
             tx.execute(
@@ -1363,6 +1455,10 @@ impl Store {
             .transpose()
             .map_err(storage)?
             .unwrap_or_else(|| serde_json::json!({"prior_failures":[]}));
+        if result.get("prior_failures").is_none() {
+            result = serde_json::json!({"prior_failures":[],"completion":result});
+        }
+        let error = error.or(artwork_error);
         let failures = result
             .get_mut("prior_failures")
             .and_then(serde_json::Value::as_array_mut)
@@ -1384,8 +1480,6 @@ impl Store {
             ],
         )
         .map_err(storage)?;
-        self.record_command(&tx, &id)?;
-        tx.commit().map_err(storage)?;
         Ok(id)
     }
 }
@@ -1435,6 +1529,7 @@ fn ensure_import_work(
         let stopped: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM private.imports WHERE id=?1 AND phase='cancelled')
              OR EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE import_id=?1 AND cancelled=1 AND NOT ?2)
+             OR EXISTS(SELECT 1 FROM private.guided_ingest_intents g JOIN private.intake_sessions s ON s.id=json_extract(g.bulk_context,'$.intake_id') WHERE g.import_id=?1 AND s.state IN ('cancelling','cancelled') AND NOT ?2)
              OR EXISTS(SELECT 1 FROM private.import_cleanup WHERE import_id=?1)
              OR EXISTS(SELECT 1 FROM private.imports p JOIN items i ON i.id=p.item_id
                        WHERE p.id=?1 AND NOT ?2 AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_import_generations g WHERE g.import_id=p.id),0))
@@ -1452,7 +1547,7 @@ fn ensure_import_work(
     Ok(())
 }
 
-fn requeue_failed_preparation(
+pub(crate) fn requeue_failed_preparation(
     tx: &rusqlite::Transaction<'_>,
     id: JobId,
     user: UserId,
@@ -1656,4 +1751,17 @@ impl Store {
 // A committed publication may finish its private receipt after supersession.
 fn job_generation_obsolete(db: &rusqlite::Connection, id: JobId) -> Result<bool> {
     db.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?", [id.to_string()], |row|row.get::<_,bool>(0)).optional().map_err(storage).map(|value|value.unwrap_or(false))
+}
+
+fn ensure_bulk_allows_work(db: &Connection, request: &serde_json::Value) -> Result<()> {
+    if let Some(parent) = request
+        .get("bulk_parent")
+        .and_then(serde_json::Value::as_str)
+    {
+        let yes:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.bulk_library WHERE id=? AND state IN ('accepted','completed'))",[parent],|r|r.get(0)).map_err(storage)?;
+        if !yes {
+            return Err(Error::JobCancelled);
+        }
+    }
+    Ok(())
 }

@@ -369,6 +369,98 @@ fn insert_import(tx: &rusqlite::Transaction<'_>, record: &ImportRecord) -> Resul
     Ok(())
 }
 
+impl Store {
+    pub(crate) fn accept_guided_records_in_transaction(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        records: &[ImportRecord],
+        intents: &[GuidedIngestIntent],
+    ) -> Result<Vec<collector_app::ImportView>> {
+        if records.is_empty() || records.len() != intents.len() || records.len() > 64 {
+            return Err(Error::Invalid(
+                "guided acceptance requires 1–64 paired packages".into(),
+            ));
+        }
+        let mut views = Vec::with_capacity(records.len());
+        for (record, intent) in records.iter().zip(intents) {
+            if intent.import_id != record.view.id
+                || intent.user_id != record.user_id
+                || intent.default_title.trim().is_empty()
+                || intent.default_title.len() > 4096
+                || intent.plan_token.len() != 64
+            {
+                return Err(Error::Invalid(
+                    "guided intent disagrees with its Import".into(),
+                ));
+            }
+            if intent.clean_reimport.is_some() {
+                Self::stop_item_work_in_tx(
+                    tx,
+                    intent.target_item_id,
+                    self.clock.now().timestamp(),
+                )?;
+                Self::archive_old_item_work(tx, intent.target_item_id, record.view.id)?;
+            }
+            if !intent.created_item {
+                let Some(expected) = record.view.expected_item_revision else {
+                    return Err(Error::Invalid(
+                        "existing destination has no revision".into(),
+                    ));
+                };
+                if record.view.association.item_id != Some(intent.target_item_id) {
+                    return Err(Error::Invalid(
+                        "guided destination disagrees with its Import".into(),
+                    ));
+                }
+                let current = tx
+                    .query_row(
+                        "SELECT collection_id,revision,deleted FROM items WHERE id=?",
+                        [intent.target_item_id.to_string()],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)?,
+                                row.get::<_, bool>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(storage)?;
+                if current
+                    != Some((
+                        record.view.collection_id.to_string(),
+                        i64::try_from(expected.0).map_err(|_| Error::Conflict)?,
+                        false,
+                    ))
+                {
+                    return Err(Error::Conflict);
+                }
+            }
+            insert_import(tx, record)?;
+            tx.execute(
+                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,clean_reimport,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
+                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),intent.clean_reimport.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
+            )
+            .map_err(storage)?;
+            tx.execute(
+                "UPDATE private.guided_ingest_intents SET bulk_context=? WHERE import_id=?",
+                params![
+                    intent
+                        .bulk_context
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(storage)?,
+                    intent.import_id.to_string()
+                ],
+            )
+            .map_err(storage)?;
+            views.push(record.view.clone());
+        }
+        Ok(views)
+    }
+}
+
 impl ProvisionalImportPort for Store {
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord> {
         let mut db = lock(&self.db)?;
@@ -636,69 +728,7 @@ impl ProvisionalImportPort for Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        let mut views = Vec::with_capacity(records.len());
-        for (record, intent) in records.iter().zip(&intents) {
-            if intent.import_id != record.view.id
-                || intent.user_id != record.user_id
-                || intent.default_title.trim().is_empty()
-                || intent.default_title.len() > 4096
-                || intent.plan_token.len() != 64
-            {
-                return Err(Error::Invalid(
-                    "guided intent disagrees with its Import".into(),
-                ));
-            }
-            if intent.clean_reimport.is_some() {
-                Self::stop_item_work_in_tx(
-                    &tx,
-                    intent.target_item_id,
-                    self.clock.now().timestamp(),
-                )?;
-                Self::archive_old_item_work(&tx, intent.target_item_id, record.view.id)?;
-            }
-            if !intent.created_item {
-                let Some(expected) = record.view.expected_item_revision else {
-                    return Err(Error::Invalid(
-                        "existing destination has no revision".into(),
-                    ));
-                };
-                if record.view.association.item_id != Some(intent.target_item_id) {
-                    return Err(Error::Invalid(
-                        "guided destination disagrees with its Import".into(),
-                    ));
-                }
-                let current = tx
-                    .query_row(
-                        "SELECT collection_id,revision,deleted FROM items WHERE id=?",
-                        [intent.target_item_id.to_string()],
-                        |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, i64>(1)?,
-                                row.get::<_, bool>(2)?,
-                            ))
-                        },
-                    )
-                    .optional()
-                    .map_err(storage)?;
-                if current
-                    != Some((
-                        record.view.collection_id.to_string(),
-                        i64::try_from(expected.0).map_err(|_| Error::Conflict)?,
-                        false,
-                    ))
-                {
-                    return Err(Error::Conflict);
-                }
-            }
-            insert_import(&tx, record)?;
-            tx.execute(
-                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,clean_reimport,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
-                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),intent.clean_reimport.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
-            )
-            .map_err(storage)?;
-            views.push(record.view.clone());
-        }
+        let views = self.accept_guided_records_in_transaction(&tx, &records, &intents)?;
         self.record_command(&tx, &views)?;
         tx.commit().map_err(storage)?;
         Ok(views)
@@ -707,15 +737,16 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?)),
             )
             .optional()
             .map_err(storage)?
             .map(|row| {
                 Ok(GuidedIngestIntent {
                     import_id: id,
+                    bulk_context: row.17.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
                     user_id: row.0.parse().map_err(storage)?,
                     plan_token: row.1,
                     target_item_id: row.2.parse().map_err(storage)?,
@@ -980,38 +1011,7 @@ impl ProvisionalImportPort for Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        // The durable Job request is authoritative even if an older interrupted
-        // coordinator did not yet save its intent-to-batch pointer.
-        let preparation_batches = {
-            let mut statement = tx.prepare("SELECT id FROM private.jobs WHERE user_id=? AND kind='music_derivative_batch' AND json_extract(request,'$.import_id')=?").map_err(storage)?;
-            let rows = statement
-                .query_map(params![record.user_id.to_string(), id.to_string()], |row| {
-                    row.get::<_, String>(0)
-                })
-                .map_err(storage)?;
-            rows.collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(storage)?
-        };
-        for batch in preparation_batches {
-            Store::cancel_preparation_batch_in_tx(
-                &tx,
-                batch.parse().map_err(storage)?,
-                record.user_id,
-                now,
-            )?;
-        }
-        tx.execute(
-            "DELETE FROM private.scan_requests WHERE kind='import' AND owner=?",
-            [id.to_string()],
-        )
-        .map_err(storage)?;
-        tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',updated_at=? WHERE user_id=? AND state='queued' AND json_extract(request,'$.import_id')=? AND NOT EXISTS(SELECT 1 FROM private.scan_requests sr WHERE sr.job_id=jobs.id AND sr.kind='direct')",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
-        tx.execute("UPDATE private.jobs SET state='cancel_requested',cancellation_requested=1,updated_at=? WHERE user_id=? AND state='running' AND json_extract(request,'$.import_id')=? AND NOT EXISTS(SELECT 1 FROM private.scan_requests sr WHERE sr.job_id=jobs.id AND sr.kind='direct')",params![now,record.user_id.to_string(),id.to_string()]).map_err(storage)?;
-        tx.execute(
-            "UPDATE private.guided_ingest_intents SET cancelled=1,settled=1 WHERE import_id=?",
-            [id.to_string()],
-        )
-        .map_err(storage)?;
+        Store::cancel_guided_requests_in_tx(&tx, record.user_id, &[id.to_string()], now)?;
         let direct_analysis:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.scan_requests r JOIN private.jobs j ON j.id=r.job_id WHERE r.kind='direct' AND j.state IN ('queued','running') AND j.kind='import_analysis' AND json_extract(j.request,'$.import_id')=?)",[id.to_string()],|row|row.get(0)).map_err(storage)?;
         let next_phase = if committed {
             "published"
@@ -1039,6 +1039,33 @@ impl ProvisionalImportPort for Store {
         self.record_command(&tx, &result)?;
         tx.commit().map_err(storage)?;
         Ok(result)
+    }
+}
+
+impl Store {
+    // Intake and individual cancellation use one effect, in the caller's transaction.
+    pub(crate) fn cancel_guided_requests_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        user: UserId,
+        imports: &[String],
+        now: i64,
+    ) -> Result<()> {
+        let ids = serde_json::to_string(imports).map_err(storage)?;
+        let batches = {
+            let mut statement=tx.prepare("SELECT id FROM private.jobs WHERE user_id=? AND kind='music_derivative_batch' AND json_extract(request,'$.import_id') IN (SELECT value FROM json_each(?))").map_err(storage)?;
+            statement
+                .query_map(params![user.to_string(), ids], |r| r.get::<_, String>(0))
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        for batch in batches {
+            Self::cancel_preparation_batch_in_tx(tx, batch.parse().map_err(storage)?, user, now)?;
+        }
+        tx.execute("DELETE FROM private.scan_requests WHERE kind='import' AND owner IN (SELECT value FROM json_each(?))",[&ids]).map_err(storage)?;
+        tx.execute("UPDATE private.jobs SET state=CASE WHEN state='queued' THEN 'cancelled' ELSE 'cancel_requested' END,phase=CASE WHEN state='queued' THEN 'cancelled' ELSE phase END,cancellation_requested=1,updated_at=? WHERE user_id=? AND state IN ('queued','running') AND json_extract(request,'$.import_id') IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests sr WHERE sr.job_id=jobs.id AND sr.kind='direct') AND (kind<>'music_derivative' OR (NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests d WHERE d.job_id=jobs.id) AND NOT EXISTS(SELECT 1 FROM private.preparation_members m JOIN private.jobs parent ON parent.id=m.batch_id WHERE m.job_id=jobs.id AND parent.cancellation_requested=0 AND parent.state<>'cancelled')))",params![now,user.to_string(),ids]).map_err(storage)?;
+        tx.execute("UPDATE private.guided_ingest_intents SET cancelled=1,settled=1 WHERE import_id IN (SELECT value FROM json_each(?))",[ids]).map_err(storage)?;
+        Ok(())
     }
 }
 
