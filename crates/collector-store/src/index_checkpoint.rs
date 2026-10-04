@@ -2,9 +2,11 @@
 use super::*;
 use std::collections::BTreeMap;
 
-const FORMAT: u32 = 4;
+const FORMAT: u32 = 5;
+pub(crate) const CATALOG_SCHEMA: u32 = 12;
 pub(crate) const TABLES: &[&str] = &[
     "collections",
+    "collection_lists",
     "items",
     "works",
     "editions",
@@ -235,7 +237,7 @@ pub(crate) fn open_catalog(state: &Path) -> Result<Connection> {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)?;
-        if version == 11 {
+        if version == CATALOG_SCHEMA {
             let mut required = TABLES
                 .iter()
                 .map(|name| name.to_string())

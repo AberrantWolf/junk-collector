@@ -14,6 +14,14 @@ archive/private-state recovery guarantees intact. [P06 validation](validation/p0
 records the locally implemented checkpoint/index delivery; LA3's second-device
 gate and paused P05 scope remain unchanged.
 
+2026-10-03 locally accepted user delivery: [CL1 collection lists](collection-lists-plan.md)
+adds portable collection-shared lists and track playlists through the existing
+library/player. Its local acceptance record is [collection-list validation](validation/collection-lists.md).
+The 2026-10-04 review follow-up repairs list selection, receipt recovery, shared
+dialog behavior and incomplete disc expansion, with its checks recorded alongside
+the original CL1 validation. The remaining LA3 device gate stays open; CL1 does not
+implement synchronized listening.
+
 ## User outcome and scope
 
 On a local server, select raw dump packages, add them to a typed collection,
@@ -51,6 +59,7 @@ eligibility and independent lossless validation still apply.
 |---|---|---|---|
 | LA1 — Guided ingestion and automatic enrichment | Reviewed and corrected; acceptance passed | Select packages, import, leave the page, return to preserved entries with metadata/artwork or actionable partial outcomes | P03/P04, U05 readiness on this journey, D04–D06, P02 jobs; import history and safe correction/discard |
 | LA2 — Album preparation and usable library | Reviewed and corrected; acceptance passed | Request whole albums, queue independent work, browse/play completed tracks while other work runs | D07.4–D07.5, existing browser player, remaining browse/music readiness defects |
+| CL1 — Collection lists and playlists | Locally accepted; repository and real-browser gates passed | Save shared lists, append album/disc/track occurrences, reorder, play and shuffle through the shell player | Existing collection roles, archive publication/checkpoints, music source/readiness and personal queue |
 | LA3 — Local installation qualification | Partially qualified: owned corpus, live providers, Redump identity, recovery, local roles/playback and actual restore passed; second device remains | Actual owned dumps and two accounts work on the intended host, including recovery and backup restore | Focused U05/P04 journey review, local deployment/oracles, bounded backup drill |
 
 These are integrated deliveries, not additional layers above all the old child

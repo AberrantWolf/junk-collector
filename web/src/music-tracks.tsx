@@ -8,7 +8,7 @@ type Coverage=components['schemas']['MusicAlbumCoverage'];
 type DiscSource=components['schemas']['MusicDiscSourceCoverage'];
 type Review=components['schemas']['MetadataReviewView'];
 type Item=components['schemas']['PresentedItem'];
-type Props={item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:(item:Item)=>void;onOpenHistory?:()=>void;onOpenFiles?:()=>void;onOpenMetadata?:()=>void;onOpenAnalysis?:(sourceId:string,operation:'structure'|'accuraterip')=>void};
+type Props={item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:(item:Item)=>void;onOpenHistory?:()=>void;onOpenFiles?:()=>void;onOpenMetadata?:()=>void;onAddToList?:(source?:string,track?:number)=>void;onOpenAnalysis?:(sourceId:string,operation:'structure'|'accuraterip')=>void};
 
 function profileLabel(profile:Availability['profile']):string{
  return profile.codec==='flac'?'FLAC':`Opus ${profile.bitrate_kbps} kbps`;
@@ -56,7 +56,7 @@ function DiscCoverageSource({source,coverage,canAssign,busy,onAssign,onOpenMetad
  </div>;
 }
 
-export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared,onOpenHistory,onOpenFiles,onOpenMetadata,onOpenAnalysis}:Props){
+export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared,onOpenHistory,onOpenFiles,onOpenMetadata,onOpenAnalysis,onAddToList}:Props){
  const [rows,setRows]=useState<Availability[]>([]);
  const [coverage,setCoverage]=useState<Coverage>();
  const [assignmentBusy,setAssignmentBusy]=useState<string>();
@@ -185,7 +185,7 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
  });
  function enqueue(groups:Availability[][]){
   const tracks=groups.flatMap(group=>{const row=preferredAvailable(group);return row?.state.status==='available'?[{itemId:item.id,collectionId:item.collection_id,album:item.title,title:row.title,position:row.track_position,representationId:row.state.representation_id,fileIndex:row.state.file_index,mediaType:row.state.media_type,artwork:item.primary_artwork||undefined}]:[];});
-  const added=addMusicTracks(tracks);setQueueNotice(added===tracks.length?`Added ${added} ${added===1?'track':'tracks'} to your queue.`:`Added ${added} tracks. Your queue holds up to 500 tracks; remove some to add more.`);
+  const added=addMusicTracks(tracks);setQueueNotice(added===tracks.length?`Added ${added} ${added===1?'track':'tracks'} to your queue.`:`Added ${added} tracks. Your queue holds up to 5,000 tracks; remove some to add more.`);
  }
 
  if(!discs.length&&!error&&item.domain.module!=='org.junk.music')return null;
@@ -208,12 +208,13 @@ export default function MusicTracks({item,canPrepare,onSessionExpired,onPrepared
   </section>}
   {canPrepare&&batches.length>0&&<section className="preparation-batches" aria-label="Album preparation progress"><h4>Preparation history</h4>{batches.length===50&&<p className="muted">Showing the 50 most recent batches. Older track jobs are in this entry’s Work &amp; history. {onOpenHistory&&<button onClick={onOpenHistory}>Open older preparation work</button>}</p>}{batches.map(batch=><article key={batch.batch_id}><div className="section-heading"><div><strong>FLAC album batch</strong><small>{new Date(batch.created_at).toLocaleString()} · {batch.batch_id}</small></div><span>{batch.succeeded}/{batch.members.length} ready</span></div><p className="muted">{batch.queued} queued · {batch.running} running · {batch.failed} failed · {batch.cancelled} cancelled · {batch.ineligible} ineligible{batch.cancelled_by_user?' · batch cancelled':''}</p>{batch.admission_error&&<p className="error" role="alert">Batch admission: {batch.admission_error}</p>}<details><summary>Track outcomes</summary>{batch.members.map(member=><p className="batch-member" key={member.member_id}><strong>{member.track_position}. {member.title}</strong><span className={`identity ${member.state}`}>{member.state.replaceAll('_',' ')}</span>{member.error&&<small>{member.error}</small>}</p>)}</details><div className="profile-actions">{batch.can_cancel&&<button disabled={busy} onClick={()=>void batchAction(batch,'cancel')}>Cancel outstanding tracks</button>}{batch.can_retry&&<button disabled={busy} onClick={()=>void batchAction(batch,'retry')}>Retry unfinished tracks</button>}</div></article>)}</section>}
   {queueNotice&&<p role="status">{queueNotice}</p>}
+  {onAddToList&&discs.length>0&&<button onClick={()=>onAddToList()}>Add album to list</button>}
   {!canPrepare&&discs.some(([,tracks])=>tracks.some(preferredAvailable))&&<button onClick={()=>enqueue(discs.flatMap(([,tracks])=>tracks))}>Add album to queue</button>}
   {discs.map(([key,tracks],discIndex)=><article className="music-disc" key={key} data-disc-key={key}>
-   <header><strong>{coverage?.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)?.medium_position?`Album disc ${coverage.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)!.medium_position}`:`Original package ${discIndex+1} · disc not linked`}</strong></header>
+   <header><strong>{coverage?.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)?.medium_position?`Album disc ${coverage.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)!.medium_position}`:`Original package ${discIndex+1} · disc not linked`}</strong>{onAddToList&&<button onClick={()=>onAddToList(tracks[0][0].source_representation_id)}>Add disc to list</button>}</header>
    {tracks.map((group,index)=>{const first=group[0];const playable=preferredAvailable(group);const flac=group.find(row=>row.profile.codec==='flac'&&row.state.status==='available');
     return <div className="music-track" key={trackKey(first)} data-track-position={first.track_position} data-representation-id={playable?.state.status==='available'?playable.state.representation_id:undefined}>
-     <div><strong>{first.track_position}. {first.title}</strong>{!canPrepare&&<button disabled={!playable} onClick={()=>enqueue([group])}>Add to queue</button>}</div>
+     <div><strong>{first.track_position}. {first.title}</strong>{onAddToList&&<button onClick={()=>onAddToList(first.source_representation_id,first.track_position)}>Add track to list</button>}{!canPrepare&&<button disabled={!playable} onClick={()=>enqueue([group])}>Add to queue</button>}</div>
      <div className="profile-actions">{group.map(row=>{
       if(row.state.status==='available'){const url=mediaUrl(item.id,row)!;return <a key={profileLabel(row.profile)} href={url} download>{profileLabel(row.profile)} <small>{stateLabel(row)}</small></a>;}
       const pending=pendingTracks.has(`${trackKey(row)}/${profileLabel(row.profile)}`);return canPrepare&&row.can_prepare?<button className={row.profile.codec==='flac'?'primary':''} key={profileLabel(row.profile)} disabled={pending} onClick={()=>void prepare(row)}>{pending?'Submitting…':`Prepare ${profileLabel(row.profile)}`}</button>:<span className="profile-status" key={profileLabel(row.profile)}><b>{profileLabel(row.profile)}</b><small>{stateLabel(row)}</small></span>;

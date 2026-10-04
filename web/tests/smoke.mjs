@@ -6,6 +6,7 @@ import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
+import {collectionListsJourney} from './collection-lists-journey.mjs';
 import {bulkLibraryJourney} from './bulk-library-journey.mjs';
 async function deadline(promise,label,millis=20000){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+' timed out')),millis);})]);}finally{clearTimeout(timer);}}
 const root=path.resolve(import.meta.dirname,'../..');
@@ -954,7 +955,8 @@ try{
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('pressing');
  await page.waitForTimeout(350);
- await bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixture:()=>{bulkFixture=true;}});
+ const bulkResult=await bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixture:()=>{bulkFixture=true;bulkDiscIds.splice(0,bulkDiscIds.length,'KMo70rqGAUyPNJCab5I0W0aV7zI-','o5z.aMadhkEVfFTU8yGG4fLXMq0-');}});
+ await collectionListsJourney(page,{...bulkResult,hasFlac});
  // The generic renderer must accept a third descriptor without a frontend ID branch.
  const fixturePage=await context.newPage();const fixtureCollection=crypto.randomUUID();
  await fixturePage.route('**/api/v1/collection-types',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:'org.example.stamps',schema_version:1,display_name:'Stamp fixture module',collection_type_label:'Postage stamps',fields:[{key:'denomination',label:'Denomination',required:true,editable:true,kind:{type:'integer',minimum:1,maximum:10000}},{key:'unit',label:'Currency unit',required:true,editable:true,kind:{type:'text',maximum_bytes:16}},{key:'perforations',label:'Perforation observations',required:false,editable:false,kind:{type:'structured'}}],capabilities:[]});await route.fulfill({response,json:body});});

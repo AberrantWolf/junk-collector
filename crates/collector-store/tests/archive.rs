@@ -1988,7 +1988,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        11 // Library care adds rebuildable health indexes; archived fixture bytes stay unchanged.
+        12 // Collection lists add a projection; archived fixture bytes stay unchanged.
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -15816,6 +15816,8 @@ fn checkpoint_missing_malformed_and_incomplete_projection_rebuild_without_losing
         "DELETE FROM catalog_checkpoint",
         "UPDATE catalog_checkpoint SET format=999",
         "DROP TABLE entity_owners",
+        "DROP TABLE collection_lists",
+        "DROP TRIGGER checkpoint_collection_lists_INSERT",
         "DROP TABLE items",
         "DROP TRIGGER references_items_INSERT",
     ] {
@@ -17906,4 +17908,832 @@ fn album_group_cannot_assemble_copies_without_known_disc_inventory() {
             .iter()
             .any(|c| matches!(c.kind, GroupConflictKind::PhysicalInventory))
     );
+}
+
+#[test]
+fn collection_lists_track_occurrences_replay_conflict_and_rebuild_without_payload_reads() {
+    use collector_app::{
+        CollectionListChange as Change, CollectionListPort, CreateCollectionList, ListEntriesQuery,
+        UpdateCollectionList,
+    };
+    let (root, store, actor, service, collection) = setup();
+    let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let expected = capture.revision;
+    capture.association.item_id = Some(album.id);
+    Catalog::save_capture(store.as_ref(), capture, expected).unwrap();
+    let create = command();
+    let list = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                name: "Evening".into(),
+            },
+            &create,
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .create_collection_list(
+                &actor,
+                collection.id,
+                CreateCollectionList {
+                    name: "Evening".into()
+                },
+                &create
+            )
+            .unwrap()
+            .id,
+        list.id
+    );
+    let append = command();
+    let update = UpdateCollectionList {
+        expected_revision: list.revision,
+        change: Change::Append {
+            item_id: album.id,
+            source_representation_id: None,
+            track_position: None,
+        },
+    };
+    let added = service
+        .update_collection_list(&actor, collection.id, list.id, update.clone(), &append)
+        .unwrap();
+    assert_eq!(added.entry_count, 2);
+    assert_eq!(
+        service
+            .update_collection_list(&actor, collection.id, list.id, update.clone(), &append)
+            .unwrap()
+            .revision,
+        added.revision
+    );
+    assert!(matches!(
+        service.update_collection_list(&actor, collection.id, list.id, update, &command()),
+        Err(Error::Conflict)
+    ));
+    let again = service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: added.revision,
+                change: Change::Append {
+                    item_id: album.id,
+                    source_representation_id: Some(imported.representation_id),
+                    track_position: Some(1),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let record = store.collection_list(list.id).unwrap();
+    assert_eq!(record.entries.len(), 3);
+    assert_ne!(record.entries[0].id, record.entries[2].id);
+    // Missing bytes must not make list queries or additions turn into an integrity scan.
+    let pcm: Vec<u8> = (0..5 * 588)
+        .flat_map(|i| [i as u8, 0x80, 0xff, 0x7f])
+        .collect();
+    let payload = find_file_with_bytes(&root.path().join("archive"), &pcm).unwrap();
+    std::fs::remove_file(payload).unwrap();
+    let first = service
+        .collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: Some(1),
+            },
+        )
+        .unwrap();
+    assert_eq!(first.entries.items.len(), 1);
+    let cursor = first.entries.next_cursor.unwrap();
+    assert!(matches!(
+        first.entries.items[0].availability,
+        collector_app::ListEntryAvailability::SourceUnavailable
+    ));
+    let moved = service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: again.revision,
+                change: Change::Move {
+                    entry_id: record.entries[2].id,
+                    before: Some(record.entries[0].id),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: Some(cursor),
+                limit: None
+            }
+        ),
+        Err(Error::Conflict)
+    ));
+    assert_eq!(
+        store.collection_list(list.id).unwrap().entries[0].id,
+        record.entries[2].id
+    );
+    let removed = service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: moved.revision,
+                change: Change::Remove {
+                    entry_id: record.entries[2].id,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(removed.entry_count, 2);
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    assert!(store.catalog_reused_at_startup());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert_eq!(store.collection_list(list.id).unwrap().entries.len(), 2);
+    store.reindex().unwrap();
+    assert_eq!(store.collection_list(list.id).unwrap().entries.len(), 2);
+    let deleted = service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: removed.revision,
+                change: Change::Delete,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(deleted.entry_count, 2);
+    assert!(matches!(
+        service.collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: None
+            }
+        ),
+        Err(Error::NotFound)
+    ));
+    store.reindex().unwrap();
+    assert!(store.collection_list(list.id).unwrap().deleted);
+}
+
+#[test]
+fn collection_lists_enforce_collection_roles_and_frozen_source_revisions() {
+    use collector_app::{
+        CollectionListChange as Change, CollectionListPort, CreateCollectionList, ListEntriesQuery,
+        ListSourceRevision, UpdateCollectionList,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let curator = Principal {
+        user_id: store
+            .create_user("list-curator", "another long password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    Catalog::grant(
+        store.as_ref(),
+        collection.id,
+        curator.user_id,
+        Role::Curator,
+    )
+    .unwrap();
+    let list = service
+        .create_collection_list(
+            &curator,
+            collection.id,
+            CreateCollectionList {
+                name: "Shared".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(album.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let appended = service
+        .update_collection_list(
+            &curator,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: list.revision,
+                change: Change::Append {
+                    item_id: album.id,
+                    source_representation_id: None,
+                    track_position: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut forged = store.collection_list(list.id).unwrap();
+    forged.revision = Revision(appended.revision.0 + 1);
+    assert!(matches!(
+        store.publish_collection_list(
+            curator.user_id,
+            forged.clone(),
+            appended.revision,
+            vec![ListSourceRevision {
+                item_id: album.id,
+                item_revision: Revision(900),
+                metadata_revision: Revision(0),
+                captures: vec![]
+            }]
+        ),
+        Err(Error::Conflict)
+    ));
+    Catalog::grant(store.as_ref(), collection.id, curator.user_id, Role::Viewer).unwrap();
+    assert!(
+        !service
+            .collection_list_view(
+                &curator,
+                collection.id,
+                list.id,
+                ListEntriesQuery {
+                    cursor: None,
+                    limit: None
+                }
+            )
+            .unwrap()
+            .list
+            .can_edit
+    );
+    assert!(matches!(
+        store.publish_collection_list(curator.user_id, forged, appended.revision, vec![]),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.update_collection_list(
+            &curator,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: appended.revision,
+                change: Change::Delete
+            },
+            &command()
+        ),
+        Err(Error::Forbidden)
+    ));
+    let outsider = Principal {
+        user_id: store
+            .create_user("list-outsider", "another long password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.collection_list_view(
+            &outsider,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: None
+            }
+        ),
+        Err(Error::Forbidden)
+    ));
+    let other = service
+        .create_collection(
+            &store
+                .login("owner", "a long test password", "lists")
+                .unwrap()
+                .1,
+            typed_collection("Other"),
+            &command(),
+        )
+        .unwrap();
+    let foreign = save_inventory(&service, &actor, item(other.id), Revision(0)).unwrap();
+    assert!(matches!(
+        service.update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: appended.revision,
+                change: Change::Append {
+                    item_id: foreign.id,
+                    source_representation_id: None,
+                    track_position: None
+                }
+            },
+            &command()
+        ),
+        Err(Error::Forbidden)
+    ));
+}
+
+#[test]
+fn collection_lists_recover_each_archive_commit_boundary_and_command_receipt() {
+    use collector_app::{CollectionListsQuery, CreateCollectionList};
+    for point in derivative_phases() {
+        let (root, store, actor, service, collection) = setup();
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(FailPublicationOnce {
+                    point,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let receipt = command();
+        let request = CreateCollectionList {
+            name: "Recovered".into(),
+        };
+        assert!(
+            service
+                .create_collection_list(&actor, collection.id, request.clone(), &receipt)
+                .is_err()
+        );
+        drop(service);
+        drop(store);
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        let list = service
+            .create_collection_list(&actor, collection.id, request.clone(), &receipt)
+            .unwrap();
+        assert_eq!(
+            service
+                .create_collection_list(&actor, collection.id, request, &receipt)
+                .unwrap()
+                .id,
+            list.id
+        );
+        let page = service
+            .collection_lists(
+                &actor,
+                collection.id,
+                CollectionListsQuery {
+                    search: None,
+                    cursor: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(page.items.len(), 1, "{point:?}");
+    }
+}
+
+#[test]
+fn collection_lists_generic_items_and_music_source_choices_remain_distinct() {
+    use collector_app::{
+        CollectionListChange as Change, CollectionListPort, CreateCollectionList, ListEntriesQuery,
+        UpdateCollectionList,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let games = service
+        .create_collection(
+            &store
+                .login("owner", "a long test password", "lists")
+                .unwrap()
+                .1,
+            CreateCollectionCommand {
+                name: "Games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let mut game = item(games.id);
+    game.domain = ModuleData {
+        module: ModuleId("org.junk.games".into()),
+        schema_version: 1,
+        payload: RawJson::from_json("{}").unwrap(),
+    };
+    let game = save_inventory(&service, &actor, game, Revision(0)).unwrap();
+    let list = service
+        .create_collection_list(
+            &actor,
+            games.id,
+            CreateCollectionList {
+                name: "To finish".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(list.kind, CollectionListKind::Items);
+    let updated = service
+        .update_collection_list(
+            &actor,
+            games.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: list.revision,
+                change: Change::Append {
+                    item_id: game.id,
+                    source_representation_id: None,
+                    track_position: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let view = service
+        .collection_list_view(
+            &actor,
+            games.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        view.entries.items[0].availability,
+        collector_app::ListEntryAvailability::Entry
+    ));
+    assert!(matches!(
+        service.update_collection_list(
+            &actor,
+            games.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: updated.revision,
+                change: Change::Append {
+                    item_id: game.id,
+                    source_representation_id: Some(RepresentationId::new()),
+                    track_position: Some(1)
+                }
+            },
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let first = derivative_import(&service, &actor, collection.id);
+    let second = derivative_import(&service, &actor, collection.id);
+    for imported in [&first, &second] {
+        let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+        let revision = capture.revision;
+        capture.association.item_id = Some(album.id);
+        Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    }
+    let playlist = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                name: "Music".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    // Unlinked originals do not acquire album positions from UUID/discovery order.
+    assert!(matches!(
+        service.update_collection_list(
+            &actor,
+            collection.id,
+            playlist.id,
+            UpdateCollectionList {
+                expected_revision: playlist.revision,
+                change: Change::Append {
+                    item_id: album.id,
+                    source_representation_id: None,
+                    track_position: None
+                }
+            },
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    let added = service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            playlist.id,
+            UpdateCollectionList {
+                expected_revision: playlist.revision,
+                change: Change::Append {
+                    item_id: album.id,
+                    source_representation_id: Some(second.representation_id),
+                    track_position: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(added.entry_count, 2);
+    let record = store.collection_list(playlist.id).unwrap();
+    assert!(record.entries.iter().all(|entry|matches!(entry.target,ListTarget::MusicTrack{source_representation_id,..} if source_representation_id==second.representation_id)));
+    assert!(matches!(
+        service.update_collection_list(
+            &actor,
+            collection.id,
+            playlist.id,
+            UpdateCollectionList {
+                expected_revision: added.revision,
+                change: Change::Append {
+                    item_id: album.id,
+                    source_representation_id: Some(first.representation_id),
+                    track_position: Some(99)
+                }
+            },
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+}
+
+#[test]
+fn collection_lists_follow_merged_capture_ownership_and_guarded_undo() {
+    use collector_app::{
+        AlbumGroupChoices, CollectionListChange as Change, ConfirmAlbumGroup, CreateCollectionList,
+        GroupEntry, ListEntriesQuery, PreviewAlbumGroup, UpdateCollectionList,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let left = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let right = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(left.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let list = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                name: "Across grouping".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: list.revision,
+                change: Change::Append {
+                    item_id: left.id,
+                    source_representation_id: None,
+                    track_position: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let preview = PreviewAlbumGroup {
+        destination: right.id,
+        entries: vec![
+            GroupEntry {
+                item_id: left.id,
+                expected_revision: left.revision,
+            },
+            GroupEntry {
+                item_id: right.id,
+                expected_revision: right.revision,
+            },
+        ],
+        choices: AlbumGroupChoices::default(),
+    };
+    let checked = service
+        .preview_album_group(&actor, preview.clone())
+        .unwrap();
+    assert!(checked.can_confirm, "{:?}", checked.conflicts);
+    let merged = service
+        .confirm_album_group(
+            &actor,
+            ConfirmAlbumGroup {
+                preview,
+                token: checked.token,
+            },
+            &command(),
+        )
+        .unwrap();
+    let view = service
+        .collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(view.entries.items.len(), 2);
+    assert!(
+        view.entries
+            .items
+            .iter()
+            .all(|entry| entry.item_id == Some(right.id))
+    );
+    service
+        .undo_album_group(&actor, merged.group_id, &command())
+        .unwrap();
+    let view = service
+        .collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        view.entries
+            .items
+            .iter()
+            .all(|entry| entry.item_id == Some(left.id))
+    );
+    let missing = CollectionService::new(store.clone(), Arc::new(Registry::default()));
+    let view = missing
+        .collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(view.entries.items.iter().all(|entry| matches!(
+        entry.availability,
+        collector_app::ListEntryAvailability::ModuleUnavailable
+    )));
+    service
+        .set_item_removed(
+            &actor,
+            left.id,
+            Catalog::item(store.as_ref(), left.id).unwrap().revision,
+            true,
+            &command(),
+        )
+        .unwrap();
+    let view = service
+        .collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            ListEntriesQuery {
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        view.entries
+            .items
+            .iter()
+            .all(|entry| entry.item_id.is_none()
+                && matches!(
+                    entry.availability,
+                    collector_app::ListEntryAvailability::EntryRemoved
+                ))
+    );
+}
+
+#[test]
+fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
+    use collector_app::{
+        CollectionListChange as Change, CollectionListPort, CreateCollectionList,
+        UpdateCollectionList,
+    };
+    for prepared_tracks in 0..=2 {
+        let (root, store, actor, service, collection) = setup();
+        let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        let imported = derivative_import(&service, &actor, collection.id);
+        let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+        let revision = capture.revision;
+        capture.association.item_id = Some(album.id);
+        Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+        let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+        for position in 1..=prepared_tracks {
+            service
+                .prepare_music_derivative(
+                    &actor,
+                    imported.capture_id,
+                    derivative_command(&imported, position),
+                    &command(),
+                )
+                .unwrap();
+        }
+        while service.run_next_job("list-partial-source").unwrap() {}
+        let pcm: Vec<u8> = (0..5 * 588)
+            .flat_map(|i| [i as u8, 0x80, 0xff, 0x7f])
+            .collect();
+        let payload = find_file_with_bytes(&root.path().join("archive"), &pcm).unwrap();
+        std::fs::remove_file(&payload).unwrap();
+        for source in [None, Some(imported.representation_id)] {
+            let list = service
+                .create_collection_list(
+                    &actor,
+                    collection.id,
+                    CreateCollectionList {
+                        name: "Complete disc scope".into(),
+                    },
+                    &command(),
+                )
+                .unwrap();
+            let request = UpdateCollectionList {
+                expected_revision: list.revision,
+                change: Change::Append {
+                    item_id: album.id,
+                    source_representation_id: source,
+                    track_position: None,
+                },
+            };
+            let result =
+                service.update_collection_list(&actor, collection.id, list.id, request, &command());
+            if prepared_tracks == 2 {
+                assert_eq!(result.unwrap().entry_count, 2);
+            } else {
+                assert!(
+                    matches!(result, Err(Error::Invalid(message)) if message.contains("complete disc audio scope"))
+                );
+                assert!(store.collection_list(list.id).unwrap().entries.is_empty());
+                if prepared_tracks == 1 {
+                    let single = service
+                        .update_collection_list(
+                            &actor,
+                            collection.id,
+                            list.id,
+                            UpdateCollectionList {
+                                expected_revision: list.revision,
+                                change: Change::Append {
+                                    item_id: album.id,
+                                    source_representation_id: Some(imported.representation_id),
+                                    track_position: Some(1),
+                                },
+                            },
+                            &command(),
+                        )
+                        .unwrap();
+                    assert_eq!(single.entry_count, 1);
+                }
+            }
+        }
+        // Restoring the original makes both recorded tracks available to expand
+        // again, without requiring new preparation or a payload integrity scan.
+        std::fs::write(payload, &pcm).unwrap();
+        let list = service
+            .create_collection_list(
+                &actor,
+                collection.id,
+                CreateCollectionList {
+                    name: "Restored disc".into(),
+                },
+                &command(),
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .update_collection_list(
+                    &actor,
+                    collection.id,
+                    list.id,
+                    UpdateCollectionList {
+                        expected_revision: list.revision,
+                        change: Change::Append {
+                            item_id: album.id,
+                            source_representation_id: None,
+                            track_position: None,
+                        },
+                    },
+                    &command(),
+                )
+                .unwrap()
+                .entry_count,
+            2
+        );
+    }
 }

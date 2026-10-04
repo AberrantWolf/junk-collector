@@ -99,4 +99,5 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  await nav.getByRole('button',{name:'Library',exact:true}).click();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('pressing');
  console.log('Bulk library journey passed: interrupted folder upload, metadata, confirmed grouping, FLAC preparation, Activity, mobile/keyboard review and actual playback.');
+ return {album:merged[1]};
 }

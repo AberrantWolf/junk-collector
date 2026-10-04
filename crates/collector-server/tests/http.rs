@@ -2706,8 +2706,10 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 132); // Dedicated care, intake, grouping and bulk workflow contracts.
+    assert_eq!(paths.len(), 134); // Two collection-list paths add read/create/detail/update contracts.
     for path in [
+        "/api/v1/collections/{collection}/lists",
+        "/api/v1/collections/{collection}/lists/{list}",
         "/api/v1/collection-search",
         "/api/v1/collections/{id}",
         "/api/v1/items/{id}/remove",
@@ -4849,4 +4851,114 @@ async fn browser_command_account_precondition_cannot_switch_or_supply_authority(
         StatusCode::OK,
         "mismatched command revoked the session"
     );
+}
+
+#[tokio::test]
+async fn collection_lists_reads_and_writes_follow_listener_composition_and_roles() {
+    use collector_app::CreateCollectionList;
+    let (_root, mut state) = state();
+    let user = state
+        .store
+        .create_user("list-owner", "a long test password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Lists"),
+            &command(),
+        )
+        .unwrap();
+    let list = state
+        .service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                name: "Playlist".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let (token, _) = state.store.issue_session(user, "browser").unwrap();
+    let url = format!("/api/v1/collections/{}/lists", collection.id);
+    let app = router(state.clone());
+    for path in [
+        "/lists".to_string(),
+        url.clone(),
+        format!("{url}/{}", list.id),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let hidden = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&url)
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "public-list")
+                .body(Body::from(r#"{"name":"Hidden"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hidden.status(), StatusCode::METHOD_NOT_ALLOWED);
+    state.ingress = Ingress::Private;
+    let viewer = state
+        .store
+        .create_user("list-viewer", "another long password", false)
+        .unwrap();
+    Catalog::grant(state.store.as_ref(), collection.id, viewer, Role::Viewer).unwrap();
+    let (viewer_token, _) = state.store.issue_session(viewer, "browser").unwrap();
+    let app = router(state.clone());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&url)
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .header("content-type", "application/json")
+                .header("origin", "https://collector.example")
+                .header("idempotency-key", "viewer-list")
+                .body(Body::from(r#"{"name":"Forbidden"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("{url}/{}", list.id))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["list"]["can_edit"], false);
 }

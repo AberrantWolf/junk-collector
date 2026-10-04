@@ -18,6 +18,44 @@ recovery reuse existing worker/publication policies. This section records the
 implemented BL1–BL3 contract; local acceptance is recorded in
 [bulk validation](validation/bulk-library.md).
 
+## Collection lists
+
+Collection-owned lists are portable revisioned archive entities, independent of
+Item inventory, metadata and the personal browser playback queue. Each occurrence
+has a stable ID; repeated items/tracks are intentional and independently movable.
+Ordinary collections list Items. Music collections list source track coordinates
+(Capture, preservation Representation and track position), never derivative URLs.
+Application policy expands album/disc additions, uses numeric disc/track order,
+and requires a source choice for alternate originals. Disc/album expansion checks
+the complete recorded audio-track scope against availability; unavailable originals
+cannot silently shrink an addition to its prepared subset. Individual available
+tracks remain addable. Additions freeze inventory and Capture revisions for a
+publication-time currency check. Current prepared
+outputs and descriptive titles are resolved when viewing/playing; list browsing
+never hashes payloads or reads audio bytes. Capture ownership follows a confirmed merge in the same
+collection; removed or superseded sources remain visible as unavailable entries.
+
+Browse roles read lists; Curator/Owner roles write collection-shared lists through
+curation routes. The storage adapter rechecks grants and revisions under the archive
+writer, publishes using the existing journal/rename commit, and atomically projects
+the list and command receipt. Archive-only recovery rebuilds lists without grants.
+Catalog v12/checkpoint format 5 include list projections. Lists have at most 5,000
+occurrences; name length is 256 bytes, list/entry pages are at most 100 rows, and
+entry cursors bind to the list revision. Conflict reload is explicit. Deletion is
+an archive tombstone and never removes originals. Unknown collection modules can
+still read lists; unsupported playback is labeled rather than invented. A future
+video capability will need its own target resolver before becoming playable.
+
+The addressable Lists page belongs beside Library. Album, disc and track controls
+append to a list through one shared chooser using the common dialog and operation
+scope helpers. Search keeps the selected destination visible and fences obsolete
+pages. Unconfirmed create/append inputs and receipt keys survive reload and panel
+reopen in a user/source-scoped browser session draft; retries resolve that original
+command before another addition. Playlist Play/Shuffle play resolve all bounded
+pages at one list revision before replacing the personal queue, and show
+unavailable-track exclusions. Shuffle changes the playback order, not the saved
+list. Reload restores a paused queue; the shell player persists across navigation.
+
 ## Local-alpha guided ingestion
 
 New guided imports create one default owned, present physical copy on their new
@@ -477,7 +515,7 @@ Durable publication journals contain transaction/entity identities, expected/tar
 
 Collection creation writes an immutable collection manifest and a private recovery intent for the owner grant before archive mutation. Startup completes the intended grant when the collection commit exists or removes the abandoned intent when it does not. Copying only the archive never reconstructs a grant.
 
-SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v11 and `private.sqlite` is schema v18. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
+SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v12 and `private.sqlite` is schema v18. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness; v12 adds portable collection-list projections. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
 
 P06 reuses the incrementally maintained catalog at startup when a checkpoint matches the canonical archive path, projection epoch and complete filesystem observation inventory. Observations cover metadata revisions, snapshot files and migration checkpoints using file size, modification time, and on Unix inode/device/change time; payload trees are pruned. This is a change hint, not byte integrity or catalog verification. Warm startup still walks metadata names/stats and runs SQLite quick_check; it does not parse archive records, revisit completed migration records, or hash snapshot/media bytes.
 
@@ -547,7 +585,7 @@ The bounded browser player has one owner at the authenticated application shell,
 independent of album views, navigation and curation refreshes. Album views enqueue
 one browser-decodable prepared representation per selected track; they do not own
 media elements. A fixed bottom dock appears for music browsing or an existing
-queue. Its personal queue (at most 500 entries, immutable item/representation/file
+queue. Its personal queue (at most 5,000 entries, immutable item/representation/file
 coordinates and display metadata) is local to this browser origin and user, never
 server activity. Reload restores a paused queue, not autoplay. Selecting, removing
 or clearing the current entry releases obsolete playback; reordering/adding other

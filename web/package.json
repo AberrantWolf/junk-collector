@@ -17,6 +17,7 @@
     "test:fx06": "node tests/fx06.mjs",
     "test:fx04-review": "node tests/fx04-review.mjs",
     "test:queue": "node tests/music-queue.mjs",
+    "test:lists": "node tests/collection-list-chooser.mjs",
     "test:context": "node tests/work-context.mjs"
   },
   "dependencies": {

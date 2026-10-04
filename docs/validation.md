@@ -1,5 +1,13 @@
 # Validation recorded for the foundation
 
+## Collection lists and playlists — 2026-10-03
+
+[Collection-list validation](validation/collection-lists.md) records portable ordered
+lists, role boundaries, recovery, source resolution and real playlist playback.
+CL1 is locally accepted: repository gates and the real Chrome playlist/shuffle,
+mobile and keyboard journeys passed. The [delivery ledger](collection-lists-plan.md)
+records the remaining scope and next handoff.
+
 ## Catalog startup and write performance — 2026-10-03
 
 [P06 validation](validation/p06-indexing.md) records checkpoint reuse, indexed
@@ -3890,3 +3898,10 @@ shared cancellation, real browser playback and the generated 2,400-member run.
 The [delivery ledger](bulk-library-plan.md) and handoff/status summaries are updated
 together. Trusted second-device and wider deployment/scale qualification remain
 separate; blocked DAT downloads remain disabled.
+
+## Collection-list review repairs — 2026-10-04
+
+The fixes and current regression/gate results are recorded in the dated follow-up
+in [collection-list validation](validation/collection-lists.md). Chooser selection,
+obsolete pagination, uncertain command receipts, shared dialog behavior and complete
+disc expansion are repaired without changing the outstanding LA3 device gate.

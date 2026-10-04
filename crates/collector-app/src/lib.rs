@@ -1,4 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod collection_lists;
+pub use collection_lists::*;
 mod bulk_library;
 pub use bulk_library::*;
 mod bulk_intake;
@@ -1271,6 +1273,7 @@ pub trait CommandEffects:
     + AlbumGroupingPort
     + BulkIntakePort
     + BulkLibraryPort
+    + CollectionListPort
 {
 }
 impl<T> CommandEffects for T where
@@ -1288,6 +1291,7 @@ impl<T> CommandEffects for T where
         + AlbumGroupingPort
         + BulkIntakePort
         + BulkLibraryPort
+        + CollectionListPort
 {
 }
 
@@ -1377,6 +1381,7 @@ pub struct CollectionService {
     grouping: Arc<dyn AlbumGroupingPort>,
     intake_port: Arc<dyn BulkIntakePort>,
     bulk_port: Arc<dyn BulkLibraryPort>,
+    lists: Arc<dyn CollectionListPort>,
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
     artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
@@ -2047,6 +2052,7 @@ impl CollectionService {
             + AlbumGroupingPort
             + BulkIntakePort
             + BulkLibraryPort
+            + CollectionListPort
             + 'static,
     {
         let reader: Arc<dyn CollectionReadPort> = catalog.clone();
@@ -2065,6 +2071,7 @@ impl CollectionService {
         let grouping: Arc<dyn AlbumGroupingPort> = catalog.clone();
         let intake_port: Arc<dyn BulkIntakePort> = catalog.clone();
         let bulk_port: Arc<dyn BulkLibraryPort> = catalog.clone();
+        let lists: Arc<dyn CollectionListPort> = catalog.clone();
         Self {
             reader,
             writer,
@@ -2083,6 +2090,7 @@ impl CollectionService {
             grouping,
             intake_port,
             bulk_port,
+            lists,
             audio_converter: None,
             artwork_preview: None,
             streaming_providers: Arc::new(Default::default()),

@@ -16,6 +16,21 @@ This repository is an executable architecture/server foundation, not the complet
 
 Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation tickets and the [release requirements](release-requirements.md) for the repository-local target specification. The gap list below is a summary, not a substitute for ticket acceptance criteria.
 
+## Collection lists — locally accepted (2026-10-03)
+
+The [CL1 contract](collection-lists-plan.md) adds collection-owned portable lists,
+track-based music playlists, album/disc expansion, ordering, and actual playback
+through the persistent player. Other collection lists contain Items. Shared-list
+roles, atomic revision/receipt recovery and typed availability are implemented.
+Repository gates and real Chrome playlist/shuffle, mobile and keyboard journeys
+passed; evidence is recorded in [validation](validation/collection-lists.md).
+2026-10-04 review repairs keep chooser destinations visible through search, fence
+obsolete pagination, retain unresolved create/append receipts through reload/reopen,
+and use shared dialog behavior. Disc/album additions reject incomplete track scopes
+instead of silently omitting unavailable tracks. See the dated follow-up in the
+validation record for current checks. Future video playback, smart/personal lists
+and synchronized listening are separate.
+
 ## Bulk library workflows — locally accepted (2026-10-03)
 
 The [bulk library delivery ledger](bulk-library-plan.md) records BL1 shared metadata

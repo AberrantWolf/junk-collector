@@ -660,6 +660,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{collection}/lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["collection_lists"];
+        put?: never;
+        post: operations["create_collection_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{collection}/lists/{list}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["collection_list_view"];
+        put: operations["update_collection_list"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{id}": {
         parameters: {
             query?: never;
@@ -2430,6 +2462,48 @@ export interface components {
         };
         /** Format: uuid */
         CollectionId: string;
+        CollectionListChange: {
+            /** @enum {string} */
+            action: "rename";
+            name: string;
+        } | {
+            /** @enum {string} */
+            action: "delete";
+        } | {
+            /** @enum {string} */
+            action: "remove";
+            entry_id: components["schemas"]["ListEntryId"];
+        } | {
+            /** @enum {string} */
+            action: "move";
+            before?: null | components["schemas"]["ListEntryId"];
+            entry_id: components["schemas"]["ListEntryId"];
+        } | {
+            /** @enum {string} */
+            action: "append";
+            item_id: components["schemas"]["ItemId"];
+            source_representation_id?: null | components["schemas"]["RepresentationId"];
+            /** Format: int32 */
+            track_position?: number | null;
+        };
+        /** Format: uuid */
+        CollectionListId: string;
+        /** @enum {string} */
+        CollectionListKind: "items" | "music_tracks";
+        CollectionListSummary: {
+            can_edit: boolean;
+            collection_id: components["schemas"]["CollectionId"];
+            /** Format: int32 */
+            entry_count: number;
+            id: components["schemas"]["CollectionListId"];
+            kind: components["schemas"]["CollectionListKind"];
+            name: string;
+            revision: components["schemas"]["Revision"];
+        };
+        CollectionListView: {
+            entries: components["schemas"]["Page_PresentedListEntry"];
+            list: components["schemas"]["CollectionListSummary"];
+        };
         CompleteEnrollment: {
             completion_secret: string;
         };
@@ -2510,6 +2584,9 @@ export interface components {
          */
         CreateCollectionCommand: {
             module: components["schemas"]["ModuleId"];
+            name: string;
+        };
+        CreateCollectionList: {
             name: string;
         };
         CreateIntake: {
@@ -3037,6 +3114,33 @@ export interface components {
             /** @enum {string} */
             selection: "all_matching";
         };
+        ListEntryAvailability: {
+            /** @enum {string} */
+            status: "entry";
+        } | {
+            /** @enum {string} */
+            status: "preparing";
+        } | {
+            /** @enum {string} */
+            status: "needs_preparation";
+        } | {
+            /** @enum {string} */
+            status: "source_unavailable";
+        } | {
+            /** @enum {string} */
+            status: "entry_removed";
+        } | {
+            /** @enum {string} */
+            status: "module_unavailable";
+        } | {
+            file_index: number;
+            media_type: string;
+            representation_id: components["schemas"]["RepresentationId"];
+            /** @enum {string} */
+            status: "available";
+        };
+        /** Format: uuid */
+        ListEntryId: string;
         Loan: {
             contact: string;
             /** Format: date */
@@ -3578,6 +3682,19 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_CollectionListSummary: {
+            items: {
+                can_edit: boolean;
+                collection_id: components["schemas"]["CollectionId"];
+                /** Format: int32 */
+                entry_count: number;
+                id: components["schemas"]["CollectionListId"];
+                kind: components["schemas"]["CollectionListKind"];
+                name: string;
+                revision: components["schemas"]["Revision"];
+            }[];
+            next_cursor?: string | null;
+        };
         Page_GrantView: {
             items: {
                 collection_id: components["schemas"]["CollectionId"];
@@ -3768,6 +3885,23 @@ export interface components {
                 wishlist: boolean;
                 /** Format: int64 */
                 workflow_generation: number;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_PresentedListEntry: {
+            items: {
+                album?: string | null;
+                artwork?: null | components["schemas"]["AssetId"];
+                availability: components["schemas"]["ListEntryAvailability"];
+                /** Format: int32 */
+                disc_position?: number | null;
+                id: components["schemas"]["ListEntryId"];
+                item_id?: null | components["schemas"]["ItemId"];
+                /** Format: int32 */
+                position: number;
+                title: string;
+                /** Format: int32 */
+                track_position?: number | null;
             }[];
             next_cursor?: string | null;
         };
@@ -4268,6 +4402,10 @@ export interface components {
         };
         UpdateAssetEnvelope: {
             command: components["schemas"]["UpdateAssetCommand"];
+            expected_revision: components["schemas"]["Revision"];
+        };
+        UpdateCollectionList: {
+            change: components["schemas"]["CollectionListChange"];
             expected_revision: components["schemas"]["Revision"];
         };
         UpdateMetadataAuthorityCommand: {
@@ -6011,6 +6149,177 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    collection_lists: {
+        parameters: {
+            query?: {
+                search?: string;
+                cursor?: components["schemas"]["CollectionListId"];
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_CollectionListSummary"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_collection_list: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCollectionList"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionListSummary"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    collection_list_view: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                list: components["schemas"]["CollectionListId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionListView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_collection_list: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                list: components["schemas"]["CollectionListId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCollectionList"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionListSummary"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

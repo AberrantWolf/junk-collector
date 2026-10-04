@@ -5,6 +5,7 @@ mod auth;
 mod browse;
 mod bulk_intake;
 mod bulk_library;
+mod collection_lists;
 mod commands;
 mod derivatives;
 mod files;
@@ -366,6 +367,7 @@ impl Store {
         let _writer = lock(&self.writer)?;
         let mut collections = Vec::new();
         let mut records = Vec::new();
+        let mut lists = Vec::new();
         let mut works = Vec::new();
         let mut editions = Vec::new();
         let mut captures = Vec::new();
@@ -402,6 +404,10 @@ impl Store {
                 collection.binding = binding.binding;
             }
             collections.push((collection.clone(), dir.clone()));
+            for list in read_latest_records::<CollectionList>(&dir.join("lists"), collection.id)? {
+                list.validate()?;
+                lists.push(list);
+            }
             assets_v3.extend(migration_v3::read_assets(&dir, collection.id)?);
             evidence_v3.extend(migration_v3::read_evidence(&dir, collection.id)?);
             works.extend(read_latest_records::<Work>(
@@ -579,10 +585,60 @@ impl Store {
             }
             graphs.push(graph);
         }
+        let item_owners = records
+            .iter()
+            .map(|(record, _)| (record.item.id, record.item.collection_id))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let capture_owners = captures
+            .iter()
+            .map(|capture| (capture.id, capture.collection_id))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let source_owners = captures
+            .iter()
+            .flat_map(|capture| {
+                capture
+                    .representations
+                    .iter()
+                    .map(move |source| (source.id, capture.collection_id))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for list in &lists {
+            for entry in &list.entries {
+                let item_id = match entry.target {
+                    ListTarget::Item { item_id } | ListTarget::MusicTrack { item_id, .. } => {
+                        item_id
+                    }
+                };
+                if item_owners
+                    .get(&item_id)
+                    .is_some_and(|owner| *owner != list.collection_id)
+                {
+                    return Err(Error::Invalid(
+                        "list target belongs to another collection".into(),
+                    ));
+                }
+                if let ListTarget::MusicTrack {
+                    capture_id,
+                    source_representation_id,
+                    ..
+                } = entry.target
+                    && (capture_owners
+                        .get(&capture_id)
+                        .is_some_and(|owner| *owner != list.collection_id)
+                        || source_owners
+                            .get(&source_representation_id)
+                            .is_some_and(|owner| *owner != list.collection_id))
+                {
+                    return Err(Error::Invalid(
+                        "playlist source belongs to another collection".into(),
+                    ));
+                }
+            }
+        }
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
-            "DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
+            "DELETE FROM collection_lists; DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
         )
         .map_err(storage)?;
         for (collection, path) in collections {
@@ -595,6 +651,9 @@ impl Store {
                 ],
             )
             .map_err(storage)?;
+        }
+        for list in lists {
+            collection_lists::project(&tx, &list)?;
         }
         for work in works {
             tx.execute(
@@ -2224,7 +2283,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if catalog_version > 11 {
+    if catalog_version > index_checkpoint::CATALOG_SCHEMA {
         return Err(Error::Unavailable(format!(
             "catalog projection schema {catalog_version} is newer than this server"
         )));
@@ -2357,6 +2416,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS processing_groups_scan ON processing_groups(scan_key);
         CREATE TABLE IF NOT EXISTS processing_members(id TEXT PRIMARY KEY, result_id TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS processing_members_result ON processing_members(result_id,id);").map_err(storage)?;
+    collection_lists::install(db)?;
     reference_index::install(db)?;
     index_checkpoint::install(db)?;
     if catalog_version < 9 {
@@ -2365,7 +2425,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         db.execute_batch("PRAGMA main.user_version=9;")
             .map_err(storage)?;
     }
-    db.execute_batch("PRAGMA main.user_version=11;")
+    db.pragma_update(None, "user_version", index_checkpoint::CATALOG_SCHEMA)
         .map_err(storage)?;
     Ok(())
 }

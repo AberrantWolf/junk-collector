@@ -481,6 +481,7 @@ pub fn router(state: AppState) -> Router {
             get(|| async { Json(serde_json::json!({"status":"ok"})) }),
         )
         .route("/", get(index))
+        .route("/lists", get(index))
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
         .route("/security.js", get(security_js))
@@ -547,6 +548,8 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(collection_types))
         .routes(routes!(collection_search))
         .routes(routes!(collection_detail))
+        .routes(routes!(collection_lists))
+        .routes(routes!(collection_list_view))
         .routes(routes!(browse))
         .routes(routes!(item))
         .routes(routes!(evidence))
@@ -562,6 +565,8 @@ fn client_api_router() -> OpenApiRouter<AppState> {
 
 fn curation_api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
+        .routes(routes!(create_collection_list))
+        .routes(routes!(update_collection_list))
         .routes(routes!(collection_grants))
         .routes(routes!(
             get_collection_grant,
@@ -4461,5 +4466,71 @@ async fn work_jobs(
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.work_jobs(&actor, query)).await?,
+    ))
+}
+
+#[utoipa::path(get,path="/api/v1/collections/{collection}/lists",params(("collection"=CollectionId,Path),("search"=Option<String>,Query),("cursor"=Option<CollectionListId>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::CollectionListSummary>),(status=403)))]
+async fn collection_lists(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(collection): Path<CollectionId>,
+    Query(query): Query<collector_app::CollectionListsQuery>,
+) -> ApiResult<Json<Page<collector_app::CollectionListSummary>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.collection_lists(&actor, collection, query)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/collections/{collection}/lists/{list}",params(("collection"=CollectionId,Path),("list"=CollectionListId,Path),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=collector_app::CollectionListView),(status=403),(status=404),(status=409)))]
+async fn collection_list_view(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, list)): Path<(CollectionId, CollectionListId)>,
+    Query(query): Query<collector_app::ListEntriesQuery>,
+) -> ApiResult<Json<collector_app::CollectionListView>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .collection_list_view(&actor, collection, list, query)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/collections/{collection}/lists",params(("collection"=CollectionId,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::CreateCollectionList,responses((status=200,body=collector_app::CollectionListSummary),(status=400),(status=403),(status=409)))]
+async fn create_collection_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(collection): Path<CollectionId>,
+    Json(command): Json<collector_app::CreateCollectionList>,
+) -> ApiResult<Json<collector_app::CollectionListSummary>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .create_collection_list(&actor, collection, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(put,path="/api/v1/collections/{collection}/lists/{list}",params(("collection"=CollectionId,Path),("list"=CollectionListId,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::UpdateCollectionList,responses((status=200,body=collector_app::CollectionListSummary),(status=400),(status=403),(status=404),(status=409)))]
+async fn update_collection_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, list)): Path<(CollectionId, CollectionListId)>,
+    Json(command): Json<collector_app::UpdateCollectionList>,
+) -> ApiResult<Json<collector_app::CollectionListSummary>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .update_collection_list(&actor, collection, list, command, &context)
+        })
+        .await?,
     ))
 }

@@ -1,4 +1,6 @@
 //! Portable collection contracts. No filesystem, database, transport or UI dependencies.
+mod lists;
+pub use lists::*;
 mod metadata;
 mod processing;
 
@@ -50,7 +52,9 @@ identity!(
     PackageFileId,
     ObservationId,
     SnapshotId,
-    RecipeId
+    RecipeId,
+    CollectionListId,
+    ListEntryId
 );
 
 #[derive(

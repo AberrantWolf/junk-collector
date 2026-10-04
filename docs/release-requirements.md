@@ -4,6 +4,16 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 This is the repository-local summary of the user-approved plan, recorded for handoff from commit `98e9187`. It describes the target, not current capabilities. [Implementation status](implementation-status.md) describes what exists; [handoff backlog](handoff-backlog.md) defines the remaining work. Implementation shortcuts are not amendments to these requirements. If a requirement needs to change, record the discrepancy and resolve it explicitly.
 
+## Collection lists and playlists
+
+Lists belong to one collection and are portable with its archive. Music list units
+are individual audio tracks; album/disc additions append their supported tracks in
+numeric order. Preserve intentional repeats, editable order, Play and Shuffle play.
+Other collection lists use entries; future playable modules require an actual typed
+target resolver. Shared collection roles govern read/play and curation writes.
+Unavailable members and concurrent changes must be visible, never silently removed
+or overwritten. List queries/admission must not hash or read full media payloads.
+
 ## Earlier local-alpha delivery
 
 Accepted 2026-09-16: prioritize ingestion of raw dumps, automatic metadata,

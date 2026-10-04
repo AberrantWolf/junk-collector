@@ -1967,6 +1967,241 @@
         }
       }
     },
+    "/api/v1/collections/{collection}/lists": {
+      "get": {
+        "operationId": "collection_lists",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionListId"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_CollectionListSummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_collection_list",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCollectionList"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionListSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{collection}/lists/{list}": {
+      "get": {
+        "operationId": "collection_list_view",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionListId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionListView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_collection_list",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionListId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCollectionList"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionListSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/collections/{id}": {
       "get": {
         "operationId": "collection_detail",
@@ -8299,6 +8534,187 @@
         "type": "string",
         "format": "uuid"
       },
+      "CollectionListChange": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "rename"
+                ]
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "delete"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "entry_id",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "remove"
+                ]
+              },
+              "entry_id": {
+                "$ref": "#/components/schemas/ListEntryId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "entry_id",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "move"
+                ]
+              },
+              "before": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ListEntryId"
+                  }
+                ]
+              },
+              "entry_id": {
+                "$ref": "#/components/schemas/ListEntryId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "item_id",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "append"
+                ]
+              },
+              "item_id": {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              "source_representation_id": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RepresentationId"
+                  }
+                ]
+              },
+              "track_position": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
+      "CollectionListId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "CollectionListKind": {
+        "type": "string",
+        "enum": [
+          "items",
+          "music_tracks"
+        ]
+      },
+      "CollectionListSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection_id",
+          "revision",
+          "name",
+          "kind",
+          "entry_count",
+          "can_edit"
+        ],
+        "properties": {
+          "can_edit": {
+            "type": "boolean"
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "entry_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/CollectionListId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CollectionListKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
+      "CollectionListView": {
+        "type": "object",
+        "required": [
+          "list",
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "$ref": "#/components/schemas/Page_PresentedListEntry"
+          },
+          "list": {
+            "$ref": "#/components/schemas/CollectionListSummary"
+          }
+        }
+      },
       "CompleteEnrollment": {
         "type": "object",
         "required": [
@@ -8645,6 +9061,18 @@
             "type": "string"
           }
         }
+      },
+      "CreateCollectionList": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "CreateIntake": {
         "type": "object",
@@ -10791,6 +11219,125 @@
             }
           }
         ]
+      },
+      "ListEntryAvailability": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "entry"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "preparing"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "needs_preparation"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "source_unavailable"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "entry_removed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "module_unavailable"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "representation_id",
+              "file_index",
+              "media_type",
+              "status"
+            ],
+            "properties": {
+              "file_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "media_type": {
+                "type": "string"
+              },
+              "representation_id": {
+                "$ref": "#/components/schemas/RepresentationId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "ListEntryId": {
+        "type": "string",
+        "format": "uuid"
       },
       "Loan": {
         "type": "object",
@@ -13062,6 +13609,60 @@
           }
         }
       },
+      "Page_CollectionListSummary": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "collection_id",
+                "revision",
+                "name",
+                "kind",
+                "entry_count",
+                "can_edit"
+              ],
+              "properties": {
+                "can_edit": {
+                  "type": "boolean"
+                },
+                "collection_id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "entry_count": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "id": {
+                  "$ref": "#/components/schemas/CollectionListId"
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/CollectionListKind"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_GrantView": {
         "type": "object",
         "required": [
@@ -13908,6 +14509,90 @@
                 "workflow_generation": {
                   "type": "integer",
                   "format": "int64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_PresentedListEntry": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "position",
+                "title",
+                "availability"
+              ],
+              "properties": {
+                "album": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "artwork": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AssetId"
+                    }
+                  ]
+                },
+                "availability": {
+                  "$ref": "#/components/schemas/ListEntryAvailability"
+                },
+                "disc_position": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "id": {
+                  "$ref": "#/components/schemas/ListEntryId"
+                },
+                "item_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ItemId"
+                    }
+                  ]
+                },
+                "position": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "title": {
+                  "type": "string"
+                },
+                "track_position": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
                   "minimum": 0
                 }
               }
@@ -16038,6 +16723,22 @@
         "properties": {
           "command": {
             "$ref": "#/components/schemas/UpdateAssetCommand"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateCollectionList": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "change"
+        ],
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/CollectionListChange"
           },
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"

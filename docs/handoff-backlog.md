@@ -4,6 +4,20 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
+## Collection lists — locally accepted
+
+2026-10-03: [CL1 collection lists and playlists](collection-lists-plan.md) is delivered
+across core, application, archive persistence, versioned API, Lists page and player.
+Repository gates, recovery tests and real-browser playlist/shuffle, mobile and
+keyboard journeys passed; see [collection-list acceptance](validation/collection-lists.md).
+2026-10-04 review repairs address chooser search/pagination, uncertain command
+recovery, shared dialog behavior and incomplete disc expansion; current checks are
+recorded in the dated collection-list validation follow-up.
+The next handoff returns to the remaining trusted second-device LA3 gate unless the
+user supplies another assignment. Do not start synchronized listening or video
+support as part of CL1. Do not commit without a new explicit request; signing should
+wait until the user is at the computer.
+
 ## Bulk library delivery — locally accepted
 
 2026-10-03: BL1 shared metadata resolution/review, BL2 durable import and confirmed
@@ -16,11 +30,14 @@ the older serial implementation handoff and performance follow-up.
 
 Continue [LA3 qualification](local-alpha-plan.md#ready-to-send-la3-prompt) using the
 intended trusted second physical LAN device. Read architecture, release requirements,
-current status and the bulk delivery validation first. Preserve actual credentials,
+current status, bulk delivery validation and collection-list validation first.
+Preserve actual credentials,
 grants, configuration, raw masters and accepted/manual metadata. Do not repeat passing
 local corpus/restore work unless affected code changes. Record actual second-device
 playback, denied curation and revocation evidence; keep blocked DAT downloads disabled.
-No additional bulk-workflow implementation is currently assigned.
+No additional bulk-workflow or list implementation is currently assigned. Do not
+trigger a commit/signing prompt without a new explicit request while the user is
+at the computer.
 
 ## Local alpha — remaining external qualification
 
@@ -904,6 +921,17 @@ Reconcile requirements against implementation and recorded evidence, review expo
 | Performance, native/container/tunnel/tailnet/NAS deployments | P06, R02, R03 |
 
 Follow-on tickets must be planned separately: SwiftUI iOS/UniFFI, PriceCharting exchange after API research, runtime plugin isolation, replication, video, emulators and ripping hardware. Cross-collection byte deduplication is not an initial requirement. Do not invent these as prerequisites for a first-release ticket.
+
+### TODO — Synchronized playback and shared listening
+
+Requested 2026-10-03; planned follow-on capability, not implemented or part of the active local-alpha assignment.
+
+- Add another room/device to an already-playing listening session so a listener can move between rooms while both play the same content at the current position, without restarting playback.
+- Support multiple devices belonging to the same user and shared listening with another authorized user.
+- On a LAN, aim to keep participating devices closely synchronized, including when a device joins ongoing playback. Define acceptable drift and correction behavior during design.
+- Over WAN, support shared listening without requiring tight timing synchronization.
+
+Plan session ownership, join/control permissions and playback coordination across application services and clients before implementation. Each participant must retain authorized media access. This is separate from C06 personal activity synchronization.
 
 ## Copyable assignment
 

@@ -968,7 +968,7 @@ impl CollectionService {
         }
     }
 
-    fn recorded_music_layout(
+    pub(super) fn recorded_music_layout(
         &self,
         collection_id: CollectionId,
         source: RepresentationId,
