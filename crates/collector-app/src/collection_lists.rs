@@ -336,6 +336,8 @@ impl CollectionService {
                 }
             }
             let mut view = PresentedListEntry {
+                source: None,
+                audio: None,
                 id: entry.id,
                 position: index as u32 + 1,
                 item_id: None,
@@ -348,6 +350,7 @@ impl CollectionService {
             };
             if let Some(item) = items.get(&item_id) {
                 view.item_id = Some(item.id);
+                view.source = Some(entry.target.clone());
                 view.title = item.title.clone();
                 view.artwork = item.primary_artwork;
                 view.availability = ListEntryAvailability::Entry;
@@ -403,6 +406,7 @@ impl CollectionService {
                             .or_else(|| matches.first());
                         view.availability = if let Some(row) = preferred {
                             view.title = row.title.clone();
+                            view.audio = Some((*row).clone());
                             match &row.state {
                                 MusicTrackAvailabilityState::Available {
                                     representation_id,

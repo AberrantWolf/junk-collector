@@ -3336,6 +3336,19 @@ export interface components {
         };
         /** Format: uuid */
         ListEntryId: string;
+        ListTarget: {
+            item_id: components["schemas"]["ItemId"];
+            /** @enum {string} */
+            kind: "item";
+        } | {
+            capture_id: components["schemas"]["CaptureId"];
+            item_id: components["schemas"]["ItemId"];
+            /** @enum {string} */
+            kind: "music_track";
+            source_representation_id: components["schemas"]["RepresentationId"];
+            /** Format: int32 */
+            track_position: number;
+        };
         Loan: {
             contact: string;
             /** Format: date */
@@ -4136,6 +4149,7 @@ export interface components {
             items: {
                 album?: string | null;
                 artwork?: null | components["schemas"]["AssetId"];
+                audio?: null | components["schemas"]["MusicTrackAvailability"];
                 availability: components["schemas"]["ListEntryAvailability"];
                 /** Format: int32 */
                 disc_position?: number | null;
@@ -4143,6 +4157,7 @@ export interface components {
                 item_id?: null | components["schemas"]["ItemId"];
                 /** Format: int32 */
                 position: number;
+                source?: null | components["schemas"]["ListTarget"];
                 title: string;
                 /** Format: int32 */
                 track_position?: number | null;

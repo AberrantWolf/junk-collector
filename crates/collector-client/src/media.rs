@@ -18,6 +18,9 @@ impl MediaCancellation {
     pub fn cancel(&self) {
         self.0.store(true, Ordering::Release);
     }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
     fn check(&self) -> io::Result<()> {
         if self.0.load(Ordering::Acquire) {
             Err(io::Error::new(
@@ -54,7 +57,7 @@ impl EnrolledClient {
         // another stopped/current-thread runtime can strand reused connections.
         // Trust and request policy still use the central client implementation.
         let worker_client = EnrolledClient {
-            client: self.enrolled.pairing.lan_client()?,
+            client: crate::credential_http_client(&self.enrolled)?,
             enrolled: self.enrolled.clone(),
         };
         let url = self.api_url(&format!(
@@ -112,6 +115,11 @@ impl EnrolledClient {
             buffer: Vec::new(),
             cancellation,
         })
+    }
+}
+impl Drop for RangeReader {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
     }
 }
 impl RangeReader {

@@ -280,10 +280,7 @@ impl EnrolledClient {
         if enrolled.expires_at <= chrono::Utc::now() {
             return Err(Error::CredentialRevoked);
         }
-        let client = match enrolled.trust {
-            ConnectionTrust::PinnedCertificate => enrolled.pairing.lan_client()?,
-            ConnectionTrust::SystemHttps => system_https_client()?,
-        };
+        let client = credential_http_client(&enrolled)?;
         Ok(Self { client, enrolled })
     }
 
@@ -319,13 +316,19 @@ impl EnrolledClient {
     }
 }
 
+fn credential_http_client(enrolled: &EnrolledCredential) -> Result<reqwest::Client> {
+    match enrolled.trust {
+        ConnectionTrust::PinnedCertificate => enrolled.pairing.lan_client(),
+        ConnectionTrust::SystemHttps => system_https_client(),
+    }
+}
 fn invalid_url(error: url::ParseError) -> Error {
     Error::Invalid(error.to_string())
 }
 
 fn client_error(error: reqwest::Error) -> Error {
     if error.is_connect() {
-        Error::Unavailable("Could not establish an HTTPS connection to Collector. Check that the address resolves, the server is running, and its certificate is trusted. For a local self-signed certificate, see Phono’s Self-signed certificate help.".into())
+        Error::Unavailable("Could not establish an HTTPS connection to Collector. Check that the address resolves, the server is running, and its certificate is trusted. For a local self-signed certificate, obtain owner-provided trust material or install the server’s certificate in the system trust store.".into())
     } else if error.is_timeout() {
         Error::Unavailable(
             "Collector did not respond in time. Check the connection and retry.".into(),

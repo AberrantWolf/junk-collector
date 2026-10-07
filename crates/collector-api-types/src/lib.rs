@@ -73,6 +73,8 @@ pub enum ListEntryAvailability {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PresentedListEntry {
+    pub source: Option<ListTarget>,
+    pub audio: Option<MusicTrackAvailability>,
     pub id: ListEntryId,
     pub position: u32,
     pub item_id: Option<ItemId>,

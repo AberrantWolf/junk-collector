@@ -979,3 +979,19 @@ connection works and requested committing both projects. This establishes local
 connection success; the trust mode and full native acceptance matrix were not
 specified. Remaining failure/account-separation cases and second-physical-Mac
 acceptance stay open.
+
+## Trash Amp client integration (2026-10-07)
+
+Shared list-entry DTOs now include authorized source coordinates and current audio
+availability with recorded file length/digest. `collector-client` media readers
+honor both enrolled system HTTPS and owner certificate trust. Connection errors
+use client-neutral wording. OpenAPI and generated browser types are updated.
+Collector workspace tests, architecture checks, Clippy, web check/build and real
+Chrome smoke passed locally. The Rust server was rebuilt after asset generation.
+
+The sibling Trash Amp delivery exercises real TLS enrollment, colliding item IDs
+on two servers, revisioned duplicate list occurrences, real FLAC stream decoding
+and retained offline decoding. Native Slint enrollment/artwork/list/playback and
+download were exercised locally. This does not establish native audio fidelity or
+complete all native adversarial acceptance scenarios; see Trash Amp's
+`docs/collector-connection.md`. It does not advance unrelated handoff assignments.

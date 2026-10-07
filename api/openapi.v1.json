@@ -11879,6 +11879,60 @@
         "type": "string",
         "format": "uuid"
       },
+      "ListTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "item_id",
+              "kind"
+            ],
+            "properties": {
+              "item_id": {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "item"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "item_id",
+              "capture_id",
+              "source_representation_id",
+              "track_position",
+              "kind"
+            ],
+            "properties": {
+              "capture_id": {
+                "$ref": "#/components/schemas/CaptureId"
+              },
+              "item_id": {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "music_track"
+                ]
+              },
+              "source_representation_id": {
+                "$ref": "#/components/schemas/RepresentationId"
+              },
+              "track_position": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
       "Loan": {
         "type": "object",
         "required": [
@@ -15309,6 +15363,16 @@
                     }
                   ]
                 },
+                "audio": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MusicTrackAvailability"
+                    }
+                  ]
+                },
                 "availability": {
                   "$ref": "#/components/schemas/ListEntryAvailability"
                 },
@@ -15337,6 +15401,16 @@
                   "type": "integer",
                   "format": "int32",
                   "minimum": 0
+                },
+                "source": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ListTarget"
+                    }
+                  ]
                 },
                 "title": {
                   "type": "string"

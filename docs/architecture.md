@@ -700,3 +700,14 @@ management interface or the server's printed filesystem location, then establish
 trust explicitly in Phono or macOS. The server reports a local HTTPS listener
 address separately from advertised names, which do not create DNS. No OS trust
 change, certificate replacement or validation bypass is automatic.
+
+## Trash Amp native consumer
+
+Trash Amp uses `collector-client` as its transport boundary. Native credentials
+select either normal system HTTPS trust or explicit owner certificate trust; the
+media reader uses the same enrolled trust policy as catalog requests. Presented
+list occurrences expose authorized stable source coordinates and current prepared
+file length/digest observations for explicit offline retention. These fields are
+resolved by the existing list application service, subject to its collection
+authorization, and do not trigger payload hashing or server preparation. Native
+caches, queues and download policy belong to Trash Amp, not Collector core.
