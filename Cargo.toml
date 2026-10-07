@@ -9,6 +9,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+collector-api-types = { path = "crates/collector-api-types" }
 collector-core = { path = "crates/collector-core" }
 collector-modules = { path = "crates/collector-modules" }
 collector-app = { path = "crates/collector-app" }

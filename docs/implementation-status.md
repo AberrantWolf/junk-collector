@@ -880,3 +880,102 @@ audio-check action. Long processing details remain available in a collapsed
 Advanced evidence panel, not in the primary collection workflow. This does not
 establish that every physical disc or audio byte is correct, and no catalog read
 performs full-payload hashing.
+
+## Phono integration — PJ1 (updated 2026-10-07)
+
+[New delivery ledger](phono-integration-plan.md): shared transport DTOs, indexed
+song search, native client operations, authenticated range reader, Phono Keychain
+service/worker, connection/search UI, remote personal queue and playlist editing
+are implemented. FLAC vector/seek/truncation, continuous/mixed-rate PCM, journal
+restart/exact-input, and real TLS range/create/replay/rename/conflict checks pass.
+Native enrollment/restart, search tabs/artwork, repeated playlist edits and explicit
+conflict reapplication, pause/resume/seek/repeat-one, persistent output and device
+revocation passed. The user confirmed audible tone output. See the
+[dated evidence and remaining acceptance](validation/phono-integration.md).
+Collector, Phono, shared-library and affected sibling gates passed locally.
+Focused audible gapless boundaries, remaining native failure/queue matrix and
+physical second-Mac/LA3 evidence remain open. This does not complete
+Trash Amp or unrelated native-client work. No preparation/offline/sync/discovery
+capability is claimed.
+
+## Account/connection usability repair — 2026-10-07
+
+The [cross-app source review](account-connection-usability-review.md) identifies
+remaining recovery, account administration and connection lifecycle gaps. Phono
+now defaults to normal system-trusted HTTPS with existing browser-mediated device
+authorization; Collector serves a real `/pair` approval page on client listeners.
+Manual certificate entry is optional for owner-provided local trust. Saved system-
+HTTPS credentials remain bound to the enrolled origin; pinned credentials retain
+their trust. Retired `reset-password` is removed. Local recovery bypasses damaged
+configuration and reports all revoked credentials. The remaining journeys in the
+review are planned, not implemented; PJ1 physical-device acceptance remains open.
+
+
+### Complete account/recovery/connection repair — 2026-10-07
+
+The three software increments in [the accepted child ledger](account-usability-delivery.md)
+are implemented. Enrollment is account-less until explicit recent browser approval;
+status/cancel are secret-authenticated. Phono polls automatically, persists attempts
+in Keychain, recovers partial finalization and separates saved accounts by server/user.
+Actual legacy credentials convert only after `/me` verification; offline entries stay
+unverified. Account switching invalidates reads/artwork and stops playback. Forget
+retains uncertain edits and separates local removal from server revocation.
+
+Account & security has Profile, Password, Passkeys, Recovery, Browser sessions and
+Apps. Password changes retain access; separate other-access revocation and code
+recovery apply the accepted atomic policies. Local recovery additionally revokes
+passkeys and preserves enabled/admin/default authority and grants. Stopped lookup
+and username-only recovery use configured account storage, bypass configuration with
+`--state`, never open the archive and fail on live locks. `paths` lists configured
+absolute locations and existence without opening storage, safe while serving.
+Account creation exposes its durable identity before a separate permitted grant;
+current/default badges and single-user default login refresh after mutations.
+`setup` is the only initialization command. Private SQLite is schema 19; see the
+ledger for conversion and backup/recovery guarantees.
+
+[Validation](validation/phono-integration.md) distinguishes automated/browser/Keychain
+evidence from native GUI, system-root deployment and second-Mac acceptance.
+
+## Web navigation redesign — 2026-10-07
+
+The shell now separates Browse (Library/Lists), Organize (Imports/Metadata/Music
+preparation/Activity), Manage (collection access/server administration), and
+account commands. Collection selection is a searchable, paginated disclosure
+above the workspace with visible scope. Activity replaces the duplicate sidebar
+Work & history entry. The misleading Manage collections command, which opened
+an entry editor, is removed; Add / import remains a workspace action.
+
+A blue navigation rail, clear active-page marker and task descriptions replace
+the former mixed sidebar. Mobile uses a keyboard-accessible Menu disclosure;
+its groups scroll without compression, with focus restored after selection or
+Escape. Short desktop viewports and the persistent player retain reachable
+navigation. Existing routes, permissions, cancellation and playback ownership
+remain in their established modules. See the
+[design and delivery record](web-navigation-redesign.md).
+
+## Local certificate download and trust guidance — 2026-10-07
+
+Administration → Server settings now offers the public HTTPS PEM download,
+its existing PEM-file fingerprint and explicit macOS/Phono trust instructions.
+It uses the authenticated pairing API and revokes its transient Blob URL on
+panel cleanup. Failure/retry and mobile layout are qualified in the browser.
+Startup/doctor distinguish the same-computer localhost HTTPS address from
+advertised DNS names, print the absolute certificate file/fingerprint, and link
+to management download/help. `paths` includes the public certificate location.
+Phono shows matching self-signed help and an HTTPS URL example; collector-client
+connection/timeout failures now give actionable diagnostics without inferring
+security policy from error text.
+
+Live localhost:9843 was reachable and validated with the server’s own public PEM;
+normal system trust rejected the self-signed certificate and the advertised
+junk-collector.local name did not resolve. Browser acceptance proved downloaded
+PEM equality/fingerprint/no private key, certificate-validated HTTPS and local
+loopback browser approval through one-time issuance. OS trust is not installed
+automatically; this follow-up does not claim native GUI/system-root or second-Mac
+qualification. See the [account delivery ledger](account-usability-delivery.md).
+
+User verification — 2026-10-07: the user confirmed that local Phono-to-Collector
+connection works and requested committing both projects. This establishes local
+connection success; the trust mode and full native acceptance matrix were not
+specified. Remaining failure/account-separation cases and second-physical-Mac
+acceptance stay open.

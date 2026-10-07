@@ -348,38 +348,7 @@ pub struct PrepareMusicTrack {
     pub profile: ConversionProfile,
 }
 
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum MusicTrackAvailabilityState {
-    Preparing,
-    Unavailable {
-        reason: String,
-    },
-    Available {
-        representation_id: RepresentationId,
-        file_id: collector_core::PackageFileId,
-        file_index: usize,
-        length: ByteLength,
-        media_type: String,
-        digest: Digest,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
-pub struct MusicTrackAvailability {
-    pub capture_id: CaptureId,
-    pub source_representation_id: RepresentationId,
-    pub track_position: u16,
-    /// Exact coordinate in the source's integer stereo PCM timeline.
-    pub start_frame: PcmFrame,
-    /// Exact track-local integer stereo PCM frame count.
-    pub frame_count: PcmFrame,
-    pub title: String,
-    pub profile: ConversionProfile,
-    pub state: MusicTrackAvailabilityState,
-    /// Current actor, module, source and encoder permit explicit preparation.
-    pub can_prepare: bool,
-}
+pub use collector_api_types::{MusicTrackAvailability, MusicTrackAvailabilityState};
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MusicAlbumCoverage {
@@ -809,6 +778,17 @@ impl CollectionService {
         self.music_track_availability_for_item(actor.user_id, &item)
     }
 
+    /// Native browsing resolves only committed observations and immutable recipes.
+    pub fn recorded_music_track_availability(
+        &self,
+        actor: &Principal,
+        item_id: collector_core::ItemId,
+    ) -> Result<Vec<MusicTrackAvailability>> {
+        let item = self.reader.item(item_id)?;
+        self.authorize(actor, item.collection_id, crate::Action::Browse)?;
+        self.music_track_availability_recorded(actor.user_id, &item)
+    }
+
     pub fn music_album_coverage(
         &self,
         actor: &Principal,
@@ -991,6 +971,21 @@ impl CollectionService {
         user_id: collector_core::UserId,
         item: &collector_core::Item,
     ) -> Result<Vec<MusicTrackAvailability>> {
+        self.music_track_rows(user_id, item, false)
+    }
+    pub(super) fn music_track_availability_recorded(
+        &self,
+        user_id: collector_core::UserId,
+        item: &collector_core::Item,
+    ) -> Result<Vec<MusicTrackAvailability>> {
+        self.music_track_rows(user_id, item, true)
+    }
+    fn music_track_rows(
+        &self,
+        user_id: collector_core::UserId,
+        item: &collector_core::Item,
+        recorded_only: bool,
+    ) -> Result<Vec<MusicTrackAvailability>> {
         let item_id = item.id;
         if item.deleted {
             return Err(Error::NotFound);
@@ -1011,19 +1006,7 @@ impl CollectionService {
             .filter(|_| readable_music_schema)
             .map(|music| music.tracks)
             .unwrap_or_default();
-        let manual_title_for = |position: u16| {
-            titles
-                .iter()
-                .find(|track| track.position == position)
-                .map(|track| track.title.trim())
-                .filter(|title| {
-                    !title.is_empty()
-                        && title.len() <= 512
-                        && !title.chars().any(char::is_control)
-                        && *title != format!("Track {position:02}")
-                })
-                .map(str::to_owned)
-        };
+        let manual_title_for = |position: u16| crate::manual_music_track_title(&titles, position);
         let release = if readable_music_schema {
             self.effective_music_release(item)?
         } else {
@@ -1052,7 +1035,8 @@ impl CollectionService {
             }) {
                 let mut tracks = Vec::<ConversionTrack>::new();
                 let mut source_readable = false;
-                if readable_music_schema
+                if !recorded_only
+                    && readable_music_schema
                     && let Ok(selection) =
                         self.detect_music_selection(capture.collection_id, source.id)
                 {
@@ -1077,6 +1061,25 @@ impl CollectionService {
                         }));
                     }
                 }
+                if recorded_only
+                    && let Some(collector_modules::music::CdProcessingResult::Layout {
+                        tracks: layout,
+                        ..
+                    }) = self.recorded_music_layout(item.collection_id, source.id)?
+                {
+                    for track in layout
+                        .into_iter()
+                        .filter(|t| t.kind == collector_core::CdTrackKind::Audio)
+                    {
+                        if let (Some(start), Some(length)) = (track.pcm_start, track.pcm_length) {
+                            tracks.push(ConversionTrack {
+                                position: u16::from(track.position),
+                                start,
+                                length,
+                            });
+                        }
+                    }
+                }
                 let mut retained = Vec::new();
                 for representation in capture.representations.iter().filter(|representation| {
                     representation.source == Some(source.id) && representation.profile.is_some()
@@ -1095,6 +1098,18 @@ impl CollectionService {
                         tracks.push(recipe.tracks[0].clone());
                     }
                     retained.push((representation, recipe));
+                }
+                if recorded_only {
+                    let mut positions = std::collections::BTreeSet::new();
+                    for (representation, recipe) in &retained {
+                        if representation.profile.as_ref() == Some(&ConversionProfile::Flac)
+                            && recipe.tracks.len() == 1
+                            && positions.insert(recipe.tracks[0].position)
+                        {
+                            tracks.retain(|v| v.position != recipe.tracks[0].position);
+                            tracks.push(recipe.tracks[0].clone());
+                        }
+                    }
                 }
                 tracks.sort_by_key(|track| track.position);
                 tracks.dedup_by_key(|track| track.position);
@@ -1170,7 +1185,9 @@ impl CollectionService {
                         }) {
                             MusicTrackAvailabilityState::Preparing
                         } else {
-                            let reason = if !source_readable {
+                            let reason = if recorded_only {
+                                "Prepared audio is not available. Open Collector to inspect preparation.".into()
+                            } else if !source_readable {
                                 "The source layout or its music module is unavailable for preparation.".into()
                             } else {
                                 match self.encoder_availability(&profile) {
@@ -1184,6 +1201,12 @@ impl CollectionService {
                         };
                         rows.push(MusicTrackAvailability {
                             capture_id: capture.id,
+                            source_label: source
+                                .files
+                                .first()
+                                .map(|f| f.name.clone())
+                                .unwrap_or_else(|| "Original".into()),
+                            disc_position: medium.map(|m| m.position),
                             source_representation_id: source.id,
                             track_position: track.position,
                             start_frame: track.start,

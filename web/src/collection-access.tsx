@@ -1,6 +1,7 @@
 import React,{useEffect,useState,api,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import {useDialogDismiss} from './dialog';
 import type {components} from './generated/api';
+import {saveGrant} from './grant-command';
 import {CollectionChooser,useCollectionSearch} from './collection-chooser';
 
 type Collection=components['schemas']['PresentedCollection'];
@@ -30,9 +31,7 @@ export default function CollectionAccess({collections,initialCollectionId,onClos
  async function save(){
   const exact=username.trim();if(!collectionId||!exact)return;setBusy(true);setFeedback(undefined);reads.cancel();
   await writes.run(async attempt=>{
-   const path=`/collections/${collectionId}/grants/${encodeURIComponent(exact)}`;
-   const current=await attempt.wait(api<Grant|null>(path,{signal:attempt.signal}));
-   await attempt.wait(api(path,{method:'PUT',signal:attempt.signal,body:JSON.stringify({expected_revision:current?.revision||0,role})}));
+   await saveGrant(attempt,collectionId,exact,role);
    return api<GrantPage>(query,{signal:attempt.signal});
   },{success:page=>{adopt(page);setUsername('');setFeedback({kind:'success',text:`Access for ${exact} saved.`});},failure:fail,settled:()=>{setBusy(false);setLoading(false);}});
  }

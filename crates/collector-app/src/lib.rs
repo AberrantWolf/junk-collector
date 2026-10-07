@@ -1,4 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod music_search;
+pub use music_search::*;
 mod collection_lists;
 pub use collection_lists::*;
 mod bulk_library;
@@ -88,6 +90,12 @@ pub trait Catalog: Send + Sync {
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role>;
     fn grant(&self, collection: CollectionId, user: UserId, role: Role) -> Result<()>;
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>>;
+    fn music_search(
+        &self,
+        collection: CollectionId,
+        user: UserId,
+        query: MusicSearchQuery,
+    ) -> Result<Page<MusicSearchRecord>>;
     fn item(&self, id: ItemId) -> Result<Item>;
     fn save(&self, item: Item, expected: Revision) -> Result<Item>;
     fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item>;
@@ -122,6 +130,12 @@ pub trait CollectionReadPort: Send + Sync {
     fn collection(&self, id: CollectionId) -> Result<Collection>;
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role>;
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>>;
+    fn music_search(
+        &self,
+        collection: CollectionId,
+        user: UserId,
+        query: MusicSearchQuery,
+    ) -> Result<Page<MusicSearchRecord>>;
     fn item(&self, id: ItemId) -> Result<Item>;
     fn work(&self, id: WorkId) -> Result<Work>;
     fn edition(&self, id: EditionId) -> Result<Edition>;
@@ -152,6 +166,14 @@ impl<T: Catalog + ?Sized> CollectionReadPort for T {
     }
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>> {
         Catalog::browse(self, user, query)
+    }
+    fn music_search(
+        &self,
+        collection: CollectionId,
+        user: UserId,
+        query: MusicSearchQuery,
+    ) -> Result<Page<MusicSearchRecord>> {
+        Catalog::music_search(self, collection, user, query)
     }
     fn item(&self, id: ItemId) -> Result<Item> {
         Catalog::item(self, id)
@@ -997,6 +1019,8 @@ pub trait JobPort: Send + Sync {
 }
 
 pub trait AdministrationPort: Send + Sync {
+    fn default_username(&self) -> Result<String>;
+    fn default_user_id(&self) -> Result<UserId>;
     fn create_user(&self, username: &str, password: &str, administrator: bool) -> Result<UserId>;
     fn reindex(&self) -> Result<()>;
     fn accounts_page(
@@ -1024,6 +1048,16 @@ pub trait AdministrationPort: Send + Sync {
 }
 
 pub trait AuthenticationPort: Send + Sync {
+    /// Slow deterministic password binding for the new password-change receipt.
+    fn password_change_binding(&self, user: UserId, key: &str, password: &str) -> Result<String>;
+    fn change_password(
+        &self,
+        user: UserId,
+        session: DeviceId,
+        expected: Revision,
+        password: &str,
+    ) -> Result<Revision>;
+    fn revoke_other_access(&self, user: UserId, session: DeviceId) -> Result<()>;
     fn now(&self) -> chrono::DateTime<Utc>;
     fn login(
         &self,
@@ -1081,10 +1115,17 @@ pub trait AuthenticationPort: Send + Sync {
 pub trait EnrollmentPort: Send + Sync {
     fn start_enrollment(
         &self,
-        user: UserId,
+        user: Option<UserId>,
         label: &str,
         verification_url: &str,
     ) -> Result<EnrollmentStart>;
+    fn preview_enrollment(&self, user: UserId, code: &str) -> Result<EnrollmentView>;
+    fn enrollment_status(
+        &self,
+        id: EnrollmentId,
+        secret: &str,
+        cancel: bool,
+    ) -> Result<EnrollmentView>;
     fn approve_enrollment(&self, user: UserId, user_code: &str) -> Result<EnrollmentView>;
     fn cancel_enrollment(&self, user: UserId, enrollment: EnrollmentId) -> Result<()>;
     fn complete_enrollment(
@@ -1141,6 +1182,20 @@ impl AuthenticatedPrincipal {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum LocalAccountSelector {
+    Id(UserId),
+    Username(String),
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LocalAccount {
+    pub id: UserId,
+    pub username: String,
+    pub enabled: bool,
+    pub administrator: bool,
+    pub is_default: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AccountView {
     pub id: UserId,
@@ -1193,39 +1248,9 @@ pub struct StoredPasskey {
     pub record: serde_json::Value,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum EnrollmentPhase {
-    PendingApproval,
-    Approved,
-    Issued,
-    Cancelled,
-    Expired,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct EnrollmentStart {
-    pub id: EnrollmentId,
-    pub completion_secret: String,
-    pub user_code: String,
-    pub verification_url: String,
-    pub expires_at: chrono::DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct EnrollmentView {
-    pub id: EnrollmentId,
-    pub requested_label: String,
-    pub phase: EnrollmentPhase,
-    pub expires_at: chrono::DateTime<Utc>,
-}
-
-#[derive(Clone, Debug)]
-pub struct NativeCredentialIssue {
-    pub device_id: NativeCredentialId,
-    pub credential: String,
-    pub expires_at: chrono::DateTime<Utc>,
-}
+pub use collector_api_types::{
+    EnrollmentPhase, EnrollmentStart, EnrollmentView, NativeCredentialIssue,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct NativeDeviceView {
@@ -5419,6 +5444,62 @@ impl CollectionService {
             },
         )
     }
+    fn browser_security_session(&self, actor: &AuthenticatedPrincipal) -> Result<DeviceId> {
+        if actor.credential_kind != CredentialKind::BrowserSession {
+            return Err(Error::Forbidden);
+        }
+        self.require_recent_authentication(actor)?;
+        actor.principal.device_id.ok_or(Error::Unauthenticated)
+    }
+    pub fn change_password(
+        &self,
+        actor: &AuthenticatedPrincipal,
+        expected: Revision,
+        password: &str,
+        confirmation: &str,
+        context: &CommandContext,
+    ) -> Result<Revision> {
+        let session = self.browser_security_session(actor)?;
+        if password != confirmation || !(12..=1024).contains(&password.len()) {
+            return Err(Error::Invalid(
+                "Passwords must match and be 12–1024 bytes".into(),
+            ));
+        }
+        let binding = self.authentication.password_change_binding(
+            actor.principal.user_id,
+            context.key(),
+            password,
+        )?;
+        self.execute_command(
+            &actor.principal,
+            context,
+            "security.password.change",
+            &(expected, binding),
+            |effects| effects.change_password(actor.principal.user_id, session, expected, password),
+        )
+    }
+    pub fn revoke_other_access(
+        &self,
+        actor: &AuthenticatedPrincipal,
+        context: &CommandContext,
+    ) -> Result<()> {
+        let session = self.browser_security_session(actor)?;
+        self.execute_command(
+            &actor.principal,
+            context,
+            "security.other_access.revoke",
+            &session,
+            |effects| effects.revoke_other_access(actor.principal.user_id, session),
+        )
+    }
+    /// Single-user presentation intentionally exposes only the configured default login.
+    pub fn default_login_username(&self) -> Result<String> {
+        self.administration.default_username()
+    }
+    pub fn default_user_id(&self, actor: &Principal) -> Result<UserId> {
+        self.require_administrator(actor)?;
+        self.administration.default_user_id()
+    }
     pub fn profile(&self, authenticated: &AuthenticatedPrincipal) -> Result<AccountView> {
         self.administration.account(authenticated.principal.user_id)
     }
@@ -5514,15 +5595,25 @@ impl CollectionService {
         self.authentication
             .consume_recovery_code(username, code, new_password, label)
     }
-    pub fn start_enrollment(
-        &self,
-        username: &str,
-        label: &str,
-        verification_url: &str,
-    ) -> Result<EnrollmentStart> {
-        let user = self.authentication.user_by_name(username)?;
+    pub fn start_enrollment(&self, label: &str, verification_url: &str) -> Result<EnrollmentStart> {
         self.enrollments
-            .start_enrollment(user, label, verification_url)
+            .start_enrollment(None, label, verification_url)
+    }
+    pub fn preview_enrollment(
+        &self,
+        actor: &AuthenticatedPrincipal,
+        code: &str,
+    ) -> Result<EnrollmentView> {
+        self.enrollments
+            .preview_enrollment(actor.principal.user_id, code)
+    }
+    pub fn enrollment_status(
+        &self,
+        id: EnrollmentId,
+        secret: &str,
+        cancel: bool,
+    ) -> Result<EnrollmentView> {
+        self.enrollments.enrollment_status(id, secret, cancel)
     }
     pub fn approve_enrollment(
         &self,

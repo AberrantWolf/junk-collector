@@ -516,6 +516,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/client/albums": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["client_albums"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/client/collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["client_collections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collection-search": {
         parameters: {
             query?: never;
@@ -692,6 +724,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{collection}/music-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["music_search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{id}": {
         parameters: {
             query?: never;
@@ -820,6 +868,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/enrollments/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["preview_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/enrollments/start": {
         parameters: {
             query?: never;
@@ -852,6 +916,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/enrollments/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_native_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/enrollments/{id}/complete": {
         parameters: {
             query?: never;
@@ -862,6 +942,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["complete_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/enrollments/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enrollment_status"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1700,6 +1796,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{item}/client-playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["client_album_playback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{item}/client-tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["client_music_tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{item}/music-preparation-batches": {
         parameters: {
             query?: never;
@@ -2004,6 +2132,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["change_password"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/recovery-codes": {
         parameters: {
             query?: never;
@@ -2014,6 +2158,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["replace_recovery_codes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/security/revoke-other-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["revoke_other_access"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2240,6 +2400,13 @@ export interface components {
             group: components["schemas"]["AlbumGroupResult"];
             reason?: string | null;
         };
+        AlbumPlaybackSnapshot: {
+            artist: string;
+            collection_id: components["schemas"]["CollectionId"];
+            item_id: components["schemas"]["ItemId"];
+            title: string;
+            tracks: components["schemas"]["MusicTrackAvailability"][];
+        };
         AnalyzeProvisionalImport: {
             module: components["schemas"]["ModuleId"];
         };
@@ -2428,12 +2595,31 @@ export interface components {
             id: string;
             system: string;
         };
+        ChangePassword: {
+            confirmation: string;
+            expected_revision: components["schemas"]["Revision"];
+            new_password: string;
+        };
         CleanReimportOptions: {
             expected_metadata_revision: components["schemas"]["Revision"];
             replace_captures: components["schemas"]["CaptureId"][];
             reset_artwork: boolean;
             reset_metadata: boolean;
             retained_representation?: null | components["schemas"]["RepresentationId"];
+        };
+        ClientAlbum: {
+            artist: string;
+            artwork?: null | components["schemas"]["AssetId"];
+            collection_id: components["schemas"]["CollectionId"];
+            id: components["schemas"]["ItemId"];
+            title: string;
+        };
+        ClientCollection: {
+            can_browse: boolean;
+            can_edit_playlists: boolean;
+            can_play: boolean;
+            id: components["schemas"]["CollectionId"];
+            name: string;
         };
         Collection: {
             /**
@@ -2674,6 +2860,14 @@ export interface components {
             route: components["schemas"]["Route"];
             url: string;
         };
+        EnrollmentCompletion_Pairing: components["schemas"]["NativeCredentialIssue"] & {
+            pairing: {
+                certificate_pem: string;
+                certificate_sha256: string;
+                endpoints: components["schemas"]["Endpoint"][];
+                server_id: components["schemas"]["ServerId"];
+            };
+        };
         /** Format: uuid */
         EnrollmentId: string;
         /** @enum {string} */
@@ -2692,6 +2886,7 @@ export interface components {
             id: components["schemas"]["EnrollmentId"];
             phase: components["schemas"]["EnrollmentPhase"];
             requested_label: string;
+            user_id?: null | components["schemas"]["UserId"];
         };
         /** Format: uuid */
         EvidenceId: string;
@@ -3509,13 +3704,34 @@ export interface components {
             /** Format: int32 */
             track_position: number;
         };
+        MusicSearchHit: {
+            artwork?: null | components["schemas"]["AssetId"];
+            song: components["schemas"]["MusicSearchRecord"];
+            /** @description Source-specific coordinates; empty when no original has been observed. */
+            sources: components["schemas"]["MusicTrackAvailability"][];
+        };
+        MusicSearchRecord: {
+            album: string;
+            artist: string;
+            /** Format: int32 */
+            disc_position?: number | null;
+            /** Format: int64 */
+            duration_ms?: number | null;
+            item_id: components["schemas"]["ItemId"];
+            title: string;
+            /** Format: int32 */
+            track_position: number;
+        };
         MusicTrackAvailability: {
             /** @description Current actor, module, source and encoder permit explicit preparation. */
             can_prepare: boolean;
             capture_id: components["schemas"]["CaptureId"];
+            /** Format: int32 */
+            disc_position?: number | null;
             /** @description Exact track-local integer stereo PCM frame count. */
             frame_count: components["schemas"]["PcmFrame"];
             profile: components["schemas"]["ConversionProfile"];
+            source_label: string;
             source_representation_id: components["schemas"]["RepresentationId"];
             /** @description Exact coordinate in the source's integer stereo PCM timeline. */
             start_frame: components["schemas"]["PcmFrame"];
@@ -3543,6 +3759,15 @@ export interface components {
         };
         /** Format: uuid */
         NativeCredentialId: string;
+        NativeCredentialIssue: {
+            credential: string;
+            device_id: components["schemas"]["NativeCredentialId"];
+            display_name: string;
+            /** Format: date-time */
+            expires_at: string;
+            user_id: components["schemas"]["UserId"];
+            username: string;
+        };
         NativeDeviceView: {
             /** Format: date-time */
             created_at: string;
@@ -3682,6 +3907,16 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        Page_ClientAlbum: {
+            items: {
+                artist: string;
+                artwork?: null | components["schemas"]["AssetId"];
+                collection_id: components["schemas"]["CollectionId"];
+                id: components["schemas"]["ItemId"];
+                title: string;
+            }[];
+            next_cursor?: string | null;
+        };
         Page_CollectionListSummary: {
             items: {
                 can_edit: boolean;
@@ -3809,6 +4044,15 @@ export interface components {
                 total_units: number;
                 /** Format: date-time */
                 updated_at: string;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_MusicSearchHit: {
+            items: {
+                artwork?: null | components["schemas"]["AssetId"];
+                song: components["schemas"]["MusicSearchRecord"];
+                /** @description Source-specific coordinates; empty when no original has been observed. */
+                sources: components["schemas"]["MusicTrackAvailability"][];
             }[];
             next_cursor?: string | null;
         };
@@ -4357,7 +4601,6 @@ export interface components {
         };
         StartEnrollment: {
             device_name: string;
-            username?: string | null;
         };
         StartIngestCommand: {
             analysis?: components["schemas"]["IngestAnalysisPolicy"];
@@ -5766,6 +6009,49 @@ export interface operations {
             };
         };
     };
+    client_albums: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                search?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ClientAlbum"];
+                };
+            };
+        };
+    };
+    client_collections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCollection"][];
+                };
+            };
+        };
+    };
     collection_search: {
         parameters: {
             query?: never;
@@ -6333,6 +6619,37 @@ export interface operations {
             };
         };
     };
+    music_search: {
+        parameters: {
+            query?: {
+                search?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_MusicSearchHit"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     collection_detail: {
         parameters: {
             query?: never;
@@ -6712,6 +7029,41 @@ export interface operations {
             };
         };
     };
+    preview_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveEnrollment"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     start_enrollment: {
         parameters: {
             query?: never;
@@ -6778,6 +7130,43 @@ export interface operations {
             };
         };
     };
+    cancel_native_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["EnrollmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteEnrollment"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentView"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     complete_enrollment: {
         parameters: {
             query?: never;
@@ -6798,7 +7187,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["EnrollmentCompletion_Pairing"];
                 };
             };
             401: {
@@ -6808,6 +7197,43 @@ export interface operations {
                 content?: never;
             };
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    enrollment_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["EnrollmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteEnrollment"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentView"];
+                };
+            };
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9257,6 +9683,62 @@ export interface operations {
             };
         };
     };
+    client_album_playback: {
+        parameters: {
+            query?: {
+                source?: components["schemas"]["RepresentationId"];
+            };
+            header?: never;
+            path: {
+                item: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumPlaybackSnapshot"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    client_music_tracks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicTrackAvailability"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     music_preparation_batches: {
         parameters: {
             query?: never;
@@ -10029,6 +10511,47 @@ export interface operations {
             };
         };
     };
+    change_password: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePassword"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Revision"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     replace_recovery_codes: {
         parameters: {
             query?: never;
@@ -10045,6 +10568,35 @@ export interface operations {
                 content: {
                     "application/json": string[];
                 };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    revoke_other_access: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: {
                 headers: {

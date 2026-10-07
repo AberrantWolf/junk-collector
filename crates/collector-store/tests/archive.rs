@@ -1988,7 +1988,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         catalog
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        12 // Collection lists add a projection; archived fixture bytes stay unchanged.
+        13 // Song search adds a rebuildable projection; archived fixture bytes stay unchanged.
     );
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
@@ -1996,7 +1996,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        18 // Durable intake extends private state without replacing existing configuration.
+        19 // Enrollment conversion preserves existing accounts, credentials and bound requests.
     );
     assert_eq!(
         private
@@ -2540,7 +2540,7 @@ fn personal_session_pages_preserve_current_marker_and_reject_bad_cursors() {
     assert_eq!(passkeys.len(), 7);
     for index in 0..4 {
         let enrollment = store
-            .start_enrollment(owner, &format!("Device {index}"), "/pair")
+            .start_enrollment(Some(owner), &format!("Device {index}"), "/pair")
             .unwrap();
         store
             .approve_enrollment(owner, &enrollment.user_code)
@@ -2745,12 +2745,21 @@ fn local_recovery_requires_exclusive_lock_and_preserves_grants() {
         )
         .unwrap();
     assert!(matches!(
-        Store::local_recover(&state, user, "the replacement password"),
+        Store::local_recover(
+            &state,
+            collector_app::LocalAccountSelector::Id(user),
+            "the replacement password"
+        ),
         Err(Error::Unavailable(_))
     ));
     drop(store);
 
-    Store::local_recover(&state, user, "the replacement password").unwrap();
+    Store::local_recover(
+        &state,
+        collector_app::LocalAccountSelector::Id(user),
+        "the replacement password",
+    )
+    .unwrap();
     let recovered = Store::open(&archive, &state).unwrap();
     assert!(
         recovered
@@ -2784,7 +2793,7 @@ fn enrollment_terminal_states_wrong_user_and_issuance_race_are_enforced() {
         .unwrap();
 
     let enrollment = store
-        .start_enrollment(requested, "Living-room client", "/pair")
+        .start_enrollment(Some(requested), "Living-room client", "/pair")
         .unwrap();
     assert!(
         store
@@ -2825,7 +2834,7 @@ fn enrollment_terminal_states_wrong_user_and_issuance_race_are_enforced() {
     );
 
     let cancelled = store
-        .start_enrollment(requested, "Cancelled client", "/pair")
+        .start_enrollment(Some(requested), "Cancelled client", "/pair")
         .unwrap();
     store.cancel_enrollment(requested, cancelled.id).unwrap();
     assert!(matches!(
@@ -2838,7 +2847,7 @@ fn enrollment_terminal_states_wrong_user_and_issuance_race_are_enforced() {
     ));
 
     let expired = store
-        .start_enrollment(requested, "Expired client", "/pair")
+        .start_enrollment(Some(requested), "Expired client", "/pair")
         .unwrap();
     clock.advance(600);
     assert!(matches!(
@@ -3981,7 +3990,7 @@ fn pagination_and_fts_do_not_cross_grants() {
     assert!(second.next_cursor.is_none());
 }
 #[test]
-fn revoked_devices_and_password_recovery() {
+fn revoked_browser_session_and_recovery_code_password_replacement() {
     let (_root, store, actor, service, _collection) = setup();
     let (token, device) = service
         .login("owner", "a long test password", "test")
@@ -3997,7 +4006,13 @@ fn revoked_devices_and_password_recovery() {
     let (token, _) = service
         .login("owner", "a long test password", "test")
         .unwrap();
-    store.reset_password("owner", "new long password").unwrap();
+    let (_, authenticated) = service
+        .login("owner", "a long test password", "recovery setup")
+        .unwrap();
+    let codes = service.replace_recovery_codes(&authenticated).unwrap();
+    store
+        .consume_recovery_code("owner", &codes[0], "new long password", "recovered")
+        .unwrap();
     assert!(service.authenticate(&token).is_err());
     assert!(
         service
@@ -5981,7 +5996,7 @@ fn sigkill_receipt_effect_gap_replays_every_mutation_family() {
                 .unwrap();
             let passkey = store.passkeys(actor.user_id).unwrap().remove(0).view.id;
             let enrollment = store
-                .start_enrollment(actor.user_id, "native", "https://example.test")
+                .start_enrollment(Some(actor.user_id), "native", "https://example.test")
                 .unwrap();
             store
                 .approve_enrollment(actor.user_id, &enrollment.user_code)
@@ -6158,7 +6173,7 @@ fn current_private_schema_preserves_durable_imports_without_private_path_columns
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        18 // Work-history state adds no private paths to Import records.
+        19 // Nullable enrollment owners add no private paths to Import records.
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -18736,4 +18751,496 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
             2
         );
     }
+}
+
+#[test]
+fn song_search_is_literal_unicode_paged_authorized_and_rebuilt_with_manual_metadata() {
+    use collector_app::{MusicSearchQuery, UpdateMetadataAuthorityCommand};
+    let (root, store, actor, service, collection) = setup();
+    let mut inventory = item(collection.id);
+    inventory.domain.payload =
+        RawJson::from_value(serde_json::json!({"artist":"Ａｒｔｉｓｔ", "tracks":[
+            {"position":1,"title":"Ｓｏｎｇ %_ Café","start":0,"length":588},
+            {"position":2,"title":"Second song","start":588,"length":588}
+        ]}));
+    let saved = save_inventory(&service, &actor, inventory, Revision(0)).unwrap();
+    let query = |search: &str, cursor: Option<String>, limit| MusicSearchQuery {
+        search: Some(search.into()),
+        cursor,
+        limit: Some(limit),
+    };
+    let hit = service
+        .music_search(
+            &actor,
+            collection.id,
+            query("song %_ cafe\u{301}", None, 50),
+        )
+        .unwrap();
+    assert_eq!(hit.items.len(), 1);
+    assert_eq!(hit.items[0].song.item_id, saved.id);
+    assert!(hit.items[0].sources.is_empty());
+    let first = service
+        .music_search(&actor, collection.id, query("song", None, 1))
+        .unwrap();
+    let second = service
+        .music_search(
+            &actor,
+            collection.id,
+            query("song", first.next_cursor.clone(), 1),
+        )
+        .unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(second.items.len(), 1);
+    assert_ne!(
+        first.items[0].song.track_position,
+        second.items[0].song.track_position
+    );
+    assert!(second.next_cursor.is_none());
+    assert!(matches!(
+        service.music_search(
+            &actor,
+            collection.id,
+            query("different", first.next_cursor, 1)
+        ),
+        Err(Error::Invalid(_))
+    ));
+    let stranger = Principal {
+        user_id: UserId::new(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.music_search(&stranger, collection.id, query("", None, 50)),
+        Err(Error::Forbidden)
+    ));
+    let authority = service.metadata_view(&actor, saved.id).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: authority.revision,
+                change: MetadataAuthorityChange::SetDomainOverrides {
+                    overrides: ModuleData {
+                        module: ModuleId("org.junk.music".into()),
+                        schema_version: 1,
+                        payload: RawJson::from_value(serde_json::json!({"artist":"Manual Artist"})),
+                    },
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .music_search(&actor, collection.id, query("manual artist", None, 50))
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    let mut edited = Catalog::item(store.as_ref(), saved.id).unwrap();
+    let revision = edited.revision;
+    edited.domain.payload = RawJson::from_value(
+        serde_json::json!({"artist":"Later inventory artist", "tracks":[{"position":1,"title":"New song title","start":0,"length":588}]}),
+    );
+    save_inventory(&service, &actor, edited, revision).unwrap();
+    assert_eq!(
+        service
+            .music_search(&actor, collection.id, query("new song title", None, 50))
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .music_search(&actor, collection.id, query("new song title", None, 50))
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store, Arc::new(Registry::builtins()));
+    assert_eq!(
+        service
+            .music_search(&actor, collection.id, query("new song title", None, 50))
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn unbound_enrollment_secret_gates_state_and_two_accounts_have_one_approval_winner() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock.clone(),
+        )
+        .unwrap(),
+    );
+    let first = store
+        .create_user("first", "a sufficiently long password", true)
+        .unwrap();
+    let second = store
+        .create_user("second", "a sufficiently long password", false)
+        .unwrap();
+    let pending = store.start_enrollment(None, "Phono", "/pair").unwrap();
+    assert!(
+        store
+            .enrollment_status(pending.id, &"0".repeat(64), true)
+            .is_err()
+    );
+    let waiting = store
+        .enrollment_status(pending.id, &pending.completion_secret, false)
+        .unwrap();
+    assert_eq!(
+        waiting.phase,
+        collector_app::EnrollmentPhase::PendingApproval
+    );
+    assert_eq!(waiting.user_id, None);
+    assert_eq!(
+        store
+            .preview_enrollment(second, &pending.user_code)
+            .unwrap()
+            .requested_label,
+        "Phono"
+    );
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let workers: Vec<_> = [first, second]
+        .into_iter()
+        .map(|user| {
+            let store = store.clone();
+            let barrier = barrier.clone();
+            let code = pending.user_code.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                store.approve_enrollment(user, &code)
+            })
+        })
+        .collect();
+    barrier.wait();
+    let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    let winner = results
+        .into_iter()
+        .find_map(Result::ok)
+        .unwrap()
+        .user_id
+        .unwrap();
+    let issued = store
+        .complete_enrollment(pending.id, &pending.completion_secret)
+        .unwrap();
+    assert_eq!(issued.user_id, winner);
+    assert_eq!(
+        store
+            .authenticate_native(&issued.credential)
+            .unwrap()
+            .principal
+            .user_id,
+        winner
+    );
+    assert_eq!(
+        store
+            .enrollment_status(pending.id, &pending.completion_secret, false)
+            .unwrap()
+            .phase,
+        collector_app::EnrollmentPhase::Issued
+    );
+    let expiring = store.start_enrollment(None, "Expires", "/pair").unwrap();
+    clock.advance(600);
+    assert!(
+        store
+            .enrollment_status(expiring.id, &"0".repeat(64), true)
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .enrollment_status(expiring.id, &expiring.completion_secret, false)
+            .unwrap()
+            .phase,
+        collector_app::EnrollmentPhase::Expired
+    );
+}
+
+#[test]
+fn password_change_receipt_retains_access_then_explicit_revocation_is_account_scoped() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let user = store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let other = store
+        .create_user("other", "a sufficiently long password", false)
+        .unwrap();
+    let (current, actor) = store
+        .login("owner", "a sufficiently long password", "current")
+        .unwrap();
+    let (old, _) = store
+        .login("owner", "a sufficiently long password", "other browser")
+        .unwrap();
+    store
+        .insert_passkey(user, "retained-passkey", serde_json::json!({"counter":0}))
+        .unwrap();
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let codes = service.replace_recovery_codes(&actor).unwrap();
+    let issue = |user| {
+        let p = store.start_enrollment(Some(user), "App", "/pair").unwrap();
+        store.approve_enrollment(user, &p.user_code).unwrap();
+        store
+            .complete_enrollment(p.id, &p.completion_secret)
+            .unwrap()
+    };
+    let app = issue(user);
+    let other_app = issue(other);
+    let pending = store
+        .start_enrollment(Some(user), "Pending", "/pair")
+        .unwrap();
+    let unbound = store.start_enrollment(None, "Unbound", "/pair").unwrap();
+    let binding = store
+        .password_change_binding(user, "binding-test", "a changed long password")
+        .unwrap();
+    assert!(binding.starts_with("$argon2id$"));
+    assert_eq!(
+        binding,
+        store
+            .password_change_binding(user, "binding-test", "a changed long password")
+            .unwrap()
+    );
+    assert_ne!(
+        binding,
+        store
+            .password_change_binding(user, "another-key", "a changed long password")
+            .unwrap()
+    );
+    use argon2::PasswordVerifier;
+    argon2::Argon2::default()
+        .verify_password(
+            b"a changed long password",
+            &argon2::PasswordHash::new(&binding).unwrap(),
+        )
+        .unwrap();
+    let expected = service.profile(&actor).unwrap().revision;
+    let receipt = command();
+    let next = service
+        .change_password(
+            &actor,
+            expected,
+            "a changed long password",
+            "a changed long password",
+            &receipt,
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .change_password(
+                &actor,
+                expected,
+                "a changed long password",
+                "a changed long password",
+                &receipt
+            )
+            .unwrap(),
+        next
+    );
+    assert!(
+        service
+            .change_password(
+                &actor,
+                expected,
+                "different long password",
+                "different long password",
+                &receipt
+            )
+            .is_err()
+    );
+    assert!(store.authenticate(&current).is_ok());
+    assert!(store.authenticate(&old).is_ok());
+    assert!(store.authenticate_native(&app.credential).is_ok());
+    assert_eq!(store.passkeys(user).unwrap().len(), 1);
+    assert!(
+        store
+            .login("owner", "a changed long password", "new password")
+            .is_ok()
+    );
+    let revoke = command();
+    service.revoke_other_access(&actor, &revoke).unwrap();
+    service.revoke_other_access(&actor, &revoke).unwrap();
+    assert!(store.authenticate(&current).is_ok());
+    assert!(store.authenticate(&old).is_err());
+    assert!(store.authenticate_native(&app.credential).is_err());
+    assert!(store.authenticate_native(&other_app.credential).is_ok());
+    assert_eq!(
+        store
+            .enrollment_status(pending.id, &pending.completion_secret, false)
+            .unwrap()
+            .phase,
+        collector_app::EnrollmentPhase::Cancelled
+    );
+    assert_eq!(
+        store
+            .enrollment_status(unbound.id, &unbound.completion_secret, false)
+            .unwrap()
+            .phase,
+        collector_app::EnrollmentPhase::PendingApproval
+    );
+    assert_eq!(store.passkeys(user).unwrap().len(), 1);
+    // Recovery retains the passkey but replaces all browser/app access and the code batch.
+    let replacement_app = issue(user);
+    let (fresh, _) = store
+        .consume_recovery_code("owner", &codes[0], "recovered long password", "recovered")
+        .unwrap();
+    assert!(store.authenticate(&fresh).is_ok());
+    assert!(store.authenticate(&current).is_err());
+    assert!(
+        store
+            .authenticate_native(&replacement_app.credential)
+            .is_err()
+    );
+    assert!(store.authenticate_native(&other_app.credential).is_ok());
+    assert_eq!(store.passkeys(user).unwrap().len(), 1);
+    assert!(
+        store
+            .consume_recovery_code("owner", &codes[1], "recovered long password", "replay")
+            .is_err()
+    );
+}
+
+#[test]
+fn stopped_account_lookup_and_username_recovery_preserve_authority_without_archive() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    assert!(Store::local_accounts(&state, None, 10).is_err());
+    assert!(!state.exists());
+    let store = Store::open(&archive, &state).unwrap();
+    let owner = store
+        .create_user("alpha", "a sufficiently long password", true)
+        .unwrap();
+    let disabled = store
+        .create_user("beta", "a sufficiently long password", false)
+        .unwrap();
+    assert!(matches!(
+        Store::local_accounts(&state, None, 10),
+        Err(Error::Unavailable(_))
+    ));
+    drop(store);
+    let db = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    db.execute(
+        "UPDATE users SET enabled=0 WHERE id=?",
+        [disabled.to_string()],
+    )
+    .unwrap();
+    drop(db);
+    std::fs::remove_dir_all(&archive).unwrap();
+    let first = Store::local_accounts(&state, None, 1).unwrap();
+    assert_eq!(first.items[0].id, owner);
+    assert!(first.items[0].is_default);
+    assert!(first.items[0].administrator);
+    let second = Store::local_accounts(&state, first.next_cursor.as_deref(), 1).unwrap();
+    assert_eq!(second.items[0].id, disabled);
+    assert!(!second.items[0].enabled);
+    assert!(
+        Store::local_recover(
+            &state,
+            collector_app::LocalAccountSelector::Username("missing".into()),
+            "replacement long password"
+        )
+        .is_err()
+    );
+    assert_eq!(
+        Store::local_recover(
+            &state,
+            collector_app::LocalAccountSelector::Username("beta".into()),
+            "replacement long password"
+        )
+        .unwrap(),
+        disabled
+    );
+    let rows = Store::local_accounts(&state, None, 10).unwrap();
+    assert!(!rows.items[1].enabled);
+    assert!(!rows.items[1].administrator);
+    assert!(rows.items[0].is_default);
+    assert!(!archive.exists());
+    let db = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    db.execute_batch("PRAGMA user_version=99").unwrap();
+    drop(db);
+    assert!(matches!(
+        Store::local_accounts(&state, None, 10),
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        Store::local_recover(
+            &state,
+            collector_app::LocalAccountSelector::Id(owner),
+            "replacement long password"
+        ),
+        Err(Error::Unavailable(_))
+    ));
+}
+
+#[test]
+fn schema18_enrollment_conversion_preserves_bound_requests_native_credentials_and_grants() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Store::open(&archive, &state).unwrap();
+    let user = store
+        .create_user("owner", "a sufficiently long password", true)
+        .unwrap();
+    let pending = store
+        .start_enrollment(Some(user), "Existing pending", "/pair")
+        .unwrap();
+    let issued = store
+        .start_enrollment(Some(user), "Existing issued", "/pair")
+        .unwrap();
+    store.approve_enrollment(user, &issued.user_code).unwrap();
+    let credential = store
+        .complete_enrollment(issued.id, &issued.completion_secret)
+        .unwrap();
+    drop(store);
+    let db = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    db.execute_batch("BEGIN; ALTER TABLE enrollments RENAME TO enrollments_new; DROP INDEX enrollments_active_user_code;
+        CREATE TABLE enrollments (id TEXT PRIMARY KEY,user_id TEXT NOT NULL,completion_secret_hash TEXT NOT NULL,user_code TEXT NOT NULL,requested_label TEXT NOT NULL,verification_url TEXT NOT NULL,phase TEXT NOT NULL,created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,approved_at INTEGER,issued_at INTEGER,cancelled_at INTEGER);
+        INSERT INTO enrollments SELECT * FROM enrollments_new;DROP TABLE enrollments_new;CREATE UNIQUE INDEX enrollments_active_user_code ON enrollments(user_code) WHERE phase IN ('pending_approval','approved');PRAGMA user_version=18;COMMIT;").unwrap();
+    drop(db);
+    let store = Store::open(&archive, &state).unwrap();
+    assert_eq!(store.default_user_id().unwrap(), user);
+    assert!(store.authenticate_native(&credential.credential).is_ok());
+    assert_eq!(
+        store
+            .enrollment_status(pending.id, &pending.completion_secret, false)
+            .unwrap()
+            .user_id,
+        Some(user)
+    );
+    store.approve_enrollment(user, &pending.user_code).unwrap();
+    assert_eq!(
+        store
+            .complete_enrollment(pending.id, &pending.completion_secret)
+            .unwrap()
+            .user_id,
+        user
+    );
+    let new = store
+        .start_enrollment(None, "Unbound after conversion", "/pair")
+        .unwrap();
+    assert_eq!(
+        store
+            .enrollment_status(new.id, &new.completion_secret, false)
+            .unwrap()
+            .user_id,
+        None
+    );
 }

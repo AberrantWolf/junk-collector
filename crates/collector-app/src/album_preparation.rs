@@ -1132,6 +1132,8 @@ mod tests {
         let first = RepresentationId::new();
         let second = RepresentationId::new();
         let row = |source_representation_id| MusicTrackAvailability {
+            source_label: "Original".into(),
+            disc_position: Some(1),
             capture_id: capture,
             source_representation_id,
             track_position: 1,
@@ -1160,6 +1162,8 @@ mod tests {
         let source = RepresentationId::new();
         let oversized = (1..=257)
             .map(|track_position| MusicTrackAvailability {
+                source_label: "Original".into(),
+                disc_position: Some(1),
                 capture_id: CaptureId::new(),
                 source_representation_id: source,
                 track_position,

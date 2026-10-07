@@ -1,5 +1,6 @@
 use super::*;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
+use collector_app::{EnrollmentPhase, LocalAccount, LocalAccountSelector};
 use rand::{RngCore, rngs::OsRng};
 use rusqlite::TransactionBehavior;
 use std::path::Path;
@@ -23,7 +24,7 @@ fn security_cursor(cursor: Option<&str>, first: i64) -> Result<(i64, String)> {
 impl Store {
     pub fn start_enrollment(
         &self,
-        user: UserId,
+        user: Option<UserId>,
         label: &str,
         verification_url: &str,
     ) -> Result<EnrollmentStart> {
@@ -43,17 +44,19 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        let enabled: bool = tx
-            .query_row(
-                "SELECT enabled FROM private.users WHERE id=?",
-                [user.to_string()],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(storage)?
-            .ok_or(Error::Unauthenticated)?;
-        if !enabled {
-            return Err(Error::Unauthenticated);
+        if let Some(user) = user {
+            let enabled: bool = tx
+                .query_row(
+                    "SELECT enabled FROM private.users WHERE id=?",
+                    [user.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(storage)?
+                .ok_or(Error::Unauthenticated)?;
+            if !enabled {
+                return Err(Error::Forbidden);
+            }
         }
         expire_enrollments(&tx, now.timestamp())?;
         let user_code = loop {
@@ -79,7 +82,7 @@ impl Store {
             "INSERT INTO private.enrollments(id,user_id,completion_secret_hash,user_code,requested_label,verification_url,phase,created_at,expires_at,approved_at,issued_at,cancelled_at) VALUES(?,?,?,?,?,?,'pending_approval',?,?,NULL,NULL,NULL)",
             params![
                 id.to_string(),
-                user.to_string(),
+                user.map(|id| id.to_string()),
                 Digest::sha256(completion_secret.as_bytes()).hex,
                 user_code,
                 label,
@@ -91,7 +94,7 @@ impl Store {
         .map_err(storage)?;
         insert_security_audit(
             &tx,
-            Some(user),
+            user,
             "enrollment_started",
             serde_json::json!({"enrollment_id": id}),
             now.timestamp(),
@@ -106,6 +109,74 @@ impl Store {
         })
     }
 
+    pub fn preview_enrollment(&self, user: UserId, code: &str) -> Result<EnrollmentView> {
+        if code.len() > 64 {
+            return Err(Error::Invalid("invalid approval code".into()));
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        expire_enrollments(&tx, self.clock.now().timestamp())?;
+        let view = enrollment_view(
+            &tx,
+            "(user_id=?1 OR user_id IS NULL) AND user_code=?2",
+            &[&user.to_string(), &code.trim().to_ascii_uppercase()],
+        )?;
+        tx.commit().map_err(storage)?;
+        Ok(view)
+    }
+    pub fn enrollment_status(
+        &self,
+        id: EnrollmentId,
+        secret: &str,
+        cancel: bool,
+    ) -> Result<EnrollmentView> {
+        if secret.len() != 64 || !secret.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(Error::Unauthenticated);
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let recorded: String = tx
+            .query_row(
+                "SELECT completion_secret_hash FROM private.enrollments WHERE id=?",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::Unauthenticated)?;
+        if Digest::sha256(secret.to_ascii_lowercase().as_bytes()).hex != recorded {
+            return Err(Error::Unauthenticated);
+        }
+        let now = self.clock.now().timestamp();
+        expire_enrollments(&tx, now)?;
+        if cancel {
+            let phase: String = tx
+                .query_row(
+                    "SELECT phase FROM private.enrollments WHERE id=?",
+                    [id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if matches!(
+                parse_enrollment_phase(&phase)?,
+                EnrollmentPhase::PendingApproval | EnrollmentPhase::Approved
+            ) {
+                tx.execute(
+                    "UPDATE private.enrollments SET phase='cancelled',cancelled_at=? WHERE id=?",
+                    params![now, id.to_string()],
+                )
+                .map_err(storage)?;
+            }
+        }
+        let view = enrollment_view(&tx, "id=?1", &[&id.to_string()])?;
+        tx.commit().map_err(storage)?;
+        Ok(view)
+    }
+
     pub fn approve_enrollment(&self, user: UserId, user_code: &str) -> Result<EnrollmentView> {
         let code = user_code.trim().to_ascii_uppercase();
         let now = self.clock.now().timestamp();
@@ -116,7 +187,7 @@ impl Store {
         expire_enrollments(&tx, now)?;
         let enrollment: Option<(String, String, String, i64)> = tx
             .query_row(
-                "SELECT id,requested_label,phase,expires_at FROM private.enrollments WHERE user_id=? AND user_code=?",
+                "SELECT id,requested_label,phase,expires_at FROM private.enrollments WHERE (user_id=? OR user_id IS NULL) AND user_code=?",
                 params![user.to_string(), code],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
@@ -129,8 +200,8 @@ impl Store {
         )?;
         if tx
             .execute(
-                "UPDATE private.enrollments SET phase='approved',approved_at=? WHERE id=? AND user_id=? AND phase='pending_approval'",
-                params![now, id, user.to_string()],
+                "UPDATE private.enrollments SET phase='approved',approved_at=?,user_id=? WHERE id=? AND (user_id=? OR user_id IS NULL) AND phase='pending_approval' AND EXISTS(SELECT 1 FROM private.users WHERE id=? AND enabled=1)",
+                params![now, user.to_string(), id, user.to_string(), user.to_string()],
             )
             .map_err(storage)?
             != 1
@@ -147,6 +218,7 @@ impl Store {
         )?;
         tx.commit().map_err(storage)?;
         Ok(EnrollmentView {
+            user_id: Some(user),
             id,
             requested_label,
             phase: collector_app::EnrollmentPhase::Approved,
@@ -211,8 +283,7 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        expire_enrollments(&tx, now.timestamp())?;
-        let record: Option<(String, String, String, String)> = tx
+        let record: Option<(Option<String>, String, String, String)> = tx
             .query_row(
                 "SELECT user_id,completion_secret_hash,requested_label,phase FROM private.enrollments WHERE id=?",
                 [enrollment.to_string()],
@@ -220,14 +291,32 @@ impl Store {
             )
             .optional()
             .map_err(storage)?;
-        let (user, secret_hash, label, phase) = record.ok_or(Error::Unauthenticated)?;
+        let (user, secret_hash, label, _phase) = record.ok_or(Error::Unauthenticated)?;
+        if Digest::sha256(completion_secret.to_ascii_lowercase().as_bytes()).hex != secret_hash {
+            return Err(Error::Unauthenticated);
+        }
+        expire_enrollments(&tx, now.timestamp())?;
+        let phase: String = tx
+            .query_row(
+                "SELECT phase FROM private.enrollments WHERE id=?",
+                [enrollment.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
         collector_app::security::enrollment_transition(
             parse_enrollment_phase(&phase)?,
             collector_app::security::EnrollmentAction::Complete,
         )?;
-        if Digest::sha256(completion_secret.to_ascii_lowercase().as_bytes()).hex != secret_hash {
-            return Err(Error::Unauthenticated);
-        }
+        let user = user.ok_or(Error::Unauthenticated)?;
+        let (username, display_name): (String, String) = tx
+            .query_row(
+                "SELECT username,display_name FROM private.users WHERE id=? AND enabled=1",
+                [&user],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::Forbidden)?;
         if tx
             .execute(
                 "UPDATE private.enrollments SET phase='issued',issued_at=? WHERE id=? AND phase='approved'",
@@ -260,6 +349,9 @@ impl Store {
         )?;
         tx.commit().map_err(storage)?;
         Ok(NativeCredentialIssue {
+            user_id,
+            username,
+            display_name,
             device_id: credential_id,
             credential,
             expires_at,
@@ -403,41 +495,76 @@ impl Store {
         tx.commit().map_err(storage)
     }
 
+    pub fn local_accounts(
+        private_state: impl AsRef<Path>,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<Page<LocalAccount>> {
+        if !(1..=100).contains(&limit) || cursor.is_some_and(|v| v.len() > 128) {
+            return Err(Error::Invalid(
+                "account page must contain 1–100 rows".into(),
+            ));
+        }
+        let (_lock, db) = open_local_state(private_state.as_ref())?;
+        let mut statement=db.prepare("SELECT id,username,enabled,administrator,EXISTS(SELECT 1 FROM private.settings s WHERE s.key='default_user_id' AND s.value=u.id) FROM private.users u WHERE username>? ORDER BY username LIMIT ?").map_err(storage)?;
+        let rows = statement
+            .query_map(params![cursor.unwrap_or(""), u64::from(limit) + 1], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .map_err(storage)?;
+        let mut items = rows
+            .map(|row| {
+                let (id, username, enabled, administrator, is_default) = row.map_err(storage)?;
+                Ok(LocalAccount {
+                    id: id.parse().map_err(storage)?,
+                    username,
+                    enabled,
+                    administrator,
+                    is_default,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|v| v.username.clone())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
     pub fn local_recover(
         private_state: impl AsRef<Path>,
-        user: UserId,
+        selector: LocalAccountSelector,
         password: &str,
-    ) -> Result<()> {
+    ) -> Result<UserId> {
         if !(12..=1024).contains(&password.len()) {
             return Err(Error::Invalid("password must be 12–1024 bytes".into()));
         }
-        let state = private_state.as_ref();
-        let database = state.join("private.sqlite");
-        if !database.is_file() {
-            return Err(Error::NotFound);
-        }
-        let private_lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(state.join(".private.lock"))
-            .map_err(storage)?;
-        private_lock
-            .try_lock_exclusive()
-            .map_err(|_| Error::Unavailable("private state is already in use".into()))?;
-        let mut connection = Connection::open_in_memory().map_err(storage)?;
-        connection
-            .execute("ATTACH DATABASE ? AS private", [database.to_string_lossy()])
-            .map_err(storage)?;
-        let version: u32 = connection
-            .query_row("PRAGMA private.user_version", [], |row| row.get(0))
-            .map_err(storage)?;
-        if !matches!(version, 5..=18) {
-            return Err(Error::Unavailable(format!(
-                "private state schema {version} must be upgraded by this server before local recovery"
-            )));
-        }
+        let (private_lock, mut connection) = open_local_state(private_state.as_ref())?;
+        let user = match selector {
+            LocalAccountSelector::Id(id) => id,
+            LocalAccountSelector::Username(name) => {
+                if name.is_empty() || name.len() > 128 {
+                    return Err(Error::Invalid("username required and bounded".into()));
+                }
+                let raw: String = connection
+                    .query_row(
+                        "SELECT id FROM private.users WHERE username=?",
+                        [name],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(storage)?
+                    .ok_or(Error::NotFound)?;
+                raw.parse().map_err(storage)?
+            }
+        };
         let salt = SaltString::generate(&mut OsRng);
         let password_hash = Argon2::default()
             .hash_password(password.as_bytes(), &salt)
@@ -473,7 +600,8 @@ impl Store {
             now,
         )?;
         tx.commit().map_err(storage)?;
-        private_lock.unlock().map_err(storage)
+        private_lock.unlock().map_err(storage)?;
+        Ok(user)
     }
 
     pub fn accounts(&self) -> Result<Vec<AccountView>> {
@@ -556,6 +684,100 @@ impl Store {
         Ok(collector_core::Page { items, next_cursor })
     }
 
+    pub fn default_user_id(&self) -> Result<UserId> {
+        let db = lock(&self.db)?;
+        let raw: String = db
+            .query_row(
+                "SELECT value FROM private.settings WHERE key='default_user_id'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        raw.parse().map_err(storage)
+    }
+    pub fn password_change_binding(
+        &self,
+        user: UserId,
+        key: &str,
+        password: &str,
+    ) -> Result<String> {
+        if !(12..=1024).contains(&password.len()) {
+            return Err(Error::Invalid("password must be 12–1024 bytes".into()));
+        }
+        // Salt is deterministic per account/command so receipt replay stays stable.
+        // Argon2 prevents a receipt from becoming a fast password-guessing oracle.
+        let bytes =
+            hex::decode(Digest::sha256(format!("password-change:{user}:{key}").as_bytes()).hex)
+                .map_err(storage)?;
+        let salt = SaltString::encode_b64(&bytes[..16]).map_err(storage)?;
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|value| value.to_string())
+            .map_err(storage)
+    }
+    pub fn change_password(
+        &self,
+        user: UserId,
+        session: DeviceId,
+        expected: Revision,
+        password: &str,
+    ) -> Result<Revision> {
+        if !(12..=1024).contains(&password.len()) {
+            return Err(Error::Invalid("password must be 12–1024 bytes".into()));
+        }
+        let hash = Argon2::default()
+            .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+            .map_err(storage)?
+            .to_string();
+        let now = self.clock.now().timestamp();
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        validate_security_session(&tx, user, session, now)?;
+        if tx.execute("UPDATE private.users SET password_hash=?,revision=revision+1 WHERE id=? AND revision=? AND enabled=1",params![hash,user.to_string(),expected.0]).map_err(storage)?!=1 { return Err(Error::Conflict); }
+        let next = Revision(expected.0 + 1);
+        insert_security_audit(
+            &tx,
+            Some(user),
+            "password_changed",
+            serde_json::json!({"existing_access_retained":true}),
+            now,
+        )?;
+        self.record_command(&tx, &next)?;
+        tx.commit().map_err(storage)?;
+        Ok(next)
+    }
+    pub fn revoke_other_access(&self, user: UserId, session: DeviceId) -> Result<()> {
+        let now = self.clock.now().timestamp();
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        validate_security_session(&tx, user, session, now)?;
+        tx.execute(
+            "DELETE FROM private.sessions WHERE user_id=? AND session_id<>?",
+            params![user.to_string(), session.to_string()],
+        )
+        .map_err(storage)?;
+        apply_credential_effects(
+            &tx,
+            user,
+            now,
+            collector_app::security::credential_effects(
+                collector_app::security::CredentialChange::RevokeOtherAccess,
+            ),
+        )?;
+        insert_security_audit(
+            &tx,
+            Some(user),
+            "other_access_revoked",
+            serde_json::json!({"current_session_retained":true}),
+            now,
+        )?;
+        self.record_command(&tx, &())?;
+        tx.commit().map_err(storage)
+    }
     pub fn account(&self, user: UserId) -> Result<AccountView> {
         let db = lock(&self.db)?;
         let row = db.query_row(
@@ -1368,30 +1590,6 @@ impl Store {
             },
         ))
     }
-    pub fn reset_password(&self, username: &str, password: &str) -> Result<()> {
-        if password.len() < 12 || password.len() > 1024 {
-            return Err(Error::Invalid("password must be 12–1024 bytes".into()));
-        }
-        let salt = SaltString::generate(&mut OsRng);
-        let hash = Argon2::default()
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(storage)?
-            .to_string();
-        let mut db = lock(&self.db)?;
-        let tx = db.transaction().map_err(storage)?;
-        if tx
-            .execute(
-                "UPDATE private.users SET password_hash=? WHERE username=?",
-                params![hash, username],
-            )
-            .map_err(storage)?
-            == 0
-        {
-            return Err(Error::NotFound);
-        }
-        tx.execute("DELETE FROM private.sessions WHERE user_id IN (SELECT id FROM private.users WHERE username=?)",[username]).map_err(storage)?;
-        tx.commit().map_err(storage)
-    }
 }
 
 fn insert_security_audit(
@@ -1470,4 +1668,76 @@ fn parse_enrollment_phase(value: &str) -> Result<collector_app::EnrollmentPhase>
         "expired" => Ok(Expired),
         _ => Err(Error::Storage("unknown enrollment phase".into())),
     }
+}
+
+fn enrollment_view(
+    db: &Connection,
+    predicate: &str,
+    values: &[&dyn rusqlite::ToSql],
+) -> Result<EnrollmentView> {
+    let row: (String,String,String,i64,Option<String>) = db.query_row(&format!("SELECT id,requested_label,phase,expires_at,user_id FROM private.enrollments WHERE {predicate}"), values, |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).optional().map_err(storage)?.ok_or_else(|| Error::Invalid("That approval code is unavailable for this account".into()))?;
+    Ok(EnrollmentView {
+        user_id: row.4.map(|v| v.parse().map_err(storage)).transpose()?,
+        id: row.0.parse().map_err(storage)?,
+        requested_label: row.1,
+        phase: parse_enrollment_phase(&row.2)?,
+        expires_at: chrono::DateTime::from_timestamp(row.3, 0)
+            .ok_or_else(|| Error::Storage("invalid enrollment expiry".into()))?,
+    })
+}
+
+fn validate_security_session(
+    db: &Connection,
+    user: UserId,
+    session: DeviceId,
+    now: i64,
+) -> Result<()> {
+    let valid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.sessions s JOIN private.users u ON u.id=s.user_id WHERE s.user_id=? AND s.session_id=? AND s.expires>? AND s.authenticated_at>? AND s.authenticated_at<=? AND u.enabled=1)",params![user.to_string(),session.to_string(),now,now-300,now],|row|row.get(0)).map_err(storage)?;
+    if valid {
+        Ok(())
+    } else {
+        Err(Error::RecentAuthenticationRequired)
+    }
+}
+
+fn open_local_state(state: &Path) -> Result<(std::fs::File, Connection)> {
+    let database = state.join("private.sqlite");
+    if !database.is_file() {
+        return Err(Error::NotFound);
+    }
+    let private_lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(state.join(".private.lock"))
+        .map_err(storage)?;
+    private_lock.try_lock_exclusive().map_err(|_| {
+        Error::Unavailable("private state is already in use; stop the server first".into())
+    })?;
+    let path = std::fs::canonicalize(database).map_err(storage)?;
+    let uri = format!(
+        "file:{}?mode=rw",
+        path.to_string_lossy()
+            .replace('%', "%25")
+            .replace('?', "%3F")
+            .replace('#', "%23")
+    );
+    let db = Connection::open_in_memory_with_flags(
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+            | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(storage)?;
+    db.execute("ATTACH DATABASE ? AS private", [uri])
+        .map_err(storage)?;
+    let version: u32 = db
+        .query_row("PRAGMA private.user_version", [], |row| row.get(0))
+        .map_err(storage)?;
+    if !(5..=19).contains(&version) {
+        return Err(Error::Unavailable(format!(
+            "private state schema {version} must be upgraded by this server before local account operations"
+        )));
+    }
+    Ok((private_lock, db))
 }

@@ -87,6 +87,7 @@ pub enum CredentialChange {
     ReplaceRecoveryCodes,
     RecoverPassword,
     LocalRecovery,
+    RevokeOtherAccess,
 }
 #[derive(Default)]
 pub struct CredentialEffects {
@@ -112,7 +113,14 @@ pub fn credential_effects(change: CredentialChange) -> CredentialEffects {
         },
         RecoverPassword => CredentialEffects {
             browser_sessions: true,
+            native_credentials: true,
+            enrollments: true,
             recovery_batches: true,
+            ..Default::default()
+        },
+        RevokeOtherAccess => CredentialEffects {
+            native_credentials: true,
+            enrollments: true,
             ..Default::default()
         },
         LocalRecovery => CredentialEffects {

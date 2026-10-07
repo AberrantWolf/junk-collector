@@ -2,92 +2,11 @@
 use crate::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct CollectionListSummary {
-    pub id: CollectionListId,
-    pub collection_id: CollectionId,
-    pub revision: Revision,
-    pub name: String,
-    pub kind: CollectionListKind,
-    pub entry_count: u32,
-    pub can_edit: bool,
-}
-#[derive(Clone, Debug, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CollectionListsQuery {
-    pub search: Option<String>,
-    pub cursor: Option<CollectionListId>,
-    pub limit: Option<u16>,
-}
-#[derive(Clone, Debug, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ListEntriesQuery {
-    pub cursor: Option<String>,
-    pub limit: Option<u16>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CreateCollectionList {
-    pub name: String,
-}
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CollectionListChange {
-    Rename {
-        name: String,
-    },
-    Delete,
-    Remove {
-        entry_id: ListEntryId,
-    },
-    Move {
-        entry_id: ListEntryId,
-        before: Option<ListEntryId>,
-    },
-    Append {
-        item_id: ItemId,
-        source_representation_id: Option<RepresentationId>,
-        track_position: Option<u16>,
-    },
-}
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct UpdateCollectionList {
-    pub expected_revision: Revision,
-    pub change: CollectionListChange,
-}
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ListEntryAvailability {
-    Entry,
-    Preparing,
-    NeedsPreparation,
-    SourceUnavailable,
-    EntryRemoved,
-    ModuleUnavailable,
-    Available {
-        representation_id: RepresentationId,
-        file_index: usize,
-        media_type: String,
-    },
-}
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
-pub struct PresentedListEntry {
-    pub id: ListEntryId,
-    pub position: u32,
-    pub item_id: Option<ItemId>,
-    pub title: String,
-    pub album: Option<String>,
-    pub disc_position: Option<u16>,
-    pub track_position: Option<u16>,
-    pub artwork: Option<AssetId>,
-    pub availability: ListEntryAvailability,
-}
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
-pub struct CollectionListView {
-    pub list: CollectionListSummary,
-    pub entries: Page<PresentedListEntry>,
-}
+pub use collector_api_types::{
+    CollectionListChange, CollectionListSummary, CollectionListView, CollectionListsQuery,
+    CreateCollectionList, ListEntriesQuery, ListEntryAvailability, PresentedListEntry,
+    UpdateCollectionList,
+};
 #[derive(Clone, Debug)]
 pub struct ListSourceRevision {
     pub item_id: ItemId,
@@ -222,7 +141,7 @@ impl CollectionService {
             effects.publish_collection_list(actor.user_id, list, command.expected_revision, sources)
         })
     }
-    fn list_music_targets(
+    pub(super) fn list_music_targets(
         &self,
         actor: &Principal,
         item: &Item,

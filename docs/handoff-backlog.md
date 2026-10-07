@@ -4,6 +4,43 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
+## Account and connection usability — current repair
+
+The user's 2026-10-07 direction is: a user who can sign in to the web server
+should be able to connect from Phono with the same account, adding complexity
+only for a concrete transport/security need. Follow the
+[review and repair scope](account-connection-usability-review.md).
+The accepted complete repair is implemented across native connections, security/
+recovery and administration/setup. The [child ledger](account-usability-delivery.md)
+records storage preservation and remaining qualification. Software checks and real
+browser evidence are in [validation](validation/phono-integration.md).
+
+Ready-to-send continuation: follow the child ledger's continuation. Finish native
+GUI/system-root HTTPS qualification when the locked Mac and trusted endpoint are
+available, then the second physical Mac. Preserve Keychain entries, journals and
+grants; do not reopen retired `init`/`reset-password` commands.
+
+## Phono integration — active PJ1 assignment
+
+The user accepted [PJ1](phono-integration-plan.md) on 2026-10-04. Its child ledger
+is authoritative for this delivery. Local 2026-10-07 evidence and remaining
+qualification are in [the validation record](validation/phono-integration.md).
+Finish its remaining acceptance matrix before marking delivery accepted.
+Keep second physical Mac acceptance open without hardware. Do not mark general
+native-client or Trash Amp backlog complete.
+
+### Ready-to-send PJ1 continuation
+
+Continue the accepted Phono integration delivery across Collector, Phono, junk-libs
+and the small Trash Amp decoder adaptation. Read architecture, release requirements,
+implementation status, PJ1 ledger and the dated validation record. Continue from
+the recorded successful local journeys; finish the remaining native failure/queue
+matrix and focused audible boundary checks;
+preserve raw masters, local catalog and manual authority. Collect actual native GUI,
+Keychain and real output evidence, then trusted second-Mac LA3 evidence if hardware
+is available. Do not commit without a new user request. The older LA3-only prompt
+below resumes after PJ1 acceptance.
+
 ## Collection lists — locally accepted
 
 2026-10-03: [CL1 collection lists and playlists](collection-lists-plan.md) is delivered
@@ -940,3 +977,25 @@ Plan session ownership, join/control permissions and playback coordination acros
 ## Wave 1 review follow-up
 
 The review found defects despite a passing original suite. The working tree now includes regression fixes for canonical capture replay, cross-collection updates, incomplete migration writes, nested identity uniqueness, transitive capture associations and capability dispatch. Adjacent fixes cover stale capture views, legacy reassociation reads, file-ownership restrictions, component projection cleanup, explicit schema transformations and language-tag parsing. See validation.md for the current checks. These are corrections to A01/A02/A03/U01 patterns, not claims that later security, transaction or client waves are implemented.
+
+Account CLI usability follow-up: recovery is username-only with configured storage defaults; `paths` reports storage locations while serving, and `--state` provides damaged-configuration recovery. See the account delivery ledger for current validation and remaining device acceptance.
+
+The 2026-10-07 user-requested web navigation redesign is recorded in
+[its design/delivery ledger](web-navigation-redesign.md). Browse/Organize/Manage
+and account actions now have separate navigation roles; collection scope moved
+above the workspace. Continue from that delivery's acceptance record rather than
+restoring retired duplicate/misleading sidebar commands. Existing LA3/PJ1 physical
+qualification remains open independently of web navigation.
+
+The 2026-10-07 local certificate usability follow-up adds Administration's public
+PEM download, macOS/Phono trust guidance, corrected local-vs-advertised startup
+addresses and actionable transport diagnostics. See the account delivery ledger.
+Do not replace existing TLS identities or silently change OS trust to repair
+onboarding. Native GUI/system-root and second-device qualification remain separate
+open acceptance work.
+
+User verification — 2026-10-07: the user confirmed that local Phono-to-Collector
+connection works and requested committing both projects. This establishes local
+connection success; the trust mode and full native acceptance matrix were not
+specified. Remaining failure/account-separation cases and second-physical-Mac
+acceptance stay open.

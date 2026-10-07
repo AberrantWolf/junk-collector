@@ -18,7 +18,11 @@
     "test:fx04-review": "node tests/fx04-review.mjs",
     "test:queue": "node tests/music-queue.mjs",
     "test:lists": "node tests/collection-list-chooser.mjs",
-    "test:context": "node tests/work-context.mjs"
+    "test:context": "node tests/work-context.mjs",
+    "test:accounts": "node tests/account-usability.mjs",
+    "test:pair": "node tests/pair-device.mjs",
+    "test:navigation": "node tests/navigation.mjs",
+    "test:certificate": "node tests/certificate.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

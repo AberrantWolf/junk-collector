@@ -76,3 +76,5 @@ export type {QueuedTrack} from './music-queue';
 
 export {OperationScope} from './operation-scope';
 export {useOperationScope} from './use-operation-scope';
+
+export {registerPasskey} from './passkeys';

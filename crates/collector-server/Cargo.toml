@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+collector-api-types.workspace = true
 collector-core.workspace = true
 collector-app.workspace = true
 collector-modules.workspace = true

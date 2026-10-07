@@ -1,6 +1,6 @@
 use collector_app::{AuthenticatedPrincipal, CreateCollectionCommand, CredentialKind};
 use collector_client::{
-    Endpoint, EnrolledClient, EnrolledCredential, NativeCredentialStorage, Pairing,
+    ConnectionKey, Endpoint, EnrolledClient, EnrolledCredential, NativeCredentialStorage, Pairing,
     PendingEnrollment, Route,
 };
 use collector_core::*;
@@ -17,21 +17,23 @@ impl NativeCredentialStorage for TestCredentialStorage {
         Ok(())
     }
 
-    fn load(&self, server: ServerId) -> Result<Option<EnrolledCredential>> {
-        Ok(self
-            .0
-            .lock()
-            .unwrap()
-            .clone()
-            .filter(|credential| credential.server_id == server))
+    fn load(&self, key: ConnectionKey) -> Result<Option<EnrolledCredential>> {
+        Ok(self.0.lock().unwrap().clone().filter(|credential| {
+            credential.server_id == key.server_id && credential.user_id == Some(key.user_id)
+        }))
     }
 
-    fn remove(&self, server: ServerId) -> Result<()> {
+    fn load_legacy(&self, _: ServerId) -> Result<Option<EnrolledCredential>> {
+        Ok(None)
+    }
+    fn remove_legacy(&self, _: ServerId) -> Result<()> {
+        Ok(())
+    }
+    fn remove(&self, key: ConnectionKey) -> Result<()> {
         let mut stored = self.0.lock().unwrap();
-        if stored
-            .as_ref()
-            .is_some_and(|value| value.server_id == server)
-        {
+        if stored.as_ref().is_some_and(|value| {
+            value.server_id == key.server_id && value.user_id == Some(key.user_id)
+        }) {
             *stored = None;
         }
         Ok(())
@@ -94,6 +96,7 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
         }],
     };
     let mut state = AppState::new(store.clone(), pairing.clone());
+    state.ingress = Ingress::Private;
     let browser_origin = format!("https://{address}");
     state.allowed_origins = Arc::new(vec![browser_origin.clone()]);
     let collection = state
@@ -164,6 +167,17 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
             .await
             .unwrap();
     });
+    // Normal HTTPS must reject a freshly generated, untrusted self-signed identity.
+    let system_client = collector_client::system_https_client().unwrap();
+    assert!(matches!(
+        PendingEnrollment::start_system_https(
+            &system_client,
+            base.parse().unwrap(),
+            "Untrusted test"
+        )
+        .await,
+        Err(Error::Unavailable(_))
+    ));
     let client = pairing.lan_client().unwrap();
     let response = client
         .get(format!("{base}/api/v1/identity"))
@@ -174,10 +188,9 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
         response.json::<serde_json::Value>().await.unwrap()["server_id"],
         id.to_string()
     );
-    let pending =
-        PendingEnrollment::start(&client, base.parse().unwrap(), Some("owner"), "LAN test")
-            .await
-            .unwrap();
+    let pending = PendingEnrollment::start(&client, base.parse().unwrap(), "LAN test")
+        .await
+        .unwrap();
     let approval_code = pending.start.user_code.clone();
     let login = client
         .post(format!("{base}/api/v1/auth/login"))
@@ -207,9 +220,14 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
         .unwrap();
     assert!(approval.status().is_success());
     let storage = TestCredentialStorage::default();
-    let enrolled = pending.complete(&client, &storage).await.unwrap();
+    let enrolled = pending.complete(&client).await.unwrap();
+    storage.save(&enrolled).unwrap();
+    let connection_key = ConnectionKey {
+        server_id: id,
+        user_id: enrolled.user_id.unwrap(),
+    };
     assert_eq!(enrolled.server_id, id);
-    let native = EnrolledClient::from_storage(&storage, id).unwrap();
+    let native = EnrolledClient::from_storage(&storage, connection_key).unwrap();
     assert!(
         native
             .get("https://attacker.example/data".parse().unwrap())
@@ -231,6 +249,81 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
         .unwrap();
     assert_eq!(response.status(), reqwest_status_partial());
     assert_eq!(response.bytes().await.unwrap().as_ref(), b"2345");
+    // Exercise the actual blocking decoder adapter against the trusted listener.
+    let saved = enrolled.clone();
+    let item_id = item.id;
+    let representation = upload.representation_id;
+    tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Seek, SeekFrom};
+        let storage = TestCredentialStorage(std::sync::Mutex::new(Some(saved)));
+        let client = EnrolledClient::from_storage(&storage, connection_key).unwrap();
+        let cancellation = collector_client::MediaCancellation::default();
+        let mut reader = client
+            .media_reader(item_id, representation, 0, cancellation.clone())
+            .unwrap();
+        assert_eq!(reader.length(), 10);
+        reader.seek(SeekFrom::Start(2)).unwrap();
+        let mut bytes = [0; 4];
+        reader.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"2345");
+        reader.seek(SeekFrom::End(-2)).unwrap();
+        let mut last = Vec::new();
+        reader.read_to_end(&mut last).unwrap();
+        assert_eq!(last, b"89");
+        assert!(reader.seek(SeekFrom::Start(11)).is_err());
+        cancellation.cancel();
+        assert_eq!(
+            reader.read(&mut bytes).unwrap_err().kind(),
+            std::io::ErrorKind::Interrupted
+        );
+    })
+    .await
+    .unwrap();
+    let list_input = collector_client::collector_api_types::CreateCollectionList {
+        name: "LAN playlist".into(),
+    };
+    let key = TransactionId::new().to_string();
+    let created = native
+        .create_list(collection.id, &list_input, &key)
+        .await
+        .unwrap();
+    let replay = native
+        .create_list(collection.id, &list_input, &key)
+        .await
+        .unwrap();
+    assert_eq!(created.id, replay.id);
+    let snapshot = native
+        .list_snapshot(collection.id, created.id)
+        .await
+        .unwrap();
+    assert_eq!(snapshot.list.name, "LAN playlist");
+    let rename = collector_client::collector_api_types::UpdateCollectionList {
+        expected_revision: created.revision,
+        change: collector_client::collector_api_types::CollectionListChange::Rename {
+            name: "Renamed".into(),
+        },
+    };
+    let updated = native
+        .update_list(
+            collection.id,
+            created.id,
+            &rename,
+            &TransactionId::new().to_string(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "Renamed");
+    assert!(matches!(
+        native
+            .update_list(
+                collection.id,
+                created.id,
+                &rename,
+                &TransactionId::new().to_string()
+            )
+            .await,
+        Err(Error::Conflict)
+    ));
     let unrelated = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])
         .unwrap()
         .cert
@@ -249,6 +342,45 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
             .await
             .is_err()
     );
+    // A reader admitted before revocation must fail on its next uncached read.
+    let device = store
+        .native_devices(owner.user_id)
+        .unwrap()
+        .into_iter()
+        .find(|device| device.id == enrolled.credential_id)
+        .unwrap();
+    let saved = enrolled.clone();
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let storage = TestCredentialStorage(std::sync::Mutex::new(Some(saved)));
+        let client = EnrolledClient::from_storage(&storage, connection_key).unwrap();
+        let mut reader = client
+            .media_reader(
+                item_id,
+                representation,
+                0,
+                collector_client::MediaCancellation::default(),
+            )
+            .unwrap();
+        store
+            .revoke_native_device(owner.user_id, device.id, device.revision)
+            .unwrap();
+        assert_eq!(
+            reader.read(&mut [0; 1]).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert!(matches!(
+            client.media_reader(
+                item_id,
+                representation,
+                0,
+                collector_client::MediaCancellation::default()
+            ),
+            Err(Error::CredentialRevoked)
+        ));
+    })
+    .await
+    .unwrap();
     stop.shutdown();
     task.await.unwrap();
 }

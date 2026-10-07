@@ -5,16 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+collector-api-types.workspace = true
 collector-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
 thiserror.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "stream", "blocking"] }
 url = { version = "2", features = ["serde"] }
 utoipa.workspace = true
 chrono.workspace = true
+tokio = { version = "1", features = ["rt", "time", "macros"] }
 
 [dev-dependencies]
 tempfile.workspace = true

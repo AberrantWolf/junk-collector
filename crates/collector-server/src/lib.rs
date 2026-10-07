@@ -1,3 +1,7 @@
+use collector_api_types::{
+    ApproveEnrollment, CompleteEnrollment, EnrollmentCompletion, MusicSearchHit, MusicSearchQuery,
+    StartEnrollment,
+};
 use collector_app::{
     WorkEntry, WorkHistoryCommand, WorkJobView, WorkJobsQuery, WorkQuery, WorkTarget,
 };
@@ -63,7 +67,6 @@ pub struct AppState {
     pub ingress: Ingress,
     pub pairing: Pairing,
     pub multi_user: bool,
-    pub default_username: String,
     pub inboxes: Arc<std::collections::BTreeMap<String, std::path::PathBuf>>,
     pub catalog_sources: Arc<Vec<CatalogSourceView>>,
     pub allowed_origins: Arc<Vec<String>>,
@@ -85,7 +88,6 @@ impl AppState {
             ingress: Ingress::Public,
             pairing,
             multi_user: false,
-            default_username: "owner".into(),
             inboxes: Arc::new(std::collections::BTreeMap::new()),
             catalog_sources: Arc::new(Vec::new()),
             allowed_origins: Arc::new(vec![]),
@@ -184,6 +186,8 @@ struct RateLimitState {
     peers: HashMap<String, VecDeque<u64>>,
     accounts: HashMap<String, VecDeque<u64>>,
     enrollment_global: VecDeque<u64>,
+    enrollment_polls: VecDeque<u64>,
+    enrollment_poll_peers: HashMap<String, VecDeque<u64>>,
     enrollment_peers: HashMap<String, VecDeque<u64>>,
     enrollment_accounts: HashMap<String, VecDeque<u64>>,
 }
@@ -246,6 +250,31 @@ impl RateLimits {
         Ok(())
     }
 
+    fn check_enrollment_poll(&self, peer: &str) -> Result<()> {
+        let now = self.clock.monotonic_millis();
+        let mut state = lock_rate(&self.state)?;
+        purge(&mut state.enrollment_polls, now, 60_000);
+        purge(
+            state.enrollment_poll_peers.entry(peer.into()).or_default(),
+            now,
+            60_000,
+        );
+        if state.enrollment_polls.len() >= 600
+            || state
+                .enrollment_poll_peers
+                .get(peer)
+                .is_some_and(|v| v.len() >= 120)
+        {
+            return Err(Error::RateLimited(60));
+        }
+        state.enrollment_polls.push_back(now);
+        state
+            .enrollment_poll_peers
+            .get_mut(peer)
+            .expect("poll bucket exists")
+            .push_back(now);
+        Ok(())
+    }
     fn check_enrollment(&self, account: &str, peer: &str) -> Result<()> {
         const WINDOW_MILLIS: u64 = 60_000;
         const GLOBAL_LIMIT: usize = 50;
@@ -481,6 +510,7 @@ pub fn router(state: AppState) -> Router {
             get(|| async { Json(serde_json::json!({"status":"ok"})) }),
         )
         .route("/", get(index))
+        .route("/pair", get(index))
         .route("/lists", get(index))
         .route("/app.js", get(app_js))
         .route("/app.css", get(app_css))
@@ -537,10 +567,15 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(revoke))
         .routes(routes!(sessions))
         .routes(routes!(replace_recovery_codes))
+        .routes(routes!(change_password))
+        .routes(routes!(revoke_other_access))
         .routes(routes!(list_passkeys))
         .routes(routes!(revoke_passkey))
         .routes(routes!(start_enrollment))
         .routes(routes!(approve_enrollment))
+        .routes(routes!(preview_enrollment))
+        .routes(routes!(enrollment_status))
+        .routes(routes!(cancel_native_enrollment))
         .routes(routes!(complete_enrollment))
         .routes(routes!(cancel_enrollment))
         .routes(routes!(native_devices))
@@ -551,6 +586,11 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(collection_lists))
         .routes(routes!(collection_list_view))
         .routes(routes!(browse))
+        .routes(routes!(music_search))
+        .routes(routes!(client_collections))
+        .routes(routes!(client_albums))
+        .routes(routes!(client_album_playback))
+        .routes(routes!(client_music_tracks))
         .routes(routes!(item))
         .routes(routes!(evidence))
         .routes(routes!(activity, save_activity))
@@ -720,7 +760,10 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
     );
     let path = request.uri().path();
     let enrollment_bootstrap = path == "/api/v1/enrollments/start"
-        || (path.starts_with("/api/v1/enrollments/") && path.ends_with("/complete"));
+        || (path.starts_with("/api/v1/enrollments/")
+            && (path.ends_with("/complete")
+                || path.ends_with("/status")
+                || path.ends_with("/cancel")));
     let origin = request
         .headers()
         .get(header::ORIGIN)
@@ -882,16 +925,20 @@ async fn identity(State(state): State<AppState>) -> Json<IdentityResponse> {
     })
 }
 #[utoipa::path(get, path = "/api/v1/features", responses((status = 200, body = FeaturesResponse)))]
-async fn features(State(state): State<AppState>) -> Json<FeaturesResponse> {
-    Json(FeaturesResponse {
-        default_username: (!state.multi_user).then(|| state.default_username.clone()),
+async fn features(State(state): State<AppState>) -> ApiResult<Json<FeaturesResponse>> {
+    Ok(Json(FeaturesResponse {
+        default_username: if state.multi_user {
+            None
+        } else {
+            Some(state.service.default_login_username()?)
+        },
         multi_user: state.multi_user,
         curation: state.exposure.allows(state.ingress, Surface::Curation),
         administration: state
             .exposure
             .allows(state.ingress, Surface::Administration),
         passkeys: state.passkeys.is_some(),
-    })
+    }))
 }
 #[derive(Deserialize, utoipa::ToSchema)]
 struct Login {
@@ -982,6 +1029,45 @@ async fn update_profile(
         })
         .await?,
     ))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ChangePassword {
+    expected_revision: Revision,
+    new_password: String,
+    confirmation: String,
+}
+#[utoipa::path(put, path = "/api/v1/security/password", request_body = ChangePassword, responses((status = 200, body = Revision), (status = 401), (status = 403), (status = 409)))]
+async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<ChangePassword>,
+) -> ApiResult<Json<Revision>> {
+    let actor = authenticated(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state.service.change_password(
+                &actor,
+                input.expected_revision,
+                &input.new_password,
+                &input.confirmation,
+                &context,
+            )
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post, path = "/api/v1/security/revoke-other-access", responses((status = 204), (status = 401), (status = 403)))]
+async fn revoke_other_access(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<StatusCode> {
+    let actor = authenticated(&state, &headers)?;
+    let context = command_context(&headers)?;
+    blocking(move || state.service.revoke_other_access(&actor, &context)).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(get, path = "/api/v1/me/profile", responses((status = 200, body = AccountView), (status = 401)))]
@@ -1135,70 +1221,69 @@ async fn revoke_passkey(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Deserialize, utoipa::ToSchema)]
-struct StartEnrollment {
-    username: Option<String>,
-    device_name: String,
-}
-
 #[utoipa::path(post, path = "/api/v1/enrollments/start", request_body = StartEnrollment, responses((status = 200, body = EnrollmentStart), (status = 401), (status = 429)))]
 async fn start_enrollment(
     State(state): State<AppState>,
     peer: Option<axum::Extension<DirectPeer>>,
     Json(input): Json<StartEnrollment>,
 ) -> ApiResult<Json<EnrollmentStart>> {
-    let username = if state.multi_user {
-        input
-            .username
-            .filter(|value| !value.trim().is_empty())
-            .ok_or(Error::Unauthenticated)?
-    } else {
-        state.default_username.clone()
-    };
     let peer = peer
         .as_ref()
         .map(|peer| peer.0.0.as_str())
         .unwrap_or("unknown-direct-peer");
-    state.rate_limits.check_enrollment(&username, peer)?;
+    state.rate_limits.check_enrollment("unbound", peer)?;
     Ok(Json(
-        blocking(move || {
-            state
-                .service
-                .start_enrollment(&username, &input.device_name, "/pair")
-        })
-        .await?,
+        blocking(move || state.service.start_enrollment(&input.device_name, "/pair")).await?,
     ))
 }
 
-#[derive(Deserialize, utoipa::ToSchema)]
-struct ApproveEnrollment {
-    user_code: String,
+#[utoipa::path(post, path = "/api/v1/enrollments/preview", request_body = ApproveEnrollment, responses((status = 200, body = EnrollmentView), (status = 401), (status = 400)))]
+async fn preview_enrollment(
+    State(state): State<AppState>,
+    peer: Option<axum::Extension<DirectPeer>>,
+    headers: HeaderMap,
+    Json(input): Json<ApproveEnrollment>,
+) -> ApiResult<Json<EnrollmentView>> {
+    let actor = authenticated(&state, &headers)?;
+    let peer = peer
+        .as_ref()
+        .map(|p| p.0.0.as_str())
+        .unwrap_or("unknown-direct-peer");
+    state
+        .rate_limits
+        .check_enrollment(&actor.principal.user_id.to_string(), peer)?;
+    Ok(Json(
+        blocking(move || state.service.preview_enrollment(&actor, &input.user_code)).await?,
+    ))
 }
 
 #[utoipa::path(post, path = "/api/v1/enrollments/approve", request_body = ApproveEnrollment, responses((status = 200, body = EnrollmentView), (status = 401), (status = 403), (status = 410)))]
 async fn approve_enrollment(
     State(state): State<AppState>,
+    peer: Option<axum::Extension<DirectPeer>>,
     headers: HeaderMap,
     Json(input): Json<ApproveEnrollment>,
 ) -> ApiResult<Json<EnrollmentView>> {
     let actor = authenticated(&state, &headers)?;
+    let peer = peer
+        .as_ref()
+        .map(|p| p.0.0.as_str())
+        .unwrap_or("unknown-direct-peer");
+    state
+        .rate_limits
+        .check_enrollment(&actor.principal.user_id.to_string(), peer)?;
     Ok(Json(
         blocking(move || state.service.approve_enrollment(&actor, &input.user_code)).await?,
     ))
 }
 
-#[derive(Deserialize, utoipa::ToSchema)]
-struct CompleteEnrollment {
-    completion_secret: String,
-}
-
-#[utoipa::path(post, path = "/api/v1/enrollments/{id}/complete", params(("id" = EnrollmentId, Path)), request_body = CompleteEnrollment, responses((status = 200, body = serde_json::Value), (status = 401), (status = 410), (status = 429)))]
+#[utoipa::path(post, path = "/api/v1/enrollments/{id}/complete", params(("id" = EnrollmentId, Path)), request_body = CompleteEnrollment, responses((status = 200, body = EnrollmentCompletion<Pairing>), (status = 401), (status = 410), (status = 429)))]
 async fn complete_enrollment(
     State(state): State<AppState>,
     peer: Option<axum::Extension<DirectPeer>>,
     Path(id): Path<EnrollmentId>,
     Json(input): Json<CompleteEnrollment>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<EnrollmentCompletion<Pairing>>> {
     let peer = peer
         .as_ref()
         .map(|peer| peer.0.0.as_str())
@@ -1213,12 +1298,53 @@ async fn complete_enrollment(
         }
     })
     .await?;
-    Ok(Json(serde_json::json!({
-        "device_id": issue.device_id,
-        "credential": issue.credential,
-        "expires_at": issue.expires_at,
-        "pairing": state.pairing,
-    })))
+    Ok(Json(EnrollmentCompletion {
+        issue,
+        pairing: state.pairing,
+    }))
+}
+
+#[utoipa::path(post, path = "/api/v1/enrollments/{id}/status", params(("id" = EnrollmentId, Path)), request_body = CompleteEnrollment, responses((status = 200, body = EnrollmentView), (status = 401), (status = 429)))]
+async fn enrollment_status(
+    State(state): State<AppState>,
+    peer: Option<axum::Extension<DirectPeer>>,
+    Path(id): Path<EnrollmentId>,
+    Json(input): Json<CompleteEnrollment>,
+) -> ApiResult<Json<EnrollmentView>> {
+    let peer = peer
+        .as_ref()
+        .map(|peer| peer.0.0.as_str())
+        .unwrap_or("unknown-direct-peer");
+    state.rate_limits.check_enrollment_poll(peer)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .enrollment_status(id, &input.completion_secret, false)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post, path = "/api/v1/enrollments/{id}/cancel", params(("id" = EnrollmentId, Path)), request_body = CompleteEnrollment, responses((status = 200, body = EnrollmentView), (status = 401), (status = 429)))]
+async fn cancel_native_enrollment(
+    State(state): State<AppState>,
+    peer: Option<axum::Extension<DirectPeer>>,
+    Path(id): Path<EnrollmentId>,
+    Json(input): Json<CompleteEnrollment>,
+) -> ApiResult<Json<EnrollmentView>> {
+    let peer = peer
+        .as_ref()
+        .map(|peer| peer.0.0.as_str())
+        .unwrap_or("unknown-direct-peer");
+    state.rate_limits.check_enrollment_poll(peer)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .enrollment_status(id, &input.completion_secret, true)
+        })
+        .await?,
+    ))
 }
 
 #[utoipa::path(delete, path = "/api/v1/enrollments/{id}", params(("id" = EnrollmentId, Path)), responses((status = 204), (status = 401), (status = 410)))]
@@ -1308,6 +1434,93 @@ async fn collection_detail(
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.presented_collection(&actor, id)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/client/collections",responses((status=200,body=Vec<collector_api_types::ClientCollection>)))]
+async fn client_collections(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Vec<collector_api_types::ClientCollection>>> {
+    let actor = principal(&state, &headers)?;
+    let curation = state.exposure.allows(state.ingress, Surface::Curation);
+    let values = blocking(move || state.service.collections(&actor)).await?;
+    Ok(Json(values.into_iter().filter(|v| matches!(&v.binding, CollectionBinding::Assigned {module} if module.0=="org.junk.music")).map(|v|collector_api_types::ClientCollection { id:v.id,name:v.name,can_browse:v.effective_permissions.can_browse,can_play:v.effective_permissions.can_browse,can_edit_playlists:curation&&v.content_permissions.can_edit }).collect()))
+}
+#[utoipa::path(get,path="/api/v1/client/albums",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_api_types::ClientAlbum>)))]
+async fn client_albums(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<BrowseQuery>,
+) -> ApiResult<Json<Page<collector_api_types::ClientAlbum>>> {
+    let actor = principal(&state, &headers)?;
+    let values = blocking(move || state.service.browse_presented(&actor, query)).await?;
+    Ok(Json(Page {
+        items: values
+            .items
+            .into_iter()
+            .filter(|v| v.domain.module.0 == "org.junk.music")
+            .map(|v| collector_api_types::ClientAlbum {
+                id: v.id,
+                collection_id: v.collection_id,
+                title: v.effective_metadata.title.value,
+                artist: v
+                    .effective_metadata
+                    .subtitle
+                    .map(|s| s.value)
+                    .unwrap_or(v.subtitle),
+                artwork: v.primary_artwork,
+            })
+            .collect(),
+        next_cursor: values.next_cursor,
+    }))
+}
+#[utoipa::path(get,path="/api/v1/items/{item}/client-tracks",params(("item"=ItemId,Path)),responses((status=200,body=Vec<collector_api_types::MusicTrackAvailability>),(status=403)))]
+async fn client_music_tracks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item): Path<ItemId>,
+) -> ApiResult<Json<Vec<collector_api_types::MusicTrackAvailability>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .recorded_music_track_availability(&actor, item)
+        })
+        .await?,
+    ))
+}
+#[derive(Deserialize)]
+struct AlbumPlaybackQuery {
+    source: Option<RepresentationId>,
+}
+#[utoipa::path(get,path="/api/v1/items/{item}/client-playback",params(("item"=ItemId,Path),("source"=Option<RepresentationId>,Query)),responses((status=200,body=collector_api_types::AlbumPlaybackSnapshot),(status=403)))]
+async fn client_album_playback(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item): Path<ItemId>,
+    Query(query): Query<AlbumPlaybackQuery>,
+) -> ApiResult<Json<collector_api_types::AlbumPlaybackSnapshot>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .album_playback_snapshot(&actor, item, query.source)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(get, path = "/api/v1/collections/{collection}/music-search", params(("collection" = CollectionId, Path), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status=200,body=Page<MusicSearchHit>),(status=403)))]
+async fn music_search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(collection): Path<CollectionId>,
+    Query(query): Query<MusicSearchQuery>,
+) -> ApiResult<Json<Page<MusicSearchHit>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.music_search(&actor, collection, query)).await?,
     ))
 }
 #[utoipa::path(get, path = "/api/v1/items", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<PresentedItem>), (status = 401)))]
@@ -3971,11 +4184,10 @@ async fn settings(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state
-        .service
-        .require_administrator(&principal(&state, &headers)?)?;
+    let actor = principal(&state, &headers)?;
+    let default_user_id = state.service.default_user_id(&actor)?;
     Ok(Json(
-        serde_json::json!({"exposure":state.exposure,"multi_user":state.multi_user,"server_id":state.pairing.server_id,"ingress":format!("{:?}",state.ingress)}),
+        serde_json::json!({"default_user_id":default_user_id,"current_user_id":actor.user_id,"exposure":state.exposure,"multi_user":state.multi_user,"server_id":state.pairing.server_id,"ingress":format!("{:?}",state.ingress)}),
     ))
 }
 

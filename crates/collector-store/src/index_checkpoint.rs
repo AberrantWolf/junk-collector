@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 
 const FORMAT: u32 = 5;
-pub(crate) const CATALOG_SCHEMA: u32 = 12;
+pub(crate) const CATALOG_SCHEMA: u32 = 13;
 pub(crate) const TABLES: &[&str] = &[
     "collections",
     "collection_lists",
@@ -16,6 +16,7 @@ pub(crate) const TABLES: &[&str] = &[
     "components",
     "legacy_payload_locators",
     "browse_items",
+    "music_search",
     "metadata_authorities",
     "metadata_health",
     "preparation_readiness",

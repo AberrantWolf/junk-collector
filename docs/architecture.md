@@ -323,8 +323,8 @@ this delivery does not introduce a second scheduler or duplicate ownership store
 
 ## Dependency rules
 
-Wave 4 reserves the `collector-api-types` boundary below; its DTO move remains
-planned. D04.2 introduced `collector-providers` at its reserved boundary. The
+The Phono PJ1 delivery implements `collector-api-types` for list, music availability
+and native browsing DTOs. Remaining DTO extraction is incremental. D04.2 introduced `collector-providers` at its reserved boundary. The
 architecture checker enforces both dependency directions. Archive v4 processing
 records and projections remain implemented through existing core, application,
 and store boundaries.
@@ -396,7 +396,7 @@ Command execution creates an explicit `CommandEffects` scope bound to a typed `C
 
 Security rules live in `collector-app::security`: account/grant authority snapshots, default-account eligibility, credential revocation sets, and enrollment transitions. Store gathers facts under an immediate SQLite transaction, evaluates that policy, and applies its effects before committing. CAS and serialized snapshot loading are storage mechanisms; last-owner/admin/default and lifecycle decisions are application policy. Grant revision counters survive removal, so recreating access cannot make a stale revision current again.
 
-API route groups are annotated once and supply both Axum runtime routing and the checked OpenAPI 3.1 document. C01.2 will move shared read DTOs to `collector-api-types`; application command types remain in `collector-app`, with callers updated together. Those Rust contract types generate `api/openapi.v1.json`; `openapi-typescript` generates the React-only type surface. The regeneration check writes temporary outputs and fails on byte differences. Request-body limits are included as `x-body-limit-bytes`. The server does not expose OpenAPI or Swagger UI. The bounded Wave 1 item envelope is a deprecated application adapter: it loads canonical server-owned state, rejects differences, then delegates only editable fields to the current command.
+API route groups are annotated once and supply both Axum runtime routing and the checked OpenAPI 3.1 document. PJ1 shares list command/read and music browsing DTOs through `collector-api-types`; unrelated application command types remain in `collector-app`. Those Rust contract types generate `api/openapi.v1.json`; `openapi-typescript` generates the React-only type surface. The regeneration check writes temporary outputs and fails on byte differences. Request-body limits are included as `x-body-limit-bytes`. The server does not expose OpenAPI or Swagger UI. The bounded Wave 1 item envelope is a deprecated application adapter: it loads canonical server-owned state, rejects differences, then delegates only editable fields to the current command.
 
 Authenticated collection-type discovery returns only registry-validated module descriptors: bounded labels, scalar field contracts, read-only structured-field notices and capability availability. It exposes no module configuration or management switch. Application read DTOs combine grants, durable binding and registry/schema availability into explicit content permissions; access management and personal activity remain separate. Domain-patch receipts bind the submitted patch under their own operation rather than its state-dependent resolved payload. Generic clients submit owner-bound domain patches, never replacement raw envelopes, and render type labels/summaries without branching on built-in module IDs. Legacy assignment guidance names the stopped-server inspection and assignment commands; unavailable owners remain safe read-only presentations.
 
@@ -621,3 +621,82 @@ reads to four, propagates disconnect cancellation and keeps the permit until the
 blocking read exits. Bodies are limited to 1 MiB and raster image MIME types; the
 browser uses authenticated same-origin image URLs and retry placeholders. CSP
 remains same-origin and previews are not stored in browser HTTP caches.
+
+## Phono Collector integration (PJ1, 2026-10-04)
+
+The [delivery ledger](phono-integration-plan.md) records implementation separately
+from physical acceptance. A rebuildable music_search projection indexes current
+materialized song title/artist/album and fingerprint-bound recorded track positions.
+Reindex restores it; browsing does not hash or open masters. Native read DTOs expose
+listener-effective capabilities. Album playback reuses existing target expansion.
+collector-client owns certificate-pinned enrollment, authenticated bounded JSON and
+artwork reads, origin checks, structured errors and validator-bound HTTP ranges.
+Phono keeps Keychain credentials and a separate durable command journal, and feeds
+shared lazy decoding/resampling into one continuous Kira voice.
+
+## Account connection usability repair — 2026-10-07
+
+A normal browser-trusted HTTPS address is the default native enrollment route.
+Collector-client uses system HTTPS roots with redirects disabled, freezes the
+server identity at enrollment start, and stores the transport trust mode alongside
+the Keychain credential. System-HTTPS enrollment retains only its authenticated
+origin; it does not send credentials to advertised alternate routes. Existing
+pinned-certificate credentials retain their actual trust and route data. Owner-
+provided certificate enrollment remains explicit for locally issued identities.
+The browser `/pair` page is a client surface independent of curation/admin exposure;
+approval uses recent browser authentication and atomically binds the enabled
+approving account.
+Phono views call the existing service/worker; no second account authority is added.
+See [the usability review](account-connection-usability-review.md) for remaining
+account/recovery gaps and acceptance boundaries.
+
+## Complete account/connection delivery — accepted 2026-10-07
+
+Native enrollment starts without an account; explicit recent browser approval
+atomically binds it to an enabled account. Secret-authenticated status/cancellation
+reveals no credentials and checks ownership before state transitions. Connections
+are keyed by server and account throughout Keychain, requests and playback.
+Application services own password/revocation policies; Store commits their effects,
+audit and receipts together. Ordinary password change retains access; explicit
+other-access revocation preserves the current browser and passkeys/codes; code
+recovery revokes sessions/apps/enrollments/codes and issues a fresh session, while
+local recovery additionally revokes passkeys. Private-state conversion preserves
+bound enrollment rows and credentials. Native legacy credential conversion verifies
+`/me` before committing account-keyed storage; no identity is guessed from edits.
+
+
+Stopped-server account lookup and recovery share an existing-state opener and the
+same exclusive private lock as the server. They do not open the archive. The CLI
+reads only storage locations from configuration by default; an explicit `--state`
+override bypasses configuration for damaged-configuration recovery. Recovery
+targets exactly a sign-in username. The read-only `paths` command reports absolute
+configured locations without opening or locking storage, including while serving. Account creation and
+collection grants remain separate durable application commands. Server authority
+never implies collection access. The [account delivery ledger](account-usability-delivery.md)
+records schema 19 and native storage backup/recovery details.
+
+Password-change receipt input binding uses deterministic per-account/command Argon2
+through the authentication mechanism port. It retains exact-input replay without
+adding a fast password fingerprint to private receipt data. Existing account-create
+receipts retain their recorded input binding so pending commands remain replayable.
+
+## Web navigation presentation — 2026-10-07
+
+The destination rail groups Browse, Organize and Manage separately from account
+commands. Collection scope is a searchable/paginated workspace disclosure, using
+existing authorized search and navigation cancellation. Navigation presentation
+adds no application policy or durable state; routes/history and the persistent
+music player retain their existing owners. See the
+[web navigation design](web-navigation-redesign.md) for decisions and acceptance.
+
+## Local certificate onboarding — 2026-10-07
+
+Administration's certificate download reuses the authenticated pairing read port;
+it exports only its public PEM and displays the existing PEM-byte fingerprint.
+The browser owns the transient Blob download and cleans it up with the panel.
+Neither the browser nor native UI decides server trust from downloaded material
+alone. Local operators can obtain the certificate through the private loopback
+management interface or the server's printed filesystem location, then establish
+trust explicitly in Phono or macOS. The server reports a local HTTPS listener
+address separately from advertised names, which do not create DNS. No OS trust
+change, certificate replacement or validation bypass is automatic.

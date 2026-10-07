@@ -16,6 +16,7 @@ mod jobs;
 mod library_care;
 mod migration;
 mod migration_v3;
+mod music_search;
 mod processing;
 mod provisional_imports;
 mod publication;
@@ -638,7 +639,7 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
-            "DELETE FROM collection_lists; DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
+            "DELETE FROM collection_lists; DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM music_search; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
         )
         .map_err(storage)?;
         for (collection, path) in collections {
@@ -731,6 +732,7 @@ impl Store {
             .map_err(storage)?;
         for id in ids {
             library_care::project_preparation(&tx, id.parse().map_err(storage)?)?;
+            music_search::refresh(&tx, id.parse().map_err(storage)?)?;
         }
         self.record_command(&tx, &())?;
         index_checkpoint::rebuilt(&tx, &self.archive)?;
@@ -1465,6 +1467,12 @@ impl JobPort for Store {
 }
 
 impl AdministrationPort for Store {
+    fn default_username(&self) -> Result<String> {
+        Store::default_username(self)
+    }
+    fn default_user_id(&self) -> Result<UserId> {
+        Store::default_user_id(self)
+    }
     fn create_user(&self, username: &str, password: &str, administrator: bool) -> Result<UserId> {
         Store::create_user(self, username, password, administrator)
     }
@@ -1542,6 +1550,21 @@ impl AdministrationPort for Store {
 }
 
 impl AuthenticationPort for Store {
+    fn password_change_binding(&self, user: UserId, key: &str, password: &str) -> Result<String> {
+        Store::password_change_binding(self, user, key, password)
+    }
+    fn change_password(
+        &self,
+        user: UserId,
+        session: DeviceId,
+        expected: Revision,
+        password: &str,
+    ) -> Result<Revision> {
+        Store::change_password(self, user, session, expected, password)
+    }
+    fn revoke_other_access(&self, user: UserId, session: DeviceId) -> Result<()> {
+        Store::revoke_other_access(self, user, session)
+    }
     fn now(&self) -> chrono::DateTime<Utc> {
         self.clock.now()
     }
@@ -1657,13 +1680,24 @@ impl AuthenticationPort for Store {
 impl EnrollmentPort for Store {
     fn start_enrollment(
         &self,
-        user: UserId,
+        user: Option<UserId>,
         label: &str,
         verification_url: &str,
     ) -> Result<EnrollmentStart> {
         Store::start_enrollment(self, user, label, verification_url)
     }
 
+    fn preview_enrollment(&self, user: UserId, code: &str) -> Result<EnrollmentView> {
+        Store::preview_enrollment(self, user, code)
+    }
+    fn enrollment_status(
+        &self,
+        id: EnrollmentId,
+        secret: &str,
+        cancel: bool,
+    ) -> Result<EnrollmentView> {
+        Store::enrollment_status(self, id, secret, cancel)
+    }
     fn approve_enrollment(&self, user: UserId, user_code: &str) -> Result<EnrollmentView> {
         Store::approve_enrollment(self, user, user_code)
     }
@@ -1806,7 +1840,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 18 {
+    if private_version > 19 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -2278,7 +2312,24 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     library_care::install(db)?;
     bulk_intake::install(db)?;
     bulk_library::install(db)?;
-    db.execute_batch("PRAGMA private.user_version=18;")
+    if private_version < 19 {
+        let tx = db.transaction().map_err(storage)?;
+        tx.execute_batch("ALTER TABLE private.enrollments RENAME TO enrollments_bound;
+            DROP INDEX private.enrollments_active_user_code;
+            CREATE TABLE private.enrollments (
+              id TEXT PRIMARY KEY, user_id TEXT, completion_secret_hash TEXT NOT NULL,
+              user_code TEXT NOT NULL, requested_label TEXT NOT NULL, verification_url TEXT NOT NULL,
+              phase TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+              approved_at INTEGER, issued_at INTEGER, cancelled_at INTEGER,
+              CHECK (user_id IS NOT NULL OR phase IN ('pending_approval','expired','cancelled')));
+            INSERT INTO private.enrollments SELECT * FROM private.enrollments_bound;
+            DROP TABLE private.enrollments_bound;
+            CREATE UNIQUE INDEX private.enrollments_active_user_code ON enrollments(user_code)
+              WHERE phase IN ('pending_approval','approved');
+            PRAGMA private.user_version=19;").map_err(storage)?;
+        tx.commit().map_err(storage)?;
+    }
+    db.execute_batch("PRAGMA private.user_version=19;")
         .map_err(storage)?;
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
@@ -2417,6 +2468,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS processing_members(id TEXT PRIMARY KEY, result_id TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS processing_members_result ON processing_members(result_id,id);").map_err(storage)?;
     collection_lists::install(db)?;
+    music_search::install(db)?;
     reference_index::install(db)?;
     index_checkpoint::install(db)?;
     if catalog_version < 9 {
@@ -2769,6 +2821,15 @@ impl CollectionTypePort for Store {
 }
 
 impl Catalog for Store {
+    fn music_search(
+        &self,
+        collection: CollectionId,
+        user: UserId,
+        query: collector_app::MusicSearchQuery,
+    ) -> Result<Page<collector_app::MusicSearchRecord>> {
+        music_search::search(&*lock(&self.db)?, collection, user, query)
+    }
+
     fn collections(&self, user: UserId) -> Result<Vec<Collection>> {
         let db = lock(&self.db)?;
         let mut stmt = db.prepare("SELECT c.record FROM collections c JOIN private.grants g ON c.id=g.collection_id WHERE g.user_id=? ORDER BY c.id").map_err(storage)?;
@@ -3456,6 +3517,7 @@ fn project(tx: &Connection, record: &RevisionRecord, path: &str) -> Result<()> {
     item.validate()?;
     tx.execute("INSERT INTO items VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,title=excluded.title,subtitle=excluded.subtitle,record=excluded.record,path=excluded.path,deleted=excluded.deleted", params![item.id.to_string(),item.collection_id.to_string(),item.revision.0,item.title,item.subtitle,serde_json::to_string(item).map_err(storage)?,path,item.deleted]).map_err(storage)?;
     browse::project(tx, item)?;
+    music_search::project(tx, item, None, &[], None)?;
     tx.execute("DELETE FROM search WHERE id=?", [item.id.to_string()])
         .map_err(storage)?;
     tx.execute(
@@ -3652,12 +3714,31 @@ fn staged_asset_payloads(
 }
 
 fn project_capture(tx: &Connection, capture: &Capture) -> Result<()> {
+    let previous_item: Option<String> = tx
+        .query_row(
+            "SELECT item_id FROM captures WHERE id=?1",
+            [capture.id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage)?
+        .flatten();
+
     tx.execute(
         "INSERT INTO captures VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET collection_id=excluded.collection_id,revision=excluded.revision,item_id=excluded.item_id,record=excluded.record",
         params![capture.id.to_string(), capture.collection_id.to_string(), capture.revision.0, capture.association.item_id.map(|id| id.to_string()), serde_json::to_string(capture).map_err(storage)?],
     ).map_err(storage)?;
+    if let Some(previous) = previous_item
+        .map(|id| id.parse::<ItemId>())
+        .transpose()
+        .map_err(storage)?
+        .filter(|id| Some(*id) != capture.association.item_id)
+    {
+        music_search::refresh(tx, previous)?;
+    }
     if let Some(item) = capture.association.item_id {
         library_care::project_preparation(tx, item)?;
+        music_search::refresh(tx, item)?;
     }
     Ok(())
 }

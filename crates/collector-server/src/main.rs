@@ -27,11 +27,6 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Create storage, local TLS identity and the initial account. Password is read from stdin.
-    Init {
-        #[arg(long, default_value = "owner")]
-        username: String,
-    },
     /// Create or repair local browser setup without changing existing accounts. Stop the server first.
     Setup {
         #[arg(long, default_value = "owner")]
@@ -55,18 +50,27 @@ enum Command {
         #[arg(long)]
         module: String,
     },
-    /// Reset an account password locally and revoke its devices. New password is read from stdin.
-    ResetPassword {
-        #[arg(long, default_value = "owner")]
-        username: String,
-    },
-    /// Recover exactly one account while the server is stopped. New password is read from stdin.
+    /// Recover an account by its sign-in username. Stop the server first; reads the new password from stdin.
     RecoverAccount {
+        /// Sign-in username of the account to recover.
         #[arg(long)]
-        private_state: PathBuf,
+        username: String,
+        /// Account-storage folder override when configuration is unavailable (contains private.sqlite).
         #[arg(long)]
-        user_id: UserId,
+        state: Option<PathBuf>,
     },
+    /// List sign-in usernames and account status. Stop the server first.
+    Accounts {
+        /// Account-storage folder override when configuration is unavailable (contains private.sqlite).
+        #[arg(long)]
+        state: Option<PathBuf>,
+        #[arg(long, default_value_t = 50)]
+        limit: u16,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Show configured storage locations without opening them. Safe while the server is running.
+    Paths,
     /// Export trusted enrollment material. Transfer this file through a trusted channel.
     Pairing,
 }
@@ -164,6 +168,44 @@ fn instructions(config: &Config, path: &std::path::Path) {
     println!(
         "For first use: sign in here, choose Create collection (or open Administration), then choose Add / import."
     );
+    if config.tls_names.iter().any(|name| name == "localhost") {
+        println!(
+            "Local Phono HTTPS: https://localhost:{} (same computer only; the certificate must be trusted)",
+            config.lan_bind.port()
+        );
+    }
+    for endpoint in &config.endpoints {
+        println!(
+            "Advertised client HTTPS: {endpoint}. Requires working DNS; setup does not create DNS records."
+        );
+    }
+    let certificate = config.state.join("tls/cert.pem");
+    if let Ok(file) = std::fs::File::open(&certificate) {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        if file.take(65_537).read_to_end(&mut bytes).is_ok() && bytes.len() <= 65_536 {
+            let location = std::path::absolute(&certificate).unwrap_or(certificate);
+            println!("Public certificate: {}", location.display());
+            println!("Phono PEM-file SHA-256: {}", Digest::sha256(&bytes).hex);
+            println!(
+                "Certificate download and help: sign in at {} → Administration → Server settings → HTTPS certificate.",
+                local_origin(config)
+            );
+            println!(
+                "For a self-signed certificate on macOS: import cert.pem into Keychain Access (login keychain), open its Trust settings, set Secure Sockets Layer (SSL) to Always Trust, close and authenticate, then restart Phono/browser."
+            );
+            println!(
+                "Phono-only alternative: Add server → owner-provided certificate → import this public PEM, compare the PEM-file SHA-256 above, and confirm trust. This does not establish browser trust; local browser approval can use {}/pair with the approval code.",
+                local_origin(config)
+            );
+            println!(
+                "Obtain trust material from the server computer or a separately trusted owner channel. Keep key.pem private; never disable certificate validation."
+            );
+        }
+    }
+    println!(
+        "After sign-in: open Account & security to save recovery codes, then create a collection and import."
+    );
     println!(
         "Public proxy upstream: http://{} (client surface; curation={}, administration={})",
         config.public_bind,
@@ -247,7 +289,7 @@ fn tls(config: &Config, create: bool) -> Result<Pairing> {
     let root = config.state.join("tls");
     if !root.join("cert.pem").exists() {
         if !create {
-            bail!("TLS identity missing; run init first");
+            bail!("TLS identity missing; run setup first");
         }
         std::fs::create_dir_all(&root)?;
         #[cfg(unix)]
@@ -285,6 +327,35 @@ fn tls(config: &Config, create: bool) -> Result<Pairing> {
         endpoints,
     })
 }
+// Read only storage locations: unrelated listener/provider settings cannot block recovery.
+#[derive(Deserialize)]
+#[serde(default)]
+struct StoragePaths {
+    state: PathBuf,
+    archive: PathBuf,
+}
+impl Default for StoragePaths {
+    fn default() -> Self {
+        let config = Config::default();
+        Self {
+            state: config.state,
+            archive: config.archive,
+        }
+    }
+}
+fn storage_paths(config: &std::path::Path) -> Result<StoragePaths> {
+    if !config.exists() {
+        return Ok(StoragePaths::default());
+    }
+    toml::from_str(&std::fs::read_to_string(config).with_context(|| format!("Cannot read configuration {}. For account commands, use --state PATH to select the existing account-storage folder.", config.display()))?)
+        .with_context(|| format!("Cannot read storage locations from {}. For account commands, use --state PATH to select the existing folder containing private.sqlite.", config.display()))
+}
+fn account_storage(config: &std::path::Path, state: Option<&std::path::Path>) -> Result<PathBuf> {
+    match state {
+        Some(path) => Ok(path.to_owned()),
+        None => Ok(storage_paths(config)?.state),
+    }
+}
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -294,29 +365,82 @@ async fn main() -> Result<()> {
         )
         .init();
     let cli = Cli::parse();
+    if matches!(cli.command, Command::Paths) {
+        let paths = storage_paths(&cli.config)?;
+        for (label, path) in [
+            ("Configuration", cli.config.clone()),
+            ("Account storage", paths.state.clone()),
+            ("Public HTTPS certificate", paths.state.join("tls/cert.pem")),
+            ("Archive", paths.archive),
+        ] {
+            let absolute = std::path::absolute(&path)?;
+            println!(
+                "{label}: {} ({})",
+                absolute.display(),
+                if absolute.exists() {
+                    "exists"
+                } else {
+                    "missing"
+                }
+            );
+        }
+        return Ok(());
+    }
+    if let Command::Accounts {
+        state,
+        limit,
+        cursor,
+    } = &cli.command
+    {
+        let state = account_storage(&cli.config, state.as_deref())?;
+        let accounts = Store::local_accounts(&state, cursor.as_deref(), *limit)?;
+        for account in accounts.items {
+            println!(
+                "{}: {}, {}{}",
+                account.username,
+                if account.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                if account.administrator {
+                    "administrator"
+                } else {
+                    "regular account"
+                },
+                if account.is_default {
+                    ", default account"
+                } else {
+                    ""
+                }
+            );
+        }
+        if let Some(cursor) = accounts.next_cursor {
+            println!("More accounts: accounts --cursor {cursor:?}");
+        }
+        return Ok(());
+    }
+    if let Command::RecoverAccount { state, username } = &cli.command {
+        let state = account_storage(&cli.config, state.as_deref())?;
+        println!(
+            "Recovering username {username:?} from {}. Browser sessions, apps, pending approvals, recovery codes and passkeys will be revoked. Roles and enabled status are preserved.",
+            std::path::absolute(&state)?.display()
+        );
+        Store::local_recover(
+            &state,
+            collector_app::LocalAccountSelector::Username(username.clone()),
+            &password()?,
+        )?;
+        println!(
+            "Recovered username {username:?}. Sign in with the new password, save new recovery codes, register passkeys and reconnect apps."
+        );
+        return Ok(());
+    }
     let mut config: Config = if cli.config.exists() {
         toml::from_str(&std::fs::read_to_string(&cli.config)?)?
     } else {
         Config::default()
     };
-    match &cli.command {
-        Command::RecoverAccount {
-            private_state,
-            user_id,
-        } => {
-            Store::local_recover(private_state, *user_id, &password()?)?;
-            println!(
-                "Recovered account {user_id}; browser sessions and passkeys were revoked. Grants and administrator status were preserved."
-            );
-            return Ok(());
-        }
-        Command::ResetPassword { .. } => {
-            bail!(
-                "reset-password is retired because it cannot identify private state and account safely; use recover-account --private-state PATH --user-id USER_ID"
-            );
-        }
-        _ => {}
-    }
     if !config.public_bind.ip().is_loopback() || !config.private_bind.ip().is_loopback() {
         bail!(
             "HTTP listeners must bind loopback; use a dedicated trusted proxy for public/private access. Direct LAN clients use the TLS listener."
@@ -356,8 +480,7 @@ async fn main() -> Result<()> {
         );
         return Ok(());
     }
-    if !cli.config.exists() && !matches!(cli.command, Command::Init { .. } | Command::Setup { .. })
-    {
+    if !cli.config.exists() && !matches!(cli.command, Command::Setup { .. }) {
         bail!("Configuration missing. Run setup first.");
     }
     let store = Arc::new(Store::open(&config.archive, &config.state)?);
@@ -392,26 +515,9 @@ async fn main() -> Result<()> {
                 "Setup complete. Run serve with this configuration, then sign in with your existing password (or the one just created)."
             );
         }
-        Command::Init { username } => {
-            if store.user_count()? > 0 {
-                bail!("already initialized; use reset-password for local recovery");
-            }
-            let origin = local_origin(&config);
-            if !config.allowed_origins.contains(&origin) {
-                config.allowed_origins.push(origin);
-            }
-            let password = password()?;
-            store.create_user(&username, &password, true)?;
-            let mut pairing = tls(&config, true)?;
-            pairing.server_id = store.server_id()?;
-            std::fs::write(&cli.config, toml::to_string_pretty(&config)?)?;
-            instructions(&config, &cli.config);
-            println!(
-                "Initialized server {}. Local certificate SHA-256: {}",
-                pairing.server_id, pairing.certificate_sha256
-            );
+        Command::RecoverAccount { .. } | Command::Accounts { .. } | Command::Paths => {
+            unreachable!()
         }
-        Command::ResetPassword { .. } | Command::RecoverAccount { .. } => unreachable!(),
         Command::Reindex => {
             store.reindex()?;
             println!("Catalog rebuilt. Access grants were not reconstructed from archive records.");
@@ -450,14 +556,12 @@ async fn main() -> Result<()> {
         }
         Command::Serve => {
             if store.user_count()? == 0 {
-                bail!("run init before serving");
+                bail!("Run setup before serving.");
             }
             instructions(&config, &cli.config);
             let mut pairing = tls(&config, false)?;
             pairing.server_id = store.server_id()?;
-            let default_username = store.default_username()?;
             let mut state = AppState::new(store, pairing);
-            state.default_username = default_username;
             state.exposure = config.exposure;
             state.inboxes = Arc::new(config.inboxes.clone());
             let flac = probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());

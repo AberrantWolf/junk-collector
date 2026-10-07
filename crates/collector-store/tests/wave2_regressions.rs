@@ -3,7 +3,7 @@ use collector_core::*;
 use collector_store::Store;
 fn enrolled(store: &Store, user: UserId) -> collector_app::NativeCredentialIssue {
     let start = store
-        .start_enrollment(user, "review device", "https://example.test")
+        .start_enrollment(Some(user), "review device", "https://example.test")
         .unwrap();
     store.approve_enrollment(user, &start.user_code).unwrap();
     store
@@ -22,7 +22,7 @@ fn review_disable_reenable_must_not_resurrect_native() {
         .unwrap();
     let issue = enrolled(&store, user);
     let pending = store
-        .start_enrollment(user, "pending device", "https://example.test")
+        .start_enrollment(Some(user), "pending device", "https://example.test")
         .unwrap();
     store.approve_enrollment(user, &pending.user_code).unwrap();
     store
@@ -42,7 +42,7 @@ fn review_disable_reenable_must_not_resurrect_native() {
     ));
 }
 #[test]
-fn review_recovery_replacement_preserves_native() {
+fn review_generating_codes_preserves_native_but_consumption_revokes_it() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("archive"), dir.path().join("state")).unwrap();
     let user = store
@@ -50,7 +50,7 @@ fn review_recovery_replacement_preserves_native() {
         .unwrap();
     let issue = enrolled(&store, user);
     let pending = store
-        .start_enrollment(user, "pending device", "https://example.test")
+        .start_enrollment(Some(user), "pending device", "https://example.test")
         .unwrap();
     store.approve_enrollment(user, &pending.user_code).unwrap();
     let codes = store.replace_recovery_codes(user).unwrap();
@@ -59,6 +59,9 @@ fn review_recovery_replacement_preserves_native() {
             .complete_enrollment(pending.id, &pending.completion_secret)
             .is_ok()
     );
+    // Generating a replacement batch still retains apps. Consuming a code now
+    // follows the explicitly accepted 2026-10-07 recovery revocation policy.
+    assert!(store.authenticate_native(&issue.credential).is_ok());
     store
         .consume_recovery_code(
             "admin",
@@ -68,8 +71,8 @@ fn review_recovery_replacement_preserves_native() {
         )
         .unwrap();
     assert!(
-        store.authenticate_native(&issue.credential).is_ok(),
-        "generating recovery codes unexpectedly revoked device"
+        store.authenticate_native(&issue.credential).is_err(),
+        "consuming a recovery code must revoke app access"
     );
 }
 #[test]

@@ -258,7 +258,7 @@ Server administration and collection access are separate permissions. An adminis
 
 Set `authentication_origin` to a stable, browser-trusted HTTPS origin and add it to `allowed_origins`. Register and use passkeys on that origin. The browser needs the standard WebAuthn JSON conversion APIs. Password login remains available.
 
-Use **Account & security** to manage account credentials and sessions. For local account recovery, see the command reference below.
+Use **Account & security** for Profile, Password, Passkeys, Recovery, Browser sessions and Apps. Changing the password retains existing access. **Sign out other sessions and apps** keeps this browser, passkeys and recovery codes. Using a recovery code replaces browser/app access and the old code batch, retaining passkeys; save replacement codes afterward. For local account recovery, see the command reference below.
 
 ## Access from another computer
 
@@ -275,6 +275,56 @@ Add each browser-facing HTTPS origin to `allowed_origins`, including its port wh
 
 Keep private and public proxy destinations separate. Public tunnels must target `public_bind`, even when they connect from localhost. Never publish the private management listener through a public tunnel.
 
+## Connect Phono Junk
+
+In Phono Junk’s Collector view, choose **Add server**, enter the full HTTPS
+address, then choose **Connect with web sign-in**. Approve the request with your
+normal browser account; Phono completes automatically and saves its separate,
+revocable credential in Keychain. You do not enter your username or password in
+Phono. The same collection permissions apply.
+
+### Self-signed certificates and local connections
+
+On the same computer, the default HTTPS client address is
+`https://localhost:9843`; `http://localhost:9842` is the local browser management
+address. Startup reports the configured local HTTPS address separately from
+advertised names. A `.local` name must resolve separately; setup does not create
+DNS or an mDNS service. `localhost` on another computer means that other computer.
+
+Collector setup generates a self-signed certificate, which is not automatically
+trusted. Sign in to the trusted browser management interface and open
+**Administration → Server settings → HTTPS certificate**. Download the public
+PEM; the panel includes instructions and its Phono PEM-file SHA-256. The startup
+output prints the certificate’s absolute file location and the same fingerprint,
+and `paths` lists the certificate location while serving. Only `cert.pem` is
+public; keep `key.pem` private.
+
+For normal HTTPS enrollment on macOS:
+
+1. Obtain the public certificate from the server computer or a separately trusted
+   owner channel. Compare `shasum -a 256 FILE.pem` with trusted startup output.
+2. Open Keychain Access through Spotlight. Select the login keychain and use
+   **File → Import Items** to add the certificate.
+3. Double-click it, expand **Trust**, and set **Secure Sockets Layer (SSL)** to
+   **Always Trust**. Close the window and authenticate if prompted.
+4. Restart Phono and your browser, then connect to the configured HTTPS address.
+
+See [Apple’s trust instructions](https://support.apple.com/guide/keychain-access/change-the-trust-settings-of-a-certificate-kyca11871/mac).
+
+Alternatively, trust this connection only in Phono: select **This server uses an
+owner-provided certificate**, import the public PEM, enter the independently
+verified PEM-file SHA-256 and confirm verification. Importing into Phono does not
+establish browser trust. On the server computer, you can enter the approval code
+at the local management `/pair` page (normally `http://localhost:9842/pair`);
+remote browser approval requires trusted HTTPS. A browser-only certificate
+exception does not establish system trust. Never disable certificate validation.
+
+The Phono fingerprint hashes PEM file bytes; certificate viewers may show a
+fingerprint of the binary certificate encoding instead. The download is the
+direct Collector HTTPS listener’s certificate; a reverse proxy can have a
+different certificate. Do not trust a download obtained solely through an
+untrusted HTTPS connection.
+
 ## Operations and backups
 
 The examples below use the built binary; place `--config /absolute/path/collector.toml` before any command when needed.
@@ -282,12 +332,17 @@ The examples below use the built binary; place `--config /absolute/path/collecto
 | Command | Purpose |
 |---|---|
 | `setup [--username NAME]` | Initialize storage, TLS, the default account, and local browser configuration. Run while stopped. |
-| `init [--username NAME]` | First-time scripted initialization, accepting the password through standard input. |
 | `serve` | Run listeners and background workers. Stop with Ctrl-C. |
 | `doctor` | Check configuration and optional encoders without locking the archive; can run while serving. Does not test provider reachability, passwords, grants, or browser certificate trust. |
 | `reindex` | Rebuild the catalog from archive records. Stop the server first. |
 | `pairing` | Export server identity, public certificate, and endpoint data as JSON. Transfer it through a trusted channel; it contains no login credential and does not establish browser trust. Run while stopped. |
-| `recover-account --private-state PATH --user-id USER_ID` | Recover one account while stopped. Reads a new password, revokes sessions/passkeys, and preserves grants and administrator status. Use the exact private-state root and account UUID. |
+| `paths` | Show absolute configuration, account-storage, archive and public-certificate locations with existence status. Safe while serving; reads configuration only. |
+| `accounts [--limit 50] [--cursor USERNAME]` | List sign-in usernames and enabled/admin/default status. Run while stopped. |
+| `recover-account --username NAME` | Recover that sign-in username while stopped. Reads a new password, revokes browsers/apps/pending approvals/codes/passkeys, and preserves grants and enabled/admin/default status. |
+
+These commands use `collector.toml` by default; select another configuration with `--config FILE` before the command. Account storage is the folder containing `private.sqlite` (normally `.collector/state`). Run `paths` to see its configured location. If configuration is damaged, `accounts --state PATH` and `recover-account --username NAME --state PATH` use that existing folder directly. They never create missing storage or open the archive. Recovery takes the username used for sign-in; no account ID is required.
+
+The [account delivery ledger](docs/account-usability-delivery.md) documents schema 19, preserved credentials and the native account-keyed conversion.
 
 ### Full backup
 

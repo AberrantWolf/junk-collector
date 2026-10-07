@@ -30,6 +30,27 @@ struct V4Target<'a> {
     revision: Revision,
 }
 
+pub(super) fn representation_fingerprint(
+    representation: &Representation,
+) -> Result<SourceFingerprint> {
+    let source = PackageScope::Representation(representation.id);
+    SourceFingerprint::calculate(
+        source,
+        representation
+            .files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| PackageFileFingerprint {
+                id: stable_file_id(source, index),
+                bytes: file.bytes,
+                sha256: file.digest.clone(),
+            })
+            .collect(),
+        None,
+        std::collections::BTreeMap::new(),
+    )
+}
+
 fn stable_file_id(scope: PackageScope, index: usize) -> PackageFileId {
     let (kind, id) = scope_columns(scope);
     PackageFileId(stable_private_uuid(&format!(
@@ -752,6 +773,7 @@ fn project_processing(
         let item:Option<String>=tx.query_row("SELECT c.item_id FROM entity_owners o JOIN captures c ON c.id=o.root_id WHERE o.kind='representation' AND o.id=?",[source.to_string()],|r|r.get(0)).optional().map_err(storage)?.flatten();
         if let Some(item) = item {
             library_care::project_preparation(tx, item.parse().map_err(storage)?)?;
+            music_search::refresh(tx, item.parse().map_err(storage)?)?;
         }
     }
     Ok(())
@@ -1031,6 +1053,16 @@ impl ProcessingPort for Store {
         collection: CollectionId,
         source: PackageScope,
     ) -> Result<SourceFingerprint> {
+        if let PackageScope::Representation(id) = source {
+            let capture =
+                reference_index::capture_for_representation(&*lock(&self.db)?, collection, id)?;
+            let representation = capture
+                .representations
+                .iter()
+                .find(|v| v.id == id)
+                .ok_or(Error::NotFound)?;
+            return representation_fingerprint(representation);
+        }
         let inventory = self.package_inventory_record(collection, source)?;
         let digests = match source {
             PackageScope::Import(id) => self
@@ -1361,6 +1393,8 @@ pub(crate) fn project_effective_metadata_search(
         .map(|row| serde_json::from_str(&row.map_err(storage)?).map_err(storage))
         .collect::<Result<Vec<_>>>()?;
     let display = collector_app::resolve_record_metadata(&item, record, &candidates)?;
+    let artist = collector_app::music_search_artist_override(&item, record)?;
+    music_search::project(tx, &item, Some(&display), &candidates, artist.as_deref())?;
     tx.execute(
         "UPDATE browse_items SET title_key=? WHERE id=?",
         params![display.title.value.to_lowercase(), item.id.to_string()],

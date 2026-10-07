@@ -81,3 +81,143 @@ fn cache_identity_includes_server_and_encoding_profile() {
     assert_eq!(evicted, vec![lossy.key(), remote.key()]);
     assert!(!evicted.contains(&base.key()));
 }
+
+#[test]
+fn credential_storage_cannot_return_another_server_or_expired_authority() {
+    use collector_client::{EnrolledClient, EnrolledCredential, NativeCredentialStorage};
+    use collector_core::{Error, NativeCredentialId, Result};
+    struct Stored(EnrolledCredential);
+    impl NativeCredentialStorage for Stored {
+        fn save(&self, _: &EnrolledCredential) -> Result<()> {
+            Ok(())
+        }
+        fn load(&self, _: ConnectionKey) -> Result<Option<EnrolledCredential>> {
+            Ok(Some(self.0.clone()))
+        }
+        fn load_legacy(&self, _: ServerId) -> Result<Option<EnrolledCredential>> {
+            Ok(None)
+        }
+        fn remove_legacy(&self, _: ServerId) -> Result<()> {
+            Ok(())
+        }
+        fn remove(&self, _: ConnectionKey) -> Result<()> {
+            Ok(())
+        }
+    }
+    let server = ServerId::new();
+    let user = UserId::new();
+    let key = ConnectionKey {
+        server_id: server,
+        user_id: user,
+    };
+    let mut credential = EnrolledCredential {
+        user_id: Some(user),
+        username: "owner".into(),
+        display_name: "Owner".into(),
+        trust: Default::default(),
+        server_id: server,
+        pairing: Pairing {
+            server_id: server,
+            certificate_pem: String::new(),
+            certificate_sha256: String::new(),
+            endpoints: vec![],
+        },
+        credential_id: NativeCredentialId::new(),
+        credential: "test-only-secret".into(),
+        expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+    };
+    assert!(matches!(
+        EnrolledClient::from_storage(
+            &Stored(credential.clone()),
+            ConnectionKey {
+                server_id: ServerId::new(),
+                user_id: user
+            }
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        EnrolledClient::from_storage(
+            &Stored(credential.clone()),
+            ConnectionKey {
+                server_id: server,
+                user_id: UserId::new()
+            }
+        ),
+        Err(Error::Invalid(_))
+    ));
+    credential.pairing.server_id = ServerId::new();
+    assert!(matches!(
+        EnrolledClient::from_storage(&Stored(credential.clone()), key),
+        Err(Error::Invalid(_))
+    ));
+    credential.pairing.server_id = server;
+    credential.expires_at = chrono::Utc::now() - chrono::Duration::seconds(1);
+    assert!(matches!(
+        EnrolledClient::from_storage(&Stored(credential), key),
+        Err(Error::CredentialRevoked)
+    ));
+}
+
+#[test]
+fn system_https_credentials_reconnect_without_a_local_certificate_and_fence_origins() {
+    struct Stored(EnrolledCredential);
+    impl NativeCredentialStorage for Stored {
+        fn save(&self, _: &EnrolledCredential) -> Result<()> {
+            Ok(())
+        }
+        fn load(&self, _: ConnectionKey) -> Result<Option<EnrolledCredential>> {
+            Ok(Some(self.0.clone()))
+        }
+        fn load_legacy(&self, _: ServerId) -> Result<Option<EnrolledCredential>> {
+            Ok(None)
+        }
+        fn remove_legacy(&self, _: ServerId) -> Result<()> {
+            Ok(())
+        }
+        fn remove(&self, _: ConnectionKey) -> Result<()> {
+            Ok(())
+        }
+    }
+    let server = ServerId::new();
+    let user = UserId::new();
+    let key = ConnectionKey {
+        server_id: server,
+        user_id: user,
+    };
+    let stored = Stored(EnrolledCredential {
+        server_id: server,
+        user_id: Some(user),
+        username: "owner".into(),
+        display_name: "Owner".into(),
+        credential_id: NativeCredentialId::new(),
+        credential: "test-only-secret".into(),
+        expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+        trust: collector_client::ConnectionTrust::SystemHttps,
+        pairing: Pairing {
+            server_id: server,
+            certificate_pem: String::new(),
+            certificate_sha256: String::new(),
+            endpoints: vec![Endpoint {
+                url: "https://collector.example/".parse().unwrap(),
+                route: Route::Public,
+                latency_ms: None,
+                healthy: true,
+            }],
+        },
+    });
+    let client = EnrolledClient::from_storage(&stored, key).unwrap();
+    assert!(
+        client
+            .get("https://collector.example/api/v1/me".parse().unwrap())
+            .is_ok()
+    );
+    for url in [
+        "http://collector.example/api/v1/me",
+        "https://attacker.example/api/v1/me",
+        "https://collector.example:8443/api/v1/me",
+        "https://user@collector.example/api/v1/me",
+    ] {
+        assert!(client.get(url.parse().unwrap()).is_err(), "{url}");
+    }
+}
