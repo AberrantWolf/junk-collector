@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "collector-api-types"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "chrono",
  "collector-core",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "collector-app"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "collector-client"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -535,7 +535,7 @@ dependencies = [
 
 [[package]]
 name = "collector-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "chrono",
  "hex",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "collector-modules"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "collector-core",
  "junk-libs-accuraterip",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "collector-providers"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "collector-app",
  "collector-core",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "collector-server"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "collector-store"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1410,6 +1410,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-accuraterip"
 version = "0.1.0"
+source = "git+https://github.com/AberrantWolf/junk-libs?tag=v0.1.0#a0abcdae1bafec8793ce77111f58aa9ab5675c4e"
 dependencies = [
  "junk-libs-core",
  "junk-libs-disc",
@@ -1419,6 +1420,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-audio"
 version = "0.1.0"
+source = "git+https://github.com/AberrantWolf/junk-libs?tag=v0.1.0#a0abcdae1bafec8793ce77111f58aa9ab5675c4e"
 dependencies = [
  "claxon",
  "junk-libs-disc",
@@ -1428,6 +1430,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-core"
 version = "0.1.0"
+source = "git+https://github.com/AberrantWolf/junk-libs?tag=v0.1.0#a0abcdae1bafec8793ce77111f58aa9ab5675c4e"
 dependencies = [
  "crc32fast",
  "md5",
@@ -1439,6 +1442,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-dat"
 version = "0.1.0"
+source = "git+https://github.com/AberrantWolf/junk-libs?tag=v0.1.0#a0abcdae1bafec8793ce77111f58aa9ab5675c4e"
 dependencies = [
  "log",
  "quick-xml",
@@ -1448,6 +1452,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-disc"
 version = "0.1.0"
+source = "git+https://github.com/AberrantWolf/junk-libs?tag=v0.1.0#a0abcdae1bafec8793ce77111f58aa9ab5675c4e"
 dependencies = [
  "chd",
  "crc32fast",
@@ -1462,6 +1467,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-disc-id"
 version = "0.1.0"
+source = "git+https://github.com/AberrantWolf/junk-libs?tag=v0.1.0#a0abcdae1bafec8793ce77111f58aa9ab5675c4e"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1472,6 +1478,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-game-formats"
 version = "0.1.0"
+source = "git+https://github.com/AberrantWolf/junk-libs?tag=v0.1.0#a0abcdae1bafec8793ce77111f58aa9ab5675c4e"
 dependencies = [
  "crc32fast",
  "junk-libs-core",

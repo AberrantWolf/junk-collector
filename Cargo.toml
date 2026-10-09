@@ -4,7 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/collector-server"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
 license = "MIT"
 
@@ -32,13 +32,13 @@ utoipa-axum = "0.2"
 url = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 httpdate = "1"
-junk-libs-audio = { path = "../junk-libs/junk-libs-audio" }
-junk-libs-accuraterip = { path = "../junk-libs/junk-libs-accuraterip" }
-junk-libs-core = { path = "../junk-libs/junk-libs-core" }
-junk-libs-disc = { path = "../junk-libs/junk-libs-disc" }
-junk-libs-disc-id = { path = "../junk-libs/junk-libs-disc-id" }
-junk-libs-game-formats = { path = "../junk-libs/junk-libs-game-formats" }
-junk-libs-dat = { path = "../junk-libs/junk-libs-dat" }
+junk-libs-audio = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
+junk-libs-accuraterip = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
+junk-libs-core = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
+junk-libs-disc = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
+junk-libs-disc-id = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
+junk-libs-game-formats = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
+junk-libs-dat = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
 
 [profile.release]
 lto = "thin"

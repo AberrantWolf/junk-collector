@@ -1,5 +1,5 @@
 FROM rust:1.95-slim-bookworm AS builder
-RUN apt-get update && apt-get install -y --no-install-recommends cmake pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends cmake pkg-config libssl-dev git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates

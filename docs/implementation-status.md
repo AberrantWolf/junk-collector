@@ -16,6 +16,27 @@ This repository is an executable architecture/server foundation, not the complet
 
 Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation tickets and the [release requirements](release-requirements.md) for the repository-local target specification. The gap list below is a summary, not a substitute for ticket acceptance criteria.
 
+## Experimental source alpha — 2026-10-09
+
+`v0.1.0-alpha.1` is the first experimental source-release checkpoint, including
+Git-consumable `collector-client` and server crates for Trash Amp builds/tests.
+The [release notes](releases/v0.1.0-alpha.1.md) state installation, pinning, backup
+requirements and the remaining qualifications. This tag does not accept LA3/PJ1,
+promise stable interfaces/storage upgrades, or claim the planned first release
+complete. No prebuilt binary or registry image is supplied.
+
+## Shared-library release baseline — 2026-10-09
+
+Collector's seven `junk-libs` dependencies now use the published `v0.1.0` Git tag;
+`Cargo.lock` freezes commit `a0abcdae1bafec8793ce77111f58aa9ab5675c4e`.
+Normal builds no longer require a sibling checkout. The Docker builder includes
+Git/CA certificates for dependency acquisition, and CI explicitly builds the
+release server after its checks. The Linux ARM64 Docker image built and passed
+non-root setup, authenticated HTTPS/web serving and recreated-container persistence
+on Docker Desktop. Validation and wider deployment limits are recorded
+in [validation](validation.md). This dependency baseline does not accept LA3/PJ1
+or establish a supported Collector release/storage contract.
+
 ## Collection lists — locally accepted (2026-10-03)
 
 The [CL1 contract](collection-lists-plan.md) adds collection-owned portable lists,

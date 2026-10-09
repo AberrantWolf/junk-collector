@@ -3979,3 +3979,92 @@ on panel reopen; retaining history remains required.
 Architecture, formatting, TypeScript, web build, Clippy, server rebuild and diff
 whitespace checks passed. `cargo test --workspace` and full `test:smoke` passed,
 including real browser metadata review, playback, bulk-library and list journeys.
+
+## Tagged shared-library dependency baseline — 2026-10-09
+
+Published annotated `junk-libs` tag `v0.1.0` at
+`a0abcdae1bafec8793ce77111f58aa9ab5675c4e`; remote tag dereferencing confirmed
+that exact commit. Collector's seven narrow shared-crate dependencies use the
+HTTPS Git tag, with the same immutable commit recorded in `Cargo.lock`. No other
+locked package versions changed. README setup no longer requires a sibling
+checkout. Docker's builder includes Git and CA certificates; CI now also builds
+the release server with `--locked`.
+
+Passed: architecture/documentation/fixture checks, Rust formatting,
+`cargo check --workspace`, `cargo test --workspace --locked`, workspace all-target
+Clippy with warnings denied, web TypeScript check/build, unchanged served asset
+diff, and whitespace checks. Existing real-dump/scale tests remained ignored;
+these are not newly qualified by a dependency-source change.
+
+An isolated copy of tracked source plus the current changes at
+`/private/tmp/collector-tag-check-4lipakif/junk-collector` had no sibling junk-libs
+checkout. Cargo metadata confirmed every shared crate came from the published
+Git tag. `cargo build --release --locked --offline -p collector-server` passed
+there using the already-fetched Cargo cache, and the resulting executable's
+`--help` ran successfully. This proves source independence from sibling checkouts,
+not an empty-cache offline build. Initial HTTPS Git acquisition also passed.
+
+Docker CLI 29.9.0 became available during validation, but `docker version` found
+no daemon at the default `/var/run/docker.sock`; no alternate context/runtime was
+configured. Container build/runtime and Linux qualification remain unrun. No
+new browser journey was run: web source/assets are unchanged, and the server was
+rebuilt with those assets. LA3/PJ1 physical acceptance and the broader release
+requirements remain open.
+
+### Docker continuation — 2026-10-09
+
+The user installed and started Docker Desktop, enabling the previously unavailable
+container check. Docker Desktop 4.94.0 / Engine 29.8.2, context `desktop-linux`,
+ran Linux ARM64. `docker build --progress=plain -t junk-collector:tag-validation .`
+passed using `rust:1.95-slim-bookworm`, fetching the published junk-libs tag in the
+builder and compiling the release binary without sibling sources.
+
+Actual disposable runtime checks passed as UID 10001: setup and doctor with
+separate config/archive/state volumes; embedded HTML and JavaScript retrieval;
+anonymous `/api/v1/me` denial; owner login and authenticated reads; HTTPS with
+explicit certificate trust and localhost hostname validation; and recreation of
+the container retaining the same TLS certificate, account/admin role and existing
+session. The server ran with a read-only root filesystem and temporary `/tmp`.
+Only its TLS client port was published to host loopback; HTTP listeners stayed
+container-loopback-only. The server correctly rejected the test's initial wildcard
+HTTP configuration. The restart assertion was corrected to compare durable user
+identity/role, since a fresh login deliberately has a new device identity.
+
+All temporary test containers and volumes were removed. The local validation image
+remains available; `/private/tmp/collector-container-validation.json` records its
+image identity and the successful checks. This supersedes the daemon-unavailable
+limitation above for this Linux ARM64 container build/smoke only. No x86-64 image,
+remote deployment, private proxy, NAS, media playback, backup/restore or full
+security/scale matrix was exercised inside Docker; those wider gates remain open.
+
+## Experimental source alpha preparation — 2026-10-09
+
+Prepared `v0.1.0-alpha.1` as a source-only experimental prerelease for local
+users and Git consumers, especially Trash Amp's collector-client and integration
+test crates. Workspace package versions and lock entries are `0.1.0-alpha.1`;
+shared junk-libs stays at its published `v0.1.0` tag. The release notes explicitly
+retain LA3/PJ1 and wider first-release gates, backup requirements and the absence
+of stable interface/storage-compatibility promises. No binary or registry image
+is advertised. CI retains push/PR checks, adds manual dispatch and a locked
+release-server build.
+
+Passed on the final alpha version: architecture/link/fixture and whitespace
+checks, Rust formatting, workspace check/tests (including 210 passing store
+integration tests and two ignored scale tests), all-target workspace Clippy with
+warnings denied, web TypeScript/build with unchanged served assets, and generated
+OpenAPI/TypeScript contract drift check. Existing real-dump/scale acceptance
+remains separately unqualified.
+
+The final `junk-collector:0.1.0-alpha.1` Linux ARM64 Docker image built, reports
+`junk-collector 0.1.0-alpha.1`, and passed the disposable non-root setup/doctor,
+web-assets, anonymous-denial, owner login, validated HTTPS and recreated-container
+account/session/TLS persistence checks described above. Test containers and
+volumes were removed. This is a release dry run, not container-registry publication
+or the complete deployment/backup/media/scale matrix.
+
+The previous GitHub Checks failure (run 37106938301) was confirmed to be a missing
+sibling junk-libs manifest during cargo metadata/formatting. The Git dependency
+pin removes that prerequisite. Publication follows clean hosted checks and a
+consumer build from the immutable pushed Collector revision; results are also
+observable in GitHub Checks and the prerelease record. The actual Trash Amp
+checkout is preserved; consumer validation uses a disposable copy.

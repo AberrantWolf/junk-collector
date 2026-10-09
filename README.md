@@ -4,19 +4,20 @@ Junk Collector is a self-hosted archive for physical video games and music CDs: 
 
 The web app supports collections with or without attached dumps, guided imports, optional metadata and artwork acquisition, game DAT matching, AccurateRip checks, and playback of prepared CD tracks. Each collection has one type—games or music CDs. Original files are retained alongside derived files and recorded evidence.
 
+## Alpha release
+
+`v0.1.0-alpha.1` is an experimental source release for local evaluation and
+pinned Rust consumers such as Trash Amp. It is not a production-ready release;
+interfaces and storage formats may still change. Back up archive, private state
+and configuration before upgrading. See [release notes](docs/releases/v0.1.0-alpha.1.md)
+for the qualified scope and remaining gates.
+
 ## Quick start
 
 ### Requirements
 
 - Rust 1.95 or newer, a C/C++ build toolchain, CMake, and pkg-config. Linux builds also need OpenSSL development headers.
-- A compatible `junk-libs` checkout beside this repository; Cargo uses its individual crates through local path dependencies:
-
-  ```text
-  projects/
-  ├── junk-collector/
-  └── junk-libs/
-  ```
-
+- Network access on the first build to fetch Cargo dependencies, including the pinned `junk-libs` `v0.1.0` Git tag. No sibling checkout is required.
 - Writable storage for the archive and private server state.
 - Optional: `flac` for lossless CD preparation; `opusenc` for smaller audio copies.
 
