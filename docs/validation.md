@@ -4068,3 +4068,19 @@ pin removes that prerequisite. Publication follows clean hosted checks and a
 consumer build from the immutable pushed Collector revision; results are also
 observable in GitHub Checks and the prerelease record. The actual Trash Amp
 checkout is preserved; consumer validation uses a disposable copy.
+
+### Hosted alpha dry run — toolchain correction
+
+Run 37908961870 passed the clean hosted Linux workspace tests and web/format
+checks, then failed Clippy: moving stable had reached Rust 1.99, adding the
+`chunks_exact_to_as_chunks` lint against existing provider conversion code.
+CI now explicitly selects Rust 1.95.0, matching the documented build baseline
+and Docker builder, rather than silently changing the release toolchain.
+No runtime defect or test failure was observed; newer-toolchain lint qualification
+is not claimed. Local alpha-version gates and the Docker/runtime dry run passed.
+
+The disposable Trash Amp checkout consuming Collector revision `598c5ae` from
+Git passed four adapter unit tests and the two-real-server integration test for
+streaming, downloading, editing and offline retention. Its five Collector
+manifest dependencies were changed only in the temporary copy. The real checkout
+was not modified. The CI-only follow-up does not change that tested Rust source.
