@@ -16,6 +16,8 @@ const a=new AbortController(),b=new AbortController();const cancelled=coordinato
 const c=new AbortController();const abandoned=coordinator.wait(alice,c.signal);const abandonedCheck=assert.rejects(abandoned,{name:'AbortError'});await Promise.resolve();c.abort();await abandonedCheck;assert.equal(prompts[1].request.signal.aborted,true);
 const latest=coordinator.wait(alice);await Promise.resolve();let finished=false;latest.then(()=>finished=true);prompts[1].gate.resolve(alice);await Promise.resolve();await Promise.resolve();assert.equal(finished,false);prompts[2].gate.resolve(alice);await latest;
 const wrong=coordinator.wait(alice);await Promise.resolve();prompts[3].gate.resolve({user_id:'bob'});await assert.rejects(wrong,/Account changed/);
+// The shared browser runtime emits identity-change events even in this Node test.
+globalThis.window=new EventTarget();
 const runtime=await load('runtime');runtime.setApiIdentity(alice);
 const prompt=deferred(),promptStarted=deferred();runtime.setRecentAuthenticationHandler(async()=>{promptStarted.resolve();return prompt.promise;});
 const calls=[];globalThis.fetch=async(url,init)=>{calls.push({url,body:init.body,key:new Headers(init.headers).get('Idempotency-Key'),actor:new Headers(init.headers).get('X-Collector-Actor')});if(url==='/api/v1/me')return Response.json({...alice,device_id:'new'});if(calls.filter(call=>call.url===url).length===1)return Response.json({error:{code:'recent_authentication_required'}},{status:403});return Response.json({saved:true});};

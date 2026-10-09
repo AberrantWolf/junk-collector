@@ -27,7 +27,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  let releaseUpload;const held=new Promise(resolve=>{releaseUpload=resolve;});
  await page.route('**/api/v1/imports/*/files/*',async route=>{await held;await route.abort('aborted').catch(()=>{});},{times:1});
  await imports.getByRole('button',{name:'Start import',exact:true}).click();
- await imports.getByRole('progressbar',{name:'Uploading package',exact:true}).waitFor();
+ await imports.getByRole('progressbar',{name:'Uploading files',exact:true}).waitFor();
  const intakeId=new URL(page.url()).searchParams.get('item');assert.ok(intakeId);
  releaseUpload();await page.reload({waitUntil:'domcontentloaded'});
  await expect.poll(async()=>{const count=await page.getByRole('region',{name:'Imports workspace'}).count();if(!count){const status=await page.evaluate(async()=>{const c=new AbortController();setTimeout(()=>c.abort(),2000);try{return (await fetch('/api/v1/me',{signal:c.signal})).status;}catch(e){return String(e);}});console.log('Bulk reload account status:',status);}return count;},{timeout:60000}).toBe(1);
@@ -52,7 +52,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  await grouping.getByLabel('Destination album',{exact:true}).selectOption(ids[1]);
  for(const field of ['Title','Artist / edition text','Identity link','Album information','Selected artwork'])await grouping.getByLabel(field,{exact:true}).selectOption(ids[1]);
  await grouping.getByRole('button',{name:'Review grouping',exact:true}).click();
- await grouping.getByRole('heading',{name:'Grouping consequences'}).waitFor();
+ await grouping.getByRole('heading',{name:'What will change'}).waitFor();
  await page.screenshot({path:fileURLToPath(new URL('../test-results/bulk-metadata-grouping-desktop.png',import.meta.url)),fullPage:true});
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Grouping review overflows on mobile');
@@ -65,8 +65,8 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  assert.equal(merged[0].merged_into,destinationId);assert.equal(merged[1].specimens.length,2);assert.equal(merged[1].captures.length,2);
  await page.setViewportSize({width:1440,height:1000});
  if(hasFlac){
-  await nav.getByRole('button',{name:'Music preparation',exact:true}).click();
-  const preparation=page.getByRole('region',{name:'Music preparation workspace'});
+  await nav.getByRole('button',{name:'Prepare audio',exact:true}).click();
+  const preparation=page.getByRole('region',{name:'Prepare audio workspace'});
   const row=preparation.locator(`[data-item-id="${destinationId}"]`).locator('..');await row.getByRole('checkbox').check();
   await preparation.getByRole('button',{name:'Preview FLAC preparation',exact:true}).click();
   const batch=page.getByRole('region',{name:'Review batch'});

@@ -8,7 +8,7 @@ export function useDialogDismiss(onClose:()=>void,enabled=true){
  function dismiss(){
   const element=ref.current;if(!element)return false;
   if(element.querySelector('[data-uploading="true"]')){
-   if(!window.confirm('Pause this upload and close? Saved entries and received bytes are kept. Reopen Import dumps and select the same folder or files to resume.'))return false;
+   if(!window.confirm('Pause this upload and close? Saved entries and received bytes are kept. Reopen Import original files and select the same folder or files to resume.'))return false;
   }else if(element.matches('[data-unsaved="true"]')||element.querySelector('[data-unsaved="true"]')){
    if(!window.confirm('Discard unsaved changes and close? Saved records and uploaded files will be kept.'))return false;
   }else if(element.getAttribute('aria-busy')==='true'&&!window.confirm('Work is still in progress. Close this window? Submitted work may continue on the server.'))return false;
@@ -22,6 +22,7 @@ export function useDialogDismiss(onClose:()=>void,enabled=true){
   document.body.style.overflow='hidden';element?.querySelector<HTMLButtonElement>('.close')?.focus();
   function keydown(event:KeyboardEvent){
    if(element!==[...document.querySelectorAll('[role="dialog"]')].at(-1))return;
+   if(event.key==='Escape'&&(event.target as HTMLElement)?.closest('.info-help')?.querySelector('[aria-expanded="true"]'))return;
    if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();latest.current();}
    if(event.key==='Tab'&&element){
     const controls=[...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(value=>value.getClientRects().length>0);

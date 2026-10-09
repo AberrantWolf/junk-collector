@@ -1452,7 +1452,7 @@ pub enum Error {
     LastAdministrator,
     #[error("the last enabled collection owner cannot be removed")]
     LastOwner,
-    #[error("the durable default account must be reassigned first")]
+    #[error("choose another default account first")]
     DefaultReassignmentRequired,
     #[error("enrollment expired")]
     EnrollmentExpired,

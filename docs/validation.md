@@ -3905,3 +3905,77 @@ The fixes and current regression/gate results are recorded in the dated follow-u
 in [collection-list validation](validation/collection-lists.md). Chooser selection,
 obsolete pagination, uncertain command receipts, shared dialog behavior and complete
 disc expansion are repaired without changing the outstanding LA3 device gate.
+
+## Preparation action clarity — 2026-10-08
+
+Focused UX repair: completed album FLAC scope replaces its preparation form with
+a ready summary; active equivalent scope disables another album start. Missing
+tracks remain queueable alongside an independently requested track. Accepted
+track/batch commands immediately mark affected controls preparing; periodic plan
+refresh covers direct preparation and work owned by other users. All-ready bulk
+FLAC previews no longer offer Start. Scan, guided import/recovery, import-session
+and history action eligibility were inspected; no complete U05 audit is claimed.
+
+The smoke expectation intentionally changed: two equivalent album batches used to
+be submitted from the UI to exercise convergence. The UI now asserts the active
+start is disabled and the completed start disappears. Server convergence coverage
+remains in the passing workspace tests.
+
+Passed: architecture checker; cargo fmt check; cargo test --workspace (including
+210 store integration tests, two explicit scale tests ignored); cargo clippy
+--workspace --all-targets -- -D warnings; npm --prefix web run check; npm --prefix
+web run build; cargo build -p collector-server. Embedded assets were rebuilt.
+Initial Chrome launch inside the sandbox failed with SIGABRT; the approved
+unsandboxed smoke run passed, including real FLAC playback, active/completed
+album assertions, bulk preparation and collection-list journeys. A second complete
+smoke run against the final rebuilt server also passed (Chrome 153.0.8010.37).
+
+Force-reencode/replacement is not implemented. Ready FLACs are still reused by
+the existing preparation service; other formats retain per-track controls when
+their encoder is configured. No provider, master-byte or publication changes.
+
+## Frontend wording and optional help — 2026-10-08
+
+This validation covers the collector-facing copy cleanup while retaining metadata,
+proposed, FLAC/Opus and named catalog services. Existing unrelated working-tree
+changes were preserved.
+
+Passed: architecture checks, Rust formatting, workspace Rust tests, final affected
+crate tests, Clippy with warnings denied, TypeScript check, web asset build and
+Rust server rebuild. The presentation-label test checks that incomplete searches,
+missing database data, ambiguous offsets and actual mismatches remain distinct.
+The account browser journey, scan browser journey and work-history recovery
+journey passed against a temporary local profile. Work-history assertions now
+expand Technical details for attempts and wait for restored deep-link dialogs.
+Chrome required execution outside the filesystem sandbox; initial sandbox launches
+aborted before opening a page.
+
+The smoke journey has additional checks for keyboard activation, accessible help
+state, mobile positioning and Escape dismissal inside a parent dialog. Mobile
+metadata screenshots were inspected for readable copy and info-control layout.
+The complete smoke journey passed against the rebuilt server, including real
+FLAC playback (start, pause/resume, seek, track advance, reload and revocation),
+interrupted folder upload, metadata review, confirmed grouping, bulk FLAC
+preparation, collection lists, WebAuthn and mobile layouts. New info-control
+keyboard/mobile and parent-dialog Escape assertions passed. The shared-runtime
+context test also passed after adding its missing Node browser-event fixture.
+
+## Album-match presentation — 2026-10-08
+
+User-reported stale name searches no longer appear in the default music album-match
+list. Saved selected/accepted choices (including unmatched accepted choices) and
+current disc-layout/identifier candidates remain visible. A checkbox reveals text
+suggestions and earlier candidates; it resets when the panel reopens. Provider
+observations and authority remain intact. This is a presentation change using
+existing typed candidate fields, not new disc matching or catalog verification.
+
+The focused `test:fx04-review` Chrome journey passed with explicit synthetic
+provider-response fixtures covering saved name selections, automatic acceptance,
+current disc/identifier matches, current and obsolete name suggestions, an older
+disc candidate, and disclosure/re-hiding. Its import file selector now uses exact
+label matching. Smoke expectations now require disclosure to inspect search/history
+on panel reopen; retaining history remains required.
+
+Architecture, formatting, TypeScript, web build, Clippy, server rebuild and diff
+whitespace checks passed. `cargo test --workspace` and full `test:smoke` passed,
+including real browser metadata review, playback, bulk-library and list journeys.

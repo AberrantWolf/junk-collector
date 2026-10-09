@@ -1,3 +1,4 @@
+import {presentationLabel} from './presentation-labels';
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {WorkProgress,UploadMeter} from './work-progress';
 import React,{useEffect,useState,useRef,api,isApiRequestError} from '@collector/runtime';
@@ -12,7 +13,7 @@ type Association=components['schemas']['CaptureAssociation'];
 type Props={initialImportId?:string;item:Item;onPublished:(item:Item)=>void;onError:(error:unknown)=>void};
 
 const terminal=new Set<JobView['state']>(['completed','failed','cancelled']);
-const phaseLabel:Record<ImportView['phase'],string>={staging:'Uploading files',analyzing:'Upload complete · analysis needed',awaiting_review:'Analysis complete · review needed',publishing:'Publishing capture',published:'Capture published',cancelled:'Import cancelled'};
+const phaseLabel:Record<ImportView['phase'],string>={staging:'Uploading files',analyzing:'Upload complete · analysis needed',awaiting_review:'Analysis complete · review needed',publishing:'Saving originals',published:'Originals saved',cancelled:'Import cancelled'};
 
 function fileName(file:File){return file.webkitRelativePath||file.name;}
 function packageName(files:File[]){const first=files[0]&&fileName(files[0]);return first?.includes('/')?first.split('/')[0]:'Browser package';}
@@ -116,12 +117,12 @@ export default function ImportWorkspace({initialImportId,item,onPublished,onErro
    const reviewed=await request<ImportView>(`/imports/${record.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:record.revision,identity:choice,association:association(),expected_item_revision:attach?itemRevision:null})});setRecord(reviewed);setConflict('');setEditingReview(false);
   }catch(error){
    if(isApiRequestError(error)&&error.status===409){
-    const [current,currentItem]=await Promise.all([request<ImportView>(`/imports/${record.id}`),request<Item>(`/items/${item.id}`)]);setRecord(current);setItemRevision(currentItem.revision);setConflict(`The server is now at Import revision ${current.revision} and Item revision ${currentItem.revision}. Your review choices are still in this form; review them and apply again.`);
+    const [current,currentItem]=await Promise.all([request<ImportView>(`/imports/${record.id}`),request<Item>(`/items/${item.id}`)]);setRecord(current);setItemRevision(currentItem.revision);setConflict(`This import or entry changed. Your choices are still here; review and save again.`);
    }else report(error);
   }finally{finish();}
  }
  async function publish(){
-  if(!record)return;setBusy(true);setActivity('Publishing capture…');setJob(undefined);
+  if(!record)return;setBusy(true);setActivity('Saving originals…');setJob(undefined);
   try{
    const accepted=await request<{job_id:string}>(`/imports/${record.id}/publish`,{method:'POST'});
    jobsChanged();await waitForJob(accepted.job_id,setJob,lifecycle.current.signal);jobsChanged();setRecord(await request<ImportView>(`/imports/${record.id}`));onPublished(await request<Item>(`/items/${item.id}`));
@@ -130,27 +131,27 @@ export default function ImportWorkspace({initialImportId,item,onPublished,onErro
 
  const canStage=source==='browser'?files.length>0:!!label&&!!inboxPackage;
  return <section data-uploading={!!uploadProgress} data-unsaved={(!record&&files.length>0)||editingReview||(record?.phase==='awaiting_review'&&!record.review&&(identity!=='unidentified'||!attach||!!specimen||!!component||!!carrier))} className="import-workspace" aria-labelledby="import-heading">
-  <div className="section-heading"><div><h3 id="import-heading">Capture accession</h3><p className="muted">Stage original package bytes, inspect the record, then choose what—if anything—they belong to.</p></div>{record&&!initialImportId&&<button disabled={busy} onClick={reset}>Stage another package</button>}</div>
+  <div className="section-heading"><div><h3 id="import-heading">Manual import</h3><p className="muted">Upload original files, review the results, and choose their destination.</p></div>{record&&!initialImportId&&<button disabled={busy} onClick={reset}>Import more files</button>}</div>
   {initialImportId&&!record&&<p role="status">Loading saved import…</p>}
-  {!record&&!initialImportId&&<form aria-label="Stage package" onSubmit={event=>{event.preventDefault();void stage();}}>
-   <fieldset className="source-choice"><legend>Package source</legend><label><input type="radio" name="import-source" checked={source==='browser'} onChange={()=>setSource('browser')}/> This browser</label><label><input type="radio" name="import-source" checked={source==='inbox'} onChange={()=>setSource('inbox')}/> Configured inbox</label></fieldset>
-   {source==='browser'?<label>Original package files<input aria-label="Original package files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>:inboxes.length?<div><label>Inbox<select value={label} disabled={busy} onChange={event=>setLabel(event.target.value)}>{inboxes.map(value=><option key={value.label}>{value.label}</option>)}</select></label><InboxPackageChooser collectionId={item.collection_id} label={label} selected={inboxPackage?[inboxPackage]:[]} onSelect={value=>setInboxPackage(value[0]||'')} disabled={busy}/></div>:<p className="notice">No configured inbox packages are available. Choose files from this browser.</p>}
+  {!record&&!initialImportId&&<form aria-label="Upload files" onSubmit={event=>{event.preventDefault();void stage();}}>
+   <fieldset className="source-choice"><legend>Package source</legend><label><input type="radio" name="import-source" checked={source==='browser'} onChange={()=>setSource('browser')}/> This browser</label><label><input type="radio" name="import-source" checked={source==='inbox'} onChange={()=>setSource('inbox')}/> Server inbox</label></fieldset>
+   {source==='browser'?<label>Original files<input aria-label="Original files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>:inboxes.length?<div><label>Inbox<select value={label} disabled={busy} onChange={event=>setLabel(event.target.value)}>{inboxes.map(value=><option key={value.label}>{value.label}</option>)}</select></label><InboxPackageChooser collectionId={item.collection_id} label={label} selected={inboxPackage?[inboxPackage]:[]} onSelect={value=>setInboxPackage(value[0]||'')} disabled={busy}/></div>:<p className="notice">No configured inbox packages are available. Choose files from this browser.</p>}
    {source==='browser'&&files.length>0&&<div className="package-files compact" role="list">{files.map(file=><div role="listitem" key={fileName(file)}><span>{fileName(file)}</span><small>{file.size.toLocaleString()} bytes</small></div>)}</div>}
-   <button className="primary" disabled={busy||!canStage}>Stage package</button>
+   <button className="primary" disabled={busy||!canStage}>Upload files</button>
   </form>}
-  {uploadProgress?<UploadMeter value={uploadProgress}/>:job&&!terminal.has(job.state)?<WorkProgress label={job.phase.replaceAll('_',' ')} completed={job.total_units?job.completed_units:undefined} total={job.total_units} detail="Server work continues independently of this window."/>:activity&&<WorkProgress label={activity}/>}
+  {uploadProgress?<UploadMeter value={uploadProgress}/>:job&&!terminal.has(job.state)?<WorkProgress label={presentationLabel(job.phase)} completed={job.total_units?job.completed_units:undefined} total={job.total_units} detail="Processing continues when you close this window."/>:activity&&<WorkProgress label={activity}/>}
   {record&&<div className="import-docket">
-   <header><div><span className="docket-phase">{record.phase==='awaiting_review'&&record.review?'Review saved · publication needed':phaseLabel[record.phase]}</span><strong className="docket-title">{record.source.package_name}</strong></div><span>Upload {percent(done,total)}%</span></header>
+   <header><div><span className="docket-phase">{record.phase==='awaiting_review'&&record.review?'Review saved · ready to save originals':phaseLabel[record.phase]}</span><strong className="docket-title">{record.source.package_name}</strong></div><span>Upload {percent(done,total)}%</span></header>
    {record.phase==='analyzing'&&<p className="notice">{record.analysis_job_id&&(!job||!terminal.has(job.state))?'Package analysis is underway. You can leave this panel and return to its progress.':'Your files are uploaded, but are not attached to the album yet. Choose Review import to analyze the package.'}</p>}
    {record.phase==='analyzing'&&analysisError&&<p role="alert">{analysisError} <button onClick={()=>setAnalysisPollRevision(value=>value+1)}>Refresh analysis status</button></p>}
-   {record.phase==='awaiting_review'&&!record.review&&<p className="notice">Analysis is complete. Confirm the album attachment and save your review below, then choose Publish capture. Tracks become available for preparation after publication.</p>}
-   {record.phase==='awaiting_review'&&record.review&&<p className="notice">Your review is saved. Choose Publish capture to preserve this package and attach it to the selected album.</p>}
-   <progress max={Math.max(total,1)} value={total?done:1} aria-label="Package staging progress"/><p className="muted" role="status" aria-live="polite">{checkingFiles?'Checking selected files against retained bytes':job?`${job.phase}: ${percent(job.completed_units,job.total_units)}%`:`${done.toLocaleString()} of ${total.toLocaleString()} bytes staged`}</p>
-   <h4>Package inventory</h4><div className="package-files" role="list">{record.files.map(file=><div role="listitem" key={file.name}><span>{file.name}</span><small>{file.received_bytes.toLocaleString()} / {file.bytes.toLocaleString()} bytes · {file.digest?'SHA-256 recorded':'digest pending'}</small></div>)}</div>
+   {record.phase==='awaiting_review'&&!record.review&&<p className="notice">Analysis is complete. Confirm the album attachment and save your review below, then choose Save originals. Tracks become available for preparation after publication.</p>}
+   {record.phase==='awaiting_review'&&record.review&&<p className="notice">Your review is saved. Choose Save originals to preserve this package and attach it to the selected album.</p>}
+   <progress max={Math.max(total,1)} value={total?done:1} aria-label="Upload progress"/><p className="muted" role="status" aria-live="polite">{checkingFiles?'Checking selected files against retained bytes':job?`${presentationLabel(job.phase)}: ${percent(job.completed_units,job.total_units)}%`:`${done.toLocaleString()} of ${total.toLocaleString()} bytes staged`}</p>
+   <h4>Files in this import</h4><div className="package-files" role="list">{record.files.map(file=><div role="listitem" key={file.name}><span>{file.name}</span><small>{file.received_bytes.toLocaleString()} / {file.bytes.toLocaleString()} bytes · {file.digest?'SHA-256 recorded':'Checksum pending'}</small></div>)}</div>
    {record.limitations.length>0&&<div className="import-limitations"><h4>Analysis limitations</h4><ul>{record.limitations.map(value=><li key={value}>{value}</li>)}</ul></div>}
    {!uploadProgress&&record.phase==='staging'&&record.source.kind==='browser'&&<form aria-label="Resume package" onSubmit={event=>{event.preventDefault();void resume();}}>
     <p className="notice">Upload interrupted? Select the same original package files to continue. Retained bytes are checked before uploading the remainder.</p>
-    <label>Original package files<input aria-label="Original package files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>
+    <label>Original files<input aria-label="Original files" type="file" disabled={busy} multiple onChange={event=>setFiles(Array.from(event.target.files||[]))}/></label>
     <button className="primary" disabled={busy||!files.length}>Resume upload</button>
    </form>}
    {record.phase==='analyzing' &&<button className="primary" disabled={busy||!!record.analysis_job_id&&(!job||!terminal.has(job.state))} onClick={()=>void beginReview()}>{record.analysis_job_id&&(!job||!terminal.has(job.state))?'Analysis in progress…':'Review import'}</button>}
@@ -161,8 +162,8 @@ export default function ImportWorkspace({initialImportId,item,onPublished,onErro
     {attach&&item.specimens.length>0&&<div className="form-grid"><label>Physical copy<select value={specimen} onChange={event=>{setSpecimen(event.target.value);setComponent('');setCarrier('');}}><option value="">Item only</option>{item.specimens.map(value=><option key={value.id} value={value.id}>{value.label}</option>)}</select></label>{selectedSpecimen&&<label>Part<select value={component} onChange={event=>{setComponent(event.target.value);setCarrier('');}}><option value="">Copy only</option>{selectedSpecimen.components.map(value=><option key={value.id} value={value.id}>{value.position}. {value.label}</option>)}</select></label>}{selectedComponent?.carrier&&<label>Carrier<select value={carrier} onChange={event=>setCarrier(event.target.value)}><option value="">Part only</option><option value={selectedComponent.carrier.id}>{selectedComponent.carrier.label}</option></select></label>}</div>}
     <button className="primary" disabled={busy}>Save review</button>
    </form>}
-   {record.phase==='awaiting_review'&&record.review&&!conflict&&!editingReview&&<div className="review-decision"><p><strong>Review saved.</strong> {record.review.identity.identity==='unidentified'?'No catalog identity was asserted.':'A candidate was selected for this capture.'}</p><button disabled={busy} onClick={()=>void editReview()}>Edit review</button><button className="primary" disabled={busy} onClick={()=>void publish()}>Publish capture</button></div>}
-   {record.phase==='published'&&<p className="notice" role="status">Capture published. The original package and integrity evidence are now in the archive.</p>}
+   {record.phase==='awaiting_review'&&record.review&&!conflict&&!editingReview&&<div className="review-decision"><p><strong>Review saved.</strong> {record.review.identity.identity==='unidentified'?'No catalog identity was asserted.':'A candidate was selected for this capture.'}</p><button disabled={busy} onClick={()=>void editReview()}>Edit review</button><button className="primary" disabled={busy} onClick={()=>void publish()}>Save originals</button></div>}
+   {record.phase==='published'&&<p className="notice" role="status">Originals saved. The original package and integrity evidence are now in the archive.</p>}
   </div>}
  </section>;
 }

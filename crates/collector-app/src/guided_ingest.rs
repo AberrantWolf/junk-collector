@@ -1477,15 +1477,18 @@ impl CollectionService {
             })
             .map(|observation| match observation.outcome {
                 collector_modules::music::MetadataProviderOutcome::NoMatch => {
-                    "No MusicBrainz release matched the derived disc identifier; originals remain preserved".into()
+                    "No MusicBrainz album matched this disc ID. Original files are kept.".into()
                 }
                 collector_modules::music::MetadataProviderOutcome::Candidates
                     if observation.release_count > 1 =>
                 {
-                    format!("{} MusicBrainz releases were recorded; album ambiguity is shown separately in Metadata", observation.release_count)
+                    format!(
+                        "{} MusicBrainz albums matched. Review the choices in Metadata.",
+                        observation.release_count
+                    )
                 }
                 collector_modules::music::MetadataProviderOutcome::Candidates => {
-                    "MusicBrainz release metadata was recorded from the derived disc identifier".into()
+                    "Album metadata was found using the disc ID.".into()
                 }
             });
         let artwork_listing_job = jobs.iter().find(|job| job.id == artwork_listing_job_id);
@@ -1613,7 +1616,7 @@ impl CollectionService {
                 record.view.phase == ImportPhase::Published
                     && !by_kind.contains_key("import_analysis"),
                 if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
-                    Some("Preservation without analysis was selected; no structural or provider identity was claimed".into())
+                    Some("Save originals only was selected. Files were not analyzed or matched to an album or edition.".into())
                 } else {
                     record.view.limitations.first().cloned()
                 },

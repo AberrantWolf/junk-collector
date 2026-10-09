@@ -397,7 +397,7 @@ impl CollectionService {
                 })
                 .collect::<Result<BTreeSet<_>>>()?;
             if choice.is_none() && values.len() > 1 {
-                conflicts.push(conflict(kind,"Choose which manual metadata value to keep; the entries have different field authority."));
+                conflicts.push(conflict(kind,"Choose which manual metadata value to keep; the entries have different saved values."));
             }
         }
         let mut album_ids = BTreeSet::new();

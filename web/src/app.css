@@ -60,3 +60,13 @@ nav{display:grid;gap:6px}nav button{text-align:left;border:none;padding:12px}.ac
 .security-tasks{flex-wrap:wrap;overflow:visible}.security-tasks button{padding:8px 12px}
 
 .server-certificate{padding-bottom:24px;margin-bottom:24px;border-bottom:1px solid var(--line)}.certificate-download{display:inline-block;padding:10px 14px;margin-bottom:18px;background:var(--green);color:#fff;border-radius:5px;text-decoration:none}.certificate-download:hover{background:#264caf}.certificate-fingerprint{display:block;overflow-wrap:anywhere;padding:10px;background:#e7edf6;font-size:12px}.server-certificate details{margin:16px 0}.server-certificate summary{cursor:pointer;font-weight:600;padding:8px 0}.server-certificate li{line-height:1.6;margin:10px 0}.server-certificate p{font-size:13px}
+
+.info-help { position: relative; display: inline-block; vertical-align: middle; margin-inline: .35rem; }
+.info-help .info-help-button { display: inline-grid; place-items: center; width: 1.65rem; height: 1.65rem; padding: 0; border-radius: 50%; font-style: normal; font-family: serif; font-weight: 700; }
+.info-help-content { position: absolute; z-index: 30; inset-inline-end: 0; top: calc(100% + .35rem); width: min(19rem, 75vw); padding: .8rem; background: var(--paper, white); color: var(--ink, #222); border: 1px solid var(--line, #aaa); border-radius: .4rem; box-shadow: 0 .3rem 1rem #0002; font-size: .9rem; line-height: 1.5; font-weight: normal; text-align: left; white-space: normal; }
+.info-help-content[hidden] { display: none; }
+@media (max-width: 600px) { .info-help-content { position: fixed; top: auto; bottom: 1rem; inset-inline: 1rem; width: auto; max-height: 50vh; overflow: auto; } }
+
+.modal .info-help-button { width: 1.65rem; min-width: 1.65rem; margin: 0; padding: 0; }
+
+.metadata-review .section-heading h3 { display: inline; }

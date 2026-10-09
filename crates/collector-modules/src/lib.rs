@@ -734,7 +734,7 @@ impl Registry {
         if data.schema_version != module.descriptor().schema_version {
             return generic_presentation(
                 data,
-                "Module schema is unsupported; preserved data is not executable.",
+                "This data format is unsupported. Saved content remains available, but cannot be processed.",
             );
         }
         match module
@@ -929,7 +929,7 @@ pub(crate) fn descriptor(
                 "import-analysis",
                 "Import analysis",
                 Availability::Unavailable {
-                    limitation: "Built-in import analyzer migration is pending D04/D05; review may continue unidentified."
+                    limitation: "Analysis is not available for this collection type. You can save original files without identifying them."
                         .into(),
                 },
             ),
@@ -938,7 +938,7 @@ pub(crate) fn descriptor(
                 "Catalog verification",
                 Availability::Unavailable {
                     limitation:
-                        "Analyzer/provider migration pending; integrity verification is separate."
+                        "This check is not available yet. File integrity checks are separate."
                             .into(),
                 },
             ),

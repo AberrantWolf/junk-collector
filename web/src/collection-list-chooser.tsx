@@ -120,7 +120,7 @@ export default function CollectionListChooser({userId,collectionId,itemId,label,
   {cursor&&<button disabled={loading||busy} onClick={()=>void more()}>More lists</button>}
   {!selected&&<label>New list name<input value={name} maxLength={256} disabled={busy||!!pending} onChange={e=>setName(e.target.value)}/></label>}
   {loading&&<p role="status">Loading lists…</p>}
-  {pending&&!busy&&<p className="notice">The previous addition has not been confirmed. Retry addition checks that same request before adding anything else.</p>}
+  {pending&&!busy&&<p className="notice">The last addition is unconfirmed. Retry to check whether it succeeded before adding again.</p>}
   {error&&<p role="alert" className="error">{error}<button disabled={busy} onClick={()=>setReload(value=>value+1)}>Reload lists</button></p>}
   {notice&&<p role="status">{notice}</p>}
   <div className="profile-actions">

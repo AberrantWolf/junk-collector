@@ -32,7 +32,7 @@ try{
  await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog');
  await editor.getByRole('button',{name:'Search existing entries'}).click();await editor.getByRole('searchbox',{name:'Search existing entries'}).fill('Existing album');await editor.locator('.destination-chooser .destination-results button').filter({hasText:'Existing album'}).click();
  const cue=Buffer.from('FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n');const pcm=Buffer.alloc(2352*10);
- await editor.getByText('Choose individual files instead').click();await editor.getByLabel('Package files').setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcm}]);await editor.getByRole('button',{name:'Preview import'}).click();await editor.getByText('1 dump packages found.',{exact:false}).waitFor();await editor.getByLabel('Preserve originals without analysis or automatic lookup').check();await editor.getByRole('button',{name:'Preserve 1 package'}).click();
+ await editor.getByText('Choose individual files instead').click();await editor.getByLabel('Files',{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcm}]);await editor.getByRole('button',{name:'Preview import'}).click();await editor.getByText('1 dump packages found.',{exact:false}).waitFor();await editor.getByLabel('Save originals only').check();await editor.getByRole('button',{name:'Preserve 1 package'}).click();
  await page.waitForFunction(async id=>{const response=await fetch('/api/v1/items/'+id);return response.ok&&(await response.json()).captures.length===1;},seeded.id);
  await editor.getByRole('button',{name:'Details',exact:true}).click();
  assert.equal(await editor.getByLabel('Title',{exact:true}).inputValue(),'Existing album');
@@ -44,8 +44,26 @@ try{
  await page.waitForTimeout(3500);
  assert.equal(await editor.getByRole('button',{name:'Details',exact:true}).getAttribute('aria-current'),'page','background Item update changed the editing section');
  assert.equal(await editor.getByLabel('Title',{exact:true}).inputValue(),'Draft after import','background Item update discarded the title draft');
- await editor.getByRole('button',{name:'Save inventory'}).click();await editor.getByText('Inventory saved.',{exact:false}).waitFor();
+ await editor.getByRole('button',{name:'Save details'}).click();await editor.getByText('Entry saved.',{exact:false}).waitFor();
  const saved=await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
  assert.equal(saved.inventory_title,'Draft after import');assert.equal(saved.inventory_subtitle,'First edition');assert.equal(saved.wishlist,true);assert.equal(saved.domain.payload.artist,'Existing artist');assert.equal(saved.captures.length,1);
- assert.deepEqual(errors,[]);console.log('FX-04 review browser passed: existing destination drafts, preserved fields, and stable section during background updates.');
+ // Synthetic provider responses exercise presentation without external provider requests.
+ await page.route(`**/api/v1/items/${seeded.id}/metadata`,async route=>{
+  if(route.request().method()!=='GET'){await route.continue();return;}
+  const response=await route.fetch();const review=await response.json();
+  const candidate=(title,strength,current,extra={})=>({identity:{provider:'org.junk.providers.musicbrainz',provider_record_id:title,provider_record_version:null},title:{value:title,language:'en'},subtitle:null,artwork:null,complete_identity:true,strength,provider_priority:0,current,selected:false,accepted_automatically:false,unmatched:false,details:null,music_layout:null,...extra});
+  review.candidates=[candidate('Saved name choice','name',false,{selected:true,unmatched:true}),candidate('Accepted release','name',true,{accepted_automatically:true}),candidate('Detected disc match','disc_layout',true),candidate('Recorded release match','identifier',true),candidate('Obsolete name search','name',false),candidate('New name suggestion','name',true),candidate('Old disc match','disc_layout',false)];
+  review.authority.selected_candidate=review.candidates[0].identity;
+  await route.fulfill({response,json:review});
+ });
+ await editor.getByRole('button',{name:'Music',exact:true}).click();
+ await editor.getByRole('button',{name:'Open Metadata workspace',exact:true}).click();
+ const ledger=page.locator('.candidate-ledger');const titles=ledger.locator('.candidate > div:first-child > strong');await titles.getByText('Saved name choice',{exact:true}).waitFor();
+ for(const title of ['Accepted release','Detected disc match','Recorded release match'])assert.equal(await titles.getByText(title,{exact:true}).count(),1);
+ for(const title of ['Obsolete name search','New name suggestion','Old disc match'])assert.equal(await titles.getByText(title,{exact:true}).count(),0);
+ const disclosure=ledger.getByRole('checkbox',{name:'Show text-search suggestions and earlier results'});
+ await disclosure.check();await titles.getByText('Obsolete name search',{exact:true}).waitFor();
+ assert.equal(await titles.getByText('New name suggestion',{exact:true}).count(),1);
+ await disclosure.uncheck();assert.equal(await titles.getByText('Obsolete name search',{exact:true}).count(),0);
+ assert.deepEqual(errors,[]);console.log('FX-04 review browser passed: existing destination drafts, preserved fields, stable section during background updates, and album-match/history disclosure.');
 }catch(error){if(page){console.error(await page.locator('body').ariaSnapshot());console.error(logs.slice(-3000));}throw error;}finally{if(browser)await browser.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>{server.kill('SIGKILL');resolve();},5000))]);}await rm(scratch,{recursive:true,force:true});}

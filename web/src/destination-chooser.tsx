@@ -18,7 +18,7 @@ export default function DestinationChooser({collectionId,selected,onSelect,disab
 
  return <section className="destination-chooser" aria-label="Destination entry">
   <p><strong>Destination</strong> · {selected?`${selected.title}${selected.subtitle?` · ${selected.subtitle}`:''}`:emptyMode==='create'?'Create a new entry for the package':'Leave unattached'}</p>
-  <p className="muted">No evidence-backed destination suggestions are available. Search the collection to choose an entry; a similar title alone is not a detected match.</p>
+  <p className="muted">Search by title, artist or edition to choose a destination.</p>
   {selected&&<button type="button" disabled={disabled} onClick={()=>onSelect(null)}>{emptyMode==='create'?'Create a new entry instead':'Leave unattached'}</button>}
   <button type="button" disabled={disabled} aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'Close search':'Search existing entries'}</button>
   {open&&<><label>Search existing entries<input type="search" value={query} onChange={event=>{setQuery(event.target.value);setRows([]);setCursor(null);}} placeholder="Title, artist or edition"/></label>

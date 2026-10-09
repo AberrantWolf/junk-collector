@@ -1,7 +1,7 @@
 import {AuthenticationCoordinator,type AuthenticationHandler,type AuthenticationIdentity} from './authentication-coordinator';
-import React,{useEffect,useRef,useState} from 'react';
+import React,{useEffect,useRef,useState,useId} from 'react';
 
-export {React as default,useState,useEffect,useRef};
+export {React as default,useState,useEffect,useRef,useId};
 
 export class ApiRequestError extends Error{
  readonly status:number;

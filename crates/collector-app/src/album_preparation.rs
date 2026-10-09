@@ -740,7 +740,7 @@ impl CollectionService {
                                 (MusicPreparationMemberState::Cancelled, None, None)
                             }
                             Err(Error::NotFound) if matches!(record.state, crate::JobState::Failed | crate::JobState::Completed) => {
-                                (MusicPreparationMemberState::Failed, None, Some(record.error.clone().unwrap_or_else(|| "Batch admission did not create this track Job; retry the batch.".into())))
+                                (MusicPreparationMemberState::Failed, None, Some(record.error.clone().unwrap_or_else(|| "This track could not be started. Retry album preparation.".into())))
                             }
                             Err(Error::NotFound) => (MusicPreparationMemberState::Queued, None, None),
                             Err(error) => return Err(error),

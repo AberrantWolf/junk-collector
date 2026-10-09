@@ -411,7 +411,7 @@ impl CollectionService {
         let (status, message, administrator_commands) = match &collection.binding {
             CollectionBinding::LegacyUnassigned => (
                 ContentAvailabilityStatus::LegacyUnassigned,
-                Some("This legacy collection is read-only until an administrator explicitly assigns its collection type with the stopped server.".into()),
+                Some("This collection is read-only. A server administrator must stop the server and assign its collection type.".into()),
                 vec![
                     format!("cargo run -p collector-server -- inspect-collection-type --collection-id {}", collection.id),
                     format!("cargo run -p collector-server -- assign-collection-type --collection-id {} --expected-revision {} --module <MODULE_ID>", collection.id, collection.revision.0),
@@ -427,7 +427,7 @@ impl CollectionService {
                     None => (
                         ContentAvailabilityStatus::OwnerUnavailable,
                         Some(format!(
-                            "Collection type {} is not installed; preserved content remains readable but content changes are disabled.",
+                            "Collection type {} is not installed. Saved content is readable, but cannot be edited.",
                             module.0
                         )),
                         vec![],
@@ -439,7 +439,7 @@ impl CollectionService {
                                 || self.modules.inspect(domain).is_err()
                         }) => (
                             ContentAvailabilityStatus::ItemSchemaUnsupported,
-                            Some("This item's preserved module data is not supported by the installed collection type; it remains read-only.".into()),
+                            Some("This entry uses an unsupported data format. You can browse its saved content, but cannot edit it.".into()),
                             vec![],
                         ),
                     Some(_) => (ContentAvailabilityStatus::Available, None, vec![]),

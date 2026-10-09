@@ -1,0 +1,11 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+const result=await build({entryPoints:[new URL('../src/presentation-labels.ts',import.meta.url).pathname],bundle:true,write:false,format:'esm'});
+const {presentationLabel}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'));
+assert.equal(presentationLabel('tentative'),'Proposed identity');
+assert.equal(presentationLabel('metadata_resolution'),'Find metadata and artwork');
+assert.equal(presentationLabel('cancel_requested'),'Cancelling');
+const outcomes=['verified','incomplete_search','mismatched','no_data','ambiguous_offsets','unavailable','unsupported'];
+assert.equal(new Set(outcomes.map(value=>presentationLabel(value))).size,outcomes.length,'distinct audio results must not collapse into the same label');
+assert.equal(presentationLabel('future_machine_state'),'Details unavailable');
+console.log('Presentation labels preserve uncertainty and task meaning.');

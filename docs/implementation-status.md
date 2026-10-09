@@ -57,6 +57,8 @@ The full first release, native clients and public deployment remain later target
 
 ## Implemented
 
+- Album-match presentation (2026-10-08): music metadata review defaults to selected/accepted releases and current disc-layout or identifier candidates. Text-search suggestions and older results require an explicit disclosure. Retained provider observations and manual authority are unchanged; this is presentation filtering, not a new identity or verification claim.
+
 - Startup performance follow-up (2026-09-28): startup projects prepared-audio
   metadata without reading its payloads. Derivative GET checks recorded length
   and SHA-256 before transfer and reports a specific player error on failure.
@@ -995,3 +997,31 @@ and retained offline decoding. Native Slint enrollment/artwork/list/playback and
 download were exercised locally. This does not establish native audio fidelity or
 complete all native adversarial acceptance scenarios; see Trash Amp's
 `docs/collector-connection.md`. It does not advance unrelated handoff assignments.
+
+## Preparation action clarity — 2026-10-08
+
+Album preparation now shows a ready summary instead of a submission form when
+all selected originals have complete FLAC outputs. Partial selections offer
+missing FLAC preparation; scopes already covered by active preparation show
+disabled progress. Track and album admission immediately reflect accepted work,
+and plan polling also follows direct/other-user preparation after reopen. Bulk
+FLAC review suppresses start when every selected track is already ready. Existing
+Opus track actions remain available subject to encoder capability. Force-reencode
+with replacement is not implemented; ordinary preparation still reuses valid
+outputs. Scan, guided-import recovery and work-history controls were inspected
+for equivalent start/retry conflicts; this is a focused audit, not full U05 acceptance.
+
+## Frontend wording and optional help — 2026-10-08
+
+The web UI retains collector terms including metadata, proposed, FLAC, Opus,
+MusicBrainz and AccurateRip, while using Review metadata, Save originals,
+Save destination and task-oriented progress labels. User-facing permission and
+import/grouping messages describe actions rather than schema/authority machinery.
+Short metadata, audio-format, import-main-file and password-length explanations
+use a shared keyboard/touch-accessible info control. IDs, reference digests,
+raw module data and detailed AccurateRip computation coordinates remain available
+under expandable Technical details. Actionable failures, partial/inconclusive
+results, destructive reset choices and security requirements remain visible.
+This changes presentation only; evidence, authorization and workflow policy remain
+unchanged. Browser checks cover info-control keyboard/mobile behavior and Escape
+inside a parent dialog; validation outcomes are recorded separately.
