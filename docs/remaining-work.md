@@ -262,6 +262,13 @@ D06 follow-ups, FX-04 history bound, P06/R02 practical scale.
   are complete. Fix observed slow/uncancellable/unbounded work; do not reopen
   incremental indexing wholesale or require enterprise-sized load as a release gate.
 
+Completed presentation follow-up, 2026-10-09: album FLAC/Opus availability now uses
+compact secondary labels and on-demand unavailable reasons, two-line track rows,
+overflow actions, and collapsed inspection information. The desktop entry
+panel also meets the right viewport edge and dock at every scroll position; see
+[status](implementation-status.md#compact-album-format-availability--2026-10-09) and
+[validation](validation.md#compact-album-format-availability--2026-10-09).
+
 Each bullet is independently assignable with real UI/recovery acceptance. Smart
 lists, private/personal lists, post-edit splitting and richer DSP/codecs remain
 optional ideas needing product/contract design, not established missing features.

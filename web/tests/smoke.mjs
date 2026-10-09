@@ -1,3 +1,4 @@
+import {clickAction,showAction} from './actions.mjs';
 import {chromium,expect} from '@playwright/test';
 import {spawn,spawnSync} from 'node:child_process';
 import {chmod,mkdir,mkdtemp,readFile,readdir,writeFile,rm} from 'node:fs/promises';
@@ -182,7 +183,7 @@ try{
  page.once('dialog',async dialog=>{assert.match(dialog.message(),/Discard unsaved changes/);await dialog.accept();});
  await page.keyboard.press('Escape');
  await curator.waitFor({state:'hidden'});
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  await curator.waitFor();
  await curator.getByRole('button',{name:'Details',exact:true}).click();
  assert.equal(await curator.getByLabel('Title',{exact:true}).inputValue(),'A test pressing','discard changed the saved album');
@@ -192,7 +193,7 @@ try{
  await page.keyboard.press('Escape');
  await curator.waitFor({state:'hidden'});
  assert.equal(await page.getByLabel('A test pressing details',{exact:true}).count(),1,'Escape also closed the underlying details');
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  await curator.waitFor();
  await curator.getByRole('button',{name:'Copies',exact:true}).click();
  await curator.getByRole('button',{name:'Add physical copy',exact:true}).click();
@@ -292,7 +293,7 @@ try{
  await page.setViewportSize({width:1440,height:1000});
  await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  page.once('dialog',dialog=>dialog.accept());
- await curator.getByRole('button',{name:'Review metadata',exact:true}).click();
+ await clickAction(curator,'Review metadata');
  await curator.waitFor({state:'detached'});
  const metadataReview=page.getByRole('region',{name:'Metadata review'});
  await metadataReview.getByText('Look up album and track names with MusicBrainz',{exact:false}).waitFor();
@@ -414,7 +415,7 @@ try{
  await page.getByRole('searchbox',{name:'Search collection'}).fill('試験盤');await page.waitForTimeout(350);
  assert.equal(await page.locator('.collection-row').count(),1,'effective metadata was not searchable');
  await page.getByRole('button',{name:/試験盤/}).click();
- await page.getByRole('button',{name:'Review metadata',exact:true}).click();
+ await clickAction(page,'Review metadata');
  await metadataReview.locator('.candidate.current').first().waitFor();
  assert.equal(await metadataReview.locator('.candidate.current').count(),1,'superseded versions became current after reopening metadata review');
  assert.equal(await metadataReview.locator('.candidate').count(),1,'reopening metadata review exposed old search history by default');
@@ -427,7 +428,7 @@ try{
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('A test pressing');await page.waitForTimeout(350);
  await page.getByRole('button',{name:/A test pressing/}).click();
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await curator.getByText('Advanced manual import review',{exact:true}).click();
  const importWorkspace=curator.getByRole('region',{name:'Manual import'});
@@ -463,7 +464,7 @@ try{
  await page.getByRole('searchbox',{name:'Search collection'}).fill('');
  await page.reload();
  await page.getByRole('button',{name:/A test pressing/}).click();
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await curator.getByText('Advanced manual import review',{exact:true}).click();
  await resumeForm.waitFor();
@@ -527,7 +528,7 @@ try{
  await page.screenshot({path:path.join(root,'web/test-results/jobs-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'work history has mobile horizontal overflow');
  await workHistory.getByRole('button',{name:'Close work history'}).click();
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await curator.getByText('Advanced manual import review',{exact:true}).click();
  await importWorkspace.scrollIntoViewIfNeeded();
@@ -573,7 +574,7 @@ try{
  await page.getByRole('button',{name:/A test pressing/}).waitFor();
  await page.reload();
  await page.getByRole('button',{name:/A test pressing/}).click();
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  const restoredCurator=page.getByRole('dialog',{name:/Edit entry/});
  await restoredCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await restoredCurator.getByText('Advanced manual import review',{exact:true}).click();
@@ -600,6 +601,7 @@ try{
  await restoredImport.getByText('Originals saved.',{exact:false}).waitFor();
  await restoredCurator.getByRole('button',{name:'Music',exact:true}).click();
  await restoredCurator.getByRole('region',{name:'Prepare audio'}).locator('.music-track').first().waitFor();
+ await restoredCurator.getByText('Disc details & checks',{exact:true}).click();
  await restoredCurator.getByRole('region',{name:'Album disc coverage'}).waitFor();
  await restoredCurator.getByRole('region',{name:'Album disc coverage'}).getByText('2 tracks recorded',{exact:true}).waitFor();
  assert.ok(await restoredCurator.getByRole('region',{name:'Album disc coverage'}).getByRole('button',{name:'Inspect CD structure'}).count()>0,'missing structure lacks a next action');
@@ -620,18 +622,18 @@ try{
  };
  const orderingRoutes=orderingPaths.map(path=>`**${path}`);
  for(const [index,route] of orderingRoutes.entries())await page.route(route,handler=>handler.fulfill({json:[orderedFixture.rows,orderedFixture.coverage,orderedFixture.plan][index]}));
- await restoredCurator.getByRole('button',{name:'Refresh tracks'}).click();
+ await clickAction(restoredCurator,'Refresh tracks');
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor();
  assert.deepEqual(await restoredCurator.locator('.album-coverage .album-medium > strong').allTextContents(),['Disc 1','Disc 2']);
  assert.deepEqual(await restoredCurator.locator('.album-preparation fieldset legend').allTextContents(),['Album disc 1','Album disc 2']);
  assert.deepEqual(await restoredCurator.locator('.music-disc > header strong').allTextContents(),['Album disc 1','Album disc 2']);
  for(const route of orderingRoutes)await page.unroute(route);
- await restoredCurator.getByRole('button',{name:'Refresh tracks'}).click();
+ await clickAction(restoredCurator,'Refresh tracks');
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor({state:'hidden'});
  await restoredCurator.getByRole('button',{name:'Open Metadata workspace',exact:true}).waitFor();
  await restoredCurator.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('button',{name:/A test pressing/}).click();
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  const cdCurator=page.getByRole('dialog',{name:/Edit entry/});
  await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await cdCurator.getByText('Technical processing history',{exact:true}).click();
@@ -661,24 +663,25 @@ try{
   await audioHelp.focus();await page.keyboard.press('Enter');await expect(audioHelp).toHaveAttribute('aria-expanded','true');
   await page.keyboard.press('Escape');await expect(audioHelp).toHaveAttribute('aria-expanded','false');await expect(cdCurator).toBeVisible();
 
-  assert.equal(await preparation.locator('.music-track').first().evaluate(element=>getComputedStyle(element).display),'grid','music stylesheet is not embedded');
+  await expect(preparation.locator('.music-track').first()).toBeVisible();
+  await showAction(preparation,'Refresh tracks');await page.keyboard.press('Escape');await expect(cdCurator).toBeVisible();await expect(preparation.getByRole('button',{name:'Album actions',exact:true})).toBeFocused();
   assert.equal(await preparation.getByRole('img',{name:'A test pressing cover'}).count(),1,'album preparation separated cover art from its text rows');
   await page.route('**/music-tracks/*/prepare',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'tools_unavailable',message:'Test encoder unavailable'}})}),{times:1});
   await preparation.locator('.music-track').first().getByRole('button',{name:'Prepare FLAC',exact:true}).click();
   await preparation.getByRole('alert').getByText('Test encoder unavailable',{exact:true}).waitFor();
   await page.waitForTimeout(250);
   assert.match(await preparation.getByRole('alert').innerText(),/Test encoder unavailable/,'preparation failure was erased by refresh');
-  await preparation.getByRole('button',{name:'Refresh tracks',exact:true}).click();
+  await clickAction(preparation,'Refresh tracks');
   const availabilityFailure=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'temporarily_unavailable',message:'Temporary availability failure'}})});
   await page.route('**/music-tracks',availabilityFailure);
-  await preparation.getByRole('button',{name:'Refresh tracks',exact:true}).click();
+  await clickAction(preparation,'Refresh tracks');
   await preparation.getByRole('alert').getByText('Temporary availability failure',{exact:true}).waitFor();
   await page.unroute('**/music-tracks',availabilityFailure);
   await page.waitForResponse(response=>response.url().endsWith('/music-tracks')&&response.status()===200,{timeout:15000});
   const includeDisc=preparation.getByLabel('Include this disc');
   await includeDisc.uncheck();
   const refreshedPlan=page.waitForResponse(response=>response.url().endsWith('/music-preparation-plan')&&response.status()===200);
-  await preparation.getByRole('button',{name:'Refresh tracks',exact:true}).click();
+  await clickAction(preparation,'Refresh tracks');
   await refreshedPlan;await page.waitForTimeout(100);
   assert.equal(await includeDisc.isChecked(),false,'polling restored a deliberately excluded disc');
   await includeDisc.check();
@@ -686,7 +689,7 @@ try{
   await preparation.locator('.music-track').first().getByRole('button',{name:'Prepare FLAC',exact:true}).click();
   await preparation.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).click();
   const albumBatch=preparation.getByRole('region',{name:'Album preparation progress'}).locator('article').first();await albumBatch.waitFor();
-  assert.equal(await preparation.getByRole('button',{name:'Refresh tracks',exact:true}).isDisabled(),false,'accepted encoding blocked unrelated browsing controls');
+  assert.equal(await (await showAction(preparation,'Refresh tracks')).isDisabled(),false,'accepted encoding blocked unrelated browsing controls');
   assert.equal(await preparation.getByRole('button',{name:'Album preparation in progress…',exact:true}).isDisabled(),true,'active album still offers another preparation');
   await cdCurator.getByRole('button',{name:'Details',exact:true}).click();
   assert.equal(await cdCurator.getByLabel('Title',{exact:true}).isDisabled(),false,'accepted encoding blocked unrelated inventory editing');
@@ -709,11 +712,21 @@ try{
   await cdCurator.getByRole('button',{name:'Close curator'}).click();
   const refreshedPlayer=page.getByRole('region',{name:'Album tracks'});
   await refreshedPlayer.getByRole('link',{name:/FLAC/}).nth(1).waitFor();
+  await expect(refreshedPlayer.getByRole('region',{name:'Album disc coverage',includeHidden:true})).toBeHidden();
+  await expect(page.getByRole('heading',{name:'Stored files',exact:true,includeHidden:true})).toBeHidden();
+  for(const width of [1440,390]){
+   await page.setViewportSize({width,height:1000});
+   await expect(refreshedPlayer.locator('.music-track').first()).toBeVisible();
+   await expect(refreshedPlayer.getByRole('link',{name:/Download FLAC/}).first()).toBeVisible();
+   await page.screenshot({path:`/tmp/junk-compact-album-${width}.png`});
+  }
+  await page.setViewportSize({width:1440,height:1000});
+  const more=refreshedPlayer.getByRole('button',{name:'Track 1 actions',exact:true});await more.focus();await page.keyboard.press('Enter');await refreshedPlayer.getByRole('button',{name:'Add to queue',exact:true}).waitFor();await page.keyboard.press('Escape');await expect(more).toBeFocused();
   await page.reload();
   await page.locator('.collection-scope summary').click();await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
   await page.getByRole('button',{name:/A test pressing/}).click();
   await page.getByRole('region',{name:'Album tracks'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
-  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+  await clickAction(page,'Edit / attach files');
   await cdCurator.waitFor();
   await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
   await cdCurator.getByRole('region',{name:'Prepare audio'}).locator('.music-track').first().waitFor();
@@ -731,7 +744,7 @@ try{
  await restoredWork.getByRole('button',{name:'Refresh work',exact:true}).click();
  await restoredWork.locator(':scope > .notice.error').waitFor({state:'detached'});
  await restoredWork.getByRole('button',{name:'Close work history'}).click();
- await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await clickAction(page,'Edit / attach files');
  await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await cdCurator.getByText('Technical processing history',{exact:true}).click();
  const visibleDocket=cdCurator.getByRole('region',{name:'Music CD checks'}).locator('.import-docket').first();
@@ -770,12 +783,13 @@ try{
   assert.equal(await album.locator('.music-track').nth(0).getAttribute('data-representation-id'),expected[0].representation);
   assert.equal(await album.locator('.music-track').nth(1).getAttribute('data-representation-id'),expected[1].representation);
   await playbackPage.evaluate(()=>{window.savedCanPlayType=HTMLMediaElement.prototype.canPlayType;HTMLMediaElement.prototype.canPlayType=()=>'';});
-  await album.getByRole('button',{name:'Refresh tracks',exact:true}).click();
+  await clickAction(album,'Refresh tracks');
+  await album.getByRole('button',{name:'About FLAC playback',exact:true}).first().click();
   await album.getByText('This browser does not report FLAC playback support.',{exact:false}).first().waitFor();
   assert.equal(await player.getByRole('button',{name:'Play',exact:true}).isDisabled(),true,'unsupported codec advertised playback');
   assert.equal(await album.getByRole('link',{name:/FLAC/}).count(),2,'unsupported browser lost download fallback');
   await playbackPage.evaluate(()=>{HTMLMediaElement.prototype.canPlayType=window.savedCanPlayType;delete window.savedCanPlayType;});
-  await album.getByRole('button',{name:'Refresh tracks',exact:true}).click();
+  await clickAction(album,'Refresh tracks');
   await album.getByRole('button',{name:'Add album to queue',exact:true}).click();
   const codec=await player.locator('audio').evaluate(element=>({support:element.canPlayType('audio/flac'),agent:navigator.userAgent}));assert.notEqual(codec.support,'','target browser did not report FLAC decoding support');
   // A rejected old play promise must not overwrite a newer track's state.

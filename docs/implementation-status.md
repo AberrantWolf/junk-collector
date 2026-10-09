@@ -33,6 +33,24 @@ not require permanent provenance history. The current append-only storage and ra
 observations still exist; no compaction, record deletion or retention conversion
 has been implemented. See [the accepted scope policy](decisions/home-lab-scope.md).
 
+## Compact album format availability — 2026-10-09
+
+Album browsing and preparation use small inline FLAC/Opus labels beside track
+names instead of full bordered availability boxes. Ready downloads show a check,
+preparation buttons show a plus, active work an ellipsis, and unavailable formats
+a muted minus with keyboard/touch-openable reason details. File sizes remain in
+accessible download labels and hover text. Track/list/queue actions stay available;
+format preparation is visually secondary. Album browsing now has a small cover/title
+header and two-line track rows: one ellipsized title line, one small format line.
+Native overflow popovers hold album management, list additions, track queue actions
+and refresh. Disc checks, collection facts, metadata details, evidence and stored
+files are collapsed until explicitly requested; unsupported playback guidance stays
+in an inline help control. The dedicated preparation view retains its actual plan
+and progress controls. The desktop entry panel now meets the
+viewport right edge and player dock without page gutters; its full-height scroll
+area stays fixed while the library scrolls. Mobile retains the ordinary page layout. See the
+[dated validation](validation.md#compact-album-format-availability--2026-10-09).
+
 ## October 9 TODO delivery
 
 Game and other non-music imports no longer offer FLAC/music controls or album-only

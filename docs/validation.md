@@ -4108,3 +4108,85 @@ Git passed four adapter unit tests and the two-real-server integration test for
 streaming, downloading, editing and offline retention. Its five Collector
 manifest dependencies were changed only in the temporary copy. The real checkout
 was not modified. The CI-only follow-up does not change that tested Rust source.
+
+
+## Compact album format availability — 2026-10-09
+
+User-requested presentation change in the shared album browse/preparation component.
+Track names and list/queue controls take priority over small inline format labels.
+Ready downloads show a check, preparation a plus, active work an ellipsis, and
+unavailable profiles a minus with native disclosure of the complete reason.
+FLAC and distinct Opus bitrates retain their full accessible names; visible Opus
+labels shorten `kbps` to `k`. File sizes remain in download names/hover text.
+Container-width layout keeps narrow desktop album panels from squeezing titles;
+mobile wraps the labels beneath track controls. No API, preparation policy,
+playback selection, authorization or storage changes.
+
+Validation: architecture/document links, Rust formatting, workspace tests, strict
+workspace/all-target Clippy, TypeScript check, web build and embedded-server rebuild
+passed. Browser smoke uses a temporary profile/server and virtual WebAuthn;
+Chrome 153.0.8010.37 exercised preparation, authenticated downloads, actual FLAC
+playback, queue/list actions and revocation. Desktop (1440×1000 viewport) and
+mobile (390×844) track-row screenshots were inspected with real fixture rows and
+unavailable Opus profiles. Test-only screenshot instrumentation is removed after
+review; no substitute production responses or permanent icon assets were added.
+
+
+### Entry-panel edge repair — 2026-10-09
+
+The desktop selected-entry panel now occupies the rightmost 360px from the top
+of the viewport to the measured player-dock boundary (or the viewport bottom
+without a dock). Its explicit viewport-based height and existing overflow keep
+long albums independently scrollable. The library reserves that width for all
+headers and controls, not just the results grid. The old right gutter and
+shortened scroll area no longer leave exposed page background around the panel.
+Shell bottom padding reserves exactly the dock height rather than adding another
+20px of blank scrolling space.
+The panel background and sticky Back to results control share one continuous
+surface. Mobile/tablet retain their ordinary full-page entry layout.
+
+Targeted navigation acceptance passed with the rebuilt server: panel top/right
+edges match the viewport, its bottom meets the dock within one pixel, and the
+library toolbar ends before the panel. Desktop 1360×980 and mobile 390×844
+screenshots were inspected; mobile has no horizontal overflow. The album smoke
+also checks top/middle/bottom panel scroll positions and library-page scrolling.
+Navigation and album smoke workflows passed. All geometry/screenshot
+instrumentation is temporary and removed after review.
+
+
+### Compact track-led album browsing — 2026-10-09
+
+Album browsing now uses a small cover/title header and a quiet track list. Each
+track has one ellipsized title line and one format line; Opus is named once before
+its distinct bitrates. Track/list/queue actions, album management and refresh use
+native overflow popovers. Native light dismissal and Escape retain the containing
+album/editor and return focus to the trigger. The application and shared dialog
+Escape handlers defer to an open popover. Popovers use the top layer so scroll
+areas cannot clip their actions. Available downloads retain full accessible format
+names and sizes; unavailable reasons and unsupported-playback help remain readable.
+
+Disc details/checks, inventory facts, descriptive metadata, evidence and stored files
+remain present behind collapsed disclosures. The dedicated preparation task keeps
+its working plan/progress controls. Artwork failure still offers retry in the small
+header, and removed albums retain their restore action and explanatory state.
+No application policy, data or availability mechanism changes.
+
+Automated UI acceptance checks feature visibility, collapsed diagnostics, functional
+management/list/queue commands, keyboard menu dismissal/focus and actual playback.
+The old `display: grid` assertion is removed: a particular layout mechanism is not
+a product guarantee. Pixel heights are visual-review evidence, not unit-test
+contracts. Screenshots at desktop 1440×1000 and mobile 390×1000 are captured for
+review. Browse and FX-05 journeys exercise artwork retry, late/failed evidence,
+retained-original playback, replacement, removal and restoration through menus.
+Their stale upload/completion wording selectors now use the actual current controls;
+no production success behavior was changed to satisfy those old expectations.
+
+
+Acceptance passed: TypeScript/web build and embedded-server rebuild, architecture/
+document checks, Rust formatting, full browser smoke, browse and FX-05 journeys.
+The focused `test:actions` browser fixture checks the actual shared popover/dialog
+components: keyboard opening, Escape preserving the editor and restoring focus,
+action execution/dismissal, outside-click dismissal and separate editor closure.
+Desktop/mobile screenshots confirm the compact two-line rows. Workspace Rust tests
+and strict Clippy passed earlier in this delivery; this pass changes presentation
+and browser tests only.

@@ -10,6 +10,7 @@ Read `docs/architecture.md` before adding or changing a subsystem. `docs/impleme
 - Artwork belongs beside game/CD text rows, including search and offline browsing.
 - Share format/audio algorithms through narrow `junk-libs` crates. Do not import old app orchestration. Extract shared code separately and check affected sibling projects.
 - Document incomplete capabilities honestly; never substitute a successful-looking mock for a missing implementation.
+- Remove clearly pointless checks or tests when encountered. Keep assertions tied to meaningful features, visibility, correctness and real failure/recovery guarantees; do not freeze incidental implementation or layout choices. Do not preserve or rewrite a useless assertion merely to make it pass.
 
 ## Lessons from implementation reviews
 

@@ -72,3 +72,12 @@ nav{display:grid;gap:6px}nav button{text-align:left;border:none;padding:12px}.ac
 .metadata-review .section-heading h3 { display: inline; }
 
 .catalog-snapshot{display:grid;gap:14px;border:1px solid var(--line);border-radius:6px;padding:16px;margin:16px 0;overflow-wrap:anywhere}.catalog-snapshot>span{display:grid;gap:8px}.catalog-snapshot strong{font-size:16px}.catalog-snapshot small{display:block;font-size:13px;color:var(--muted)}.catalog-snapshot details{font-size:14px}.catalog-snapshot details p{margin:10px 0;line-height:1.5}.catalog-snapshot details strong{font-size:14px}
+
+/* The desktop entry panel meets the viewport edge and the player dock. */
+@media(min-width:1151px){
+ .viewing-entry main{padding-right:388px}
+ .browser.has-detail{grid-template-columns:minmax(0,1fr)}
+ .detail-view{position:fixed;inset:0 0 0 auto;width:360px;height:100dvh;min-height:0;max-height:none;background:#eeefe6;border-left:1px solid var(--line)}
+ .detail-view .detail{border-radius:0}
+ .detail-view>.back-to-results{width:100%;margin:0;padding:14px 24px;border:0;border-bottom:1px solid var(--line);border-radius:0;text-align:left;background:#eeefe6}
+}
