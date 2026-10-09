@@ -4,6 +4,25 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Historical baseline: Wave 1 commit `e4cb6c5`, 2026-09-09. **Waves 2 and 3 are implemented and reviewed locally; external qualification gates remain open.** Wave 3's initial ledger ends at `756e251`; the 2026-09-11 recovery/resume corrections are included in the subsequent review-fix commit. Ticket status is recorded individually below. The [Wave 3 execution plan](wave-3-plan.md) and [review follow-up](wave-3-review.md#independent-review-follow-up-2026-09-11) record the current checkpoint; earlier dated ticket entries describe historical checkpoints.
 
+## TODO — Keep the Rust release toolchain current
+
+Requested 2026-10-09. The alpha's Rust 1.95.0 CI pin is temporary; do not leave
+it as an indefinite substitute for current-stable qualification.
+
+Before the next alpha, evaluate current stable Rust (1.99 at the alpha dry run),
+resolve its Clippy findings, and advance CI, the Docker builder, documented build
+requirements and the local validation toolchain together. The first observed
+finding is `chunks_exact_to_as_chunks` in
+`crates/collector-providers/src/conversion.rs`. Check stable Rust when preparing
+each later release and record the upgrade decision/results.
+
+Acceptance: the chosen current stable version passes architecture/format,
+workspace tests and warning-denied all-target Clippy, web checks/build,
+release and Docker build/runtime checks, plus affected junk-libs and consumer
+checks. Record any actual minimum-version requirement separately; do not silently
+move the tested release baseline or suppress new lints to make a summary green.
+This maintenance TODO does not replace the active LA3/PJ1 physical qualification.
+
 ## Account and connection usability — current repair
 
 The user's 2026-10-07 direction is: a user who can sign in to the web server
