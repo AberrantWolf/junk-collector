@@ -2707,7 +2707,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 144); // Native approval preview/status/cancel and account-security commands extend the existing paths.
+    assert_eq!(paths.len(), 145); // Browser DAT upload adds one administration-only command.
     for path in [
         "/api/v1/collections/{collection}/lists",
         "/api/v1/collections/{collection}/lists/{list}",
@@ -2739,6 +2739,7 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         "/api/v1/collections/{id}/catalog-snapshots",
         "/api/v1/admin/catalog-sources",
         "/api/v1/admin/collections/{id}/catalog-snapshots",
+        "/api/v1/admin/collections/{id}/catalog-upload",
         "/api/v1/admin/collections/{id}/catalog-snapshots/{snapshot_id}/active",
         "/api/v1/imports/{id}/analysis",
         "/api/v1/imports/{id}/review",
@@ -4962,4 +4963,146 @@ async fn collection_lists_reads_and_writes_follow_listener_composition_and_roles
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["list"]["can_edit"], false);
+}
+
+#[tokio::test]
+async fn dat_upload_is_administration_only_and_binds_exact_bytes_and_metadata() {
+    let (root, mut state) = state();
+    let owner = state
+        .store
+        .create_user("dat-admin", "a long test password", true)
+        .unwrap();
+    let viewer = state
+        .store
+        .create_user("dat-viewer", "a long viewer password", false)
+        .unwrap();
+    let actor = Principal {
+        user_id: owner,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = state
+        .service
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Game DATs".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    Catalog::grant(&*state.store, collection.id, viewer, Role::Viewer).unwrap();
+    let (token, _) = state.store.issue_session(owner, "dat-upload").unwrap();
+    let (viewer_token, _) = state.store.issue_session(viewer, "dat-upload").unwrap();
+    let uri = format!(
+        "/api/v1/admin/collections/{}/catalog-upload?system=nes&catalog=fixture&byte_domain=org.junk.game.raw-bytes",
+        collection.id
+    );
+    let request = |token: Option<&str>, key: &str, bytes: Vec<u8>| {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("origin", "https://collector.example")
+            .header("content-type", "application/octet-stream")
+            .header("idempotency-key", key);
+        if let Some(token) = token {
+            builder = builder.header("authorization", format!("Bearer {token}"));
+        }
+        builder.body(Body::from(bytes)).unwrap()
+    };
+    assert_eq!(
+        router(state.clone())
+            .oneshot(request(Some(&token), "hidden", b"data".to_vec()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    state.ingress = Ingress::Private;
+    let app = router(state.clone());
+    assert_eq!(
+        app.clone()
+            .oneshot(request(None, "anonymous", b"data".to_vec()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(Some(&viewer_token), "viewer", b"data".to_vec()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert!(!root.path().join("state/catalog-uploads").exists());
+    assert_eq!(
+        app.clone()
+            .oneshot(request(Some(&token), "empty", vec![]))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(Some(&token), "zip", b"PK\x03\x04archive".to_vec()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                Some(&token),
+                "too-large",
+                vec![0; collector_app::MAX_DAT_UPLOAD_BYTES + 1]
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    let first = app
+        .clone()
+        .oneshot(request(Some(&token), "exact-upload", b"data".to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::ACCEPTED);
+    let first = axum::body::to_bytes(first.into_body(), 4096).await.unwrap();
+    let replay = app
+        .clone()
+        .oneshot(request(Some(&token), "exact-upload", b"data".to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(replay.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        first,
+        axum::body::to_bytes(replay.into_body(), 4096)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(Some(&token), "exact-upload", b"diff".to_vec()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let changed_platform = Request::builder()
+        .method("POST")
+        .uri(uri.replace("system=nes", "system=snes"))
+        .header("origin", "https://collector.example")
+        .header("authorization", format!("Bearer {token}"))
+        .header("idempotency-key", "exact-upload")
+        .body(Body::from("data"))
+        .unwrap();
+    assert_eq!(
+        app.oneshot(changed_platform).await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
 }

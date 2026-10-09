@@ -253,6 +253,14 @@ pub struct DatSnapshotObservation {
     pub byte_domain: String,
     pub byte_domain_version: u32,
     pub game_count: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview_entries: Vec<DatCatalogPreviewEntry>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DatCatalogPreviewEntry {
+    pub label: String,
+    pub files: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -498,6 +498,9 @@ pub use collector_modules::{IngestAnchorChoice, IngestBlocker, IngestBlockerKind
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPlanPackage {
+    // Retained private intake plans may predate this presentation capability.
+    #[serde(default)]
+    pub music_actions_available: bool,
     pub position: u16,
     pub source: ImportSourceSummary,
     pub files: Vec<UploadFile>,
@@ -1409,6 +1412,7 @@ pub struct CollectionService {
     lists: Arc<dyn CollectionListPort>,
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
     artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
+    catalog_uploads: Option<Arc<dyn UploadedCatalogPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
     modules: Arc<Registry>,
@@ -2118,6 +2122,7 @@ impl CollectionService {
             lists,
             audio_converter: None,
             artwork_preview: None,
+            catalog_uploads: None,
             streaming_providers: Arc::new(Default::default()),
             catalog_parsers: Arc::new(Default::default()),
             modules,
@@ -4630,6 +4635,93 @@ impl CollectionService {
             created_at: self.authentication.now(),
         };
         self.enqueue_catalog_acquisition(actor, frozen, context)
+    }
+
+    pub fn with_catalog_uploads(mut self, uploads: Arc<dyn UploadedCatalogPort>) -> Self {
+        self.catalog_uploads = Some(uploads);
+        self
+    }
+    pub fn upload_dat_catalog(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        metadata: DatUploadMetadata,
+        bytes: &[u8],
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.validate_dat_upload(actor, collection, &metadata)?;
+        let port = self
+            .catalog_uploads
+            .as_ref()
+            .ok_or_else(|| Error::Unavailable("DAT upload storage is unavailable.".into()))?;
+        if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
+            return Err(Error::Invalid("ZIP uploads are not supported. Extract the archive on your computer and upload the individual DAT file.".into()));
+        }
+        let digest = port.stage_uploaded_catalog(bytes)?;
+        self.import_uploaded_catalog(
+            actor,
+            collection,
+            UploadedDatCatalog {
+                metadata,
+                digest,
+                bytes: ByteLength(bytes.len() as u64),
+            },
+            context,
+        )
+    }
+
+    pub fn validate_dat_upload(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        metadata: &DatUploadMetadata,
+    ) -> Result<()> {
+        self.require_administrator(actor)?;
+        metadata.validate()?;
+        let eligibility = self.content_write_eligibility(actor, collection)?;
+        if eligibility.owner.0 != "org.junk.games" {
+            return Err(Error::Invalid(
+                "DAT catalogs require a Games collection.".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn import_uploaded_catalog(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        upload: UploadedDatCatalog,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.validate_dat_upload(actor, collection, &upload.metadata)?;
+        upload.validate()?;
+        // Bind receipts to submitted metadata and bytes, before resolving mutable binding/time.
+        self.execute_command(
+            actor,
+            context,
+            "catalog.upload.enqueue",
+            &(collection, upload.clone()),
+            |effects| {
+                let eligibility = self.content_write_eligibility(actor, collection)?;
+                let id = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+                let frozen = FrozenAcquisitionJob {
+                    request: ProviderRequest {
+                        collection_id: collection,
+                        provider: ModuleId("org.junk.providers.local-dat".into()),
+                        operation: OperationId::new("org.junk.providers.local-dat.acquire")?,
+                        source_fingerprint: None,
+                        query: RawJson::from_value(serde_json::json!({"upload":upload})),
+                        maximum_response_bytes: MAX_DAT_UPLOAD_BYTES as u64,
+                    },
+                    collection_binding: eligibility.binding,
+                    item_id: None,
+                    snapshot_id: SnapshotId(id.0),
+                    created_at: self.authentication.now(),
+                };
+                effects.enqueue_job(self.catalog_acquisition_spec(actor, &frozen, id)?)
+            },
+        )
     }
 
     pub fn catalog_snapshots(

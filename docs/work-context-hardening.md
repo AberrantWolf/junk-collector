@@ -1,5 +1,13 @@
 # Work context hardening — locally accepted 2026-09-26
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 This delivery precedes FX-07. It preserves typed domain identities and existing
 services, worker claims, archive recovery, and durable shared-work ownership.
 

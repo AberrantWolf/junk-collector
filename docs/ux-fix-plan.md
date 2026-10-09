@@ -1,5 +1,13 @@
 # Usability and lifecycle fixes
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 Prepared 2026-09-21 at the user's request, combining the [18 UX findings](reviews/ux-2026-09-20/review.md) with related unfinished milestone work. **FX-01–FX-03 are implemented and locally accepted (2026-09-21). FX-04 local acceptance passed 2026-09-25. FX-05 Remove/Restore and clean reimport are implemented and locally accepted (2026-09-26). FX-06 is locally accepted (2026-09-26), and FX-07 local acceptance passed 2026-09-27.** This document defines a coherent fix set; it does not declare LA3 accepted or silently replace its outstanding second-device qualification.
 
 ## Intended outcome
@@ -186,18 +194,15 @@ Run the repository gates at each integrated implementation boundary: architectur
 
 Close U05/P04 criteria only when the full applicable checklist passes. Retain independent accessibility/security and physical-device/hardware/deployment qualifications as open where unavailable. LA3's remaining trusted second device is a separate recorded gate, not something this audit can simulate into completion.
 
-## Coverage and explicit deferrals
+## Coverage
 
-All audit findings are assigned: UX-01/02/04/10/11 → FX-01; UX-16/17/18 → FX-02 plus history cleanup in FX-03; UX-12 → FX-03; UX-07/08/09/13/14 → FX-04; UX-15 → FX-05; UX-03/05/06 → FX-06. Six smaller findings are covered by FX-01/04. FX-07 audits additional actions rather than treating this list as exhaustive.
+All audit findings are assigned: UX-01/02/04/10/11 → FX-01; UX-16/17/18 → FX-02
+plus history cleanup in FX-03; UX-12 → FX-03; UX-07/08/09/13/14 → FX-04;
+UX-15 → FX-05; UX-03/05/06 → FX-06. Six smaller findings are covered by FX-01/04.
+FX-07 audited additional actions. Outstanding work and optional features are
+listed only in [remaining work](remaining-work.md).
 
-- **P05 export/full backup tooling remains paused/outside this fix set.** Use the existing stopped-server backup/restore runbook for actual-data changes and test temporary roots. Preserve records needed by future export. Full P05.1–P05.3 is useful later, but not a dependency for reversible removal or history cleanup.
-- **Permanent deletion of published payloads is excluded.** It needs a separate reference/retention/recovery design; none of these controls should imply disk reclamation for preserved masters.
-- **P06 was deferred from this fix set; its separate user-prioritized delivery is now locally implemented (2026-10-03).** See [P06 validation](validation/p06-indexing.md). R02 formal scale/deployment qualification remains outstanding.
-- **C06 events remain deferred.** Correct polling, pagination and durable reconciliation suffice for this delivery.
-- **Native/offline clients, Trash Amp, TLS rotation/discovery, legacy migration, new providers/formats and document attachments remain deferred.** Their absence must remain honest in the UI.
-- **Completed D06/D07/LA1/LA2 are reused, not restarted.** Revalidate affected behavior without claiming new external qualification.
-
-## Implementation handoff
+## Implementation record
 
 FX-01–FX-04 are locally accepted. FX-04 was implemented in the 2026-09-24
 checkpoint; see its [validation record](validation.md#fx-04-focused-editing-and-intake--2026-09-24)
@@ -207,7 +212,8 @@ recoverable capture switching, generation fences and continued queued playback.
 Local acceptance passed on 2026-09-26; see [validation](validation.md) for the exact checked scope and limitations.
 Preserve local user data and configuration. FX-06 and FX-07 are locally accepted. The user-requested [work-context hardening](work-context-hardening.md) is locally accepted (2026-09-26). The outstanding LA3 second-device gate remains separate.
 
-At completion of each delivery, update this ledger, implementation status, the mapped U05/P04/background-work criteria, validation evidence and the next ready-to-send prompt together. Retain dated earlier acceptance records and outstanding LA3/external gates. For FX-02 and FX-05, document durable identities, publication fences, cancellation/ownership and restart recovery before changing their subsystem boundaries.
+For changes to these delivered behaviors, update implementation status, relevant
+acceptance criteria, validation and remaining-work.md together. Retain dated earlier acceptance records and outstanding LA3/external gates. For FX-02 and FX-05, document durable identities, publication fences, cancellation/ownership and restart recovery before changing their subsystem boundaries.
 
 **FX-07 local acceptance, 2026-09-27:** Administrator accounts now use an authorized,
 bounded, searchable keyset query, with later-page and direct-record regression
@@ -225,10 +231,3 @@ successful analyses, two failed attempts, actual cleanup fault/retry and
 restart reclamation. Offline DAT fixtures display ambiguous and no-match
 verification. The [action, scale and combined-journey audit](fx07-interface-audit.md)
 and [validation](validation.md) support local U05.2/U05.3 and P04.6 acceptance.
-
-**Next ready-to-send prompt:** Continue the remaining trusted second-device
-[LA3 qualification](local-alpha-plan.md#ready-to-send-la3-prompt). Use the
-intended second device and record actual LAN playback, download and trust
-behavior. Keep independent accessibility/security and physical deployment
-reviews in their release gates. Page metadata candidate responses before
-raising the current 4,096-version per-Item admission ceiling.

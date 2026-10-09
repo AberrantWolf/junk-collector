@@ -1,5 +1,13 @@
 # Album preparation and nonblocking background work
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 **FX-03 update (2026-09-21):** Work & history, scoped server filtering/pagination,
 workflow/attempt grouping, dismissal/restoration, selected cleanup with durable
 settlement and byte outcomes, server-backed import reopening, and removal of
@@ -130,13 +138,3 @@ submitted overlapping album batches, kept inventory controls enabled and played 
 completed track in a second page while another member remained active. Exact results and unqualified external
 inputs are recorded in [validation](validation.md). D07.5 passed independent integrated review on 2026-09-17; broader U05 interface
 auditing is not claimed. See the review corrections in local-alpha-review.md.
-
-## Historical child assignment (use the local-alpha handoff instead)
-
-Implement D07.4 from docs/background-work-plan.md. Read AGENTS.md,
-docs/architecture.md, docs/release-requirements.md and D07/P02 contracts. Define
-album/source selection, durable bounded admission, idempotency and cancellation
-ownership before implementation. Reuse track effects/workers; add album FLAC and
-independent track enqueueing with real UI tests. Update this ledger, current
-status, validation and the D07.5 review assignment. U05's broader review remains
-a separate completion gate.

@@ -1627,3 +1627,68 @@ pub(crate) fn project_authority_revision(
 
     Ok(())
 }
+
+impl Store {
+    /// Sync a content-addressed private spool before committing its Job reference.
+    pub fn stage_uploaded_catalog(&self, bytes: &[u8]) -> Result<Digest> {
+        if bytes.is_empty() || bytes.len() > collector_app::MAX_DAT_UPLOAD_BYTES {
+            return Err(Error::Invalid(
+                "Upload an extracted DAT file between 1 byte and 64 MiB.".into(),
+            ));
+        }
+        let digest = Digest::new(HashAlgorithm::Sha256, hex::encode(Sha256::digest(bytes)))?;
+        let directory = self.state.join("catalog-uploads");
+        fs::create_dir_all(&directory).map_err(storage)?;
+        let target = directory.join(&digest.hex);
+        let mut staged = tempfile::NamedTempFile::new_in(&directory).map_err(storage)?;
+        staged.write_all(bytes).map_err(storage)?;
+        staged.as_file().sync_all().map_err(storage)?;
+        match staged.persist_noclobber(&target) {
+            Ok(_) => {}
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let file = File::open(&target).map_err(storage)?;
+                let valid = if file.metadata().map_err(storage)?.len() == bytes.len() as u64 {
+                    let mut existing = Vec::with_capacity(bytes.len());
+                    file.take(bytes.len() as u64 + 1)
+                        .read_to_end(&mut existing)
+                        .map_err(storage)?;
+                    existing == bytes
+                } else {
+                    false
+                };
+                if !valid {
+                    // Repair only private staging from freshly supplied bytes with
+                    // this exact digest. Immutable archive snapshots are untouched.
+                    error
+                        .file
+                        .persist(&target)
+                        .map_err(|error| storage(error.error))?;
+                }
+            }
+            Err(error) => return Err(storage(error.error)),
+        }
+        File::open(&directory)
+            .and_then(|file| file.sync_all())
+            .map_err(storage)?;
+        Ok(digest)
+    }
+}
+impl collector_app::UploadedCatalogPort for Store {
+    fn stage_uploaded_catalog(&self, bytes: &[u8]) -> Result<Digest> {
+        Store::stage_uploaded_catalog(self, bytes)
+    }
+    fn uploaded_catalog(
+        &self,
+        upload: &collector_app::UploadedDatCatalog,
+    ) -> Result<Box<dyn collector_app::MediaReader>> {
+        upload.validate()?;
+        let file = File::open(self.state.join("catalog-uploads").join(&upload.digest.hex))
+            .map_err(storage)?;
+        if file.metadata().map_err(storage)?.len() != upload.bytes.0 {
+            return Err(Error::Invalid(
+                "Saved DAT upload length changed; upload the original DAT again.".into(),
+            ));
+        }
+        Ok(Box::new(file))
+    }
+}

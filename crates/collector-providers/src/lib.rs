@@ -70,12 +70,14 @@ impl LocalDatSource {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LocalDatQuery {
-    source: String,
+    source: Option<String>,
+    upload: Option<collector_app::UploadedDatCatalog>,
 }
 
 #[derive(Clone)]
 pub struct LocalDatProvider {
     sources: BTreeMap<String, LocalDatSource>,
+    uploads: Option<std::sync::Arc<dyn collector_app::UploadedCatalogPort>>,
 }
 
 impl LocalDatProvider {
@@ -94,7 +96,18 @@ impl LocalDatProvider {
             }
             source.validate()?;
         }
-        Ok(Self { sources })
+        Ok(Self {
+            sources,
+            uploads: None,
+        })
+    }
+
+    pub fn with_uploads(
+        mut self,
+        uploads: std::sync::Arc<dyn collector_app::UploadedCatalogPort>,
+    ) -> Self {
+        self.uploads = Some(uploads);
+        self
     }
 
     pub fn configured_sources(&self) -> impl Iterator<Item = (&str, &LocalDatSource)> {
@@ -110,7 +123,7 @@ impl LocalDatProvider {
         source.validate()?;
         let dat = junk_libs_dat::parse_dat(BufReader::new(reader))
             .map_err(|error| Error::Invalid(format!("invalid DAT catalog: {error}")))?;
-        normalized_dat(source, dat)
+        normalized_dat(source, dat, &mut || Ok(false))
     }
 }
 
@@ -129,13 +142,41 @@ impl StreamingProviderPort for LocalDatProvider {
             ));
         }
         let query: LocalDatQuery = request.query.parse()?;
-        let source = self
-            .sources
-            .get(&query.source)
-            .ok_or_else(|| Error::Unavailable("configured DAT source is unavailable".into()))?;
-        let mut file = File::open(&source.path)
-            .map_err(|error| Error::Unavailable(format!("DAT source outage: {error}")))?;
-        let declared = file.metadata().map_err(provider_io)?.len();
+        let (source, mut file, uploaded): (LocalDatSource, Box<dyn collector_app::MediaReader>, _) =
+            match (query.source, query.upload) {
+                (Some(id), None) => {
+                    let source = self
+                        .sources
+                        .get(&id)
+                        .ok_or_else(|| {
+                            Error::Unavailable("configured DAT source is unavailable".into())
+                        })?
+                        .clone();
+                    let file = File::open(&source.path).map_err(|error| {
+                        Error::Unavailable(format!("DAT source outage: {error}"))
+                    })?;
+                    (source, Box::new(file), None)
+                }
+                (None, Some(upload)) => {
+                    upload.validate()?;
+                    let source = LocalDatSource {
+                        path: PathBuf::new(),
+                        system: upload.metadata.system.clone(),
+                        catalog: upload.metadata.catalog.clone(),
+                        byte_domain: upload.metadata.byte_domain.clone(),
+                        byte_domain_version: 1,
+                    };
+                    let file = self
+                        .uploads
+                        .as_ref()
+                        .ok_or_else(|| Error::Unavailable("DAT uploads are unavailable".into()))?
+                        .uploaded_catalog(&upload)?;
+                    (source, file, Some(upload))
+                }
+                _ => return Err(Error::Invalid("Choose exactly one DAT source.".into())),
+            };
+        let declared = file.seek(SeekFrom::End(0)).map_err(provider_io)?;
+        file.seek(SeekFrom::Start(0)).map_err(provider_io)?;
         if declared == 0 || declared > request.maximum_response_bytes || declared > MAX_DAT_BYTES {
             return Err(Error::Invalid("DAT source is empty or oversized".into()));
         }
@@ -164,6 +205,16 @@ impl StreamingProviderPort for LocalDatProvider {
         if measured != declared {
             return Err(Error::Invalid("DAT source changed while being read".into()));
         }
+        let digest = Digest::new(HashAlgorithm::Sha256, hex::encode(hasher.finalize()))?;
+        if uploaded
+            .as_ref()
+            .is_some_and(|upload| upload.digest != digest || upload.bytes.0 != measured)
+        {
+            return Err(Error::Invalid(
+                "Saved DAT upload failed integrity validation; upload the original DAT again."
+                    .into(),
+            ));
+        }
         file.seek(SeekFrom::Start(0)).map_err(provider_io)?;
         let mut bounded = (&mut file).take(declared.saturating_add(1));
         let reporting = ReportingReader::new(&mut bounded, execution, declared);
@@ -175,9 +226,13 @@ impl StreamingProviderPort for LocalDatProvider {
                 return Err(Error::Invalid(format!("invalid DAT catalog: {error}")));
             }
         };
-        let (header, entries) = normalized_dat(source, dat)?;
+        let (header, entries) =
+            normalized_dat(&source, dat, &mut || execution.cancellation_requested())?;
         let mut index_bytes = 0_usize;
         for entry in &entries {
+            if execution.cancellation_requested()? {
+                return Err(Error::JobCancelled);
+            }
             let bytes = serde_json::to_vec(entry)
                 .map_err(|error| Error::Invalid(error.to_string()))?
                 .len();
@@ -192,7 +247,7 @@ impl StreamingProviderPort for LocalDatProvider {
         Ok(ProviderStreamResponse {
             media_type: "application/vnd.logiqx.dat".into(),
             bytes: ByteLength(measured),
-            digest: Digest::new(HashAlgorithm::Sha256, hex::encode(hasher.finalize()))?,
+            digest,
             parsed_observation: RawJson::from_value(
                 serde_json::to_value(header).map_err(|error| Error::Invalid(error.to_string()))?,
             ),
@@ -232,7 +287,8 @@ impl CatalogParserPort for LocalDatProvider {
             hasher: Sha256::new(),
             bytes: 0,
         };
-        let parsed = Self::parse_observation(&source, &mut verified);
+        let parsed = junk_libs_dat::parse_dat(BufReader::new(&mut verified))
+            .map_err(|error| Error::Invalid(format!("invalid DAT catalog: {error}")));
         // Parsers may stop at the document terminator. Drain the bounded stream
         // so trailing bytes and length changes also invalidate the snapshot.
         if parsed.is_ok() {
@@ -243,7 +299,7 @@ impl CatalogParserPort for LocalDatProvider {
             HashAlgorithm::Sha256,
             hex::encode(verified.hasher.finalize()),
         )?;
-        let (actual, entries) = match parsed {
+        let dat = match parsed {
             Ok(parsed) => parsed,
             Err(_) if cancelled()? => return Err(Error::JobCancelled),
             Err(error) => return Err(error),
@@ -252,6 +308,10 @@ impl CatalogParserPort for LocalDatProvider {
             return Err(Error::Invalid(
                 "archived DAT bytes fail snapshot integrity validation".into(),
             ));
+        }
+        let (mut actual, entries) = normalized_dat(&source, dat, cancelled)?;
+        if header.preview_entries.is_empty() {
+            actual.preview_entries.clear();
         }
         if actual != header {
             return Err(Error::Invalid(
@@ -277,6 +337,7 @@ impl CatalogParserPort for LocalDatProvider {
 fn normalized_dat(
     source: &LocalDatSource,
     dat: junk_libs_dat::DatFile,
+    cancelled: &mut dyn FnMut() -> Result<bool>,
 ) -> Result<(DatSnapshotObservation, Vec<DatCatalogEntryObservation>)> {
     if dat.version.trim().is_empty() {
         return Err(Error::Invalid("DAT catalog declares no version".into()));
@@ -289,6 +350,9 @@ fn normalized_dat(
     }
     let mut entries = Vec::with_capacity(dat.games.len());
     for (index, game) in dat.games.into_iter().enumerate() {
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
         safe_text(&game.name, "DAT game name")?;
         for (field, value) in [
             ("DAT game region", game.region.as_deref()),
@@ -308,6 +372,9 @@ fn normalized_dat(
         let mut files = Vec::with_capacity(game.roms.len());
         let mut excluded_files = Vec::new();
         for rom in game.roms {
+            if cancelled()? {
+                return Err(Error::JobCancelled);
+            }
             safe_text(&rom.name, "DAT file name")?;
             if let Some(serial) = &rom.serial {
                 safe_text(serial, "DAT file serial")?;
@@ -353,6 +420,19 @@ fn normalized_dat(
             byte_domain: source.byte_domain.clone(),
             byte_domain_version: source.byte_domain_version,
             game_count: entries.len() as u64,
+            preview_entries: entries
+                .iter()
+                .take(3)
+                .map(|entry| collector_modules::games::DatCatalogPreviewEntry {
+                    label: entry.label.clone(),
+                    files: entry
+                        .files
+                        .iter()
+                        .take(3)
+                        .map(|file| file.name.clone())
+                        .collect(),
+                })
+                .collect(),
         },
         entries,
     ))

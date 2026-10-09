@@ -1,5 +1,13 @@
 # Bulk import, metadata repair and preparation
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 Accepted 2026-10-03. This user assignment takes precedence over the previously
 active serial handoff. Preserve actual archive/private data and all P06 recovery
 and lightweight-query guarantees. Full accepted scope: dedicated Library,
@@ -83,12 +91,3 @@ pages; periodic recovery covers all unfinished pages. Metadata and preparation f
 loaded result pages, selections and review drafts survive task navigation. The player
 remains outside task pages; mobile reviews have an explicit return path and keyboard
 focus returns to the originating result.
-
-## Next handoff
-
-No BL1–BL3 implementation remains assigned. Continue the existing
-[LA3 second-device qualification](local-alpha-plan.md#ready-to-send-la3-prompt)
-with the intended trusted physical LAN device. Preserve the passing local corpus,
-provider and restore records; qualify new changes separately. Keep blocked DAT
-acquisition disabled. General post-edit splitting, new providers, native/offline
-clients, synchronized listening and backup UI remain separate scoped deliveries.

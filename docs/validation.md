@@ -1,12 +1,36 @@
 # Validation recorded for the foundation
 
+## Documentation consolidation — 2026-10-09
+
+Remaining work is consolidated in [the home-lab queue](remaining-work.md).
+The unnecessary backlog archive, obsolete wave queues/music-first proposal and
+superseded assignment prompts were removed. Useful unfinished scope and advanced
+security design are consolidated in that file; dated implementation evidence remains. Release scope/status/development instructions and
+older handoff pointers now follow [the revised policy](decisions/home-lab-scope.md):
+Phono is retired, proposed contracts need reassessment, repeated lookups do not
+require permanent collection provenance, and advanced security/scale work is deferred
+unless practically needed. No runtime, archive or sibling data was changed.
+
+Validation: `python3 scripts/check_architecture.py` passed (architecture, document
+file links and fixture manifests); changed-document fragment/reference coverage and
+`git diff --check` passed. Runtime suites were not rerun for these prose-only edits.
+Existing qualification gaps stay open; none was accepted by reprioritization.
+
+## Recent TODO delivery — 2026-10-09
+
+[October validation](validation/october-todos.md) records music-only controls,
+no-active-catalog import results, manual DAT upload/review/activation, offline
+existing-game matching and Rust 1.99 release/container qualification. It retains
+separate shared-library strict-Clippy findings and the temporary-copy Phono lockfile
+adjustment. Physical LA3/PJ1 qualification is unchanged.
+
 ## Collection lists and playlists — 2026-10-03
 
 [Collection-list validation](validation/collection-lists.md) records portable ordered
 lists, role boundaries, recovery, source resolution and real playlist playback.
 CL1 is locally accepted: repository gates and the real Chrome playlist/shuffle,
-mobile and keyboard journeys passed. The [delivery ledger](collection-lists-plan.md)
-records the remaining scope and next handoff.
+mobile and keyboard journeys passed. The [delivery record](collection-lists-plan.md) records implementation and
+acceptance; [remaining work](remaining-work.md) is the only work queue.
 
 ## Catalog startup and write performance — 2026-10-03
 

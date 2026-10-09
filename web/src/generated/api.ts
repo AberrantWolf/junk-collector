@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/collections/{id}/catalog-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["upload_catalog_snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/default-user/{id}": {
         parameters: {
             query?: never;
@@ -3086,6 +3102,7 @@ export interface components {
             default_title: string;
             files: components["schemas"]["UploadFile"][];
             metadata_available: boolean;
+            music_actions_available?: boolean;
             /** Format: int32 */
             position: number;
             preparation_available: boolean;
@@ -3962,6 +3979,7 @@ export interface components {
                 default_title: string;
                 files: components["schemas"]["UploadFile"][];
                 metadata_available: boolean;
+                music_actions_available?: boolean;
                 /** Format: int32 */
                 position: number;
                 preparation_available: boolean;
@@ -4953,6 +4971,61 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_catalog_snapshot: {
+        parameters: {
+            query: {
+                system: string;
+                catalog: string;
+                byte_domain: string;
+            };
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

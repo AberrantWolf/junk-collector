@@ -1,5 +1,11 @@
 # Phono integration delivery — PJ1
 
+**Scope revised 2026-10-09:** Phono Junk is no longer a target. Its remaining PJ1
+and Phono-specific GUI/system-root/second-Mac acceptance are retired, not passed.
+This ledger preserves implemented shared software, data guarantees and dated
+evidence. Relevant web/Trash Amp qualification lives only in
+[remaining work](remaining-work.md). Further Phono work is not a target.
+
 Accepted 2026-10-04. This is a new native Phono delivery, independent of Trash Amp
 and the remaining general native-client backlog. Preserve local catalog data,
 manual authority, raw masters and existing provider workflows.
@@ -46,16 +52,3 @@ approves it after recent browser authentication. See [the review](account-connec
 [dated validation](validation/phono-integration.md) for remaining recovery/account
 work and exact evidence. Do not claim actual native system-root HTTPS deployment
 from a localhost browser or pinned-certificate fixture.
-
-## Remaining acceptance
-
-Finish the remaining matrix in the validation record: multiple servers, denied
-trust, pagination and keyboard navigation, native delete/move and lost-response
-restart recovery, shuffle/repeat-all and unavailable queue entries. Exercise malformed/range-change,
-network stall and revocation while media is being read. Verify healthy transitions
-through a real output device. Finally use a second physical Mac against a trusted
-LAN endpoint for playback, Curator writes, denied Viewer writes and grant/device
-revocation. Keep hardware acceptance open when unavailable.
-
-Excluded: preparation, persistent media cache, offline downloads, synchronized
-listening, discovery and a private-playlist model. No startup autoplay.

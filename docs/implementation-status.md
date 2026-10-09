@@ -14,14 +14,51 @@ Import identity. These changes add permanent recovery and browser regression tes
 
 This repository is an executable architecture/server foundation, not the complete first release described in the accepted plan. Capability reporting must stay honest as remaining modules land.
 
-Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation tickets and the [release requirements](release-requirements.md) for the repository-local target specification. The gap list below is a summary, not a substitute for ticket acceptance criteria.
+Use the [consolidated backlog](remaining-work.md) for all remaining work and
+[release requirements](release-requirements.md) for the revised home-lab gate.
+Older dated entries below describe their state at the time, not the current queue.
+
+## Current scope and remaining work — 2026-10-09
+
+Web and Trash Amp are the client targets; Phono Junk is no longer a target.
+PJ1 and Phono-specific GUI/device acceptance are retired, not passed. Existing
+shared account/client/transport software remains implemented. Remaining useful work
+is grouped only in the backlog: contract/retention simplification, web/Trash Amp
+LAN acceptance, practical backup tooling, actual Linux/public-ingress qualification,
+independent evidence for advertised formats and a bounded release audit. Optional
+features and advanced security remain there with reasons for deferral.
+
+Old proposed contracts require reassessment. Repeated artwork/metadata lookups do
+not require permanent provenance history. The current append-only storage and raw
+observations still exist; no compaction, record deletion or retention conversion
+has been implemented. See [the accepted scope policy](decisions/home-lab-scope.md).
+
+## October 9 TODO delivery
+
+Game and other non-music imports no longer offer FLAC/music controls or album-only
+suggestions. Package plans return typed music-action eligibility; music retains
+its preparation controls. No-active-catalog import results explain saved originals,
+unavailable identification and that no catalog match was attempted.
+
+Administration adds manual DAT download guidance, bounded browser upload, parsed
+platform/version/entry review and explicit activation through the existing durable
+catalog pipeline. Exact bytes and historical snapshots are retained; ZIPs require
+manual extraction, failed validation cannot activate a snapshot, and prior games
+can be checked afterward. See [the contract](game-catalog-upload.md) and
+[validation](validation/october-todos.md). No provider downloader was added.
+
+The tested checkout/CI/Docker baseline advances to Rust 1.99.0, with matching local
+pin/build guidance and no Collector lint suppressions. Shared-library and consumer
+tests pass; separate strict-Clippy findings in unchanged junk-libs remain recorded.
+The dated alpha.1 Rust 1.95 evidence remains historical. Relevant LA3/Trash Amp
+qualification remains open; Phono-specific gates are retired under the current scope.
 
 ## Experimental source alpha — 2026-10-09
 
 `v0.1.0-alpha.1` is the first experimental source-release checkpoint, including
 Git-consumable `collector-client` and server crates for Trash Amp builds/tests.
 The [release notes](releases/v0.1.0-alpha.1.md) state installation, pinning, backup
-requirements and the remaining qualifications. This tag does not accept LA3/PJ1,
+requirements and the remaining qualifications. This tag does not complete the remaining installation/client acceptance,
 promise stable interfaces/storage upgrades, or claim the planned first release
 complete. No prebuilt binary or registry image is supplied.
 
@@ -34,7 +71,7 @@ Git/CA certificates for dependency acquisition, and CI explicitly builds the
 release server after its checks. The Linux ARM64 Docker image built and passed
 non-root setup, authenticated HTTPS/web serving and recreated-container persistence
 on Docker Desktop. Validation and wider deployment limits are recorded
-in [validation](validation.md). This dependency baseline does not accept LA3/PJ1
+in [validation](validation.md). This dependency baseline does not complete installation/client acceptance
 or establish a supported Collector release/storage contract.
 
 ## Collection lists — locally accepted (2026-10-03)
@@ -64,7 +101,7 @@ journey, publication interruption matrix, generated 2,400-package/album measurem
 and separate live response qualification. Multi-terabyte codec processing, NAS and
 second-device qualification are not established by those local tests.
 
-## Active delivery target — 2026-09-16
+## Historical local-alpha target — 2026-09-16
 
 D06.3 is committed as `3a6143b`. The accepted [local-alpha plan](local-alpha-plan.md)
 now takes precedence over the remaining wave order. LA1 guided ingestion and
@@ -419,11 +456,11 @@ The full first release, native clients and public deployment remain later target
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
-## Wave 4 plan
+## Processing implementation checkpoint — September 2026
 
-[Wave 4 implementation handoff](wave-4-plan.md) defines the next 28 ordered
-implementation/review steps from baseline `c5c3ecf`. It covers game/CD processing,
-metadata, derivatives, backup/restore and native connection/trust/failover services.
+[Dated validation](validation.md) and [the review](wave-4-review.md) record game/CD
+processing, metadata, derivatives and their limits. The obsolete wave queue has
+been removed; future backup/trust/routing scope is consolidated in remaining work.
 W4.0 is reviewed and corrected. W4.1's portable processing/metadata types,
 source-bound package-reader and application port contracts, deterministic source
 fingerprints, and split game/music module files are implemented locally, reviewed and corrected. They add no analyzer, provider I/O, persistence, API, or runtime support
@@ -497,47 +534,13 @@ passed local acceptance with exact evidence in [the interface audit](fx07-interf
 and [validation](validation.md). See the current sections below.
 LA3's second-device qualification and broader release gates remain open.
 
-## Required before the planned first release
+## Remaining work and follow-on scope
 
-- **Album/background-queue gate, added 2026-09-15:**
-  [D07.4–D07.5](background-work-plan.md) are reviewed and corrected locally. Whole-album submission, durable per-member state, independent
-  enqueueing, retry/restart and shared-safe cancellation now use the existing bounded
-  Jobs. FX-07 audited the other implemented interfaces for unnecessary
-  background-work blocking; LA2 alone did not claim that application-wide gate.
-
-- **Interface readiness gate, added 2026-09-15:** LA1 implements typed readiness,
-  unique-anchor defaults and prerequisite guidance for its guided import journey.
-  The broader [U05.1–U05.3](interface-readiness-plan.md) operation matrix and
-  application-wide audit passed local acceptance in FX-07.
-
-- **Web UI completion gate, added 2026-09-15:** LA1 implements bounded personal
-  import/attempt history, reopen, retry/cancel, staging reclamation and published
-  association correction for guided intake. P04 search/filter, bulk cleanup,
-  dismiss/archive/restore, cleanup-failure UI and its completion review passed
-  local acceptance through FX-03–FX-07. See the [import-management plan](import-management-plan.md).
-
-1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete independent accessibility/security review for the locally implemented
-   P04 workspace and Job controls. The legacy upload and administrator inbox routes
-   remain compatibility adapters scheduled for API-major removal. Document
-   attachments, event streaming, and offline artwork remain unimplemented.
-3. Complete independent D04-D05 real-dump verification oracles and review the
-   locally implemented MusicBrainz/CAA enrichment and DAT metadata integration.
-   D02/D03 and D04.1 complete the reusable disc/audio/game primitives locally; no
-   Collector catalog verification is currently claimed.
-4. Complete the active local-alpha deliveries before returning to P05.1 portable
-   export/change inventory. The local deterministic MusicBrainz/CAA workflow
-   passes with actual published artwork, and LA3 adds one live provider result;
-   other-browser and deployment qualification remain unclaimed.
-5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
-6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.
-7. Add authenticated endpoint discovery, mDNS, automatic health checks and actual transfer failover. Extend the tested enrolled LAN trust path to automatic discovery and full native-client failover.
-8. Add event delivery/polling plus their UI/integration tests under P02/C06. A04 application boundaries, command idempotency, generated OpenAPI/TypeScript contracts, body limits, and Wave 1 command migration are complete.
-9. Execute the 100k-item/1m-record benchmark on a recorded 4-core/16GB SSD host; validate native/container/tunnel/NAS deployments and load behavior.
-
-## Follow-on releases
-
-SwiftUI iOS through UniFFI; PriceCharting collection exchange; runtime plugins; replication; video/emulation; ripping hardware. These remain explicitly deferred by the accepted plan.
+See [the single remaining-work queue](remaining-work.md). The previous gap list
+mixed completed interfaces/indexing/native integration with unrun qualification,
+and treated optional clients/advanced deployment as universal release gates.
+It is superseded by the 2026-10-09 reassessment. Obsolete work queues have been removed. Relevant unfinished scope is in
+remaining-work.md; no missing capability is accepted by reprioritization.
 
 ## Local onboarding
 

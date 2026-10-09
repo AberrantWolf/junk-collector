@@ -73,6 +73,7 @@ pub struct AppState {
     pub passkeys: Option<Arc<passkeys::Passkeys>>,
     pub rate_limits: Arc<RateLimits>,
     artwork_preview_slots: Arc<tokio::sync::Semaphore>,
+    catalog_upload_slots: Arc<tokio::sync::Semaphore>,
 }
 impl AppState {
     pub fn new(store: Arc<Store>, pairing: Pairing) -> Self {
@@ -80,7 +81,8 @@ impl AppState {
     }
 
     pub fn new_with_registry(store: Arc<Store>, pairing: Pairing, modules: Arc<Registry>) -> Self {
-        let service = CollectionService::new(store.clone(), modules);
+        let service =
+            CollectionService::new(store.clone(), modules).with_catalog_uploads(store.clone());
         Self {
             store,
             service,
@@ -93,6 +95,7 @@ impl AppState {
             allowed_origins: Arc::new(vec![]),
             rate_limits: Arc::new(RateLimits::default()),
             artwork_preview_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            catalog_upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
             passkeys: None,
         }
     }
@@ -714,6 +717,10 @@ fn administration_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(grant))
         .routes(routes!(reindex))
         .routes(routes!(catalog_sources))
+        .routes(
+            routes!(upload_catalog_snapshot)
+                .layer(DefaultBodyLimit::max(collector_app::MAX_DAT_UPLOAD_BYTES)),
+        )
         .routes(routes!(catalog_snapshots, import_catalog_snapshot))
         .routes(routes!(activate_catalog_snapshot))
 }
@@ -4278,6 +4285,41 @@ async fn import_catalog_snapshot(
             },
             &context,
         )
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
+}
+
+#[utoipa::path(post, path = "/api/v1/admin/collections/{id}/catalog-upload", params(("id" = CollectionId, Path), ("Idempotency-Key" = String, Header), collector_app::DatUploadMetadata), request_body(content = String, content_type = "application/octet-stream"), responses((status = 202, body = serde_json::Value), (status = 400), (status = 403), (status = 409), (status = 413)))]
+async fn upload_catalog_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Query(metadata): Query<collector_app::DatUploadMetadata>,
+    request: Request,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    state.service.validate_dat_upload(&actor, id, &metadata)?;
+    let _slot = state
+        .catalog_upload_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            Error::Unavailable("Other DAT uploads are in progress; try again shortly.".into())
+        })?;
+    let bytes = match axum::body::to_bytes(request.into_body(), collector_app::MAX_DAT_UPLOAD_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => return Ok((StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"error":{"code":"invalid","message":"Upload an extracted DAT file no larger than 64 MiB."}}))).into_response()),
+    };
+    let job_id = blocking(move || {
+        state
+            .service
+            .upload_dat_catalog(&actor, id, metadata, &bytes, &context)
     })
     .await?;
     Ok((

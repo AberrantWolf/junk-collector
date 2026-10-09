@@ -1,5 +1,13 @@
 # U05 — Guided interfaces and readiness review
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 **Provider lookup requirement 2026-09-22 (FX-04):** Automatically acquire CD
 metadata when supported dump analysis supplies its actual disc identity. Reuse the
 existing guided disc-ID acquisition for other intake paths; do not require a lookup
@@ -147,14 +155,3 @@ reload/reconnect and changes while dialogs are open. Test cases must defeat
 first-file/default-profile shortcuts and verify that known-invalid submissions
 create no job. Record real UI evidence and all remaining gaps; a happy-path smoke
 test or completed audit document alone cannot satisfy acceptance.
-
-## Historical child assignment (use the local-alpha handoff instead)
-
-Implement U05.1 from docs/interface-readiness-plan.md. Read AGENTS.md,
-docs/architecture.md, docs/release-requirements.md and the relevant A03/A04/P03/D05
-contracts. Establish module-owned input requirements and application-owned typed
-readiness; implement eligible analysis choices, valid defaults and up-front
-missing-input guidance through the real UI and API. Cover CUE/redumper, misplaced
-anchors, missing companions, ambiguity and stale selections. Preserve imports
-without analysis. Update this ledger, current status, validation and the next
-assignment; do not claim U05.2/U05.3 complete from this analysis-specific child.

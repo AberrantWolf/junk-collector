@@ -19244,3 +19244,223 @@ fn schema18_enrollment_conversion_preserves_bound_requests_native_credentials_an
         None
     );
 }
+
+#[test]
+fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
+    use collector_app::{DatUploadMetadata, UploadedCatalogPort};
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let archive = root.path().join("archive");
+    let private = root.path().join("state");
+    let store = Arc::new(Store::open_with_clock(&archive, &private, clock.clone()).unwrap());
+    let user = store
+        .create_user("upload-owner", "a long test password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .create_collection(
+            &AuthenticatedPrincipal {
+                principal: actor.clone(),
+                credential_kind: CredentialKind::TestLocal,
+                authenticated_at: clock.now(),
+            },
+            CreateCollectionCommand {
+                name: "Uploaded games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let metadata = DatUploadMetadata {
+        system: "nes".into(),
+        catalog: "offline fixture".into(),
+        byte_domain: "org.junk.game.raw-bytes".into(),
+    };
+    let bytes = |version| {
+        format!(r#"<datafile><header><name>Offline fixture</name><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd"/></game></datafile>"#).into_bytes()
+    };
+    let configure = |store: Arc<Store>| {
+        let provider = Arc::new(
+            LocalDatProvider::new(Default::default())
+                .unwrap()
+                .with_uploads(store.clone()),
+        );
+        CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_catalog_uploads(store)
+            .with_streaming_provider(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+            .with_catalog_parser(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider)
+            .unwrap()
+    };
+    let service = configure(store.clone());
+    let receipt = command();
+    let job = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("1"),
+            &receipt,
+        )
+        .unwrap();
+    drop(service);
+    drop(store);
+    let store = Arc::new(Store::open_with_clock(&archive, &private, clock.clone()).unwrap());
+    let service = configure(store.clone());
+    assert!(service.run_next_job("restarted-upload").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let id = SnapshotId(job.0);
+    let saved = service
+        .catalog_snapshots(&actor, collection.id, None, 10)
+        .unwrap();
+    assert_eq!(saved.items.len(), 1);
+    assert!(!saved.items[0].active);
+    let parsed: collector_providers::DatSnapshotObservation =
+        saved.items[0].snapshot.parsed_observation.parse().unwrap();
+    assert_eq!(parsed.preview_entries[0].label, "Known Game");
+    assert_eq!(parsed.preview_entries[0].files, ["game.bin"]);
+    service
+        .activate_catalog_snapshot(&actor, collection.id, id, &command())
+        .unwrap();
+    clock.advance(60);
+    assert_eq!(
+        service
+            .upload_dat_catalog(
+                &actor,
+                collection.id,
+                metadata.clone(),
+                &bytes("1"),
+                &receipt
+            )
+            .unwrap(),
+        job
+    );
+    assert!(matches!(
+        service.upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("2"),
+            &receipt
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    let second = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("2"),
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("second-upload").unwrap());
+    service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(second.0), &command())
+        .unwrap();
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 10)
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    let mut exact = Vec::new();
+    SnapshotPort::snapshot_bytes(
+        &*store,
+        SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: id,
+        },
+    )
+    .unwrap()
+    .read_to_end(&mut exact)
+    .unwrap();
+    assert_eq!(exact, bytes("1"));
+    let denied = Principal {
+        administrator: false,
+        ..actor.clone()
+    };
+    assert!(
+        service
+            .upload_dat_catalog(
+                &denied,
+                collection.id,
+                metadata.clone(),
+                &bytes("1"),
+                &command()
+            )
+            .is_err()
+    );
+    let malformed = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            b"<datafile><game",
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("malformed-upload").unwrap());
+    assert_eq!(
+        service.job(&actor, malformed).unwrap().state,
+        JobState::Failed
+    );
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 10)
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    let changed = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("3"),
+            &command(),
+        )
+        .unwrap();
+    let digest = UploadedCatalogPort::stage_uploaded_catalog(&*store, &bytes("3")).unwrap();
+    let mut corrupted = bytes("3");
+    corrupted[10] ^= 1;
+    std::fs::write(private.join("catalog-uploads").join(digest.hex), corrupted).unwrap();
+    assert!(service.run_next_job("corrupt-upload").unwrap());
+    assert_eq!(
+        service.job(&actor, changed).unwrap().state,
+        JobState::Failed
+    );
+    // A new upload of the exact original can repair private staging and retry.
+    UploadedCatalogPort::stage_uploaded_catalog(&*store, &bytes("3")).unwrap();
+    service.retry_job(&actor, changed, &command()).unwrap();
+    assert!(service.run_next_job("repaired-upload").unwrap());
+    assert_eq!(
+        service.job(&actor, changed).unwrap().state,
+        JobState::Completed
+    );
+    let cancelled = service
+        .upload_dat_catalog(&actor, collection.id, metadata, &bytes("4"), &command())
+        .unwrap();
+    service.cancel_job(&actor, cancelled, &command()).unwrap();
+    let _ = service.run_next_job("cancelled-upload").unwrap();
+    assert_eq!(
+        service.job(&actor, cancelled).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 10)
+            .unwrap()
+            .items
+            .len(),
+        3
+    );
+}

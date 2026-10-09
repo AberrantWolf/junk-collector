@@ -304,6 +304,7 @@ impl CollectionService {
                 )
             };
             packages.push(IngestPlanPackage {
+                music_actions_available: eligibility.owner.0 == "org.junk.music",
                 position: position
                     .try_into()
                     .map_err(|_| Error::Invalid("too many packages".into()))?,
@@ -1162,7 +1163,7 @@ impl CollectionService {
             .processing
             .processing_record(ObservationId(analysis.0))?;
         let snapshot_id = portable.observation.snapshot_id.ok_or_else(|| {
-            Error::Unavailable("No active DAT snapshot was available for automatic metadata".into())
+            Error::Unavailable("Game imported; automatic identification unavailable because no game catalog is active. Originals are saved. No catalog match was attempted. Upload and activate a game reference catalog in Administration → Game catalogs, then run a catalog check for this entry.".into())
         })?;
         self.refresh_provider_metadata_for_job(
             intent.user_id,
@@ -1608,7 +1609,7 @@ impl CollectionService {
                 retryable: false,
             }
         };
-        let steps = vec![
+        let mut steps = vec![
             staging_step,
             job_step(
                 "identification",
@@ -1631,6 +1632,9 @@ impl CollectionService {
             artwork_step,
             preparation_step,
         ];
+        if !music {
+            steps.retain(|step| step.step != "preparation");
+        }
         Ok(IngestDetail {
             summary,
             import: record.view,

@@ -22,7 +22,8 @@
     "test:accounts": "node tests/account-usability.mjs",
     "test:pair": "node tests/pair-device.mjs",
     "test:navigation": "node tests/navigation.mjs",
-    "test:certificate": "node tests/certificate.mjs"
+    "test:certificate": "node tests/certificate.mjs",
+    "test:game-catalog": "node tests/game-catalog-upload.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

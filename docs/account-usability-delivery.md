@@ -1,5 +1,11 @@
 # Account, recovery and Phono connection delivery
 
+**Scope revised 2026-10-09:** Phono Junk is no longer a target. Its remaining PJ1
+and Phono-specific GUI/system-root/second-Mac acceptance are retired, not passed.
+This ledger preserves implemented shared software, data guarantees and dated
+evidence. Relevant web/Trash Amp qualification lives only in
+[remaining work](remaining-work.md). Further Phono work is not a target.
+
 Accepted 2026-10-07. This ledger supersedes the remaining software repair scope in
 [the usability review](account-connection-usability-review.md). It does not expand
 PJ1 into discovery, certificate rotation, email invitations or offline media.
@@ -50,17 +56,6 @@ backup. Without Keychain access, reauthorize the same account; do not discard it
 journal or infer its identity from edits. Disconnect preserves access; Forget
 removes only the selected local credential/settings. Server revocation is a separate
 Account & security → Apps action.
-
-## Ready-to-send continuation
-
-Read this ledger, architecture, implementation status and
-[the dated validation record](validation/phono-integration.md). Resume the remaining
-native GUI/system-trusted HTTPS acceptance, building on the user-reported local
-connection success on 2026-10-07. The trust mode of that connection was not specified. Exercise URL-only automatic opening/completion,
-two accounts on one server, multiple servers, cancellation/restart/expiry and
-account switching during playback/uncertain edits. Preserve existing profiles and
-Keychain entries. Keep second-physical-Mac acceptance open until that device is
-available. Do not repeat completed software increments or add compatibility aliases.
 
 ## CLI usability follow-up — 2026-10-07
 

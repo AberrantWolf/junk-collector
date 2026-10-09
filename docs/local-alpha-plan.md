@@ -1,5 +1,13 @@
 # Local alpha: import, enrich, browse, listen
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 Accepted direction 2026-09-16, after D06.3 commit `3a6143b`. **LA1 is reviewed and corrected
 locally; acceptance passed. LA2 is reviewed and corrected locally; its bounded
 album-preparation and browser-playback acceptance passed. LA3 is in progress and
@@ -362,138 +370,3 @@ LA3 is still not accepted. The intended second physical LAN browser with trusted
 HTTPS was not available, so second-device playback, denied curation, grant
 revocation and active-session revocation remain required. No game DAT was supplied;
 DAT-backed game identity remains outstanding only if it is part of adoption.
-
-## Deferred from alpha, preserved in the release backlog
-
-P05 portable export/change bundles and full backup UI; native Slint/SwiftUI and
-Trash Amp integration; offline caches; automatic route discovery/failover and
-certificate rotation; public deployment and passkey-platform qualification;
-additional online game metadata providers; full Retro Junk archive/evidence migration;
-scale qualification, runtime plugins, video and emulation. Importing raw files from
-an old archive does not claim migration of its IDs, history or manual metadata.
-
-Do not broaden alpha by completing these in order. Do not remove existing working
-security or typed boundaries to accelerate it. Keep the original full-release
-requirements as the destination; alpha introduces a smaller useful delivery gate.
-
-## Agent handoff and review method
-
-One focused packet per delivery: this plan, relevant contracts/code and its explicit
-acceptance cases. Keep diagrams small and update them when ownership changes.
-Typed production interfaces and executable tests supersede illustrative pseudocode;
-do not maintain a second detailed implementation in documentation. Measure total
-implementation plus review/repair effort and successful user journeys, not number
-of checkpoints. No promise of cheaper-model savings without measurements.
-
-Use targeted tests while editing, then the required repository checks once at the
-integrated delivery boundary. Repeat affected checks for fixes; do not rerun every
-expensive suite after prose changes. Record exact results in validation.md. Update
-this ledger, implementation status, mapped old tickets and the next prompt together.
-No automatic commits; recommend backup checkpoints after working deliveries.
-
-## Ready-to-send LA1 review prompt
-
-Completed review assignment; retained as historical context. Use the LA3
-prompt below next.
-
-```text
-Review the integrated LA1 implementation against docs/local-alpha-plan.md and
-docs/local-alpha-review.md. Read AGENTS.md, architecture.md,
-implementation-status.md, release-requirements.md and the mapped P04/U05 criteria.
-Do not begin LA2, P05, native clients, broad P04/U05 completion or a new provider.
-
-Inspect the diff and trace configured-inbox and resumable-browser intake through
-intent acceptance, stable identities, existing Jobs, publication, metadata and
-Asset authority. Challenge restart/retry/cancellation, receipt binding, stale plans,
-grant loss, optional-provider failure, manual title/artwork conflicts, cleanup races,
-history projection and published association correction. Verify automatic metadata
-is never described as verification and preservation remains independent.
-
-Run focused regressions and the repository gates, rebuild embedded assets, and run
-the real temporary-profile browser journey. Record findings and corrections in
-docs/local-alpha-review.md and docs/validation.md. Keep live-provider and owned-dump
-qualification explicitly unrun unless those inputs are actually supplied. Stop
-after LA1 is reviewed and corrected; update the next prompt to LA2 only if review
-acceptance passes. Do not commit or spawn agents.
-```
-
-## Ready-to-send LA2 review prompt
-
-Completed 2026-09-17; retained as historical context. Use the LA3 prompt below next.
-
-```text
-Review the integrated LA2 implementation against docs/local-alpha-plan.md,
-docs/local-alpha-review.md and D07.4–D07.5 in docs/background-work-plan.md. Read
-AGENTS.md, architecture.md, implementation-status.md and release-requirements.md.
-Do not begin LA3, P05, native clients, public deployment or the broader P04/U05 audit.
-
-Trace Prepare album and guided-import preparation through application-owned album
-scope, frozen batch/member identities and the existing per-track Jobs/publication.
-Challenge bounded admission, source ambiguity, duplicate convergence, active/shared
-Job ownership, cancellation, retry history, missing encoders, permission loss,
-partial failure and restart at every fan-out/execution/publication boundary. Verify
-valid outputs are reused and neither cancellation nor failure can replace masters.
-
-Inspect the generated API and React behavior for durable reopen, honest aggregate
-and per-track outcomes, cover art beside text, and the nonblocking rule: accepted
-work must not globally disable independent preparation, browsing, editing or player
-controls. Exercise actual browser playback and access revocation; do not accept a
-mock player or a completed Job without a published Representation.
-
-Run focused regressions and all repository gates, rebuild embedded assets, and run
-the real temporary-profile browser journey. Record findings/corrections in
-docs/local-alpha-review.md and docs/validation.md. Keep owned dumps, live providers,
-target deployment, backup restore, Opus and non-Chrome qualification explicitly open
-unless actually supplied and run. Stop after LA2 is reviewed and corrected; update
-the next prompt to LA3 only if acceptance passes. Do not commit or spawn agents.
-```
-
-## Ready-to-send LA3 prompt
-
-LA3 is partially qualified through 2026-09-19. The owned-corpus journey, live-provider
-enrichment, actual stopped-server copy/restore, local Owner/Viewer checks, FLAC
-preparation/playback, outage behavior and focused journey repairs are recorded in
-`docs/local-alpha-installation.md`. A cached full-release Redump PlayStation view
-also produced a unique complete match for the owned four-track disc after explicit
-CUE-versus-track domain correction. Continue only the remaining external gates; do
-not repeat the completed corpus or restore work unless its owning code changes.
-
-~~~text
-Finish LA3 qualification as one usable local installation, following
-docs/local-alpha-plan.md.
-Read AGENTS.md, architecture.md, implementation-status.md, release-requirements.md,
-local-alpha-review.md and validation.md. LA1 and LA2 provide the existing workflow;
-do not restart their design or resume the historical serial wave order.
-
-Use the existing partial-qualification record. Use the recorded project URL for the
-MusicBrainz/Cover Art Archive User-Agent and obtain the intended second LAN
-device/browser with a browser-trusted HTTPS management origin. Do not repeat the
-passing Redump qualification unless its owning code changes. The immutable
-full-release snapshot, explicit retained CUE exclusion, four-track complete match
-and applied automatic title are recorded in the installation runbook. The bounded
-cache also contains a Headerless No-Intro NES DAT; no owned NES dump was supplied.
-The reviewed cache helper disables new DAT-o-MATIC downloads in code.
-DAT-o-MATIC refused the subsequent N64 request with error 1260, so do not retry or
-attempt to evade it. Ask narrowly for restored provider access or manually supplied
-N64, SNES and PC Engine ZIPs only if those caches remain adoption inputs.
-
-The live-provider gate already passes; do not repeat it unless provider-owning code
-changes. Keep MusicBrainz identity distinct from catalog/audio verification and do
-not re-import the corpus merely to trigger provider work.
-
-From the intended second device, use the existing private/encrypted ingress and
-trusted certificate path. Verify Viewer login, cover/text browsing and real FLAC
-playback, denied curation, grant revocation and active-session revocation. Do not
-bypass certificate validation, expose the private listener, change public/private
-router composition or create a public tunnel.
-
-Run affected checks and the real browser path for any correction, then run all
-repository gates before acceptance. Append exact provider/device/browser results to
-the installation, validation, status, backlog and review ledgers together. Do not
-mark LA3 accepted while second-device evidence is absent. The
-completed stopped-server drill is not P05 portable export/change-bundle completion.
-
-Do not implement native clients, discovery, public tunnels, P05, broad P04/U05,
-new online game providers, or the full release backlog. Do not modify sibling
-projects, commit, or spawn agents without an explicit assignment to do so.
-~~~

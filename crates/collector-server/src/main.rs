@@ -561,7 +561,7 @@ async fn main() -> Result<()> {
             instructions(&config, &cli.config);
             let mut pairing = tls(&config, false)?;
             pairing.server_id = store.server_id()?;
-            let mut state = AppState::new(store, pairing);
+            let mut state = AppState::new(store.clone(), pairing);
             state.exposure = config.exposure;
             state.inboxes = Arc::new(config.inboxes.clone());
             let flac = probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());
@@ -586,7 +586,8 @@ async fn main() -> Result<()> {
                     )
                 })
                 .collect();
-            let dat_provider = Arc::new(LocalDatProvider::new(dat_sources)?);
+            let dat_provider =
+                Arc::new(LocalDatProvider::new(dat_sources)?.with_uploads(store.clone()));
             let provider_id = ModuleId(LOCAL_DAT_PROVIDER_ID.into());
             state.service = state
                 .service

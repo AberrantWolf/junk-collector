@@ -1,5 +1,10 @@
 # Foundation contracts
 
+**Scope update (2026-10-09):** use [remaining work](../remaining-work.md)
+and [home-lab policy](home-lab-scope.md). Older future contracts/order and blanket
+history requirements below need reassessment. Preserve actual data/recovery and
+valid current boundaries; Phono Junk is no longer a target.
+
 **Status:** accepted for the first-release architecture (A01), 2026-09-09. These are target contracts. The [implementation status](../implementation-status.md) remains the source of truth for what is executable today.
 
 This decision settles the collection foundation before A02, A03, A04 and P01 change persisted data or service boundaries. It deliberately does not migrate the current archive schema.

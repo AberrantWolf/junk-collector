@@ -2,7 +2,51 @@
 
 Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
 
-This is the repository-local summary of the user-approved plan, recorded for handoff from commit `98e9187`. It describes the target, not current capabilities. [Implementation status](implementation-status.md) describes what exists; [handoff backlog](handoff-backlog.md) defines the remaining work. Implementation shortcuts are not amendments to these requirements. If a requirement needs to change, record the discrepancy and resolve it explicitly.
+The user revised the target on 2026-10-09 toward a clean, useful home-lab tool,
+with proportional public-Internet security, reassessed contracts and meaningful
+provenance. Phono Junk is no longer a target. This explicit direction supersedes
+universal release gates and history-retention assumptions in the earlier plan from
+`98e9187`. [Implementation status](implementation-status.md) describes what exists;
+[remaining work](remaining-work.md) is the single remaining-work queue.
+See [the accepted scope policy](decisions/home-lab-scope.md).
+
+## Current home-lab release gate
+
+- Preserve raw originals, physical collection facts, manual authority, unknown data
+  and meaningful source-bound evidence. Keep accepted metadata/artwork attribution;
+  do not require a permanent history of every lookup or equivalent provider response.
+  Simplification/compaction must preserve actual data and recovery through an
+  explicit tested policy, not silent deletion.
+- Deliver actual web and Trash Amp collection/listening workflows. Complete relevant
+  LAN/native qualification and meaningful format/audio oracles for advertised
+  support. Phono-specific acceptance is retired. Missing capabilities stay labeled.
+- Provide an executable stopped-server backup/restore workflow and qualify the
+  intended Linux binary/container and storage layout. A tested manual runbook is
+  existing evidence; dedicated backup tooling is still open.
+- For supported public access, qualify trusted HTTPS, listener/page/API exposure,
+  roles, Origin/session controls, recovery/revocation, credential redaction and
+  bounded untrusted work on the intended ingress. Keep focused security review;
+  automatic rotation/discovery, exhaustive commercial matrices and distributed
+  limiting are not default prerequisites.
+- Test real user journeys, reasonable collection scale on the intended host,
+  keyboard/mobile use and affected repository/sibling gates. State supported
+  platforms, evidence limits and any upgrade/storage promise explicitly.
+
+A separate Collector Slint app, full offline/activity parity across clients,
+100k-item load gate, general Retro Junk migration, delta export and advanced
+security certification are deferred/conditional outcomes in the backlog. Earlier
+proposed contracts must be reviewed for validity and excessive complexity before
+implementation. No older ticket is a mandatory stability/retention promise merely
+because it was written down.
+
+## Broader product target reference
+
+The sections below retain the earlier product goals, detailed safety constraints
+and dated user requirements. Their feature lists and broad acceptance matrix are
+reference scope, not a second execution queue or universal home-lab release gate.
+Current scope and retention policy take precedence. Completed requirements remain
+useful regression criteria; deferred capabilities require fresh bounded design
+before implementation. No unrun check is marked passed by this change.
 
 ## Collection lists and playlists
 
@@ -18,8 +62,8 @@ or overwritten. List queries/admission must not hash or read full media payloads
 
 Accepted 2026-09-16: prioritize ingestion of raw dumps, automatic metadata,
 artwork/text browsing, supported CD playback and multiple trusted local users in
-the existing web UI. The [local-alpha plan](local-alpha-plan.md) is the active
-execution order. Automatic enrichment is default for its new guided import path;
+the existing web UI. The [local-alpha plan](local-alpha-plan.md) records the earlier delivery;
+current ordering is in the consolidated backlog. Automatic enrichment is default for its new guided import path;
 playback derivatives remain optional and explicitly requested. Local-only limits
 deployment scope, not authorization or transport protections. A tested stopped-server
 backup/restore procedure is an alpha gate; complete portable export, native/offline

@@ -240,6 +240,86 @@
         }
       }
     },
+    "/api/v1/admin/collections/{id}/catalog-upload": {
+      "post": {
+        "operationId": "upload_catalog_snapshot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "system",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "catalog",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "byte_domain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/admin/default-user/{id}": {
       "put": {
         "operationId": "reassign_default_user",
@@ -10829,6 +10909,9 @@
           "metadata_available": {
             "type": "boolean"
           },
+          "music_actions_available": {
+            "type": "boolean"
+          },
           "position": {
             "type": "integer",
             "format": "int32",
@@ -14520,6 +14603,9 @@
                   }
                 },
                 "metadata_available": {
+                  "type": "boolean"
+                },
+                "music_actions_available": {
                   "type": "boolean"
                 },
                 "position": {

@@ -263,6 +263,73 @@ impl ImportCatalogSnapshotCommand {
     }
 }
 
+/// Browser uploads use the same provider and immutable snapshot pipeline as local DATs.
+pub const MAX_DAT_UPLOAD_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct DatUploadMetadata {
+    pub system: String,
+    pub catalog: String,
+    pub byte_domain: String,
+}
+impl DatUploadMetadata {
+    pub fn validate(&self) -> Result<()> {
+        for (value, maximum) in [(&self.system, 120), (&self.catalog, 255)] {
+            if value.trim().is_empty()
+                || value.len() > maximum
+                || value.chars().any(char::is_control)
+            {
+                return Err(collector_core::Error::Invalid(
+                    "Enter a platform and catalog name (up to 120 and 255 bytes).".into(),
+                ));
+            }
+        }
+        if !matches!(
+            self.byte_domain.as_str(),
+            "org.junk.game.raw-bytes"
+                | "org.junk.game.nes.ines-payload"
+                | "org.junk.game.n64.z64-big-endian"
+                | "org.junk.game.snes.headerless-payload"
+                | "org.junk.game.pce.hucard-payload"
+                | "org.junk.game.cd.raw-2352-track"
+        ) {
+            return Err(collector_core::Error::Invalid(
+                "Choose a supported catalog byte variant.".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UploadedDatCatalog {
+    pub metadata: DatUploadMetadata,
+    pub digest: Digest,
+    pub bytes: ByteLength,
+}
+impl UploadedDatCatalog {
+    pub fn validate(&self) -> Result<()> {
+        self.metadata.validate()?;
+        self.digest.validate()?;
+        if self.digest.algorithm != collector_core::HashAlgorithm::Sha256
+            || self.bytes.0 == 0
+            || self.bytes.0 > MAX_DAT_UPLOAD_BYTES as u64
+        {
+            return Err(collector_core::Error::Invalid(
+                "Upload an extracted DAT file between 1 byte and 64 MiB.".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+/// Private immutable upload staging; no adapter paths cross this boundary.
+pub trait UploadedCatalogPort: Send + Sync {
+    fn stage_uploaded_catalog(&self, bytes: &[u8]) -> Result<Digest>;
+    fn uploaded_catalog(&self, upload: &UploadedDatCatalog) -> Result<Box<dyn crate::MediaReader>>;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ActivateCatalogSnapshotCommand {

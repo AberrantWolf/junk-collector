@@ -1,5 +1,13 @@
 # Collection lists and playlists
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 User assignment: add lists within each collection; playable music lists contain
 individual tracks, allow whole albums or discs to be appended, preserve order,
 and support playback, rearrangement and shuffle play.
@@ -73,7 +81,3 @@ passed. The 2026-10-04 review repairs and repeated gate results are appended to
 retained as dated history.
 No commit is authorized by this new implementation request. Wait for the user to
 be at the computer before triggering a signing prompt on a later commit request.
-
-Next handoff after acceptance: remaining trusted second-device LA3 qualification,
-or a new explicit user assignment. Synchronized listening, personal/private lists,
-smart lists, video decoding and native/offline clients remain separate work.
