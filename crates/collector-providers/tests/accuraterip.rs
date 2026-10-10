@@ -164,6 +164,7 @@ fn known_match_response_is_exact_bounded_and_replayable_offline() {
     assert_eq!(parsed.responses[0].tracks[1].checksum, 0x2222_2222);
 
     let record = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: CollectionId::new(),
         provider: ModuleId(ACCURATERIP_PROVIDER_ID.into()),

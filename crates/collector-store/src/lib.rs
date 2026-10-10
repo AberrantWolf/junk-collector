@@ -1,4 +1,5 @@
 //! Portable immutable revisions plus local SQLite projections and private operational state.
+mod acquisitions;
 mod album_grouping;
 mod archive_v3;
 mod auth;
@@ -17,6 +18,8 @@ mod library_care;
 mod migration;
 mod migration_v3;
 mod music_search;
+mod snapshot_compaction;
+pub use snapshot_compaction::{SnapshotDuplicate, SnapshotDuplicatePlan};
 mod processing;
 mod provisional_imports;
 mod publication;
@@ -1463,6 +1466,33 @@ impl JobPort for Store {
         self.enqueue_job_record_with_batch(spec, Some((batch, claim_token)))
     }
 
+    fn acquisition_for_job(
+        &self,
+        claim: &JobClaim,
+        frozen: &collector_app::FrozenAcquisitionJob,
+    ) -> Result<Option<SnapshotId>> {
+        self.acquire_for_owner(claim, frozen)
+    }
+    fn acquisition_owners(&self, claim: &JobClaim) -> Result<Vec<JobRecord>> {
+        self.provider_owners(claim)
+    }
+    fn acquisition_response_status(
+        &self,
+        claim: &JobClaim,
+    ) -> Result<Option<collector_app::ProviderResponseStatus>> {
+        let raw:Option<String>=lock(&self.db)?.query_row("SELECT json_extract(a.result,'$.response_status') FROM private.acquisition_links l JOIN private.jobs a ON a.id=l.acquisition_job WHERE l.owner_job=? AND l.snapshot_id IS NOT NULL ORDER BY a.created_at LIMIT 1",[claim.id.to_string()],|r|r.get(0)).optional().map_err(storage)?.flatten();
+        raw.map(|v| serde_json::from_value(serde_json::Value::String(v)).map_err(storage))
+            .transpose()
+    }
+    fn acquisition_committed_snapshot(&self, claim: &JobClaim) -> Result<Option<SnapshotId>> {
+        let value:Option<String>=lock(&self.db)?.query_row("SELECT json_extract(p.output_references,'$[0]') FROM private.processing_jobs p JOIN private.jobs j ON j.id=p.job_id WHERE p.job_id=? AND j.claim_token=? AND p.checkpoint='snapshot_committed'",params![claim.id.to_string(),claim.claim_token],|r|r.get(0)).optional().map_err(storage)?.flatten();
+        value.map(|v| v.parse().map_err(storage)).transpose()
+    }
+    fn reconcile_acquisitions(&self) -> Result<()> {
+        self.reconcile_provider_work()?;
+        Ok(())
+    }
+
     fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>> {
         self.claim_job_record(worker_instance, lease_seconds)
     }
@@ -1944,7 +1974,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.game_direct_members(request_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,job_id TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS private.game_scan_members(parent TEXT NOT NULL,item_id TEXT NOT NULL,representation_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(parent,item_id,representation_id));
             CREATE TABLE IF NOT EXISTS private.active_game_catalogs(collection_id TEXT NOT NULL,system TEXT NOT NULL,catalog TEXT NOT NULL,byte_domain TEXT NOT NULL,snapshot_id TEXT NOT NULL,activated_at INTEGER NOT NULL,PRIMARY KEY(collection_id,system,catalog,byte_domain));").map_err(storage)?;
-    if private_version > 19 {
+    if private_version > 20 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
@@ -2433,8 +2463,18 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             PRAGMA private.user_version=19;").map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
-    db.execute_batch("PRAGMA private.user_version=19;")
+    let tx = db.transaction().map_err(storage)?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS private.acquisition_links(owner_job TEXT NOT NULL,input_key TEXT NOT NULL,acquisition_job TEXT NOT NULL,snapshot_id TEXT,PRIMARY KEY(owner_job,input_key));
+      CREATE INDEX IF NOT EXISTS private.acquisition_links_work ON acquisition_links(acquisition_job);
+      CREATE TABLE IF NOT EXISTS private.acquisition_waits(owner_job TEXT PRIMARY KEY,acquisition_job TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS private.snapshot_bindings(job_id TEXT NOT NULL,snapshot_id TEXT NOT NULL,item_id TEXT,generation INTEGER NOT NULL,PRIMARY KEY(job_id,snapshot_id));
+      PRAGMA private.user_version=20;")
         .map_err(storage)?;
+    if private_version < 20 {
+        tx.execute_batch("INSERT OR IGNORE INTO private.snapshot_bindings(job_id,snapshot_id,item_id,generation) SELECT j.id,COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id')),j.item_id,COALESCE(g.generation,0) FROM private.jobs j LEFT JOIN private.item_job_generations g ON g.job_id=j.id WHERE j.state='completed' AND j.item_id IS NOT NULL AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id')) IS NOT NULL;").map_err(storage)?;
+        Store::adopt_existing_acquisitions(&tx)?;
+    }
+    tx.commit().map_err(storage)?;
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;

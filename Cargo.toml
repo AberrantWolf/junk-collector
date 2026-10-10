@@ -47,3 +47,11 @@ strip = true
 # Optimize snapshot checks and prepared-media transfers in debug server builds.
 [profile.dev.package.sha2]
 opt-level = 3
+
+# Audio checks stream whole discs through shared decoding/checksum loops.
+# Keep development servers usable without changing the algorithms or coverage.
+[profile.dev.package.junk-libs-disc]
+opt-level = 3
+
+[profile.dev.package.junk-libs-accuraterip]
+opt-level = 3

@@ -1893,6 +1893,22 @@ impl CollectionModule for Music {
         match operation.as_str() {
             CD_STRUCTURE_OPERATION => plan.normalize::<CdPackageSelection>()?,
             ACCURATERIP_VERIFICATION_OPERATION => {
+                let value: serde_json::Value = plan
+                    .selection
+                    .parse()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+                if value
+                    .get("snapshot_id")
+                    .is_none_or(|id| id.is_null() || id.as_str() == Some(""))
+                {
+                    let mut selection = value;
+                    selection.as_object_mut().unwrap().remove("snapshot_id");
+                    plan.selection = RawJson::from_value(selection);
+                    plan.blockers.push(
+                        "Choose an AccurateRip response for this disc before checking.".into(),
+                    );
+                    return Ok(plan);
+                }
                 plan.normalize::<AccurateRipSelection>()?;
                 if plan.blockers.is_empty() {
                     let selected: AccurateRipSelection = plan

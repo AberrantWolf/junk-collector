@@ -80,7 +80,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   await batch.getByRole('button',{name:'Open album preparation'}).click();
   await page.getByRole('region',{name:'Album preparation'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
   await nav.getByRole('button',{name:'Library',exact:true}).click();
-  await page.getByRole('button',{name:/Bulk resolved album/}).click();
+  await page.locator('.collection-row').filter({hasText:'Bulk resolved album'}).click();
   const album=page.getByRole('region',{name:'Album tracks'});
   await album.getByRole('button',{name:'Add album to queue',exact:true}).click();
   const player=page.getByRole('region',{name:'Music player'});if(!await player.locator('.queue-track').first().isVisible())await player.getByRole('button',{name:/Queue \(/}).click();

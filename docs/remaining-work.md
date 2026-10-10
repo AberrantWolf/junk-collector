@@ -61,7 +61,9 @@ Collector pins pushed shared-library revision
 
 ### HL-01 — Simplify contracts and retain meaningful provenance
 
-**State:** needs design/code/storage audit; no cleanup has been implemented.
+**State:** the 2026-10-10 provider acquisition/response delivery is implemented; the broader retention audit remains.
+See [delivery validation](validation/concurrent-processing.md) and [stopped-server conversion](snapshot-duplicate-conversion.md).
+Two processing slots and one provider slot, active request sharing, equivalent response reuse and explicit duplicate-payload conversion address provider redundancy. Other retention policies remain unimplemented; no live archive cleanup was performed.
 **Maps:** A04/P01/D06/FX-02 and old history requirements. **Owner:** application
 policy, module evidence semantics and archive/private-state adapters.
 
@@ -256,11 +258,18 @@ all older C05 requirements pass. Preserve standalone local playback and retained
 offline files; revocation cannot recall disconnected copies. No need to rebuild
 C07, duplicate a player or require C02 failover before single-route downloads.
 
-### HL-08 — Collection conveniences and measured performance gaps
+### HL-08 — Collection conveniences, game-disc listening, provider contributions and performance gaps
 
 **State:** optional scoped work; most earlier web gaps are completed. **Maps:** U04,
-D06 follow-ups, FX-04 history bound, P06/R02 practical scale.
+D05/D07 listening extensions, D06 follow-ups, FX-04 history bound, P06/R02 practical scale.
 
+#### Collection convenience and performance follow-ups
+
+- Repair Library “Back to results” after nested Work & history navigation: an
+  older `work` URL entry can reopen the history modal instead of returning to the
+  unselected list. Observed in the 2026-10-09 AccurateRip shortcut smoke journey;
+  Library navigation avoids that history-stack defect. Preserve intentional
+  browser Back restoration of a work detail while correcting the browse return.
 - Add document attachments when manuals/receipts are needed, using existing Asset
   visibility/publication with bounded validation and honest download/preview types.
   Image Covers/Photos/Scans already work. Do not imply arbitrary documents work now.
@@ -277,6 +286,72 @@ D06 follow-ups, FX-04 history bound, P06/R02 practical scale.
   are complete. Fix observed slow/uncancellable/unbounded work; do not reopen
   incremental indexing wholesale or require enterprise-sized load as a release gate.
 
+Each bullet is independently assignable with real UI/recovery acceptance. Smart
+lists, private/personal lists, post-edit splitting and richer DSP/codecs remain
+optional ideas needing product/contract design, not established missing features.
+
+#### Game-disc audio in music listening and Trash Amp
+
+**State:** requested 2026-10-10; game-disc listening is not implemented.
+**Owner:** Games owns game identity and descriptive metadata; shared `junk-libs`
+readers own disc layout and PCM extraction; application services own preparation,
+authorized listening projections and list expansion; web and Trash Amp consume
+the shared listening contracts.
+
+Expose audio tracks included on CD-based game discs through normal music
+browse/search, queues and playlists, plus Trash Amp streaming and explicit offline
+downloads. Keep game artwork and source attribution beside track text. Start with
+actual CD audio tracks, including mixed data/audio discs; proprietary in-game audio
+files and soundtrack decoding are separate future scope. Preserve the original
+game package and its collection identity without requiring a duplicate music import.
+
+Before implementation, settle cross-module listening capability ownership and
+source-bound track metadata, including manual titles and useful unnamed-track
+defaults. Current preparation requires a music collection, and mixed-mode audio
+preparation is unsupported. Extend the existing preparation/availability/media,
+music discovery and list pipeline rather than introducing a second importer,
+player or workflow. Complete bounded, cancellable audio-range extraction with
+explicit data-track exclusion and gap/boundary policy; reuse exact source
+coordinates, immutable recipes, lossless validation and durable publication.
+Browse and admission must use recorded observations without hashing masters.
+Automatic game metadata/artwork providers are not prerequisites.
+
+**Done when:** an owned mixed-mode game demonstrates track discovery and explicit
+FLAC preparation, ordinary web music browsing/search and listening, playlist
+expansion, Trash Amp streaming and offline artwork/text browsing and playback.
+Independent vectors cover audio/data boundaries, stored/synthetic gaps and malformed
+or truncated inputs. Cancellation/restart, reindex, manual metadata authority and
+collection authorization/revocation preserve the existing guarantees. Data tracks
+never become playable, unsupported layouts remain explicit, and successful
+extraction does not imply catalog or whole-disc audio verification. HL-05 owns
+qualification of the advertised layouts; HL-02/HL-07 provide client acceptance
+patterns without turning this new feature into a prerequisite for existing LAN
+listening. Deliver the complete workflow across layers as one assignment.
+
+#### AccurateRip contribution investigation
+
+**State:** requested 2026-10-10; submission support is not implemented.
+**Owner:** application/provider policy; adapters own any supported submission mechanism.
+
+Investigate how to contribute eligible AccurateRip results, especially for discs
+whose lookup returns no data. Motivating case: **SQ Relax - Krystelle's Chillwave
+Vol. 2**, by SQUARE ENIX MUSIC & Krystelle. An independent original-TOC calculation
+and fresh HTTP/HTTPS requests confirmed no data for its exact disc layout; see
+[lookup validation](validation.md#sq-relax-vol-2-live-accuraterip-lookup--2026-10-10).
+
+Establish the supported submission route, provider access requirements, eligibility
+and required drive/rip information. Assess a Collector workflow or guidance through
+a supported external tool. Keep missing provider data distinct from a verification
+failure; submitting results must not itself confer verified status. Require explicit
+user authorization before submitting results externally.
+
+**Done when:** the supported route and prerequisites are documented, and the
+investigation recommends a feasible integration, an external-tool workflow, or
+records a concrete blocker. Implementation is a separate scoped assignment after
+that assessment; this investigation does not authorize external submission.
+
+#### Completed presentation follow-ups
+
 Completed presentation follow-up, 2026-10-09: album FLAC/Opus availability now uses
 compact secondary labels and on-demand unavailable reasons, two-line track rows,
 overflow actions, and collapsed inspection information. The desktop entry
@@ -284,9 +359,13 @@ panel also meets the right viewport edge and dock at every scroll position; see
 [status](implementation-status.md#compact-album-format-availability--2026-10-09) and
 [validation](validation.md#compact-album-format-availability--2026-10-09).
 
-Each bullet is independently assignable with real UI/recovery acceptance. Smart
-lists, private/personal lists, post-edit splitting and richer DSP/codecs remain
-optional ideas needing product/contract design, not established missing features.
+Completed presentation follow-up, 2026-10-09: album rows show recorded AccurateRip
+results instead of the independent Identity flag. Curators can open audio checks
+from the column, album menu, or disc inspection; this retains honest original-level
+coverage and adds no audio reads to browsing. See
+[status](implementation-status.md#accuraterip-browsing-shortcut--2026-10-09) and
+[validation](validation.md#accuraterip-browsing-shortcut--2026-10-09).
+HL-05 live owned-disc qualification remains outstanding.
 
 ### HL-09 — Portable export and one-way legacy adoption
 
@@ -441,3 +520,24 @@ implemented; provider-access restoration or automated scraping is not an open ta
 > ledgers, status and dated validation. Do not commit or spawn agents without an
 > explicit user request. HL-02 LAN qualification and HL-03 backup tooling remain
 > independent follow-ups when their required inputs are available.
+
+Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
+single-anchor disc to an unrelated collection response. Current recorded layout
+supplies the full query for admission and response selection, including matches on
+older pages and correction of stale browser preferences. Missing responses prompt
+acquisition. The worker retains its strict selected-layout check; real owned-disc
+qualification remains HL-05. See [status](implementation-status.md#accuraterip-response-selection-repair--2026-10-09)
+and [validation](validation.md#accuraterip-response-selection-repair--2026-10-09).
+
+Follow-up to that repair, 2026-10-09: missing-reference readiness keeps eligible
+source files and has no empty-UUID error; imported layouts expose an actionable
+fetch through server-owned structural eligibility. No recorded layout offers the
+existing structure check. Acquisition keeps source/module/role and ambiguity guards.
+See the same status and validation record above; HL-05 remains open.
+
+Completed progress follow-up, 2026-10-09: active file checks report typed
+indeterminate progress and actual source/computation/publication phases instead
+of misleading zero completion. Development builds optimize shared audio loops.
+Algorithm/coverage and live-owned-disc qualification are unchanged; see
+[status](implementation-status.md#file-check-progress-and-development-audio-performance--2026-10-09)
+and [validation](validation.md#file-check-progress--2026-10-09).

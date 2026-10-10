@@ -16,7 +16,8 @@ type DomainField=components['schemas']['DomainFieldDescriptor'];
 type Item=components['schemas']['PresentedItem'];
 type SaveItemEditCommand=components['schemas']['SaveItemEditCommand'];
 
-type Props={initialCollectionId?:string;initialSection?:'details'|'files'|'evidence'|'reimport';collections:Collection[];collectionTypes:CollectionType[];selected?:Item;onClose:()=>void;onSaved:(item:Item,replacedItemId?:string)=>void;onSessionExpired:()=>void};
+type AnalysisTarget={sourceId?:string;operation:'structure'|'accuraterip'};
+type Props={initialAnalysis?:AnalysisTarget;initialCollectionId?:string;initialSection?:'details'|'files'|'evidence'|'reimport';collections:Collection[];collectionTypes:CollectionType[];selected?:Item;onClose:()=>void;onSaved:(item:Item,replacedItemId?:string)=>void;onSessionExpired:()=>void};
 type Feedback={kind:'success'|'error';text:string};
 
 function scalarValues(item?:Item):Record<string,string>{const payload=item?.domain.payload;if(!payload||typeof payload!=='object'||Array.isArray(payload))return {};return Object.fromEntries(Object.entries(payload).filter(([,value])=>typeof value==='string'||typeof value==='number').map(([key,value])=>[key,String(value)]));}
@@ -24,10 +25,10 @@ function inventoryTitle(item?:Item):string{return item?.inventory_title??item?.t
 function inventorySubtitle(item?:Item):string{return item?.inventory_subtitle??item?.subtitle??'';}
 function editableItem(item:Item):Item{return {...item,title:inventoryTitle(item),subtitle:inventorySubtitle(item)};}
 
-export default function Curation({initialCollectionId,initialSection='details',collections,collectionTypes,selected,onClose,onSaved,onSessionExpired}:Props){
+export default function Curation({initialAnalysis,initialCollectionId,initialSection='details',collections,collectionTypes,selected,onClose,onSaved,onSessionExpired}:Props){
  const dialog=useDialogDismiss(onClose);const [addingMode,setAddingMode]=useState<'import'|'manual'>('import');
- const [section,setSection]=useState<'details'|'copies'|'files'|'music'|'artwork'|'evidence'|'reimport'>(initialSection);const [guidedDraft,setGuidedDraft]=useState(false);
- const [technicalOpen,setTechnicalOpen]=useState(false);const [analysisTarget,setAnalysisTarget]=useState<{sourceId:string;operation:'structure'|'accuraterip'}>();
+ const [section,setSection]=useState<'details'|'copies'|'files'|'music'|'artwork'|'evidence'|'reimport'>(initialAnalysis?'evidence':initialSection);const [guidedDraft,setGuidedDraft]=useState(false);
+ const [technicalOpen,setTechnicalOpen]=useState(!!initialAnalysis);const [analysisTarget,setAnalysisTarget]=useState<AnalysisTarget|undefined>(initialAnalysis);
  const [item,setItem]=useState(selected&&editableItem(selected));const [title,setTitle]=useState(inventoryTitle(selected));const [subtitle,setSubtitle]=useState(inventorySubtitle(selected));const [collection,setCollection]=useState(selected?.collection_id||initialCollectionId||collections[0]?.id||'');const [fieldValues,setFieldValues]=useState<Record<string,string>>(()=>scalarValues(selected));const [domainPatch,setDomainPatch]=useState<Record<string,unknown>>({});const [wishlist,setWishlist]=useState(selected?.wishlist||false);const [feedback,setFeedback]=useState<Feedback>();const [busy,setBusy]=useState(false);
  const adoptedItemId=useRef(selected?.id);
  const activeCollection=item?.collection_id||collection;

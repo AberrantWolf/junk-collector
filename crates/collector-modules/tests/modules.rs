@@ -2118,6 +2118,32 @@ fn scan_planning_selects_only_eligible_anchors_without_opening_bytes() {
             .unwrap();
         assert!(!plan.blockers.is_empty(), "{names:?}");
     }
+    // No response is an ordinary prerequisite; keep source choices and never
+    // report an empty browser selection as a malformed UUID.
+    for snapshot in [
+        None,
+        Some(serde_json::Value::Null),
+        Some(serde_json::json!("")),
+    ] {
+        let mut selection = serde_json::json!({"maximum_offset":0});
+        if let Some(snapshot) = snapshot {
+            selection["snapshot_id"] = snapshot;
+        }
+        let plan = registry
+            .scan_inputs(
+                &CapabilityId::new(collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION)
+                    .unwrap(),
+                &inventory(&["disc.cue", "disc.bin"]),
+                &RawJson::from_value(selection),
+            )
+            .unwrap();
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.selection.value().unwrap()["anchor_file_index"], 0);
+        assert_eq!(
+            plan.blockers,
+            ["Choose an AccurateRip response for this disc before checking."]
+        );
+    }
     let complete = registry
         .scan_inputs(
             &op,

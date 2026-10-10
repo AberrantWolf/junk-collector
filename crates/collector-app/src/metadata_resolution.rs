@@ -46,6 +46,8 @@ impl FrozenMetadataResolution {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MetadataResolutionResult {
+    #[serde(default)]
+    pub response_status: Option<crate::ProviderResponseStatus>,
     pub item_id: ItemId,
     pub snapshot_id: SnapshotId,
     pub outcome: Option<MetadataRefreshOutcome>,
@@ -354,6 +356,7 @@ impl CollectionService {
         let item = self.resolution_item(claim, frozen)?;
         let snapshot_id = self.acquire_snapshot_for_job(claim, &frozen.acquisition)?;
         let mut result = MetadataResolutionResult {
+            response_status: self.jobs.acquisition_response_status(claim)?,
             item_id: item.id,
             snapshot_id,
             outcome: None,
@@ -373,7 +376,9 @@ impl CollectionService {
                 // is a partial outcome, never a failed text resolution.
                 match self.resolve_automatic_artwork(claim, frozen, snapshot_id, candidate) {
                     Ok(()) => {}
-                    Err(Error::JobCancelled) => return Err(Error::JobCancelled),
+                    Err(error @ (Error::JobCancelled | Error::CommandInProgress)) => {
+                        return Err(error);
+                    }
                     Err(error) => result.artwork_error = Some(error.to_string()),
                 }
             }

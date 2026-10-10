@@ -8,6 +8,71 @@ recovery, durable requester ownership, manual authority and real offline browser
 upload/activation/identification. The [supported matrix](game-identification.md)
 limits the capability claim; this delivery does not qualify universal game formats.
 
+## AccurateRip response selection repair — 2026-10-09
+
+Cause: the check panel chose from collection-wide saved responses, preferring an
+active/newest response without checking its disc identity. The worker's frozen
+layout guard correctly refused a foreign query before computing audio checksums.
+
+Local regression: the real music service/store workflow accepts its matching
+query and blocks independent changes to track count, AccurateRip ID1, ID2 and
+CDDB ID before Job admission. The same workflow resolves the query from import analysis before a separate
+structure check, with the archived audio temporarily unavailable, proving that
+planning reads recorded evidence rather than audio. An absent snapshot choice
+still returns that query. Existing checksum/snapshot/reindex assertions remain.
+`node web/tests/accuraterip-snapshots.mjs` uses the real React processing panel with
+explicit offline API fixtures: three equal-track-count discs, stale remembered
+foreign response, matching response on the second page, missing-match guidance,
+correct submission, and source-specific selection after acquisition refresh.
+
+Passed: architecture/document links, formatting, workspace tests (the existing
+owned-dump and scale gates remain ignored), strict workspace Clippy, web TypeScript
+check/build, generated API contract check, the focused browser regression and the
+full temporary-server browser smoke journey on Chrome 153.0.8010.37. The final
+empty-choice/import-evidence regression was rerun after the workspace suite;
+Clippy and the Rust server were rebuilt after that correction. Smoke includes the
+real synthetic AccurateRip acquisition/check workflow and embedded-asset equality.
+Real owned albums and live AccurateRip remain unqualified; no claim is made that this selection repair proves
+their PCM matches. Originals, provider responses and existing evidence are retained.
+
+Follow-up recovery regression (same day): absent/null/empty reference selections
+produce one ordinary prerequisite and retain the eligible source anchor. Scan-plan
+eligibility returns the actual current import-analysis observation ID. The real
+service acquires a valid response from that imported layout before any dedicated
+structure Job. The browser fixture uses an import-only nested layout and asserts
+the fetch action, retained source choice, absence of UUID errors, omitted empty
+reference field and correct acquisition observation ID. Envelope/selection reference
+mismatch remains blocked. Passed: the module planning regression, the real
+music service/store acquisition/check/reindex regression, the updated offline
+browser regression, architecture/document links, formatting, workspace tests,
+strict workspace Clippy, TypeScript check/build, generated API contracts and the
+full Chrome temporary-server smoke journey. The final admission-envelope guard
+and retained multi-anchor fetch eligibility adjustment were followed by the focused
+store workflow, Clippy and a Rust server rebuild. Owned-disc/live-provider and
+explicitly ignored scale qualification remain outstanding.
+
+## File-check progress — 2026-10-09
+
+Read-only process inspection showed the existing home-server debug process using
+98.7% CPU while its processing counter remained zero. This establishes activity,
+not the state/outcome of a particular disc. The processing executor previously
+never advanced its admitted source-byte counter during checksum work. That work
+has variable offset coverage and cannot honestly use source bytes as a percentage.
+
+Regression: application Job DTOs serialize typed indeterminate progress for active
+processing; measured encoding and terminal Jobs retain their existing measured
+presentation. The real React panel fixture renders the AccurateRip computation
+phase and a progress element without a value, and omits the false `0 of` counter.
+Existing real acquisition/check/source-recheck/reindex tests still pass. Worker
+phase updates retain cancellation/claim fencing; no active installation was
+restarted or its Job modified. Shared disc and AccurateRip crates now build with
+optimization in the development profile. No live whole-disc throughput/ETA claim
+is made. Passed: architecture/document links, formatting, workspace tests
+(existing owned-dump/scale gates remain ignored), strict workspace Clippy,
+TypeScript check/build, generated API contract check, the focused real-panel
+browser regression and the full temporary-server Chrome smoke journey. The Rust
+server was rebuilt with current embedded assets and optimized shared audio crates.
+
 ## Documentation consolidation — 2026-10-09
 
 Remaining work is consolidated in [the home-lab queue](remaining-work.md).
@@ -4198,3 +4263,68 @@ action execution/dismissal, outside-click dismissal and separate editor closure.
 Desktop/mobile screenshots confirm the compact two-line rows. Workspace Rust tests
 and strict Clippy passed earlier in this delivery; this pass changes presentation
 and browser tests only.
+
+## AccurateRip browsing shortcut — 2026-10-09
+
+Album browse rows expose recorded status per current visible original rather than
+the separate inventory Identity flag. The column and album menu open the existing
+check workspace directly; focused operations only include preservation masters.
+Results are resolved against committed source fingerprints, without audio reads
+in presentation. A verified fraction describes originals, not missing album discs.
+
+Focused browser acceptance covers unchecked, verified, partial, mismatch, no-data,
+incomplete-search, ambiguous-offset, unavailable and unsupported labels; empty and
+reader-only states; and keyboard activation of the correct album. The real-server
+smoke journey opens AccurateRip from the album menu, runs structure and synthetic
+AccurateRip checks, confirms that another unchecked original stays unchecked,
+then opens checks directly from the refreshed list column.
+
+Passed: architecture/link checks, Rust formatting, full Rust workspace tests,
+strict workspace Clippy, generated API contract check, TypeScript check, web build
+and embedded-server rebuild; `test:audio-checks`, `test:browse` and full
+`test:smoke`. Desktop/mobile screenshots were inspected. Album locators now
+explicitly distinguish opening an album from its independent AccurateRip shortcut.
+The existing nested Work & history browser-Back issue is recorded under HL-08;
+this journey returns to the list through Library navigation.
+
+Live owned-disc AccurateRip qualification remains unperformed; this delivery does
+not broaden the verifier's existing evidence or coverage claims.
+
+
+## Concurrent processing and provider response reuse — 2026-10-10
+
+See [delivery validation](validation/concurrent-processing.md) for transactional
+scheduling, durable shared ownership, response reuse, conversion interruption tests,
+real browser fixtures and local FLAC performance measurements. No live archive was
+converted; live-provider/owned-disc qualification and hashing redesign remain separate.
+
+## SQ Relax Vol. 2 live AccurateRip lookup — 2026-10-10
+
+Read-only investigation of **SQ Relax - Krystelle's Chillwave Vol. 2** in the
+local running installation confirmed the current “No data” result for its exact
+preserved disc layout. The live archive/private state was not modified and no
+results were submitted externally.
+
+- Decoded the original 180-byte redumper TOC independently of Collector/shared
+  libraries. Its 21 track starts agree with the original dump log; first LBA is 0
+  and lead-out is 312008. Independently computed AccurateRip/FreeDB IDs are
+  `00350715-03223214-19104015`, matching recorded structure and verification inputs.
+  The ID/URL calculation was cross-checked against the
+  [Python Audio Tools source](https://github.com/tuffy/python-audio-tools/blob/master/audiotools/accuraterip.py).
+- Fresh HTTPS and HTTP requests to
+  [the exact AccurateRip entry](https://www.accuraterip.com/accuraterip/5/1/7/dBAR-021-00350715-03223214-19104015.bin)
+  both returned HTTP 404, 1245 bytes, SHA-256
+  `dc1d54dab6ec8c00f70137927504e4f222c8395f10760b6beecfcfa94e08249f`.
+  This exactly matches retained snapshot `5a12cd95-7b86-5a0b-9777-65b0fbdcd07d`;
+  its recorded length/digest were verified against its actual small response bytes.
+- A known-positive control on the same HTTPS endpoint returned HTTP 200 and
+  157 bytes. Its decoded DBAR header matched all expected values:
+  16 tracks, `0028c27c-01f34071-d0114a10`.
+- Reviewed provider handling and UI status mapping: HTTP 404 becomes typed
+  `no_data`; network failures and other unsuccessful HTTP statuses are errors.
+  The row displays the current original's recorded `no_data` result.
+
+This establishes missing database data for this TOC at the time of the check,
+not absence for every pressing or proof of audio accuracy. No full audio-payload
+scan or new verification run was performed. AccurateRip submission investigation
+remains an HL-08 follow-up.

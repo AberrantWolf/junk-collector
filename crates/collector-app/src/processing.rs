@@ -100,6 +100,8 @@ pub struct SnapshotQuery {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquisition_key: Option<String>,
     pub id: SnapshotId,
     pub collection_id: CollectionId,
     pub provider: ModuleId,
@@ -764,7 +766,7 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         record: SnapshotRecord,
         reader: &mut dyn std::io::Read,
         cancelled: &mut dyn FnMut() -> Result<bool>,
-    ) -> Result<()>;
+    ) -> Result<SnapshotId>;
     fn processing_record(&self, id: ObservationId) -> Result<PortableProcessingRecord>;
     fn recipe(&self, id: RecipeId) -> Result<collector_core::ConversionRecipe>;
     fn publish_recipe(

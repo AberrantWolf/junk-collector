@@ -112,62 +112,52 @@ impl Drop for JobRuntime {
 }
 
 pub fn start_job_workers(state: AppState) -> JobRuntime {
-    let service = state.service.clone();
     let worker_instance = ServerId::new().to_string();
-    let workers = (0..2)
-        .map(|worker_index| {
-            let service = service.clone();
-            let recovery_state = state.clone();
-            let worker_instance = worker_instance.clone();
-            tokio::spawn(async move {
-                let mut next_recovery = tokio::time::Instant::now();
-                loop {
-                    if worker_index == 0 && tokio::time::Instant::now() >= next_recovery {
-                        next_recovery =
-                            tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-                        let recovery_state = recovery_state.clone();
-                        let recovery = service.clone();
-                        match tokio::task::spawn_blocking(move || {
-                            recover_guided_inbox_staging(&recovery_state)?;
-                            recovery.resume_bulk_intakes()?;
-                            recovery.resume_bulk_library()?;
-                            recovery.resume_guided_ingests()
-                        })
-                        .await
-                        {
-                            Ok(Ok(())) => {}
-                            Ok(Err(error)) => {
-                                tracing::error!(%error, "guided ingest recovery failed")
-                            }
-                            Err(error) => {
-                                tracing::error!(%error, "guided ingest recovery panicked")
-                            }
-                        }
+    let mut workers = Vec::new();
+    let recovery_state = state.clone();
+    workers.push(tokio::spawn(async move {
+        loop {
+            let state = recovery_state.clone();
+            match tokio::task::spawn_blocking(move || {
+                state.service.reconcile_provider_acquisitions()?;
+                recover_guided_inbox_staging(&state)?;
+                state.service.resume_bulk_intakes()?;
+                state.service.resume_bulk_library()?;
+                state.service.resume_guided_ingests()
+            })
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::error!(%error, "workflow recovery failed"),
+                Err(error) => tracing::error!(%error, "workflow recovery panicked"),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    }));
+    for worker_index in 0..3 {
+        let service = state.service.clone();
+        let worker_instance = worker_instance.clone();
+        workers.push(tokio::spawn(async move {
+            loop {
+                let service = service.clone();
+                let instance = worker_instance.clone();
+                match tokio::task::spawn_blocking(move || service.run_next_job(&instance)).await {
+                    Ok(Ok(true)) => continue,
+                    Ok(Ok(false)) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await
                     }
-                    let service = service.clone();
-                    let worker_instance = worker_instance.clone();
-                    match tokio::task::spawn_blocking(move || {
-                        service.run_next_job(&worker_instance)
-                    })
-                    .await
-                    {
-                        Ok(Ok(true)) => continue,
-                        Ok(Ok(false)) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(250)).await
-                        }
-                        Ok(Err(error)) => {
-                            tracing::error!(worker_index, %error, "durable job worker failed");
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
-                        Err(error) => {
-                            tracing::error!(worker_index, %error, "durable job worker panicked");
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
+                    Ok(Err(error)) => {
+                        tracing::error!(worker_index,%error,"job worker failed");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                    Err(error) => {
+                        tracing::error!(worker_index,%error,"job worker panicked");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                 }
-            })
-        })
-        .collect();
+            }
+        }));
+    }
     JobRuntime(workers)
 }
 

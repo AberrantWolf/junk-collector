@@ -3,7 +3,7 @@ use collector_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 pub const DBAR_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DbarQuery {
     pub track_count: u8,

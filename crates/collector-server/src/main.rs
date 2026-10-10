@@ -36,6 +36,20 @@ enum Command {
     Doctor,
     Serve,
     Reindex,
+    /// Write a verified full stopped-server backup for snapshot conversion.
+    SnapshotDuplicateBackup {
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    /// Inspect exact duplicate provider payloads; stop the server first.
+    InspectSnapshotDuplicates,
+    /// Apply the reviewed JSON plan using a verified backup; stop the server first.
+    ApplySnapshotDuplicates {
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        backup: PathBuf,
+    },
     /// Inspect durable collection-type assignment eligibility without changing data.
     InspectCollectionType {
         #[arg(long)]
@@ -517,6 +531,33 @@ async fn main() -> Result<()> {
         }
         Command::RecoverAccount { .. } | Command::Accounts { .. } | Command::Paths => {
             unreachable!()
+        }
+        Command::SnapshotDuplicateBackup { destination } => {
+            store.backup_snapshot_conversion(&destination, &cli.config)?;
+            println!("Verified backup: {}", destination.display());
+        }
+        Command::InspectSnapshotDuplicates => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&store.inspect_snapshot_duplicates()?)?
+            );
+        }
+        Command::ApplySnapshotDuplicates { plan, backup } => {
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(
+                &mut std::io::Read::take(std::fs::File::open(plan)?, 16 * 1024 * 1024 + 1),
+                &mut bytes,
+            )?;
+            anyhow::ensure!(
+                bytes.len() <= 16 * 1024 * 1024,
+                "conversion plan exceeds 16 MiB"
+            );
+            let plan: collector_store::SnapshotDuplicatePlan = serde_json::from_slice(&bytes)?;
+            store.apply_snapshot_duplicates(&plan, &backup)?;
+            println!(
+                "Conversion complete: {} payload bytes removed, {} reference bytes added; historical snapshot IDs retained.",
+                plan.saved_bytes, plan.reference_bytes
+            );
         }
         Command::Reindex => {
             store.reindex()?;

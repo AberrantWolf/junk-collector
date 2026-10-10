@@ -2001,7 +2001,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        19 // Enrollment conversion preserves existing accounts, credentials and bound requests.
+        20 // Provider ownership/bindings preserve existing accounts, credentials and requests. preserves existing accounts, credentials and bound requests.
     );
     assert_eq!(
         private
@@ -4220,7 +4220,7 @@ fn durable_job_rows_store_typed_state_without_losing_upload_identity() {
 }
 
 #[test]
-fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
+fn durable_claims_fence_stale_workers_and_allow_same_user_parallelism() {
     let root = tempfile::tempdir().unwrap();
     let clock = Arc::new(TestClock::new(1_800_000_000));
     let store = Store::open_with_clock(
@@ -4253,7 +4253,16 @@ fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
 
     let original = store.claim_job("server-a", 30).unwrap().unwrap();
     assert_eq!(original.id, first.id);
+    let concurrent = store.claim_job("server-a", 30).unwrap().unwrap();
+    assert_eq!(concurrent.id, second.id);
     assert!(store.claim_job("server-a", 30).unwrap().is_none());
+    store
+        .complete_job(
+            concurrent.id,
+            &concurrent.claim_token,
+            serde_json::json!({}),
+        )
+        .unwrap();
     assert!(matches!(
         store.complete_job(original.id, "wrong-token", serde_json::json!({})),
         Err(Error::CommandInProgress)
@@ -4278,10 +4287,7 @@ fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
             serde_json::json!({"completed":true}),
         )
         .unwrap();
-    assert_eq!(
-        store.claim_job("server-b", 30).unwrap().unwrap().id,
-        second.id
-    );
+    assert!(store.claim_job("server-b", 30).unwrap().is_none());
 }
 
 #[test]
@@ -6178,7 +6184,7 @@ fn current_private_schema_preserves_durable_imports_without_private_path_columns
         private
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        19 // Nullable enrollment owners add no private paths to Import records.
+        20 // Provider ownership and bindings add no private paths to Import records.
     );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
@@ -6475,7 +6481,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     assert!(recovered.run_next_job("guided-analysis").unwrap());
     assert!(recovered.run_next_job("guided-publication").unwrap());
     let detail = recovered.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert_eq!(detail.summary.capture_revision, Some(Revision(1)));
     assert!(matches!(
         recovered.discard_ingest(&actor, id, detail.import.revision, &command()),
@@ -6828,7 +6834,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
     assert!(service.run_next_job("existing-analysis").unwrap());
     assert!(service.run_next_job("existing-publication").unwrap());
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert_eq!(detail.summary.target_item_id, Some(existing.id));
     let saved = store.item(existing.id).unwrap();
     assert_eq!(saved.title, existing.title);
@@ -6993,7 +6999,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
     );
     assert!(service.run_next_job("preservation-only").unwrap());
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert_eq!(
         detail
             .steps
@@ -7320,7 +7326,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
     assert!(service.run_next_job("guided-analysis").unwrap());
     assert!(service.run_next_job("guided-publication").unwrap());
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert!(
         detail
             .steps
@@ -7537,7 +7543,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         )
         .unwrap();
     assert!(service.run_next_job("guided-provider-publication").unwrap());
-    assert!(service.run_next_job("guided-provider-metadata").unwrap());
+    provider_drain(&service);
     let requests = mb_server.requests.lock().unwrap();
     assert!(
         requests
@@ -7571,11 +7577,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             &command(),
         )
         .unwrap();
-    assert!(
-        service
-            .run_next_job("guided-provider-art-listing-retry")
-            .unwrap()
-    );
+    provider_drain(&service);
     assert!(!service.run_next_job("guided-provider-art-image").unwrap());
     assert!(!service.run_next_job("guided-provider-finished").unwrap());
     let target = service
@@ -7687,7 +7689,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             .unwrap()
     );
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert!(detail.steps.iter().any(|step| step.step == "identification"
         && step.state == collector_app::IngestStepState::Failed));
     assert_eq!(
@@ -8567,6 +8569,7 @@ fn streamed_snapshot_is_hashed_and_survives_archive_only_rebuild() {
     let (root, store, _actor, service, collection) = setup();
     let bytes = b"streamed catalog bytes".to_vec();
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -8627,6 +8630,7 @@ fn streamed_snapshot_cancellation_aborts_before_commit_and_recovers_cleanly() {
     let (root, store, _actor, service, collection) = setup();
     let bytes = vec![7_u8; 2 * 1024 * 1024];
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -9122,6 +9126,69 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
         JobState::Completed
     );
     let published = service.provisional_import(&actor, created.id).unwrap();
+    // Imported structure is enough for response selection. A planning read must
+    // not open the audio payload, even when it has become unavailable on disk.
+    let payloads = files_named(&root.path().join("archive"), "disc.bin");
+    assert!(!payloads.is_empty());
+    for path in &payloads {
+        std::fs::rename(path, path.with_extension("bin-unavailable")).unwrap();
+    }
+    let import_plan = service
+        .processing_plan(
+            &actor,
+            published.capture_id,
+            StartProcessingCommand {
+                operation: OperationId::new(
+                    collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                )
+                .unwrap(),
+                operation_version: 1,
+                representation_id: published.representation_id,
+                snapshot_id: None,
+                selection: RawJson::from_value(serde_json::json!({"maximum_offset":0})),
+            },
+        )
+        .unwrap();
+    for path in &payloads {
+        std::fs::rename(path.with_extension("bin-unavailable"), path).unwrap();
+    }
+    assert_eq!(
+        import_plan.accuraterip_query.unwrap(),
+        collector_modules::music::catalog::DbarQuery {
+            track_count: 1,
+            accuraterip_id1: id1,
+            accuraterip_id2: id2,
+            cddb_id: cddb,
+        }
+    );
+    assert_eq!(import_plan.files.len(), 1);
+    assert_eq!(
+        import_plan.blockers,
+        ["Choose an AccurateRip response for this disc before checking."]
+    );
+    assert_eq!(
+        import_plan.accuraterip_structure_observation_id,
+        Some(ObservationId(analysis_job.0))
+    );
+    // Fetch directly from imported layout, without manufacturing a second check.
+    unavailable.store(false, Ordering::SeqCst);
+    let import_acquisition = service
+        .enqueue_accuraterip_acquisition(
+            &actor,
+            published.capture_id,
+            AcquireAccurateRipCommand {
+                representation_id: published.representation_id,
+                structure_observation_id: import_plan.accuraterip_structure_observation_id.unwrap(),
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, import_acquisition).unwrap().state,
+        JobState::Completed
+    );
+    unavailable.store(true, Ordering::SeqCst);
     let structure_job = service
         .enqueue_processing_operation(
             &actor,
@@ -9183,7 +9250,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
             .unwrap()
     };
     let outage_job = acquire(&service);
-    assert!(service.run_next_job("accuraterip-outage").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, outage_job).unwrap().state,
         JobState::Failed
@@ -9191,7 +9258,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     assert!(Catalog::capture(&*store, published.capture_id).is_ok());
     unavailable.store(false, Ordering::SeqCst);
     service.retry_job(&actor, outage_job, &command()).unwrap();
-    assert!(service.run_next_job("accuraterip-retry").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, outage_job).unwrap().state,
         JobState::Completed
@@ -9207,14 +9274,14 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     service
         .cancel_job(&actor, cancelled_job, &command())
         .unwrap();
-    assert!(!service.run_next_job("accuraterip-cancelled").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, cancelled_job).unwrap().state,
         JobState::Cancelled
     );
 
     let refreshed_job = acquire(&service);
-    assert!(service.run_next_job("accuraterip-refresh").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, refreshed_job).unwrap().state,
         JobState::Completed
@@ -9222,14 +9289,117 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     let snapshots = service
         .curation_catalog_snapshots(&actor, collection.id, None, 10)
         .unwrap();
-    assert_eq!(snapshots.items.len(), 2);
-    let second_snapshot = snapshots
-        .items
-        .iter()
-        .find(|value| value.snapshot.id != first_snapshot)
-        .unwrap()
-        .snapshot
-        .id;
+    assert_eq!(
+        snapshots.items.len(),
+        1,
+        "identical AccurateRip responses do not create permanent snapshots"
+    );
+    let second_snapshot = completed_provider_snapshot(&service, &actor, refreshed_job);
+    assert_eq!(second_snapshot, first_snapshot);
+
+    let verification_command = |snapshot_id| StartProcessingCommand {
+        operation: OperationId::new(collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION)
+            .unwrap(),
+        operation_version: 1,
+        representation_id: published.representation_id,
+        snapshot_id: Some(snapshot_id),
+        selection: RawJson::from_value(serde_json::json!({
+            "anchor_file_index":0,"snapshot_id":snapshot_id,"maximum_offset":0
+        })),
+    };
+    let matching_plan = service
+        .processing_plan(
+            &actor,
+            published.capture_id,
+            verification_command(first_snapshot),
+        )
+        .unwrap();
+    let expected_query = matching_plan.accuraterip_query.unwrap();
+    assert!(matching_plan.blockers.is_empty());
+    assert_eq!(expected_query.accuraterip_id1, id1);
+    assert_eq!(expected_query.accuraterip_id2, id2);
+    assert_eq!(expected_query.cddb_id, cddb);
+    // Omitting the envelope reference cannot bypass the prerequisite by leaving
+    // a valid response ID only inside the module selection.
+    let mut unfrozen_reference = verification_command(first_snapshot);
+    unfrozen_reference.snapshot_id = None;
+    assert!(matches!(
+        service
+            .processing_plan(&actor, published.capture_id, unfrozen_reference.clone())
+            .unwrap()
+            .state,
+        collector_app::ScanState::Blocked
+    ));
+    assert!(matches!(
+        service.enqueue_processing_operation(
+            &actor,
+            published.capture_id,
+            unfrozen_reference,
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    // Equal track counts alone cannot choose a reference: each disc ID matters.
+    for field in [
+        "track_count",
+        "accuraterip_id1",
+        "accuraterip_id2",
+        "cddb_id",
+    ] {
+        let mut query = serde_json::to_value(&expected_query).unwrap();
+        query[field] = serde_json::json!(query[field].as_u64().unwrap() + 1);
+        let foreign = SnapshotRecord {
+            acquisition_key: None,
+            id: SnapshotId::new(),
+            collection_id: collection.id,
+            provider: ModuleId("org.junk.providers.accuraterip".into()),
+            media_type: "application/vnd.accuraterip.dbar".into(),
+            bytes: ByteLength(0),
+            digest: Digest::sha256(&[]),
+            parsed_observation: RawJson::from_value(serde_json::json!({
+                "schema_version":1,"query":query,"outcome":"no_data","response_count":0
+            })),
+            created_at: chrono::Utc::now(),
+        };
+        let claim = snapshot_claim(&store, collection.id);
+        store
+            .publish_snapshot(
+                &claim,
+                foreign.clone(),
+                &mut std::io::Cursor::new(Vec::<u8>::new()),
+                &mut || Ok(false),
+            )
+            .unwrap();
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+        let request = verification_command(foreign.id);
+        let plan = service
+            .processing_plan(&actor, published.capture_id, request.clone())
+            .unwrap();
+        assert!(
+            matches!(plan.state, collector_app::ScanState::Blocked),
+            "{field}"
+        );
+        assert!(
+            plan.blockers
+                .iter()
+                .any(|value| value.contains("different disc")),
+            "{field}"
+        );
+        assert!(
+            matches!(
+                service.enqueue_processing_operation(
+                    &actor,
+                    published.capture_id,
+                    request,
+                    &command()
+                ),
+                Err(Error::Invalid(_))
+            ),
+            "{field}"
+        );
+    }
 
     for snapshot_id in [first_snapshot, second_snapshot] {
         let verification = service
@@ -9361,7 +9531,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     );
     no_data.store(true, Ordering::SeqCst);
     let no_data_acquisition = acquire(&service);
-    assert!(service.run_next_job("accuraterip-no-data").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, no_data_acquisition).unwrap().state,
         JobState::Completed
@@ -9375,6 +9545,16 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
         .unwrap()
         .snapshot
         .id;
+    let repeated_no_data = acquire(&service);
+    provider_drain(&service);
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, repeated_no_data),
+        no_data_snapshot
+    );
+    assert_ne!(
+        no_data_snapshot, first_snapshot,
+        "no-data is distinct from successful data"
+    );
     let no_data_verification = service
         .enqueue_processing_operation(
             &actor,
@@ -9715,7 +9895,7 @@ fn acquisition_restart_after_snapshot_commit_reuses_frozen_response() {
         }
     };
     let recovered = CollectionService::new(reopened.clone(), Arc::new(Registry::default()));
-    assert!(recovered.run_next_job("acquisition-new").unwrap());
+    provider_drain(&recovered);
     assert_eq!(
         recovered.job(&actor, job).unwrap().state,
         JobState::Completed
@@ -10428,7 +10608,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
         ),
         Err(Error::IdempotencyConflict)
     ));
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, mb_job).unwrap().state,
         JobState::Completed
@@ -10445,7 +10625,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     let provider_art = service
         .publish_provider_artwork(
             &actor,
@@ -10545,7 +10725,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     assert!(
         service
             .publish_provider_artwork(
@@ -10579,7 +10759,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     let no_match = service
         .refresh_provider_metadata(
             &actor,
@@ -10597,13 +10777,60 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
         no_match.observations[0].outcome,
         MetadataRefreshOutcome::NoMatch
     );
-    assert_eq!(no_match.display.unwrap().artwork, Some(manual.id));
+    assert_eq!(no_match.display.as_ref().unwrap().artwork, Some(manual.id));
     assert!(
         no_match.observations[0]
             .raw_observation
             .get()
             .contains(&missing.to_string())
     );
+
+    // Equivalent historical response IDs do not create another no-data occurrence.
+    let mut legacy = store
+        .snapshot(SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: SnapshotId(missing.0),
+        })
+        .unwrap();
+    let mut payload = Vec::new();
+    store
+        .snapshot_bytes(SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: legacy.id,
+        })
+        .unwrap()
+        .read_to_end(&mut payload)
+        .unwrap();
+    legacy.id = SnapshotId::new();
+    legacy.acquisition_key = None;
+    let alias = legacy.id;
+    let claim = snapshot_claim(&store, collection.id);
+    store
+        .publish_snapshot(
+            &claim,
+            legacy,
+            &mut std::io::Cursor::new(payload),
+            &mut || Ok(false),
+        )
+        .unwrap();
+    store
+        .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+        .unwrap();
+    let unchanged = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: no_match.revision,
+                snapshot_id: alias,
+                source_observation_id: None,
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(unchanged.revision, no_match.revision);
+    assert_eq!(unchanged.observations, no_match.observations);
 
     AdministrationPort::reindex(&*store).unwrap();
     let rebuilt = service.metadata_view(&actor, saved.id).unwrap();
@@ -11347,6 +11574,7 @@ fn stale_analysis_cannot_be_rebound_to_different_published_bytes() {
 fn snapshot_envelope_mismatch_does_not_partially_replace_catalog() {
     let (root, store, _actor, _service, collection) = setup();
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -11740,7 +11968,7 @@ fn ct3_queued_job_rechecks_owner_availability() {
     drop(service);
 
     let unavailable = CollectionService::new(store, Arc::new(Registry::default()));
-    assert!(unavailable.run_next_job("ct3-missing-owner").unwrap());
+    provider_drain(&unavailable);
     let failed = unavailable.job(&actor, job).unwrap();
     assert_eq!(failed.state, JobState::Failed);
     assert!(failed.error.unwrap().contains("not installed"));
@@ -11936,10 +12164,31 @@ fn derivative_import_variant(
     collection: CollectionId,
     variant: u8,
 ) -> ImportView {
+    derivative_import_sectors(service, actor, collection, variant, 5)
+}
+
+fn derivative_import_sectors(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    variant: u8,
+    sectors: usize,
+) -> ImportView {
     // Track 1 owns stored HTOA plus track 2's stored INDEX 00: 3 sectors.
     // Track 2 owns the final two sectors. No AccurateRip evidence is requested.
     let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 00 00:00:00\n INDEX 01 00:00:01\n TRACK 02 AUDIO\n INDEX 00 00:00:02\n INDEX 01 00:00:03\n";
-    let pcm: Vec<u8> = (0..5 * 588)
+    let extended_cue = format!(
+        "FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n TRACK 02 AUDIO\n INDEX 01 {:02}:{:02}:{:02}\n",
+        sectors / 2 / 4500,
+        sectors / 2 / 75 % 60,
+        sectors / 2 % 75
+    );
+    let cue = if sectors == 5 {
+        cue.as_slice()
+    } else {
+        extended_cue.as_bytes()
+    };
+    let pcm: Vec<u8> = (0..sectors * 588)
         .flat_map(|i| [(i as u8).wrapping_add(variant), 0x80, 0xff, 0x7f])
         .collect();
     let created = service
@@ -11973,9 +12222,17 @@ fn derivative_import_variant(
     service
         .stage_provisional_import_chunk(actor, created.id, 0, 0, cue)
         .unwrap();
-    service
-        .stage_provisional_import_chunk(actor, created.id, 1, 0, &pcm)
-        .unwrap();
+    for (index, chunk) in pcm.chunks(1024 * 1024).enumerate() {
+        service
+            .stage_provisional_import_chunk(
+                actor,
+                created.id,
+                1,
+                (index * 1024 * 1024) as u64,
+                chunk,
+            )
+            .unwrap();
+    }
     service
         .enqueue_import_analysis(
             actor,
@@ -15583,6 +15840,41 @@ fn clean_reimport_rejects_prior_generation_snapshot_completion() {
         store.ensure_snapshot_current(original.id, snapshot),
         Err(Error::Conflict)
     ));
+    // Settle the reimport's real queued work before admitting the independent
+    // binding fixture; its ordering is not part of this freshness assertion.
+    fx05_drain(&service);
+    // The same retained response may be consumed by a current generation. Older
+    // bindings remain evidence and must not veto the new requester.
+    let current_job = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: current_job,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(original.id),
+            kind: "test.snapshot_binding".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let current_claim = store.claim_job("provider-fixture", 30).unwrap().unwrap();
+    assert_eq!(current_claim.id, current_job);
+    store
+        .complete_job(
+            current_job,
+            &current_claim.claim_token,
+            serde_json::json!({"snapshot_id":snapshot}),
+        )
+        .unwrap();
+    store
+        .ensure_snapshot_current(original.id, snapshot)
+        .unwrap();
+    store.reindex().unwrap();
+    store
+        .ensure_snapshot_current(original.id, snapshot)
+        .unwrap();
 }
 
 #[test]
@@ -15677,6 +15969,7 @@ fn snapshot_publication_rejects_foreign_and_cancelled_claims_without_trusting_ca
     let (_root, store, _actor, _service, collection) = setup();
     let claim = snapshot_claim(&store, collection.id);
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -16141,7 +16434,32 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
         ),
         Err(Error::IdempotencyConflict)
     ));
-    assert!(service.run_next_job("durable-resolution").unwrap());
+    let direct = service
+        .enqueue_musicbrainz_metadata_acquisition(
+            &actor,
+            saved.id,
+            collector_modules::music::MusicBrainzQuery::DiscId {
+                disc_id: disc_id.clone(),
+                refresh: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.job(&actor, direct).unwrap().provider_status,
+        Some(collector_app::ProviderResponseStatus::Shared)
+    ));
+    provider_drain(&service);
+    let direct_snapshot = completed_provider_snapshot(&service, &actor, direct);
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 100)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+
     let resolution = service
         .metadata_resolutions(&actor, saved.id)
         .unwrap()
@@ -16163,7 +16481,38 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
         "ja",
         "accepted inputs remain frozen after preference changes"
     );
-    assert_eq!(authority.display.unwrap().title.value, "アルバム");
+    assert_eq!(authority.display.as_ref().unwrap().title.value, "アルバム");
+    let repeated = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: authority.revision,
+                snapshot_id: direct_snapshot,
+                source_observation_id: None,
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    // Current language preferences changed after admission, so this resolution is meaningful.
+    assert!(repeated.revision > authority.revision);
+    let unchanged = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: repeated.revision,
+                snapshot_id: direct_snapshot,
+                source_observation_id: None,
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(unchanged.revision, repeated.revision);
+    assert_eq!(unchanged.observations.len(), repeated.observations.len());
+
     let review = service.metadata_review(&actor, saved.id).unwrap();
     assert_eq!(
         review.display.title.value, "Album",
@@ -19476,6 +19825,22 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
     );
 }
 
+fn shared_provider_input(collection: &Collection, input: &str) -> FrozenAcquisitionJob {
+    FrozenAcquisitionJob {
+        collection_binding: collection.binding.clone(),
+        request: ProviderRequest {
+            collection_id: collection.id,
+            provider: ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            operation: OperationId::new("org.junk.providers.accuraterip.acquire").unwrap(),
+            source_fingerprint: None,
+            query: RawJson::from_value(serde_json::json!({"disc":input})),
+            maximum_response_bytes: 1024,
+        },
+        item_id: None,
+        snapshot_id: SnapshotId::new(),
+        created_at: chrono::Utc::now(),
+    }
+}
 fn provider_drain(service: &CollectionService) {
     for _ in 0..40 {
         if !service.run_next_job("shared-provider-test").unwrap() {
@@ -19483,6 +19848,884 @@ fn provider_drain(service: &CollectionService) {
         }
     }
     panic!("provider workflows did not settle");
+}
+fn completed_provider_snapshot(
+    service: &CollectionService,
+    actor: &Principal,
+    job: JobId,
+) -> SnapshotId {
+    let view = service.job(actor, job).unwrap();
+    assert_eq!(view.state, JobState::Completed, "{:?}", view.error);
+    match view.result.unwrap() {
+        collector_app::JobResultView::CatalogSnapshot { snapshot_id, .. } => snapshot_id,
+        _ => panic!("expected catalog result"),
+    }
+}
+
+#[test]
+fn shared_provider_download_has_reserved_capacity_and_private_cross_user_ownership() {
+    let (_root, store, actor, base, collection) = setup();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = base
+        .with_streaming_provider(
+            ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            Arc::new(FixtureStreamingProvider {
+                calls: calls.clone(),
+                bytes: b"shared response".to_vec(),
+            }),
+        )
+        .unwrap();
+    let other_id = store
+        .create_user("second-provider-owner", "a long test password", false)
+        .unwrap();
+    Catalog::grant(store.as_ref(), collection.id, other_id, Role::Curator).unwrap();
+    let other = Principal {
+        user_id: other_id,
+        administrator: false,
+        device_id: None,
+    };
+    let mut processing = Vec::new();
+    for _ in 0..2 {
+        let id = JobId::new();
+        store
+            .enqueue_job(JobSpec {
+                id,
+                user_id: actor.user_id,
+                collection_id: Some(collection.id),
+                item_id: None,
+                kind: "test.processing".into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+        processing.push(
+            store
+                .claim_job("shared-provider-test", 30)
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    let first_input = shared_provider_input(&collection, "same-disc");
+    let first = service
+        .enqueue_catalog_acquisition(&actor, first_input.clone(), &command())
+        .unwrap();
+    let second = service
+        .enqueue_catalog_acquisition(
+            &other,
+            shared_provider_input(&collection, "same-disc"),
+            &command(),
+        )
+        .unwrap();
+    assert_ne!(first, second);
+    assert!(service.job(&other, first).is_err());
+    assert!(service.job(&actor, second).is_err());
+    assert!(
+        service.run_next_job("shared-provider-test").unwrap(),
+        "provider slot stays available with two same-user processing jobs"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        service.job(&actor, first).unwrap().state,
+        JobState::Queued,
+        "continuation needs a processing slot"
+    );
+    assert!(
+        store
+            .claim_job("shared-provider-test", 30)
+            .unwrap()
+            .is_none()
+    );
+    for claim in processing {
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+    }
+    provider_drain(&service);
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, first),
+        completed_provider_snapshot(&service, &other, second)
+    );
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    let third = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "same-disc"),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "deliberate refresh downloads again"
+    );
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, third),
+        first_input.snapshot_id
+    );
+    assert!(matches!(
+        service.job(&actor, third).unwrap().provider_status,
+        Some(collector_app::ProviderResponseStatus::Unchanged)
+    ));
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .len(),
+        1,
+        "unchanged refresh does not append a snapshot"
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        completed_provider_snapshot(&service, &other, second),
+        first_input.snapshot_id
+    );
+}
+
+struct BlockingSharedProvider {
+    started: Arc<AtomicBool>,
+    release: Arc<AtomicBool>,
+}
+impl StreamingProviderPort for BlockingSharedProvider {
+    fn acquire_stream(
+        &self,
+        _request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        self.started.store(true, Ordering::SeqCst);
+        while !self.release.load(Ordering::SeqCst) {
+            if execution.cancellation_requested()? {
+                return Err(Error::JobCancelled);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let bytes = b"owned response".to_vec();
+        Ok(ProviderStreamResponse {
+            media_type: "application/octet-stream".into(),
+            bytes: ByteLength(bytes.len() as u64),
+            digest: Digest::sha256(&bytes),
+            parsed_observation: RawJson::from_value(serde_json::json!({"outcome":"data"})),
+            reader: Box::new(std::io::Cursor::new(bytes)),
+        })
+    }
+}
+#[test]
+fn shared_provider_later_owner_survives_cancel_and_last_owner_fences_admission() {
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (_root, store, actor, base, collection) = setup_with_clock(Some(clock.clone()));
+    let started = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let service = Arc::new(
+        base.with_streaming_provider(
+            ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            Arc::new(BlockingSharedProvider {
+                started: started.clone(),
+                release: release.clone(),
+            }),
+        )
+        .unwrap(),
+    );
+    let first = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "owned"),
+            &command(),
+        )
+        .unwrap();
+    let run = service.clone();
+    let worker = thread::spawn(move || run.run_next_job("shared-provider-test"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !started.load(Ordering::SeqCst) {
+        assert!(std::time::Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    clock.advance(2);
+    let second = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "owned"),
+            &command(),
+        )
+        .unwrap();
+    service.cancel_job(&actor, first, &command()).unwrap();
+    service.reconcile_provider_acquisitions().unwrap();
+    assert_eq!(service.job(&actor, second).unwrap().state, JobState::Queued);
+    service.cancel_job(&actor, second, &command()).unwrap();
+    assert!(
+        matches!(
+            service.enqueue_catalog_acquisition(
+                &actor,
+                shared_provider_input(&collection, "owned"),
+                &command()
+            ),
+            Err(Error::CommandInProgress)
+        ),
+        "cannot resurrect last-owner cancellation before settlement"
+    );
+    service.reconcile_provider_acquisitions().unwrap();
+    assert!(worker.join().unwrap().unwrap());
+    assert!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    release.store(true, Ordering::SeqCst);
+    let third = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "owned"),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    completed_provider_snapshot(&service, &actor, third);
+    assert_eq!(
+        service.job(&actor, first).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service.job(&actor, second).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        store
+            .jobs(actor.user_id)
+            .unwrap()
+            .iter()
+            .filter(|j| j.user_id != actor.user_id)
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn provider_response_identity_distinguishes_changed_bytes_inputs_and_collections() {
+    let (_root, store, actor, base, collection) = setup();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let build = |bytes: &[u8]| {
+        CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_streaming_provider(
+                ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+                Arc::new(FixtureStreamingProvider {
+                    calls: calls.clone(),
+                    bytes: bytes.to_vec(),
+                }),
+            )
+            .unwrap()
+    };
+    let service = build(b"one");
+    let one = service
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&collection, "a"), &command())
+        .unwrap();
+    provider_drain(&service);
+    let other = base
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Other provider collection"),
+            &command(),
+        )
+        .unwrap();
+    let two = service
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&collection, "b"), &command())
+        .unwrap();
+    let three = service
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&other, "a"), &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_ne!(
+        completed_provider_snapshot(&service, &actor, one),
+        completed_provider_snapshot(&service, &actor, two)
+    );
+    assert_ne!(
+        completed_provider_snapshot(&service, &actor, one),
+        completed_provider_snapshot(&service, &actor, three)
+    );
+    let changed = build(b"two");
+    let four = changed
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&collection, "a"), &command())
+        .unwrap();
+    provider_drain(&changed);
+    assert_ne!(
+        completed_provider_snapshot(&changed, &actor, four),
+        completed_provider_snapshot(&service, &actor, one)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn snapshot_duplicate_conversion_preserves_ids_rebuilds_and_requires_verified_backup() {
+    snapshot_duplicate_conversion_case(None);
+}
+fn snapshot_duplicate_conversion_case(fault: Option<collector_store::PublicationFaultPoint>) {
+    let (root, store, actor, service, collection) = setup();
+    let mut ids = Vec::new();
+    let payload = b"existing duplicate response";
+    for index in 0..2 {
+        let id = SnapshotId::new();
+        ids.push(id);
+        let claim = snapshot_claim(&store, collection.id);
+        store
+            .publish_snapshot(
+                &claim,
+                SnapshotRecord {
+                    acquisition_key: None,
+                    id,
+                    collection_id: collection.id,
+                    provider: ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+                    media_type: "application/octet-stream".into(),
+                    bytes: ByteLength(payload.len() as u64),
+                    digest: Digest::sha256(payload),
+                    parsed_observation: RawJson::from_value(
+                        serde_json::json!({"outcome":"data","query":"identical"}),
+                    ),
+                    created_at: chrono::DateTime::from_timestamp(
+                        1_800_000_000,
+                        if index == 0 { 900_000_000 } else { 100_000_000 },
+                    )
+                    .unwrap(),
+                },
+                &mut std::io::Cursor::new(payload),
+                &mut || Ok(false),
+            )
+            .unwrap();
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+        // Legacy acquisition inputs were private. Establish exact provenance for conversion.
+        let frozen = shared_provider_input(&collection, "legacy");
+        let mut frozen = frozen;
+        frozen.snapshot_id = id;
+        let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        private
+            .execute(
+                "INSERT INTO processing_jobs(job_id,frozen_input) VALUES(?,?)",
+                rusqlite::params![
+                    claim.id.to_string(),
+                    serde_json::to_string(&collector_app::FrozenJobInput::Acquisition(frozen))
+                        .unwrap()
+                ],
+            )
+            .unwrap();
+    }
+    if fault.is_none() {
+        let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        let (job, raw): (String, String) = db
+            .query_row(
+                "SELECT job_id,frozen_input FROM processing_jobs LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let mut unknown: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        unknown["input"]["future_semantics"] = serde_json::json!({"keep_original_layout":true});
+        db.execute(
+            "UPDATE processing_jobs SET frozen_input=? WHERE job_id=?",
+            rusqlite::params![unknown.to_string(), job],
+        )
+        .unwrap();
+        let inspected = store.inspect_snapshot_duplicates().unwrap();
+        assert_eq!(inspected.skipped.len(), 1);
+        assert!(inspected.duplicates.is_empty());
+        db.execute(
+            "UPDATE processing_jobs SET frozen_input=? WHERE job_id=?",
+            rusqlite::params![raw, job],
+        )
+        .unwrap();
+    }
+    if fault.is_none() {
+        let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let unknown = collection_path
+            .join("snapshots")
+            .join(ids[0].to_string())
+            .join("payload/future-layout.json");
+        std::fs::write(&unknown, b"unknown data requires original source.bin").unwrap();
+        let inspected = store.inspect_snapshot_duplicates().unwrap();
+        assert!(inspected.skipped.contains(&ids[0]));
+        assert!(inspected.duplicates.is_empty());
+        assert!(unknown.exists());
+        std::fs::remove_file(unknown).unwrap();
+    }
+    let plan = store.inspect_snapshot_duplicates().unwrap();
+    assert_eq!(plan.duplicates.len(), 1);
+    assert_eq!(
+        plan.duplicates[0].canonical, ids[1],
+        "fractional timestamps precede ID tie-breaking"
+    );
+    assert_eq!(plan.saved_bytes, payload.len() as u64);
+    assert!(
+        store
+            .apply_snapshot_duplicates(&plan, &root.path().join("missing-backup"))
+            .is_err()
+    );
+    let config = root.path().join("collector.toml");
+    std::fs::write(&config, "fixture configuration").unwrap();
+    let backup = root.path().join("backup");
+    store.backup_snapshot_conversion(&backup, &config).unwrap();
+    if let Some(point) = fault {
+        drop(service);
+        drop(store);
+        let failing = Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap();
+        assert!(failing.apply_snapshot_duplicates(&plan, &backup).is_err());
+        drop(failing);
+        let recovered =
+            Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        recovered.apply_snapshot_duplicates(&plan, &backup).unwrap();
+        recovered.apply_snapshot_duplicates(&plan, &backup).unwrap();
+        for id in &ids {
+            let mut bytes = vec![];
+            recovered
+                .snapshot_bytes(SnapshotQuery {
+                    collection_id: collection.id,
+                    snapshot_id: *id,
+                })
+                .unwrap()
+                .read_to_end(&mut bytes)
+                .unwrap();
+            assert_eq!(bytes, payload);
+        }
+        return;
+    }
+    let backed_config = std::fs::read(backup.join("collector.toml")).unwrap();
+    std::fs::write(backup.join("collector.toml"), b"corrupted backup").unwrap();
+    assert!(store.apply_snapshot_duplicates(&plan, &backup).is_err());
+    std::fs::write(backup.join("collector.toml"), backed_config).unwrap();
+    let extra = root.path().join("state/unbacked-unknown-data");
+    std::fs::write(&extra, b"must preserve").unwrap();
+    assert!(store.apply_snapshot_duplicates(&plan, &backup).is_err());
+    std::fs::remove_file(extra).unwrap();
+    store.apply_snapshot_duplicates(&plan, &backup).unwrap();
+    store.apply_snapshot_duplicates(&plan, &backup).unwrap();
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let reference = collection_path
+        .join("snapshots")
+        .join(plan.duplicates[0].snapshot.to_string())
+        .join("payload/reference.v1.json");
+    let saved_reference = std::fs::read(&reference).unwrap();
+    let mut corrupt: serde_json::Value = serde_json::from_slice(&saved_reference).unwrap();
+    corrupt["checksum"]["hex"] = serde_json::json!("00".repeat(32));
+    std::fs::write(&reference, serde_json::to_vec(&corrupt).unwrap()).unwrap();
+    assert!(
+        store
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: plan.duplicates[0].snapshot
+            })
+            .is_err()
+    );
+    std::fs::write(reference, saved_reference).unwrap();
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .len(),
+        2,
+        "historical IDs remain"
+    );
+    for id in &ids {
+        let mut bytes = vec![];
+        store
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: *id,
+            })
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, payload);
+    }
+    assert!(
+        store
+            .inspect_snapshot_duplicates()
+            .unwrap()
+            .duplicates
+            .is_empty()
+    );
+    let reuse = |store: &Store| {
+        let mut incoming = store
+            .snapshot(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: plan.duplicates[0].canonical,
+            })
+            .unwrap();
+        incoming.id = SnapshotId::new();
+        incoming.created_at = chrono::Utc::now();
+        incoming.acquisition_key = Some(plan.duplicates[0].input_key.clone());
+        let claim = snapshot_claim(store, collection.id);
+        let retained = store
+            .publish_snapshot(
+                &claim,
+                incoming,
+                &mut std::io::Cursor::new(payload),
+                &mut || Ok(false),
+            )
+            .unwrap();
+        assert_eq!(
+            retained, plan.duplicates[0].canonical,
+            "fresh bytes reuse proven legacy canonical content"
+        );
+        store
+            .complete_job(
+                claim.id,
+                &claim.claim_token,
+                serde_json::json!({"snapshot_id":retained}),
+            )
+            .unwrap();
+    };
+    reuse(&store);
+    drop(service);
+    drop(store);
+    let archive_only = Store::open(
+        root.path().join("archive"),
+        root.path().join("archive-only"),
+    )
+    .unwrap();
+    reuse(&archive_only);
+    for id in ids {
+        let mut bytes = vec![];
+        archive_only
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: id,
+            })
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, payload);
+    }
+}
+
+#[test]
+fn snapshot_duplicate_conversion_recovers_every_mutation_boundary() {
+    use collector_store::PublicationFaultPoint as Point;
+    for point in [
+        Point::Prepared,
+        Point::BytesStaged,
+        Point::PayloadPublished,
+        Point::ProjectionApplied,
+    ] {
+        snapshot_duplicate_conversion_case(Some(point));
+    }
+}
+
+#[test]
+fn same_user_parallel_tracks_publish_without_losing_capture_outputs() {
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let service = Arc::new(
+        service.with_audio_converter(Arc::new(ConcurrentDerivativeEncoder(
+            std::sync::Barrier::new(2),
+        ))),
+    );
+    let jobs: [JobId; 2] = [1, 2].map(|position| {
+        service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, position),
+                &command(),
+            )
+            .unwrap()
+    });
+    thread::scope(|scope| {
+        for _ in 0..2 {
+            let service = &service;
+            scope.spawn(move || service.run_next_job("parallel-tracks").unwrap());
+        }
+    });
+    for job in jobs {
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    }
+    let capture = store.capture(imported.capture_id).unwrap();
+    assert_eq!(capture.representations.len(), 3);
+    store.reindex().unwrap();
+    assert_eq!(
+        store
+            .capture(imported.capture_id)
+            .unwrap()
+            .representations
+            .len(),
+        3
+    );
+}
+
+#[test]
+#[ignore = "manual local performance qualification with real FLAC"]
+fn processing_concurrency_local_benchmark() {
+    let workers: usize = std::env::var("COLLECTOR_BENCH_WORKERS")
+        .unwrap_or("1".into())
+        .parse()
+        .unwrap();
+    assert!((1..=2).contains(&workers));
+    let tool = collector_providers::ConfiguredEncoder::probe(
+        collector_providers::EncoderKind::Flac,
+        "flac",
+    )
+    .unwrap();
+    let version = tool.version().to_string();
+    let converter = collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap();
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import_sectors(&service, &actor, collection.id, 0, 13500);
+    let service = Arc::new(service.with_audio_converter(Arc::new(converter)));
+    let jobs: Vec<_> = [1, 2]
+        .into_iter()
+        .map(|position| {
+            let mut input = derivative_command(&imported, position);
+            input.encoder_version = version.clone();
+            service
+                .prepare_music_derivative(&actor, imported.capture_id, input, &command())
+                .unwrap()
+        })
+        .collect();
+    let start = std::time::Instant::now();
+    let mut queue_ms = std::collections::BTreeMap::new();
+    thread::scope(|scope| {
+        for _ in 0..workers {
+            let service = &service;
+            scope.spawn(move || while service.run_next_job("local-benchmark").unwrap() {});
+        }
+        loop {
+            let mut settled = true;
+            for job in &jobs {
+                let view = service.job(&actor, *job).unwrap();
+                if view.state != JobState::Queued {
+                    queue_ms
+                        .entry(*job)
+                        .or_insert_with(|| start.elapsed().as_millis());
+                }
+                if matches!(view.state, JobState::Queued | JobState::Running) {
+                    settled = false;
+                }
+            }
+            if settled {
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+    });
+    eprintln!(
+        "queue_to_claim_ms={:?} (2ms polling resolution)",
+        queue_ms.values().collect::<Vec<_>>()
+    );
+    for job in jobs {
+        let view = service.job(&actor, job).unwrap();
+        assert_eq!(view.state, JobState::Completed, "{:?}", view.error);
+    }
+    let source = store.capture(imported.capture_id).unwrap().representations[0].clone();
+    let inventory = store
+        .package_inventory(collection.id, PackageScope::Representation(source.id))
+        .unwrap();
+    let source_bytes: u64 = inventory.files.iter().map(|file| file.bytes.0).sum();
+    eprintln!(
+        "workers={workers} album_ms={} source_bytes={source_bytes} full_validation_bytes={} (two complete validations per track; codec input/output additional)",
+        start.elapsed().as_millis(),
+        source_bytes * 4
+    );
+}
+
+#[test]
+fn expired_processing_claim_cannot_exceed_capacity_after_older_waiters_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Store::open_with_clock(
+        root.path().join("archive"),
+        root.path().join("state"),
+        clock.clone(),
+    )
+    .unwrap();
+    let input = |phase: &str| JobSpec {
+        id: JobId::new(),
+        user_id: UserId::new(),
+        collection_id: None,
+        item_id: None,
+        kind: "test.processing".into(),
+        phase: phase.into(),
+        total_units: 1,
+        request: serde_json::json!({}),
+        frozen_input: None,
+    };
+    let first = input("waiting_fixture");
+    let second = input("waiting_fixture");
+    store.enqueue_job(first.clone()).unwrap();
+    store.enqueue_job(second.clone()).unwrap();
+    clock.advance(1);
+    let expired = input("queued");
+    store.enqueue_job(expired.clone()).unwrap();
+    let old = store.claim_job("same-instance", 30).unwrap().unwrap();
+    assert_eq!(old.id, expired.id);
+    clock.advance(31);
+    assert!(
+        store.renew_job_lease(old.id, &old.claim_token, 30).is_err(),
+        "expired claims cannot revive after capacity is reclaimed"
+    );
+    assert!(
+        store
+            .cancellation_requested(old.id, &old.claim_token)
+            .is_err(),
+        "expired worker work must stop before publication"
+    );
+    let frozen = FrozenAcquisitionJob {
+        collection_binding: CollectionBinding::LegacyUnassigned,
+        request: ProviderRequest {
+            collection_id: CollectionId::new(),
+            provider: ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            operation: OperationId::new("org.junk.providers.accuraterip.acquire").unwrap(),
+            source_fingerprint: None,
+            query: RawJson::from_value(serde_json::json!({"disc":"expired"})),
+            maximum_response_bytes: 1024,
+        },
+        item_id: None,
+        snapshot_id: SnapshotId::new(),
+        created_at: chrono::Utc::now(),
+    };
+    assert!(store.acquisition_for_job(&old, &frozen).is_err());
+    assert!(store.acquisition_owners(&old).is_err());
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let links: u64 = db
+        .query_row("SELECT COUNT(*) FROM acquisition_links", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(links, 0, "an expired owner cannot admit shared work");
+    db.execute(
+        "UPDATE jobs SET phase='queued' WHERE phase='waiting_fixture'",
+        [],
+    )
+    .unwrap();
+    let active = store.claim_job("same-instance", 30).unwrap().unwrap();
+    let other = store.claim_job("same-instance", 30).unwrap().unwrap();
+    assert!(
+        store.claim_job("same-instance", 30).unwrap().is_none(),
+        "expired execution must wait for available capacity"
+    );
+    store
+        .complete_job(active.id, &active.claim_token, serde_json::json!({}))
+        .unwrap();
+    let recovered = store.claim_job("same-instance", 30).unwrap().unwrap();
+    assert_eq!(recovered.id, expired.id);
+    assert_ne!(recovered.claim_token, old.claim_token);
+    assert!(
+        store
+            .complete_job(old.id, &old.claim_token, serde_json::json!({}))
+            .is_err()
+    );
+    store
+        .complete_job(recovered.id, &recovered.claim_token, serde_json::json!({}))
+        .unwrap();
+    store
+        .complete_job(other.id, &other.claim_token, serde_json::json!({}))
+        .unwrap();
+}
+
+#[test]
+fn existing_queued_provider_requests_join_registry_on_upgrade_without_using_processing_capacity() {
+    let (root, store, actor, service, collection) = setup();
+    let first = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "before-registry"),
+            &command(),
+        )
+        .unwrap();
+    let second = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "before-registry"),
+            &command(),
+        )
+        .unwrap();
+    let created = service.job(&actor, first).unwrap().created_at;
+    drop(service);
+    drop(store);
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute_batch("DELETE FROM acquisition_waits; DELETE FROM acquisition_links; DELETE FROM processing_jobs WHERE job_id IN (SELECT id FROM jobs WHERE kind='provider_acquisition'); DELETE FROM jobs WHERE kind='provider_acquisition'; UPDATE jobs SET phase='queued' WHERE kind='catalog_acquisition'; PRAGMA user_version=19;").unwrap();
+    drop(db);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .with_streaming_provider(
+            ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            Arc::new(FixtureStreamingProvider {
+                calls: calls.clone(),
+                bytes: b"upgraded response".to_vec(),
+            }),
+        )
+        .unwrap();
+    assert_eq!(service.job(&actor, first).unwrap().created_at, created);
+    let mut claims = Vec::new();
+    for _ in 0..2 {
+        let id = JobId::new();
+        store
+            .enqueue_job(JobSpec {
+                id,
+                user_id: actor.user_id,
+                collection_id: Some(collection.id),
+                item_id: None,
+                kind: "test.processing".into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+        // Temporarily claim CPU fixtures explicitly before the older download class.
+        let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        db.execute(
+            "UPDATE jobs SET phase='waiting_fixture' WHERE kind='provider_acquisition'",
+            [],
+        )
+        .unwrap();
+        claims.push(store.claim_job("upgrade", 30).unwrap().unwrap());
+    }
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute(
+        "UPDATE jobs SET phase='queued' WHERE kind='provider_acquisition'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    service.run_next_job("upgrade").unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    for claim in claims {
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+    }
+    provider_drain(&service);
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, first),
+        completed_provider_snapshot(&service, &actor, second)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]

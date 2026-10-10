@@ -1427,7 +1427,7 @@ impl CollectionService {
         if job.state != crate::JobState::Completed {
             return Err(Error::Conflict);
         }
-        let Some(crate::JobResultView::CatalogSnapshot { snapshot_id }) = job.result else {
+        let Some(crate::JobResultView::CatalogSnapshot { snapshot_id, .. }) = job.result else {
             return Err(Error::Invalid("job has no metadata snapshot".into()));
         };
         let snapshot = self.processing.snapshot(SnapshotQuery {
@@ -1928,6 +1928,89 @@ impl CollectionService {
             updated_at: self.authentication.now(),
         };
         record.validate()?;
+        if let Some(old) = self
+            .processing
+            .metadata_authority(item.collection_id, item.id)?
+        {
+            let same_observation = match (old.observations.last(), record.observations.last()) {
+                (Some(old), Some(new)) => {
+                    let normalize =
+                        |observation: &MetadataRefreshObservation| -> Result<serde_json::Value> {
+                            let mut value = serde_json::to_value(observation)
+                                .map_err(|e| Error::Invalid(e.to_string()))?;
+                            if let Some(object) = value.as_object_mut() {
+                                object.remove("id");
+                                object.remove("observed_at");
+                            }
+                            // Snapshot references for empty/non-JSON responses describe
+                            // content and interpretation, rather than an occurrence ID.
+                            if let Some(raw) = value
+                                .get_mut("raw_observation")
+                                .and_then(|v| v.as_object_mut())
+                                && raw.get("provider").and_then(|v| v.as_str())
+                                    == Some(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
+                                && raw.keys().all(|key| {
+                                    matches!(
+                                        key.as_str(),
+                                        "provider"
+                                            | "snapshot_id"
+                                            | "snapshot_digest"
+                                            | "outcome"
+                                            | "observation"
+                                    )
+                                })
+                                && let Some(id) = raw.get("snapshot_id").and_then(|v| {
+                                    serde_json::from_value::<SnapshotId>(v.clone()).ok()
+                                })
+                                && let Ok(snapshot) = self.processing.snapshot(SnapshotQuery {
+                                    collection_id: item.collection_id,
+                                    snapshot_id: id,
+                                })
+                                && raw.get("snapshot_digest")
+                                    == Some(
+                                        &serde_json::to_value(&snapshot.digest)
+                                            .map_err(|e| Error::Invalid(e.to_string()))?,
+                                    )
+                                && snapshot.provider.0
+                                    == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+                            {
+                                let mut interpretation = snapshot.parsed_observation.value()?;
+                                if let Some(query) = interpretation
+                                    .get_mut("query")
+                                    .and_then(|v| v.as_object_mut())
+                                {
+                                    query.remove("refresh");
+                                }
+                                raw.remove("snapshot_id");
+                                raw.insert("observation".into(), interpretation);
+                                raw.insert(
+                                    "media_type".into(),
+                                    serde_json::json!(snapshot.media_type),
+                                );
+                                raw.insert("bytes".into(), serde_json::json!(snapshot.bytes));
+                            }
+                            Ok(value)
+                        };
+                    normalize(old)? == normalize(new)?
+                }
+                _ => false,
+            };
+            if same_observation
+                && serde_json::to_value(&old.inventory)
+                    .map_err(|e| Error::Invalid(e.to_string()))?
+                    == serde_json::to_value(&record.inventory)
+                        .map_err(|e| Error::Invalid(e.to_string()))?
+                && serde_json::to_value(&old.authority)
+                    .map_err(|e| Error::Invalid(e.to_string()))?
+                    == serde_json::to_value(&record.authority)
+                        .map_err(|e| Error::Invalid(e.to_string()))?
+                && old.display == record.display
+                && old.current_candidates == record.current_candidates
+                && old.resolution_policy == record.resolution_policy
+            {
+                return Ok(old);
+            }
+        }
         if let Some(claim) = claim {
             effects.publish_metadata_for_job(claim, record.clone())?;
         } else {

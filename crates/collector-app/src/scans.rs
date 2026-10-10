@@ -21,6 +21,9 @@ pub struct ScanPlan {
     pub blockers: Vec<String>,
     pub job: Option<JobView>,
     pub result: Option<ProcessingSummary>,
+    /// Recorded current disc identity, for choosing compatible saved responses.
+    pub accuraterip_query: Option<collector_modules::music::catalog::DbarQuery>,
+    pub accuraterip_structure_observation_id: Option<ObservationId>,
 }
 
 /// Input identity uses reference content; the original Snapshot identity remains
@@ -163,6 +166,54 @@ impl CollectionService {
             "org.junk.music.accuraterip-verification" => Some("org.junk.providers.accuraterip"),
             _ => None,
         };
+        // Read committed structure only. Planning must never inspect/hash audio.
+        // A package with several anchors needs the worker's selected-layout check;
+        // a source-level layout alone cannot identify that anchor unambiguously.
+        // Resolve the anchor independently of a response choice: an empty or
+        // invalid snapshot ID must not hide the query needed to choose one.
+        let music_layout_operation = matches!(
+            command.operation.as_str(),
+            collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
+                | collector_modules::music::CD_STRUCTURE_OPERATION
+        );
+        let single_music_anchor = if music_layout_operation {
+            self.modules
+                .scan_inputs(
+                    &OperationId::new(collector_modules::music::CD_STRUCTURE_OPERATION)?,
+                    &inventory,
+                    &RawJson::from_value(serde_json::json!({})),
+                )
+                .is_ok_and(|inputs| inputs.files.len() == 1)
+        } else {
+            false
+        };
+        let accuraterip_structure = if music_layout_operation {
+            let structure = self.latest_music_result(
+                capture.collection_id,
+                command.representation_id,
+                collector_modules::music::CD_STRUCTURE_OPERATION,
+            )?;
+            let structure = match structure {
+                Some(value) => Some(value),
+                None => self.latest_music_result(
+                    capture.collection_id,
+                    command.representation_id,
+                    "org.junk.music.import-analysis",
+                )?,
+            };
+            structure.and_then(|(id, value)| {
+                collector_modules::music::accuraterip_query_from_structure(&value)
+                    .ok()
+                    .map(|query| (id, query))
+            })
+        } else {
+            None
+        };
+        let accuraterip_structure_observation_id =
+            accuraterip_structure.as_ref().map(|(id, _)| *id);
+        let accuraterip_query = accuraterip_structure
+            .filter(|_| single_music_anchor)
+            .map(|(_, query)| query);
         if let Some(provider) = expected_provider {
             match command.snapshot_id {
                 Some(snapshot_id) => {
@@ -193,6 +244,13 @@ impl CollectionService {
                                     );
                                 }
                             }
+                            if let Some(expected) = &accuraterip_query {
+                                let observation = snapshot.parsed_observation
+                                    .parse::<collector_modules::music::catalog::DbarSnapshotObservation>();
+                                if !observation.is_ok_and(|value| value.query == *expected) {
+                                    blockers.push("This AccurateRip response belongs to a different disc. Choose a matching response or fetch one for this source.".into());
+                                }
+                            }
                         }
                         Err(Error::NotFound) => blockers.push(
                             "Choose an available reference snapshot from this collection.".into(),
@@ -200,6 +258,8 @@ impl CollectionService {
                         Err(error) => return Err(error),
                     }
                 }
+                None if provider == "org.junk.providers.accuraterip"
+                    && selection.get("snapshot_id").is_none() => {}
                 None => blockers.push("Choose a reference snapshot before checking.".into()),
             }
         } else if command.snapshot_id.is_some()
@@ -220,6 +280,8 @@ impl CollectionService {
             blockers,
             job: None,
             result: None,
+            accuraterip_query,
+            accuraterip_structure_observation_id,
         };
         if !plan.blockers.is_empty() {
             return Ok(plan);

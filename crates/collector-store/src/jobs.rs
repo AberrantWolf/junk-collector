@@ -490,22 +490,9 @@ impl Store {
                     && expected
                         .iter()
                         .all(|id| evidence.iter().any(|value| value.id == *id))
-            } else if kind == "catalog_acquisition" {
-                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
-                request
-                    .get("snapshot_id")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|value| value.parse::<SnapshotId>().ok())
-                    .is_some_and(|snapshot_id| {
-                        lock(&self.db).is_ok_and(|db| {
-                            db.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id=?)",
-                                [snapshot_id.to_string()],
-                                |row| row.get::<_, bool>(0),
-                            )
-                            .unwrap_or(false)
-                        })
-                    })
+            } else if kind == "provider_acquisition" {
+                let db = lock(&self.db)?;
+                db.query_row("SELECT EXISTS(SELECT 1 FROM private.processing_jobs p JOIN snapshots s ON s.id=json_extract(p.output_references,'$[0]') WHERE p.job_id=? AND p.checkpoint='snapshot_committed')",[&id],|r|r.get::<_,bool>(0)).map_err(storage)?
             } else if kind == "music_derivative" {
                 let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
                 let capture: CaptureId =
@@ -875,6 +862,22 @@ impl Store {
             member.view.state = collector_app::BulkMemberState::Queued;
             tx.execute("UPDATE private.bulk_library_members SET job_id=?,state='queued',record=? WHERE batch_id=? AND position=?",params![spec.id.to_string(),serde_json::to_string(&member).map_err(storage)?,parent.to_string(),position]).map_err(storage)?;
         }
+        let acquisition = match &spec.frozen_input {
+            Some(FrozenJobInput::Acquisition(input)) => Some(input),
+            Some(FrozenJobInput::MetadataResolution(input)) => Some(&input.acquisition),
+            _ => None,
+        };
+        if spec.kind != "provider_acquisition"
+            && let Some(input) = acquisition
+        {
+            Self::attach_acquisition(&tx, spec.id, input, now)?;
+            tx.execute("INSERT OR REPLACE INTO private.acquisition_waits(owner_job,acquisition_job) SELECT owner_job,acquisition_job FROM private.acquisition_links WHERE owner_job=? AND input_key=?",params![spec.id.to_string(),collector_app::acquisition_key(input)?]).map_err(storage)?;
+            tx.execute(
+                "UPDATE private.jobs SET phase=CASE WHEN (SELECT COUNT(*) FROM private.acquisition_links WHERE acquisition_job=(SELECT acquisition_job FROM private.acquisition_links WHERE owner_job=jobs.id LIMIT 1))>1 THEN 'waiting_shared_provider' ELSE 'waiting_provider' END WHERE id=? AND state='queued'",
+                [spec.id.to_string()],
+            )
+            .map_err(storage)?;
+        }
         self.record_command(&tx, &spec.id)?;
         tx.commit().map_err(storage)?;
         Ok(spec.id)
@@ -906,21 +909,16 @@ impl Store {
                      candidate.claim_token IS NOT NULL AND
                      (candidate.worker_instance IS NULL OR candidate.worker_instance<>? OR candidate.lease_expires<=?))
                  )
-                 AND NOT EXISTS(
-                   SELECT 1 FROM private.jobs active
-                   WHERE active.user_id=candidate.user_id
-                     AND active.state IN ('running','cancel_requested')
-                     AND active.lease_expires>?
-                     AND active.id<>candidate.id
-                 )
                  AND (
-                   candidate.state='running' OR
                    (SELECT COUNT(*) FROM private.jobs active
-                    WHERE active.state IN ('running','cancel_requested')
-                      AND active.lease_expires>?) < 2
+                    WHERE active.id<>candidate.id
+                      AND active.state IN ('running','cancel_requested')
+                      AND active.lease_expires>?
+                      AND (active.kind='provider_acquisition')=(candidate.kind='provider_acquisition'))
+                      < CASE WHEN candidate.kind='provider_acquisition' THEN 1 ELSE 2 END
                  )
                  ORDER BY candidate.created_at,candidate.id LIMIT 1",
-                params![worker_instance, now, now, now],
+                params![worker_instance, now, now],
                 |row| row.get(0),
             )
             .optional()
@@ -1027,7 +1025,7 @@ impl Store {
                    completed_units=CASE WHEN phase<>? OR updated_at<? THEN ? ELSE completed_units END,
                    lease_expires=?,
                    updated_at=CASE WHEN phase<>? OR updated_at<? THEN ? ELSE updated_at END
-                 WHERE id=? AND claim_token=? AND state='running' AND completed_units<=? AND ?<=total_units",
+                 WHERE id=? AND claim_token=? AND state='running' AND completed_units<=? AND ?<=total_units AND lease_expires>?",
                 params![
                     phase,
                     now,
@@ -1043,6 +1041,7 @@ impl Store {
                     claim_token,
                     completed_units,
                     completed_units,
+                    now,
                 ],
             )
             .map_err(storage)?;
@@ -1065,11 +1064,12 @@ impl Store {
         let changed = lock(&self.db)?
             .execute(
                 "UPDATE private.jobs SET lease_expires=?
-                 WHERE id=? AND claim_token=? AND state='running'",
+                 WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
                 params![
                     now.saturating_add(lease_seconds),
                     id.to_string(),
                     claim_token,
+                    now,
                 ],
             )
             .map_err(storage)?;
@@ -1085,8 +1085,11 @@ impl Store {
         claim_token: &str,
         result: serde_json::Value,
     ) -> Result<()> {
-        let db = lock(&self.db)?;
-        let prior: Option<String> = db
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let prior: Option<String> = tx
             .query_row(
                 "SELECT result FROM private.jobs WHERE id=? AND claim_token=? AND state='running'",
                 params![id.to_string(), claim_token],
@@ -1111,7 +1114,7 @@ impl Store {
         if result.len() > 1024 * 1024 {
             return Err(Error::Invalid("job result is too large".into()));
         }
-        let changed = db
+        let changed = tx
             .execute(
                 "UPDATE private.jobs SET state='completed',phase='completed',completed_units=total_units,result=?,error=NULL,worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=? WHERE id=? AND claim_token=? AND state='running'",
                 params![result, self.clock.now().timestamp(), id.to_string(), claim_token],
@@ -1120,7 +1123,16 @@ impl Store {
         if changed != 1 {
             return Err(Error::CommandInProgress);
         }
-        Ok(())
+        let value: serde_json::Value = serde_json::from_str(&result).map_err(storage)?;
+        if let Some(raw) = value
+            .get("completion")
+            .or(Some(&value))
+            .and_then(|v| v.get("snapshot_id"))
+            .and_then(|v| v.as_str())
+        {
+            Self::bind_snapshot(&tx, id, raw.parse().map_err(storage)?)?;
+        }
+        tx.commit().map_err(storage)
     }
 
     pub(crate) fn fail_job_record(
@@ -1165,8 +1177,8 @@ impl Store {
         let db = lock(&self.db)?;
         let cancelled: bool = db.query_row(
                 "SELECT state='cancel_requested' OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
-                 WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested')",
-                params![id.to_string(), claim_token],
+                 WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
+                params![id.to_string(), claim_token, self.clock.now().timestamp()],
                 |row| row.get(0),
             )
             .optional()
@@ -1512,6 +1524,7 @@ impl Store {
             "error": error,
             "failed_at": failed_at,
         }));
+        tx.execute("DELETE FROM private.acquisition_links WHERE owner_job=? AND snapshot_id IS NULL AND acquisition_job IN (SELECT id FROM private.jobs WHERE state IN ('failed','cancelled'))",[id.to_string()]).map_err(storage)?;
         tx.execute(
             "UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,
                attempt=attempt+1,error=NULL,result=?,cancellation_requested=0,
@@ -1840,7 +1853,7 @@ impl Store {
 
 // Shared computation remains eligible while an independent owner needs it.
 // A committed publication may finish its private receipt after supersession.
-fn job_generation_obsolete(db: &rusqlite::Connection, id: JobId) -> Result<bool> {
+pub(crate) fn job_generation_obsolete(db: &rusqlite::Connection, id: JobId) -> Result<bool> {
     db.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?", [id.to_string()], |row|row.get::<_,bool>(0)).optional().map_err(storage).map(|value|value.unwrap_or(false))
 }
 

@@ -850,9 +850,12 @@ impl CollectionService {
                     source.id,
                     collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
                 )? {
-                    Some(collector_modules::music::CdProcessingResult::AudioVerification {
-                        verification,
-                    }) => Some(verification.status),
+                    Some((
+                        _,
+                        collector_modules::music::CdProcessingResult::AudioVerification {
+                            verification,
+                        },
+                    )) => Some(verification.status),
                     _ => None,
                 };
                 sources.push(MusicDiscSourceCoverage {
@@ -895,12 +898,17 @@ impl CollectionService {
         })
     }
 
-    fn latest_music_result(
+    pub(super) fn latest_music_result(
         &self,
         collection_id: CollectionId,
         source: RepresentationId,
         operation: &str,
-    ) -> Result<Option<collector_modules::music::CdProcessingResult>> {
+    ) -> Result<
+        Option<(
+            collector_core::ObservationId,
+            collector_modules::music::CdProcessingResult,
+        )>,
+    > {
         let scope = PackageScope::Representation(source);
         let fingerprint = match self.processing.recorded_source(collection_id, scope) {
             Ok(value) => value,
@@ -931,14 +939,14 @@ impl CollectionService {
                             .parse::<collector_modules::music::CdProcessingResult>()
                             .ok()
                     }) {
-                        return Ok(Some(result));
+                        return Ok(Some((observation.id, result)));
                     }
                 } else if let Ok(result) = observation
                     .typed_result
                     .payload
                     .parse::<collector_modules::music::CdProcessingResult>()
                 {
-                    return Ok(Some(result));
+                    return Ok(Some((observation.id, result)));
                 }
             }
             if page.next_cursor.is_none() {
@@ -957,7 +965,7 @@ impl CollectionService {
             collector_modules::music::CD_STRUCTURE_OPERATION,
             "org.junk.music.import-analysis",
         ] {
-            if let Some(layout @ collector_modules::music::CdProcessingResult::Layout { .. }) =
+            if let Some((_, layout @ collector_modules::music::CdProcessingResult::Layout { .. })) =
                 self.latest_music_result(collection_id, source, operation)?
             {
                 return Ok(Some(layout));

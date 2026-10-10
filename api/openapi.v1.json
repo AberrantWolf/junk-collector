@@ -10147,6 +10147,38 @@
         },
         "additionalProperties": false
       },
+      "DbarQuery": {
+        "type": "object",
+        "required": [
+          "track_count",
+          "accuraterip_id1",
+          "accuraterip_id2",
+          "cddb_id"
+        ],
+        "properties": {
+          "accuraterip_id1": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "accuraterip_id2": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cddb_id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "DeviceId": {
         "type": "string",
         "format": "uuid"
@@ -12494,6 +12526,13 @@
         "type": "string",
         "format": "uuid"
       },
+      "JobProgressKind": {
+        "type": "string",
+        "enum": [
+          "measured",
+          "indeterminate"
+        ]
+      },
       "JobResultView": {
         "oneOf": [
           {
@@ -12551,6 +12590,16 @@
                   "catalog_snapshot"
                 ]
               },
+              "response_status": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProviderResponseStatus"
+                  }
+                ]
+              },
               "snapshot_id": {
                 "$ref": "#/components/schemas/SnapshotId"
               }
@@ -12573,6 +12622,7 @@
         "type": "object",
         "required": [
           "id",
+          "progress_kind",
           "kind",
           "state",
           "phase",
@@ -12642,6 +12692,19 @@
           },
           "phase": {
             "type": "string"
+          },
+          "progress_kind": {
+            "$ref": "#/components/schemas/JobProgressKind"
+          },
+          "provider_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderResponseStatus"
+              }
+            ]
           },
           "result": {
             "oneOf": [
@@ -13764,6 +13827,16 @@
               },
               {
                 "$ref": "#/components/schemas/MetadataRefreshOutcome"
+              }
+            ]
+          },
+          "response_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderResponseStatus"
               }
             ]
           },
@@ -15968,6 +16041,7 @@
               "type": "object",
               "required": [
                 "id",
+                "progress_kind",
                 "kind",
                 "state",
                 "phase",
@@ -16037,6 +16111,19 @@
                 },
                 "phase": {
                   "type": "string"
+                },
+                "progress_kind": {
+                  "$ref": "#/components/schemas/JobProgressKind"
+                },
+                "provider_status": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderResponseStatus"
+                    }
+                  ]
                 },
                 "result": {
                   "oneOf": [
@@ -16327,6 +16414,15 @@
                 "content_permissions"
               ],
               "properties": {
+                "accuraterip": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/PresentedAudioCheck"
+                  }
+                },
                 "assets": {
                   "type": "array",
                   "items": {
@@ -17181,6 +17277,28 @@
           }
         }
       },
+      "PresentedAudioCheck": {
+        "type": "object",
+        "description": "Recorded checks for visible, currently associated originals. This is not an\nalbum-coverage claim: missing discs and unchecked originals remain distinct.",
+        "required": [
+          "source_id"
+        ],
+        "properties": {
+          "source_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AudioVerificationStatus"
+              }
+            ]
+          }
+        }
+      },
       "PresentedCapture": {
         "type": "object",
         "required": [
@@ -17349,6 +17467,15 @@
           "content_permissions"
         ],
         "properties": {
+          "accuraterip": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PresentedAudioCheck"
+            }
+          },
           "assets": {
             "type": "array",
             "items": {
@@ -17757,6 +17884,15 @@
             "type": "string"
           }
         }
+      },
+      "ProviderResponseStatus": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "shared",
+          "downloaded",
+          "unchanged"
+        ]
       },
       "PublishProviderArtworkCommand": {
         "type": "object",
@@ -18228,6 +18364,27 @@
           "blockers"
         ],
         "properties": {
+          "accuraterip_query": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DbarQuery",
+                "description": "Recorded current disc identity, for choosing compatible saved responses."
+              }
+            ]
+          },
+          "accuraterip_structure_observation_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ObservationId"
+              }
+            ]
+          },
           "blockers": {
             "type": "array",
             "items": {
@@ -18334,6 +18491,12 @@
           "created_at"
         ],
         "properties": {
+          "acquisition_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "bytes": {
             "$ref": "#/components/schemas/ByteLength"
           },

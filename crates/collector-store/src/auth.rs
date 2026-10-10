@@ -1734,7 +1734,7 @@ fn open_local_state(state: &Path) -> Result<(std::fs::File, Connection)> {
     let version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if !(5..=19).contains(&version) {
+    if !(5..=20).contains(&version) {
         return Err(Error::Unavailable(format!(
             "private state schema {version} must be upgraded by this server before local account operations"
         )));

@@ -51,6 +51,16 @@ not require permanent provenance history. The current append-only storage and ra
 observations still exist; no compaction, record deletion or retention conversion
 has been implemented. See [the accepted scope policy](decisions/home-lab-scope.md).
 
+## Game-disc listening scope — 2026-10-10
+
+Listening to CD audio tracks preserved with games through the normal music
+interface and Trash Amp is requested future work, not an implemented capability.
+Preparation currently requires a music collection and does not support mixed-mode
+audio extraction. [HL-08](remaining-work.md#game-disc-audio-in-music-listening-and-trash-amp)
+owns the complete cross-module preparation, discovery, playlist and native/offline
+delivery; no duplicate music import or proprietary game-audio decoding is required
+by that initial scope.
+
 ## Compact album format availability — 2026-10-09
 
 Album browsing and preparation use small inline FLAC/Opus labels beside track
@@ -68,6 +78,55 @@ and progress controls. The desktop entry panel now meets the
 viewport right edge and player dock without page gutters; its full-height scroll
 area stays fixed while the library scrolls. Mobile retains the ordinary page layout. See the
 [dated validation](validation.md#compact-album-format-availability--2026-10-09).
+
+## AccurateRip browsing shortcut — 2026-10-09
+
+Album rows replace the independent legacy Identity flag with AccurateRip results
+for their visible, currently associated preserved originals. Unchecked, verified,
+mismatch, no-data, incomplete-search, ambiguous-offset, unavailable and unsupported
+outcomes stay distinct; multiple originals show the verified fraction when any pass.
+Mismatches remain explicit; mixed unsuccessful outcomes are inconclusive. This does
+not assert completeness of album disc coverage. The typed presentation reads
+recorded observations against committed source fingerprints without reading or
+hashing audio. Curators can open the checks directly from the status column or
+Album management → Check audio with AccurateRip; per-disc shortcuts focus that
+original. The existing processing workflow owns snapshot acquisition and check
+submission. Readers see results without write controls. See the
+[dated validation](validation.md#accuraterip-browsing-shortcut--2026-10-09).
+Real owned-disc/live AccurateRip qualification remains outstanding in HL-05.
+
+## AccurateRip response selection repair — 2026-10-09
+
+The check panel previously offered collection-wide AccurateRip responses and could
+default to another disc's response, causing the worker to reject the query before
+checking audio. Single-anchor packages now get a server-computed query from current
+recorded structure/import analysis. Admission rejects mismatched references; the
+panel chooses only responses matching track count, both AccurateRip IDs and CDDB
+ID, repairs a stale saved choice, and loads older snapshot pages. Missing matches
+show fetch guidance. Multiple-anchor packages keep explicit choices and the strict
+worker check. No checksum algorithm, saved evidence or originals changed. See
+[validation](validation.md#accuraterip-response-selection-repair--2026-10-09).
+This does not complete HL-05 real owned-disc/live-provider qualification.
+
+Follow-up recovery fix: empty response selections retain the source chooser and
+show one actionable prerequisite instead of a UUID parse failure. Scan plans expose
+the usable structure observation; acquisition accepts imported structure under the
+same validation as a dedicated check. The fetch action is therefore available for
+import-only layouts even when history is paginated. A missing layout has an explicit
+Inspect CD structure action. Existing dedicated-check acquisition stays available.
+
+
+## File-check progress and development audio performance — 2026-10-09
+
+Active processing operations now carry typed indeterminate progress instead of
+presenting an untouched source-byte counter as zero completion. Actual worker
+phases distinguish source validation, AccurateRip checksum/offset computation,
+final source recheck and recording the result. Both the check panel and Work
+history use an indeterminate meter; other measured workflows retain counters.
+Shared disc decoding and AccurateRip loops are optimized in development builds,
+which previously ran unoptimized on the home-server debug binary. Algorithms and
+coverage are unchanged, and running Jobs are not interrupted by this code change.
+See [validation](validation.md#file-check-progress--2026-10-09).
 
 ## October 9 TODO delivery
 
@@ -303,10 +362,11 @@ The full first release, native clients and public deployment remain later target
 - Configured server inbox inventory/import API using the same source-retaining staging and evidence path; background upload errors persist as failed jobs.
 - P02.1/P02.2 advance private state to schema v8 and implement typed durable jobs
   plus a local executable scheduler. Transactional FIFO claiming enforces a
-  two-job global bound and one active job per user; 30-second leases,
+  two processing executions plus one reserved provider acquisition globally,
+  including two same-account processing Jobs; 30-second leases,
   five-second heartbeats, claim-token fencing, restart takeover, and bounded
-  progress persistence are permanent-test covered. Two server worker loops run
-  integrity verification as the first consumer. Its deterministic Evidence
+  progress persistence are permanent-test covered. Three server execution loops
+  share a process-instance identity; integrity verification was the first consumer. Its deterministic Evidence
   identity makes recovery after archive publication idempotent, and the existing
   verification HTTP action now returns the actual queued Job identity.
 - P02.3 separates incomplete upload staging from executable queue state and moves
@@ -1085,3 +1145,25 @@ results, destructive reset choices and security requirements remain visible.
 This changes presentation only; evidence, authorization and workflow policy remain
 unchanged. Browser checks cover info-control keyboard/mobile behavior and Escape
 inside a parent dialog; validation outcomes are recorded separately.
+
+
+## Concurrent processing and response reuse — 2026-10-10
+
+Implemented: two global processing slots plus one reserved provider-download slot,
+including two processing Jobs from the same account. Direct, guided and metadata
+work use durable collection-scoped shared acquisitions with private requester Jobs,
+independent cancellation and committed-result recovery. Reconciliation runs every
+five seconds independently of workers and traverses unfinished workflow pages.
+Identical AccurateRip/MusicBrainz responses reuse canonical snapshots; unchanged
+metadata resolution does not append redundant authority/candidate revisions.
+The web exposes typed provider progress and resumes pending AccurateRip requests
+with their original receipt after reopening.
+
+Administrator CLI backup/inspect/apply commands convert proven existing duplicate
+payloads with both roots exclusively locked and a verified full backup. Historical
+IDs and evidence remain readable through portable checksummed references, including
+reindex and archive-only recovery. Unknown or unresolved inputs are skipped;
+corruption fails closed. See [conversion](snapshot-duplicate-conversion.md) and
+[delivery validation](validation/concurrent-processing.md). No live archive was
+converted. Full-source validation is retained; disk contention and hashing redesign
+remain separate work. This does not qualify live-provider or real-disc HL-05 checks.

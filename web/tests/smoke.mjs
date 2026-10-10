@@ -28,7 +28,8 @@ const sum32=(first,last)=>Number((BigInt(first+last)*BigInt(last-first+1)/2n)&0x
 const checksums=[sum32(2940,trackFrames[0]),sum32(1,trackFrames[1]-2940)];
 const dbar=Buffer.alloc(31);dbar[0]=2;dbar.writeUInt32LE(676,1);dbar.writeUInt32LE(1804,5);dbar.writeUInt32LE(0x07000602,9);
 for(let index=0;index<2;index++){const offset=13+index*9;dbar[offset]=17;dbar.writeUInt32LE(checksums[index],offset+1);dbar.writeUInt32LE(0,offset+5);}
-const accurateRipServer=createServer((_request,response)=>{response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
+let accurateRipRequests=0;let accurateRipDelay=0;
+const accurateRipServer=createServer(async(_request,response)=>{accurateRipRequests++;if(accurateRipDelay)await new Promise(resolve=>setTimeout(resolve,accurateRipDelay));response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
 await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
 let bulkFixture=false;const bulkDiscIds=[];
 const metadataRequests=[];const metadataProviderServer=createServer((request,response)=>{metadataRequests.push(request.url);const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const discId=url.pathname.split('/').at(-1);if(bulkFixture&&!bulkDiscIds.includes(discId))bulkDiscIds.push(discId);const body=Buffer.from(JSON.stringify({id:discId,releases:releases.map(value=>({...value,...bulkFixture?{title:'Bulk resolved album'}:{},media:bulkFixture?bulkDiscIds.map((id,index)=>({position:index+1,discs:[{id}],tracks:[{position:1,title:'Opening'}]})):[{discs:[{id:discId}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const matches=url.searchParams.get('query')?.includes('unmatched fixture')?[]:releases;const body=Buffer.from(JSON.stringify({releases:matches}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
@@ -466,7 +467,7 @@ try{
  // after overriding that title, so subsequent list selections use all entries.
  await page.getByRole('searchbox',{name:'Search collection'}).fill('');
  await page.reload();
- await page.getByRole('button',{name:/A test pressing/}).click();
+ await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
  await clickAction(page,'Edit / attach files');
  await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
  await curator.getByText('Advanced manual import review',{exact:true}).click();
@@ -574,9 +575,9 @@ try{
  await conflictReview.getByRole('button',{name:'Save review',exact:true}).click();
  await importWorkspace.getByText('Review saved.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Close curator'}).click();
- await page.getByRole('button',{name:/A test pressing/}).waitFor();
+ await page.locator('.collection-row').filter({hasText:'A test pressing'}).waitFor();
  await page.reload();
- await page.getByRole('button',{name:/A test pressing/}).click();
+ await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
  await clickAction(page,'Edit / attach files');
  const restoredCurator=page.getByRole('dialog',{name:/Edit entry/});
  await restoredCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
@@ -635,13 +636,12 @@ try{
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor({state:'hidden'});
  await restoredCurator.getByRole('button',{name:'Open Metadata workspace',exact:true}).waitFor();
  await restoredCurator.getByRole('button',{name:'Close curator'}).click();
- await page.getByRole('button',{name:/A test pressing/}).click();
- await clickAction(page,'Edit / attach files');
+ await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
+ await clickAction(page,'Check audio with AccurateRip');
  const cdCurator=page.getByRole('dialog',{name:/Edit entry/});
- await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
- await cdCurator.getByText('Technical processing history',{exact:true}).click();
  const musicAnalysis=cdCurator.getByRole('region',{name:'Music CD checks'});await musicAnalysis.waitFor();
  const cdDocket=musicAnalysis.locator('.import-docket').filter({hasText:'2 files'});
+ await expect(cdDocket.locator('select').first()).toHaveValue('org.junk.music.accuraterip-verification');
  await cdDocket.locator('select').first().selectOption('org.junk.music.cd-structure');
  await cdDocket.locator('select').nth(1).selectOption('0');
  await cdDocket.getByRole('button',{name:'Run check',exact:true}).click();
@@ -657,6 +657,21 @@ try{
  assert.match(await cdDocket.innerText(), /Unavailable physical edge frames/);
  assert.match(await cdDocket.innerText(),/Track 1: Verified, computed at 0 stereo sample frames/);
  assert.match(await cdDocket.innerText(),/Track 2: Verified, computed at 0 stereo sample frames/);
+ // The album-list shortcut opens the correct source without selecting the row first.
+ const checkedAlbumId=await page.evaluate(()=>new URL(location.href).searchParams.get('item'));
+ const checkedAlbum=await page.evaluate(async id=>(await fetch('/api/v1/items/'+id)).json(),checkedAlbumId);
+ assert.equal(checkedAlbum.accuraterip.filter(check=>check.status==='verified').length,1);
+ assert.ok(checkedAlbum.accuraterip.some(check=>check.status===null),'the unchecked original must not acquire the other disc’s result');
+ const checkedLabel=`1/${checkedAlbum.accuraterip.length} verified`;
+ await cdCurator.getByRole('button',{name:'Close curator'}).click();
+ await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
+ const checkShortcut=page.getByRole('button',{name:`AccurateRip for ${checkedAlbum.title}: ${checkedLabel}. Open audio checks`,exact:true});
+ await checkShortcut.waitFor();await checkShortcut.click();
+ await expect(cdCurator).toBeVisible();
+ await expect(cdCurator.locator('.import-docket select').first()).toHaveValue('org.junk.music.accuraterip-verification');
+ await cdCurator.getByRole('button',{name:'Close curator'}).click();
+ await page.locator(`[data-item-id="${checkedAlbumId}"]`).click();
+ await clickAction(page,'Edit / attach files');
  await cdCurator.getByRole('button',{name:'Artwork',exact:true}).click();
  assert.equal(await cdCurator.getByRole('img',{name:'Private archival cover',exact:true}).count(),1,'music analysis displaced artwork from the artwork task');
  await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
@@ -697,12 +712,34 @@ try{
   await cdCurator.getByRole('button',{name:'Details',exact:true}).click();
   assert.equal(await cdCurator.getByLabel('Title',{exact:true}).isDisabled(),false,'accepted encoding blocked unrelated inventory editing');
   await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
+  // Both processing slots may belong to this account; provider IO has reserved capacity.
+  await expect.poll(async()=>page.evaluate(async()=>((await(await fetch('/api/v1/jobs?limit=100')).json()).items).filter(job=>job.kind==='music_derivative'&&job.state==='running').length),{timeout:15000}).toBe(2);
+  const beforeDownload=accurateRipRequests;accurateRipDelay=3000;
+  await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
+  if(!await musicAnalysis.isVisible())await cdCurator.getByText('Technical processing history',{exact:true}).click();
+  const [providerRequest]=await Promise.all([page.waitForRequest(request=>request.method()==='POST'&&request.url().includes('/accuraterip')),cdDocket.getByRole('button',{name:'Fetch AccurateRip response',exact:true}).click()]);
+  const duplicate=await page.evaluate(async({url,body})=>{const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body});if(!response.ok)throw new Error(await response.text());return response.json();},{url:providerRequest.url(),body:providerRequest.postData()});
+  await expect.poll(()=>accurateRipRequests,{timeout:3000}).toBe(beforeDownload+1);
+  assert.equal(await page.evaluate(async()=>((await(await fetch('/api/v1/jobs?limit=100')).json()).items).filter(job=>job.kind==='music_derivative'&&job.state==='running').length),2,'provider download waited for encoding capacity');
+  await cdDocket.getByText('Sharing provider download',{exact:true}).waitFor();
+  const cancellationPage=await context.newPage();await cancellationPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
+  await cancellationPage.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Activity',exact:true}).click();
+  await cancellationPage.locator(`[data-work-open="job:${duplicate.job_id||duplicate.id}"]`).click();
+  await cancellationPage.getByRole('button',{name:'Cancel task',exact:true}).click();
+  await cancellationPage.getByRole('article',{name:/Import catalog Cancelled/}).waitFor();
+  await cancellationPage.close();
+  await cdCurator.getByRole('button',{name:'Close curator'}).click();
+  await clickAction(page,'Check audio with AccurateRip');
+  await cdDocket.getByText('Checked again; response unchanged',{exact:true}).waitFor({timeout:30000});
+  await expect.poll(async()=>page.evaluate(async id=>(await(await fetch('/api/v1/jobs/'+id)).json()).state,duplicate.job_id||duplicate.id),{timeout:30000}).toBe('cancelled');
+  assert.equal(accurateRipRequests,beforeDownload+1,'equivalent concurrent requests downloaded twice');accurateRipDelay=0;console.log('Concurrent provider journey passed: two same-account encodes, reserved download, shared waiting, one-requester cancellation, reopen and unchanged refresh.');
+  await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
   // Preparing publishes Capture outputs independently of an inventory save.
   const inventoryRevision=await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}`)).json()).revision;});
 
   await preparation.getByRole('link',{name:/FLAC/}).first().waitFor({timeout:30000});
   assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}/music-preparation-batches`)).json()).some(batch=>batch.queued>0||batch.running>0);}),true,'all batch work settled before concurrent player acceptance could be observed');
-  const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await concurrentPage.locator('.collection-scope summary').click();await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.getByRole('button',{name:/A test pressing/}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPage.getByRole('button',{name:'Add album to queue',exact:true}).click();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
+  const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await concurrentPage.locator('.collection-scope summary').click();await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPage.getByRole('button',{name:'Add album to queue',exact:true}).click();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
   await albumBatch.getByText('2/2 ready',{exact:true}).waitFor({timeout:30000});
   await preparation.getByText('All album tracks are ready as FLAC.',{exact:false}).waitFor();
   assert.equal(await preparation.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).count(),0,'completed album still offers preparation');
@@ -727,7 +764,7 @@ try{
   const more=refreshedPlayer.getByRole('button',{name:'Track 1 actions',exact:true});await more.focus();await page.keyboard.press('Enter');await refreshedPlayer.getByRole('button',{name:'Add to queue',exact:true}).waitFor();await page.keyboard.press('Escape');await expect(more).toBeFocused();
   await page.reload();
   await page.locator('.collection-scope summary').click();await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
-  await page.getByRole('button',{name:/A test pressing/}).click();
+  await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
   await page.getByRole('region',{name:'Album tracks'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
   await clickAction(page,'Edit / attach files');
   await cdCurator.waitFor();
@@ -774,7 +811,7 @@ try{
   await playbackPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
   await playbackPage.evaluate(async({username,password})=>{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password,device_name:'Playback qualification'})});if(!response.ok)throw new Error(`viewer login: ${response.status} ${await response.text()}`);},{username:'playback-viewer',password:playbackPassword});
   if(localSetup){await playbackPage.goto('http://localhost:19841');await playbackPage.getByText('Client access only at this address.',{exact:false}).waitFor();}else await playbackPage.reload();
-  await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.getByRole('button',{name:/A test pressing/}).click();
+  await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();
   const player=playbackPage.getByRole('region',{name:'Music player'});await player.waitFor();await player.getByRole('button',{name:'Queue (0)',exact:true}).waitFor();const album=playbackPage.getByRole('region',{name:'Album tracks'});
   const viewerArtwork=playbackPage.locator('.detail').getByRole('img',{name:/Cover Art Archive image/});await viewerArtwork.waitFor();
   assert.equal(await viewerArtwork.count(),1,'viewer player did not receive the shared effective artwork');
@@ -837,7 +874,7 @@ try{
   await rebuiltPlayer.getByRole('button',{name:'Queue (1)',exact:true}).click();
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
   await detachedAudio.dispose();
-  await playbackPage.getByRole('button',{name:/A test pressing/}).click();await rebuiltPlayer.waitFor();
+  await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();await rebuiltPlayer.waitFor();
   const expiredAudio=await rebuiltPlayer.locator('audio').elementHandle();
   await playbackContext.clearCookies();
     await playbackPage.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
@@ -846,7 +883,7 @@ try{
   await playbackPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
   await playbackPage.evaluate(async password=>{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'playback-viewer',password,device_name:'Playback reauthentication'})});if(!response.ok)throw new Error(`viewer reauthentication: ${response.status}`);},playbackPassword);
   if(localSetup)await playbackPage.goto('http://localhost:19841');else await playbackPage.reload();
-  await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.getByRole('button',{name:/A test pressing/}).click();await rebuiltPlayer.waitFor();
+  await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();await rebuiltPlayer.waitFor();
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
 
   await page.evaluate(async({collectionId})=>{const grants=await(await fetch(`/api/v1/collections/${collectionId}/grants`)).json();const grant=grants.items.find(value=>value.username==='playback-viewer');const response=await fetch(`/api/v1/collections/${collectionId}/grants/playback-viewer?expected_revision=${grant.revision}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`grant revocation: ${response.status} ${await response.text()}`);},playbackFixture);
@@ -935,7 +972,7 @@ try{
  // Queue playback remains the same element while browsing and adding another album.
  if(importAudio){
   await page.getByRole('button',{name:'Back to results',exact:true}).click();
-  await page.getByRole('button',{name:/A test pressing/}).click();
+  await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
   assert.deepEqual(await importAudio.evaluate(element=>({connected:element.isConnected,paused:element.paused})),{connected:true,paused:false},'browsing another album stopped the queue');
   await page.getByRole('button',{name:'Add album to queue',exact:true}).click();
   const dock=page.getByRole('region',{name:'Music player'});

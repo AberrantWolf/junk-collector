@@ -2919,6 +2919,16 @@ export interface components {
             catalog: string;
             system: string;
         };
+        DbarQuery: {
+            /** Format: int32 */
+            accuraterip_id1: number;
+            /** Format: int32 */
+            accuraterip_id2: number;
+            /** Format: int32 */
+            cddb_id: number;
+            /** Format: int32 */
+            track_count: number;
+        };
         /** Format: uuid */
         DeviceId: string;
         Digest: {
@@ -3486,6 +3496,8 @@ export interface components {
         };
         /** Format: uuid */
         JobId: string;
+        /** @enum {string} */
+        JobProgressKind: "measured" | "indeterminate";
         JobResultView: {
             /** @enum {string} */
             kind: "game_identification";
@@ -3499,6 +3511,7 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "catalog_snapshot";
+            response_status?: null | components["schemas"]["ProviderResponseStatus"];
             snapshot_id: components["schemas"]["SnapshotId"];
         };
         /** @enum {string} */
@@ -3518,6 +3531,8 @@ export interface components {
             kind: string;
             limitation?: string | null;
             phase: string;
+            progress_kind: components["schemas"]["JobProgressKind"];
+            provider_status?: null | components["schemas"]["ProviderResponseStatus"];
             result?: null | components["schemas"]["JobResultView"];
             retryable: boolean;
             state: components["schemas"]["JobState"];
@@ -3785,6 +3800,7 @@ export interface components {
             artwork_options: components["schemas"]["MetadataArtworkOption"][];
             item_id: components["schemas"]["ItemId"];
             outcome?: null | components["schemas"]["MetadataRefreshOutcome"];
+            response_status?: null | components["schemas"]["ProviderResponseStatus"];
             snapshot_id: components["schemas"]["SnapshotId"];
         };
         MetadataResolutionView: {
@@ -4325,6 +4341,8 @@ export interface components {
                 kind: string;
                 limitation?: string | null;
                 phase: string;
+                progress_kind: components["schemas"]["JobProgressKind"];
+                provider_status?: null | components["schemas"]["ProviderResponseStatus"];
                 result?: null | components["schemas"]["JobResultView"];
                 retryable: boolean;
                 state: components["schemas"]["JobState"];
@@ -4388,6 +4406,7 @@ export interface components {
         };
         Page_PresentedItem: {
             items: {
+                accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
                 assets: components["schemas"]["PresentedAsset"][];
                 captures: components["schemas"]["PresentedCapture"][];
                 collection_id: components["schemas"]["CollectionId"];
@@ -4581,6 +4600,14 @@ export interface components {
             updated_at: string;
             visibility?: null | components["schemas"]["Visibility"];
         };
+        /**
+         * @description Recorded checks for visible, currently associated originals. This is not an
+         *     album-coverage claim: missing discs and unchecked originals remain distinct.
+         */
+        PresentedAudioCheck: {
+            source_id: components["schemas"]["RepresentationId"];
+            status?: null | components["schemas"]["AudioVerificationStatus"];
+        };
         PresentedCapture: {
             association: components["schemas"]["CaptureAssociation"];
             collection_id: components["schemas"]["CollectionId"];
@@ -4620,6 +4647,7 @@ export interface components {
          *     flattened into a transport response.
          */
         PresentedItem: {
+            accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
             assets: components["schemas"]["PresentedAsset"][];
             captures: components["schemas"]["PresentedCapture"][];
             collection_id: components["schemas"]["CollectionId"];
@@ -4714,6 +4742,8 @@ export interface components {
             provider: components["schemas"]["ModuleId"];
             value: string;
         };
+        /** @enum {string} */
+        ProviderResponseStatus: "waiting" | "shared" | "downloaded" | "unchanged";
         PublishProviderArtworkCommand: {
             snapshot_id: components["schemas"]["SnapshotId"];
         };
@@ -4825,6 +4855,8 @@ export interface components {
         };
         SaveItemEnvelope: components["schemas"]["SaveItemCommandEnvelope"] | components["schemas"]["SaveItemEditCommandEnvelope"] | components["schemas"]["Wave1SaveItemEnvelope"];
         ScanPlan: {
+            accuraterip_query?: null | components["schemas"]["DbarQuery"];
+            accuraterip_structure_observation_id?: null | components["schemas"]["ObservationId"];
             blockers: string[];
             command: components["schemas"]["StartProcessingCommand"];
             files: components["schemas"]["IngestAnchorChoice"][];
@@ -4850,6 +4882,7 @@ export interface components {
         /** Format: uuid */
         SnapshotId: string;
         SnapshotRecord: {
+            acquisition_key?: string | null;
             bytes: components["schemas"]["ByteLength"];
             collection_id: components["schemas"]["CollectionId"];
             /** Format: date-time */

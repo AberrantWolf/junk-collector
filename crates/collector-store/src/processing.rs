@@ -482,6 +482,7 @@ impl Store {
                     .and_then(Path::parent)
                     .unwrap()
                     .join("payload/source.bin");
+                let payload = self.resolve_snapshot_payload(&record, &payload)?;
                 let (bytes, digest) = crate::files::hash_file(&payload)?;
                 if bytes != record.bytes || digest != record.digest {
                     return Err(Error::Storage("archived snapshot payload mismatch".into()));
@@ -928,20 +929,9 @@ impl SnapshotPort for Store {
         serde_json::from_str(&record).map_err(storage)
     }
     fn snapshot_bytes(&self, query: SnapshotQuery) -> Result<Box<dyn Read + Send>> {
-        let path: String = lock(&self.db)?
-            .query_row(
-                "SELECT payload_path FROM snapshots WHERE id=? AND collection_id=?",
-                params![
-                    query.snapshot_id.to_string(),
-                    query.collection_id.to_string()
-                ],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(storage)?
-            .ok_or(Error::NotFound)?;
+        let record = self.snapshot(query)?;
         Ok(Box::new(
-            File::open(self.archive.join(path)).map_err(storage)?,
+            File::open(self.snapshot_payload_path(&record)?).map_err(storage)?,
         ))
     }
 
@@ -1049,8 +1039,14 @@ impl SnapshotPort for Store {
 
 impl ProcessingPort for Store {
     fn ensure_snapshot_current(&self, item: ItemId, snapshot: SnapshotId) -> Result<()> {
-        let stale: bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN items i ON i.id=j.item_id WHERE j.item_id=?1 AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id'))=?2 AND COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=j.id),0)<>COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))",params![item.to_string(),snapshot.to_string()],|row|row.get(0)).map_err(storage)?;
-        if stale { Err(Error::Conflict) } else { Ok(()) }
+        let db = lock(&self.db)?;
+        let bound:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.snapshot_bindings b JOIN items i ON i.id=b.item_id WHERE b.snapshot_id=? AND b.item_id=? AND b.generation=COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))",params![snapshot.to_string(),item.to_string()],|r|r.get(0)).map_err(storage)?;
+        let historical:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.snapshot_bindings WHERE snapshot_id=? AND item_id=?)",params![snapshot.to_string(),item.to_string()],|r|r.get(0)).map_err(storage)?;
+        if historical && !bound {
+            Err(Error::Conflict)
+        } else {
+            Ok(())
+        }
     }
 
     fn conversion_scratch(&self) -> Result<Box<dyn collector_app::ConversionScratch>> {
@@ -1188,8 +1184,12 @@ impl ProcessingPort for Store {
         record: SnapshotRecord,
         reader: &mut dyn Read,
         cancelled: &mut dyn FnMut() -> Result<bool>,
-    ) -> Result<()> {
+    ) -> Result<SnapshotId> {
         record.validate()?;
+        self.validate_publication_claim(claim, record.collection_id)?;
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
         if let Ok(existing) = self.snapshot(SnapshotQuery {
             collection_id: record.collection_id,
             snapshot_id: record.id,
@@ -1197,7 +1197,7 @@ impl ProcessingPort for Store {
             return if serde_json::to_value(existing).map_err(storage)?
                 == serde_json::to_value(&record).map_err(storage)?
             {
-                Ok(())
+                Ok(record.id)
             } else {
                 Err(Error::Storage(
                     "immutable snapshot identity conflicts".into(),
@@ -1236,6 +1236,106 @@ impl ProcessingPort for Store {
         }
         spool.rewind().map_err(storage)?;
         let _writer = lock(&self.writer)?;
+        self.validate_publication_claim(claim, record.collection_id)?;
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
+        if record.acquisition_key.is_some()
+            && matches!(
+                record.provider.0.as_str(),
+                "org.junk.providers.accuraterip" | "org.junk.providers.musicbrainz"
+            )
+        {
+            let response_key = collector_app::snapshot_response_key(&record)?;
+            let mut after = None;
+            let mut retained: Option<SnapshotRecord> = None;
+            let mut references = Default::default();
+            loop {
+                if cancelled()? {
+                    return Err(Error::JobCancelled);
+                }
+                let candidates = self.snapshot_record_page(Some(record.collection_id), after)?;
+                if candidates.is_empty() {
+                    break;
+                }
+                after = candidates.last().map(|row| row.0);
+                for (_, raw) in candidates {
+                    if cancelled()? {
+                        return Err(Error::JobCancelled);
+                    }
+                    let Some(raw) = raw else {
+                        continue;
+                    };
+                    let old: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
+                    if old.provider != record.provider {
+                        continue;
+                    }
+                    let value: serde_json::Value = serde_json::from_str(&raw).map_err(storage)?;
+                    if serde_json::to_value(&old).map_err(storage)? != value {
+                        continue;
+                    }
+                    let mut comparison = old.clone();
+                    if comparison.acquisition_key.is_none() {
+                        comparison.acquisition_key =
+                            self.legacy_snapshot_key_checked(old.id, cancelled, &mut references)?;
+                    }
+                    if comparison.acquisition_key != record.acquisition_key {
+                        continue;
+                    }
+                    if collector_app::snapshot_response_key(&comparison)? == response_key
+                        && retained.as_ref().is_none_or(|best| {
+                            (old.created_at, old.id) < (best.created_at, best.id)
+                        })
+                    {
+                        retained = Some(old);
+                    }
+                }
+            }
+            if let Some(old) = retained {
+                // Validate both consumed download and retained bytes before reuse.
+                let (retained_bytes, digest) = crate::files::hash_file_checked(
+                    &self.snapshot_payload_path(&old)?,
+                    old.bytes.0,
+                    &mut || {
+                        if cancelled()? {
+                            Err(Error::JobCancelled)
+                        } else {
+                            Ok(())
+                        }
+                    },
+                )?;
+                if retained_bytes != old.bytes {
+                    return Err(Error::Conflict);
+                }
+                let mut hash = Sha256::new();
+                let mut chunk = vec![0; STREAM_CHUNK];
+                loop {
+                    if cancelled()? {
+                        return Err(Error::JobCancelled);
+                    }
+                    let n = spool.read(&mut chunk).map_err(storage)?;
+                    if n == 0 {
+                        break;
+                    }
+                    hash.update(&chunk[..n]);
+                }
+                if hex::encode(hash.finalize()) != record.digest.hex || digest != record.digest {
+                    return Err(Error::Conflict);
+                }
+                let _gate = lock(&self.job_publication_gate)?;
+                if cancelled()? {
+                    return Err(Error::JobCancelled);
+                }
+                let mut db = lock(&self.db)?;
+                let tx = db
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(storage)?;
+                if tx.execute("UPDATE private.jobs SET phase='revision_committed' WHERE id=? AND claim_token=? AND state='running' AND cancellation_requested=0",params![claim.id.to_string(),claim.claim_token]).map_err(storage)?!=1 {return Err(Error::JobCancelled);}
+                tx.execute("UPDATE private.processing_jobs SET output_references=?,checkpoint='snapshot_committed' WHERE job_id=?",params![serde_json::json!([old.id]).to_string(),claim.id.to_string()]).map_err(storage)?;
+                tx.commit().map_err(storage)?;
+                return Ok(old.id);
+            }
+        }
         let txid = TransactionId(job.0);
         let result = self.publish_v4(
             V4Target {
@@ -1268,7 +1368,8 @@ impl ProcessingPort for Store {
         tx.execute("UPDATE private.processing_jobs SET output_references=?,checkpoint='snapshot_committed' WHERE job_id=?",params![serde_json::to_string(&vec![record.id]).map_err(storage)?,job.to_string()]).map_err(storage)?;
         tx.commit().map_err(storage)?;
         drop(db);
-        finish_v3_publication(self, txid)
+        finish_v3_publication(self, txid)?;
+        Ok(record.id)
     }
     fn processing_record(&self, id: ObservationId) -> Result<PortableProcessingRecord> {
         let value: String = lock(&self.db)?

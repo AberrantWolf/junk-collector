@@ -1,6 +1,8 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
 mod game_identification;
 pub use game_identification::*;
+mod acquisitions;
+pub use acquisitions::*;
 mod music_search;
 pub use music_search::*;
 mod collection_lists;
@@ -898,12 +900,22 @@ pub enum JobResultView {
     },
     CatalogSnapshot {
         snapshot_id: SnapshotId,
+        response_status: Option<ProviderResponseStatus>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobProgressKind {
+    Measured,
+    Indeterminate,
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct JobView {
+    pub provider_status: Option<ProviderResponseStatus>,
     pub id: JobId,
+    pub progress_kind: JobProgressKind,
     pub collection_id: Option<CollectionId>,
     pub item_id: Option<ItemId>,
     pub kind: String,
@@ -947,7 +959,30 @@ impl From<JobRecord> for JobView {
             || record.state == JobState::Completed
                 && metadata_artwork_error(&record.kind, record.result.as_ref()).is_some();
         let result = safe_job_result(&record.kind, record.result.as_ref());
+        let progress_kind = if record.kind == "processing_operation"
+            && matches!(
+                record.state,
+                JobState::Queued | JobState::Running | JobState::CancelRequested
+            ) {
+            JobProgressKind::Indeterminate
+        } else {
+            JobProgressKind::Measured
+        };
         Self {
+            provider_status: if record.phase == "waiting_provider" {
+                Some(ProviderResponseStatus::Waiting)
+            } else if record.phase == "waiting_shared_provider" {
+                Some(ProviderResponseStatus::Shared)
+            } else {
+                record
+                    .result
+                    .as_ref()
+                    .and_then(|v| v.get("completion").or(Some(v)))
+                    .and_then(|v| v.get("response_status"))
+                    .cloned()
+                    .and_then(|v| serde_json::from_value(v).ok())
+            },
+            progress_kind,
             id: record.id,
             collection_id: record.collection_id,
             item_id: record.item_id,
@@ -988,7 +1023,13 @@ fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<Job
     }
     let result = result.and_then(|value| value.get("completion").or(Some(value)))?;
     let snapshot_id = result.get("snapshot_id")?.as_str()?.parse().ok()?;
-    Some(JobResultView::CatalogSnapshot { snapshot_id })
+    Some(JobResultView::CatalogSnapshot {
+        snapshot_id,
+        response_status: result
+            .get("response_status")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok()),
+    })
 }
 
 pub trait JobPort: Send + Sync {
@@ -1027,6 +1068,18 @@ pub trait JobPort: Send + Sync {
         claim_token: &str,
         spec: JobSpec,
     ) -> Result<JobId>;
+    fn acquisition_for_job(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenAcquisitionJob,
+    ) -> Result<Option<SnapshotId>>;
+    fn acquisition_owners(&self, claim: &JobClaim) -> Result<Vec<JobRecord>>;
+    fn acquisition_response_status(
+        &self,
+        claim: &JobClaim,
+    ) -> Result<Option<ProviderResponseStatus>>;
+    fn acquisition_committed_snapshot(&self, claim: &JobClaim) -> Result<Option<SnapshotId>>;
+    fn reconcile_acquisitions(&self) -> Result<()>;
     fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>>;
     fn renew_job_lease(&self, id: JobId, claim_token: &str, lease_seconds: i64) -> Result<()>;
     fn heartbeat_job(
@@ -1841,6 +1894,14 @@ impl From<Capture> for PresentedCapture {
     }
 }
 
+/// Recorded checks for visible, currently associated originals. This is not an
+/// album-coverage claim: missing discs and unchecked originals remain distinct.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PresentedAudioCheck {
+    pub source_id: RepresentationId,
+    pub status: Option<collector_modules::music::AudioVerificationStatus>,
+}
+
 /// Explicit response shape: unrestricted stored Item records are never
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -1861,6 +1922,8 @@ pub struct PresentedItem {
     pub identity_link: ItemIdentityLink,
     pub domain: PresentedModuleData,
     pub identity: IdentityState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accuraterip: Option<Vec<PresentedAudioCheck>>,
     pub translations: Vec<LocalizedText>,
     pub identifiers: Vec<ProviderIdentity>,
     pub specimens: Vec<PresentedSpecimen>,
@@ -2501,6 +2564,41 @@ impl CollectionService {
             .artwork
             .filter(|asset_id| asset_states.iter().any(|state| state.asset.id == *asset_id));
         let primary_artwork = effective_metadata.artwork.or(primary_artwork);
+        let accuraterip = if item.domain.module.0 == "org.junk.music" {
+            let mut checks = Vec::new();
+            for capture in item
+                .captures
+                .iter()
+                .filter(|capture| capture.association.item_id == Some(item.id))
+            {
+                for source in capture
+                    .representations
+                    .iter()
+                    .filter(|source| source.role == RepresentationRole::PreservationMaster)
+                {
+                    let status = match self.latest_music_result(
+                        item.collection_id,
+                        source.id,
+                        collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                    )? {
+                        Some((
+                            _,
+                            collector_modules::music::CdProcessingResult::AudioVerification {
+                                verification,
+                            },
+                        )) => Some(verification.status),
+                        _ => None,
+                    };
+                    checks.push(PresentedAudioCheck {
+                        source_id: source.id,
+                        status,
+                    });
+                }
+            }
+            Some(checks)
+        } else {
+            None
+        };
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
@@ -2546,6 +2644,7 @@ impl CollectionService {
                 .map(|specimen| PresentedSpecimen::from_stored(specimen, private))
                 .collect(),
             wishlist: item.wishlist,
+            accuraterip,
             captures: item.captures.into_iter().map(Into::into).collect(),
             assets: asset_states
                 .into_iter()
@@ -4575,13 +4674,12 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         let id = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
-        let spec = self.catalog_acquisition_spec(actor, &frozen, id)?;
         self.execute_command(
             actor,
             context,
             "catalog.acquire.enqueue",
-            &frozen,
-            |effects| effects.enqueue_job(spec),
+            &(frozen.request.clone(), frozen.item_id),
+            |effects| effects.enqueue_job(self.catalog_acquisition_spec(actor, &frozen, id)?),
         )
     }
 
@@ -4628,71 +4726,108 @@ impl CollectionService {
         command: AcquireAccurateRipCommand,
         context: &CommandContext,
     ) -> Result<JobId> {
-        let capture = self.reader.capture(capture_id)?;
-        let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
-        if eligibility.owner.0 != "org.junk.music"
-            || !capture
-                .representations
-                .iter()
-                .any(|value| value.id == command.representation_id)
-        {
-            return Err(Error::NotFound);
-        }
-        let structure = self
-            .processing
-            .processing_record(command.structure_observation_id)?
-            .observation;
-        if structure.collection_id != capture.collection_id
-            || structure.operation.as_str() != collector_modules::music::CD_STRUCTURE_OPERATION
-            || structure.operation_version != eligibility.schema_version
-            || structure.typed_result.module != eligibility.owner
-            || structure.typed_result.schema_version != eligibility.schema_version
-            || structure.source_fingerprint.source
-                != PackageScope::Representation(command.representation_id)
-            || !matches!(structure.support, OperationSupport::Supported)
-        {
-            return Err(Error::Invalid(
+        self.execute_command(
+            actor,
+            context,
+            "accuraterip.acquire",
+            &(capture_id, &command),
+            |effects| {
+                let capture = self.reader.capture(capture_id)?;
+                let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
+                if eligibility.owner.0 != "org.junk.music"
+                    || !capture
+                        .representations
+                        .iter()
+                        .any(|value| value.id == command.representation_id)
+                {
+                    return Err(Error::NotFound);
+                }
+                let structure = self
+                    .processing
+                    .processing_record(command.structure_observation_id)?
+                    .observation;
+                if structure.collection_id != capture.collection_id
+                    || !matches!(
+                        structure.operation.as_str(),
+                        collector_modules::music::CD_STRUCTURE_OPERATION
+                            | "org.junk.music.import-analysis"
+                    )
+                    || structure.operation_version != eligibility.schema_version
+                    || structure.typed_result.module != eligibility.owner
+                    || structure.typed_result.schema_version != eligibility.schema_version
+                    || structure.source_fingerprint.source
+                        != PackageScope::Representation(command.representation_id)
+                    || !matches!(structure.support, OperationSupport::Supported)
+                {
+                    return Err(Error::Invalid(
                 "AccurateRip acquisition requires structural evidence for this representation"
                     .into(),
             ));
-        }
-        let inventory = self.processing.package_inventory(
-            capture.collection_id,
-            PackageScope::Representation(command.representation_id),
-        )?;
-        structure
-            .source_fingerprint
-            .validate_inventory(&inventory)?;
-        if self
-            .processing
-            .recorded_source(capture.collection_id, inventory.scope)?
-            != structure.source_fingerprint
-        {
-            return Err(Error::Conflict);
-        }
-        let result: collector_modules::music::CdProcessingResult =
-            structure.typed_result.payload.parse()?;
-        let query = collector_modules::music::accuraterip_query_from_structure(&result)
-            .map_err(|error| Error::Invalid(error.to_string()))?;
-        let job = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
-        let frozen = FrozenAcquisitionJob {
-            request: ProviderRequest {
-                collection_id: capture.collection_id,
-                provider: ModuleId("org.junk.providers.accuraterip".into()),
-                operation: OperationId::new("org.junk.providers.accuraterip.acquire")?,
-                source_fingerprint: Some(structure.source_fingerprint),
-                query: RawJson::from_value(
-                    serde_json::to_value(query)
-                        .map_err(|error| Error::Invalid(error.to_string()))?,
-                ),
-                maximum_response_bytes: 8 * 1024 * 1024,
+                }
+                let inventory = self.processing.package_inventory(
+                    capture.collection_id,
+                    PackageScope::Representation(command.representation_id),
+                )?;
+                structure
+                    .source_fingerprint
+                    .validate_inventory(&inventory)?;
+                if self
+                    .processing
+                    .recorded_source(capture.collection_id, inventory.scope)?
+                    != structure.source_fingerprint
+                {
+                    return Err(Error::Conflict);
+                }
+                let result: collector_modules::music::CdProcessingResult =
+                    if structure.operation.as_str() == "org.junk.music.import-analysis" {
+                        let output: collector_modules::music::MusicImportAnalysisOutput =
+                            structure.typed_result.payload.parse()?;
+                        let mut layouts = output.observations.iter().filter_map(|value| {
+                            value
+                                .parse::<collector_modules::music::CdProcessingResult>()
+                                .ok()
+                                .filter(|value| {
+                                    matches!(
+                                        value,
+                                        collector_modules::music::CdProcessingResult::Layout { .. }
+                                    )
+                                })
+                        });
+                        let layout = layouts.next().ok_or_else(|| {
+                            Error::Invalid("Import analysis has no recorded CD layout".into())
+                        })?;
+                        if layouts.next().is_some() {
+                            return Err(Error::Invalid(
+                                "Import analysis has ambiguous CD layouts".into(),
+                            ));
+                        }
+                        layout
+                    } else {
+                        structure.typed_result.payload.parse()?
+                    };
+                let query = collector_modules::music::accuraterip_query_from_structure(&result)
+                    .map_err(|error| Error::Invalid(error.to_string()))?;
+                let job = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+                let frozen = FrozenAcquisitionJob {
+                    request: ProviderRequest {
+                        collection_id: capture.collection_id,
+                        provider: ModuleId("org.junk.providers.accuraterip".into()),
+                        operation: OperationId::new("org.junk.providers.accuraterip.acquire")?,
+                        source_fingerprint: Some(structure.source_fingerprint),
+                        query: RawJson::from_value(
+                            serde_json::to_value(query)
+                                .map_err(|error| Error::Invalid(error.to_string()))?,
+                        ),
+                        maximum_response_bytes: 8 * 1024 * 1024,
+                    },
+                    collection_binding: eligibility.binding,
+                    item_id: None,
+                    snapshot_id: SnapshotId(job.0),
+                    created_at: self.authentication.now(),
+                };
+                effects.enqueue_job(self.catalog_acquisition_spec(actor, &frozen, job)?)
             },
-            collection_binding: eligibility.binding,
-            item_id: None,
-            snapshot_id: SnapshotId(job.0),
-            created_at: self.authentication.now(),
-        };
-        self.enqueue_catalog_acquisition(actor, frozen, context)
+        )
     }
 
     pub fn import_catalog_snapshot(
@@ -5004,6 +5139,7 @@ impl CollectionService {
 
     pub fn run_next_job(&self, worker_instance: &str) -> Result<bool> {
         self.jobs.reconcile_game_scans()?;
+        self.jobs.reconcile_acquisitions()?;
         let Some(claim) = self.jobs.claim_job(worker_instance, 30)? else {
             return Ok(false);
         };
@@ -5233,13 +5369,22 @@ impl CollectionService {
                         })
                     })
             })(),
-            "catalog_acquisition" => (|| {
+            "catalog_acquisition" | "provider_acquisition" => (|| {
                 let frozen = match claim.frozen_input.clone() {
                     Some(FrozenJobInput::Acquisition(value)) => value,
                     _ => return Err(Error::Storage("acquisition job has no frozen input".into())),
                 };
-                self.acquire_snapshot_for_job(&claim, &frozen)
-                    .map(|snapshot_id| serde_json::json!({"snapshot_id":snapshot_id}))
+                let snapshot_id = self.acquire_snapshot_for_job(&claim, &frozen)?;
+                let response_status = if claim.kind == "provider_acquisition" {
+                    Some(if snapshot_id == frozen.snapshot_id {
+                        ProviderResponseStatus::Downloaded
+                    } else {
+                        ProviderResponseStatus::Unchanged
+                    })
+                } else {
+                    self.jobs.acquisition_response_status(&claim)?
+                };
+                Ok(serde_json::json!({"snapshot_id":snapshot_id,"response_status":response_status}))
             })(),
             "metadata_resolution" => self.run_metadata_resolution(&claim),
             "bulk_intake" => self.run_bulk_intake(&claim),
@@ -5277,6 +5422,7 @@ impl CollectionService {
                     .processing
                     .package_inventory(frozen.collection_id, frozen.source)?;
                 frozen.source_fingerprint.validate_inventory(&inventory)?;
+                self.report_processing_phase(&claim, "validating_source")?;
                 if self.fingerprint_inventory_checked(&inventory, &mut || {
                     if self
                         .jobs
@@ -5309,6 +5455,14 @@ impl CollectionService {
                     job_id: claim.id,
                     claim_token: claim.claim_token.clone(),
                 };
+                let phase = if frozen.operation.as_str()
+                    == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
+                {
+                    "checking_accuraterip"
+                } else {
+                    "processing_files"
+                };
+                self.report_processing_phase(&claim, phase)?;
                 let (module, version) = self.modules.capability_owner(&frozen.operation)?;
                 let operated = self.modules.operate(
                     OperationRequest {
@@ -5358,6 +5512,7 @@ impl CollectionService {
                 )?;
                 self.validate_frozen_binding(&current, &frozen.collection_binding)?;
                 self.validate_operation_eligibility(&current, &frozen.operation)?;
+                self.report_processing_phase(&claim, "rechecking_source")?;
                 if self.fingerprint_inventory_checked(&inventory, &mut || {
                     if self
                         .jobs
@@ -5390,6 +5545,7 @@ impl CollectionService {
                     created_at: self.authentication.now(),
                 };
                 observation.validate()?;
+                self.report_processing_phase(&claim, "recording_check")?;
                 self.processing.publish_processing_record(
                     &claim,
                     PortableProcessingRecord {
@@ -5418,6 +5574,12 @@ impl CollectionService {
                     .complete_job(claim.id, &claim.claim_token, result)?;
             }
             Err(Error::CommandInProgress) if claim.kind == "game_catalog_scan" => {}
+            Err(Error::CommandInProgress)
+                if self
+                    .jobs
+                    .job_record(claim.id, claim.user_id)?
+                    .phase
+                    .starts_with("waiting_") => {}
             Err(Error::JobCancelled) => {
                 if claim.kind.starts_with("import_")
                     && let Some(import_id) = claim
@@ -5451,6 +5613,7 @@ impl CollectionService {
                 )?;
             }
         }
+        self.jobs.reconcile_acquisitions()?;
         if let Some(id) = guided_import_id {
             self.reconcile_guided_ingest(id)?;
         }
@@ -5461,6 +5624,15 @@ impl CollectionService {
         claim: &JobClaim,
         frozen: &FrozenAcquisitionJob,
     ) -> Result<SnapshotId> {
+        if claim.kind != "provider_acquisition" {
+            return self
+                .jobs
+                .acquisition_for_job(claim, frozen)?
+                .ok_or(Error::CommandInProgress);
+        }
+        if let Some(snapshot_id) = self.jobs.acquisition_committed_snapshot(claim)? {
+            return Ok(snapshot_id);
+        }
         if let Ok(existing) = self.processing.snapshot(SnapshotQuery {
             collection_id: frozen.request.collection_id,
             snapshot_id: frozen.snapshot_id,
@@ -5468,12 +5640,7 @@ impl CollectionService {
             return Ok(existing.id);
         }
         FrozenJobInput::Acquisition(frozen.clone()).validate()?;
-        let eligibility = self.content_write_eligibility_for_job(
-            claim.user_id,
-            claim.collection_id,
-            claim.item_id,
-        )?;
-        self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+        self.validate_acquisition_owners(claim, frozen)?;
         let mut execution = DurableProcessingContext {
             progress_base: if claim.kind == "metadata_resolution" {
                 self.jobs
@@ -5496,6 +5663,7 @@ impl CollectionService {
             .ok_or_else(|| Error::Unavailable("configured provider is unavailable".into()))?;
         let mut response = provider.acquire_stream(&frozen.request, &mut execution)?;
         let snapshot = SnapshotRecord {
+            acquisition_key: Some(acquisition_key(frozen)?),
             id: frozen.snapshot_id,
             collection_id: frozen.request.collection_id,
             provider: frozen.request.provider.clone(),
@@ -5513,15 +5681,9 @@ impl CollectionService {
         }
         self.processing
             .publish_snapshot(claim, snapshot, response.reader.as_mut(), &mut || {
-                let current = self.content_write_eligibility_for_job(
-                    claim.user_id,
-                    claim.collection_id,
-                    claim.item_id,
-                )?;
-                self.validate_frozen_binding(&current, &frozen.collection_binding)?;
+                self.validate_acquisition_owners(claim, frozen)?;
                 execution.cancellation_requested()
-            })?;
-        Ok(frozen.snapshot_id)
+            })
     }
     pub fn jobs(&self, actor: &Principal) -> Result<Vec<Job>> {
         let jobs = self.imports.jobs(actor.user_id)?;

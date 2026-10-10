@@ -540,7 +540,7 @@ Durable publication journals contain transaction/entity identities, expected/tar
 
 Collection creation writes an immutable collection manifest and a private recovery intent for the owner grant before archive mutation. Startup completes the intended grant when the collection commit exists or removes the abandoned intent when it does not. Copying only the archive never reconstructs a grant.
 
-SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v12 and `private.sqlite` is schema v18. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness; v12 adds portable collection-list projections. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
+SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v12 and `private.sqlite` is schema v20. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness; v12 adds portable collection-list projections. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Private v19 permits native enrollment requests awaiting account approval; v20 adds shared acquisition ownership, specific pending dependencies and requester snapshot/generation bindings. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
 
 P06 reuses the incrementally maintained catalog at startup when a checkpoint matches the canonical archive path, projection epoch and complete filesystem observation inventory. Observations cover metadata revisions, snapshot files and migration checkpoints using file size, modification time, and on Unix inode/device/change time; payload trees are pruned. This is a change hint, not byte integrity or catalog verification. Warm startup still walks metadata names/stats and runs SQLite quick_check; it does not parse archive records, revisit completed migration records, or hash snapshot/media bytes.
 
@@ -749,3 +749,92 @@ snapshot publication; activation remains a separate collection command. Parsed
 snapshot samples are bounded and checked against actual bytes on snapshot reads.
 No provider downloader or second catalog publication pipeline is introduced.
 Ingest package plans carry typed music-action eligibility for frontend controls.
+
+### AccurateRip browse presentation
+
+Application presentation exposes recorded audio-check status per visible, currently
+associated preservation master on music items. It reuses the music coverage query's
+fingerprint-bound observation resolver; browse does not read or hash source bytes.
+The web list summarizes original-level results and opens the existing processing
+workspace, whose application commands remain responsible for eligibility, snapshots
+and publication. A verified original count does not establish album disc coverage
+or MusicBrainz identity.
+
+### AccurateRip response selection — 2026-10-09
+
+For a package with one eligible CUE/TOC anchor, scan planning derives the expected
+AccurateRip query from current fingerprint-bound recorded structure (including
+import analysis when no separate structure check exists). The application returns
+that query and blocks a saved response whose track count or any of the three disc
+IDs differs. This reads recorded metadata, never payload bytes. The check panel
+filters saved responses by that complete identity, repairs obsolete saved choices,
+and traverses snapshot pages before choosing a default. No matching response gives
+fetch guidance. Multiple-anchor packages retain explicit selection and the worker's
+strict comparison against the actual selected layout; planning does not guess from
+a source-level observation. The worker still validates bytes and snapshot identity
+before computing checksums; admission guidance is not audio verification.
+
+AccurateRip readiness also exposes the current structural observation ID. Acquisition
+accepts either a dedicated structure observation or one unambiguous layout inside
+music import analysis, with the same module/schema, source-fingerprint, permission
+and complete-layout validation. The frontend uses this typed eligibility rather
+than searching its paginated history for a top-level layout. Missing responses are
+ordinary planning blockers, retain anchor choices and never parse an empty UUID;
+execution still requires a valid reference. When no usable recorded layout exists,
+the panel offers the existing structure check before fetching.
+
+### File-check progress — 2026-10-09
+
+Processing-operation Jobs do not measure checksum/offset-search completion in the
+admitted source-byte counter. Application presentation marks active work with
+`JobProgressKind::Indeterminate`; measured workflows retain their counters. The
+processing worker records actual phase transitions for source-byte validation,
+module computation, final source recheck and result publication. Phase updates
+preserve claim fencing and translate cancellation races to cancellation. The check
+panel and Work history render unmeasured work without a false zero-percent meter.
+Development builds optimize the shared disc/AccurateRip mechanisms; algorithm,
+reference identity, offset coverage and validation rules are unchanged.
+
+
+### Concurrent processing and shared acquisition — 2026-10-10
+
+The application owns provider equivalence and requester authorization. The private
+store commits requester Job admission, acquisition owner links and command receipts
+in one transaction. Internal provider Jobs have no assignable account identity;
+requester Jobs and outcomes remain account-private. Collection, provider/
+operation, normalized query, source fingerprint and response limits identify active
+work. Item generations and metadata preferences belong to requesters. MusicBrainz
+cache bypass is operational and does not split equivalent active work.
+
+Three execution loops share one process-instance identity and existing fenced
+leases. Transactional claims permit two processing executions and one provider
+execution globally; a single account can use both processing slots. FIFO applies
+within each class. Waiting workflows release processing claims. The specific pending
+acquisition is durable, its outcome commits first, and an independent five-second
+reconciliation loop visits all workflow pages even while processing is occupied.
+Cancellation retains running capacity until work stops; existing subprocess group
+termination/reaping and cancellable validation remain in force.
+
+Provider byte spooling/parsing occurs outside the serialized archive writer. Under
+that writer, equivalent AccurateRip/MusicBrainz responses reuse the retained snapshot
+ID after cancellable length/digest validation. Identity includes media type, parsed
+outcome and interpretation version, excluding acquisition time and cache bypass.
+Requester-to-snapshot results commit before effects. Positive item/generation
+bindings replace freshness inference from unrelated historical Jobs; each effect
+still checks source, generation and authorization. Equivalent effective metadata
+and resolution inputs return existing authority without another occurrence/revision.
+Schema adoption attaches pre-existing queued/running provider requests
+transactionally, preserving their immutable Jobs. Expired claims cannot attach
+request ownership or consume acquisition results. Response comparison reads small
+record pages with cancellation checks; it does not retain the response history in
+memory. Converted legacy snapshots carry input identity through portable references,
+allowing fresh response reuse after archive-only rebuild. Downloads never advance
+audio verification dates. Admission and browse use recorded fingerprints, without
+hashing payloads.
+
+Existing response payloads are converted only by explicit CLI commands holding both
+storage-root locks with the server stopped and a verified full backup. Portable
+checksummed payload-reference sidecars preserve immutable envelopes and evidence
+IDs. The private conversion journal makes publish-reference/remove-payload/reindex
+steps resumable. See [the conversion runbook](snapshot-duplicate-conversion.md).
+This is a provider-owned policy, not a general retention/workflow engine.
