@@ -260,12 +260,10 @@ impl CollectionService {
                 .is_ok()
                 && !blockers.iter().any(|issue| issue.blocks_analysis);
             let metadata_available = if eligibility.owner.0 == "org.junk.games" {
-                self.processing
-                    .active_snapshot(
-                        command.collection_id,
-                        &ModuleId("org.junk.providers.local-dat".into()),
-                    )?
-                    .is_some()
+                !self
+                    .processing
+                    .active_game_snapshots(command.collection_id)?
+                    .is_empty()
             } else if eligibility.owner.0 == "org.junk.music" {
                 self.streaming_providers
                     .contains_key(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
@@ -700,7 +698,7 @@ impl CollectionService {
                     &intent.import_id.to_string(),
                 )),
                 MetadataAuthorityRecord {
-                    resolution_policy: 2,
+                    resolution_policy: 3,
                     current_candidates: Some(vec![]),
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
@@ -986,7 +984,9 @@ impl CollectionService {
         }
         match record.view.phase {
             ImportPhase::Analyzing => {
-                if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
+                if intent.analysis == IngestAnalysisPolicy::PreserveOnly
+                    || item.domain.module.0 == "org.junk.games"
+                {
                     record.view.review = Some(ImportReviewDecision {
                         identity: ImportIdentityDecision::Unidentified,
                         association: record.view.association,
@@ -1137,47 +1137,12 @@ impl CollectionService {
             ));
         }
         if item.domain.module.0 == "org.junk.games" {
-            // DAT candidates are retained by Import analysis. Publication has
-            // already rebound the exact observation; applying them automatically
-            // is handled by the same metadata authority resolver in the follow-up
-            // helper, never as catalog verification.
-            self.apply_guided_dat_metadata(intent, record, &item)?;
-            return Ok(true);
+            return self.advance_guided_game_identification(intent, record, &item);
         }
         if item.domain.module.0 == "org.junk.music" {
             return self.advance_guided_music_metadata(intent, record, &item);
         }
         Ok(true)
-    }
-
-    fn apply_guided_dat_metadata(
-        &self,
-        intent: &GuidedIngestIntent,
-        record: &ImportRecord,
-        item: &Item,
-    ) -> Result<()> {
-        let Some(analysis) = record.view.analysis_job_id else {
-            return Ok(());
-        };
-        let portable = self
-            .processing
-            .processing_record(ObservationId(analysis.0))?;
-        let snapshot_id = portable.observation.snapshot_id.ok_or_else(|| {
-            Error::Unavailable("Game imported; automatic identification unavailable because no game catalog is active. Originals are saved. No catalog match was attempted. Upload and activate a game reference catalog in Administration → Game catalogs, then run a catalog check for this entry.".into())
-        })?;
-        self.refresh_provider_metadata_for_job(
-            intent.user_id,
-            item,
-            snapshot_id,
-            Some(portable.observation.id),
-            vec![],
-            ObservationId(super::deterministic_inventory_uuid(
-                intent.user_id,
-                "guided-dat-metadata",
-                &record.view.id.to_string(),
-            )),
-        )?;
-        Ok(())
     }
 
     fn advance_guided_music_metadata(
@@ -1458,7 +1423,19 @@ impl CollectionService {
             "guided.cover-art.image",
             &record.view.id.to_string(),
         );
-        let metadata_job = jobs.iter().find(|job| job.id == metadata_job_id);
+        let game_job = if owner
+            .as_ref()
+            .is_some_and(|module| module.0 == "org.junk.games")
+        {
+            self.jobs.game_import_job(intent.user_id, record.view.id)?
+        } else {
+            None
+        };
+        let metadata_job = if music {
+            jobs.iter().find(|job| job.id == metadata_job_id)
+        } else {
+            game_job.as_ref()
+        };
         let metadata_message = metadata_job
             .filter(|job| job.state == JobState::Completed)
             .and_then(|job| completed_snapshot_id(job.result.as_ref()))
@@ -1613,8 +1590,11 @@ impl CollectionService {
             staging_step,
             job_step(
                 "identification",
-                by_kind.get("import_analysis").copied(),
-                record.view.phase == ImportPhase::Published
+                game_job
+                    .as_ref()
+                    .or_else(|| by_kind.get("import_analysis").copied()),
+                game_job.is_none()
+                    && record.view.phase == ImportPhase::Published
                     && !by_kind.contains_key("import_analysis"),
                 if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
                     Some("Save originals only was selected. Files were not analyzed or matched to an album or edition.".into())
@@ -1633,7 +1613,7 @@ impl CollectionService {
             preparation_step,
         ];
         if !music {
-            steps.retain(|step| step.step != "preparation");
+            steps.retain(|step| step.step != "preparation" && step.step != "metadata");
         }
         Ok(IngestDetail {
             summary,

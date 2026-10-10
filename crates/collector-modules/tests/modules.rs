@@ -48,6 +48,7 @@ impl CollectionModule for Stamps {
             schema_version: 2,
             display_name: "Stamps".into(),
             collection_type_label: "Postage stamps".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![
                 DomainFieldDescriptor {
                     key: "denomination".into(),

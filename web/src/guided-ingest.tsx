@@ -13,7 +13,7 @@ type Detail=components['schemas']['IngestDetail'];
 type Item=components['schemas']['PresentedItem'];
 type InboxSource=components['schemas']['InboxSourceView'];
 type Props={initialImportId?:string;historyOnly?:boolean;initialItem?:Item;collectionId:string;busy:boolean;setBusy:(value:boolean)=>void;onPublished:(item:Item,replacedItemId?:string)=>void;onError:(error:unknown)=>void;onDraftChange?:(value:boolean)=>void};
-function selectedName(files:File[]){return files.length===1?files[0].name:'Browser package';}
+function selectedName(files:File[]){const cues=files.filter(file=>file.name.toLowerCase().endsWith('.cue'));return files.length===1?files[0].name:cues.length===1?cues[0].name:'Browser package';}
 function fileName(file:File){return file.webkitRelativePath||file.name;}
 function stateLabel(value:string){return presentationLabel(value);}
 

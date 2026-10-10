@@ -51,6 +51,7 @@ impl CollectionModule for LegacyUnavailableModule {
             schema_version: 7,
             display_name: "Temporary legacy fixture".into(),
             collection_type_label: "Legacy fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![],
         }
@@ -83,6 +84,7 @@ impl CollectionModule for UnknownStampsModule {
             schema_version: 4,
             display_name: "Temporary stamps fixture".into(),
             collection_type_label: "Stamp fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![],
         }
@@ -124,6 +126,7 @@ impl CollectionModule for ReaderProcessingModule {
             schema_version: 1,
             display_name: "Reader processing fixture".into(),
             collection_type_label: "Reader fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![Capability {
                 id: CapabilityId::new("org.example.reader.inspect").unwrap(),
@@ -347,6 +350,7 @@ impl CollectionModule for ImportAnalyzingModule {
             schema_version: 1,
             display_name: "Import analysis fixture".into(),
             collection_type_label: "Import fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![Capability {
                 id: CapabilityId::new("org.junk.music.import-analysis").unwrap(),
@@ -420,6 +424,7 @@ impl CollectionModule for ArtworkSelectingModule {
             schema_version: 1,
             display_name: "Artwork selection fixture".into(),
             collection_type_label: "Music CDs".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![],
         }
@@ -6322,19 +6327,25 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
         .stage_provisional_import_chunk(&actor, import_id, 0, 0, rom)
         .unwrap();
 
-    assert!(service.run_next_job("guided-game-analysis").unwrap());
+    provider_drain(&service);
     let detail = service.ingest_detail(&actor, import_id).unwrap();
-    let analysis = service
-        .job(&actor, detail.import.analysis_job_id.unwrap())
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
+    assert!(detail.import.analysis_job_id.is_none());
+    let ids = service
+        .identify_game_entry(&actor, detail.summary.target_item_id.unwrap(), &command())
         .unwrap();
-    assert_eq!(analysis.state, JobState::Completed);
-    assert!(
-        detail
-            .import
-            .limitations
-            .iter()
-            .any(|limitation| { limitation.contains("No active DAT snapshot was selected") })
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, ids[0]).unwrap().state,
+        JobState::Completed
     );
+    let review = service
+        .metadata_review(&actor, detail.summary.target_item_id.unwrap())
+        .unwrap();
+    assert!(matches!(
+        review.identification.unwrap().status,
+        collector_modules::games::GameDetectionStatus::Unrecognized
+    ));
 }
 
 #[test]
@@ -8665,7 +8676,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
     let dat_path = root.path().join("games.dat");
     let dat = |version: &str, sha1: &str| {
         format!(
-            r#"<datafile><header><name>Fixture Games</name><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="{sha1}"/></game></datafile>"#
+            r#"<datafile><header><name>Nintendo - Game Boy</name><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="{sha1}"/></game></datafile>"#
         )
     };
     std::fs::write(
@@ -8684,11 +8695,11 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
     };
     let provider = Arc::new(
         LocalDatProvider::new(std::collections::BTreeMap::from([(
-            "nes".into(),
+            "gb".into(),
             LocalDatSource {
                 path: dat_path.clone(),
-                system: "nes".into(),
-                catalog: "fixture-games".into(),
+                system: "gb".into(),
+                catalog: "No-Intro".into(),
                 byte_domain: "org.junk.game.raw-bytes".into(),
                 byte_domain_version: 1,
             },
@@ -8718,7 +8729,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
         module: ModuleId("org.junk.games".into()),
         schema_version: 1,
         payload: RawJson::from_value(serde_json::json!({
-            "platform":"nes",
+            "platform":"gb",
             "region":null,
             "publisher":null,
             "release_year":null
@@ -8733,12 +8744,12 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                 ImportCatalogSnapshotCommand {
                     collection_id: collection.id,
                     provider: provider_id.clone(),
-                    source: "nes".into(),
+                    source: "gb".into(),
                 },
                 &command(),
             )
             .unwrap();
-        assert!(service.run_next_job("dat-acquisition").unwrap());
+        provider_drain(service);
         assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
         SnapshotId(job.0)
     };
@@ -8816,7 +8827,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("game-analysis").unwrap());
+    provider_drain(&service);
     let analyzed = service.provisional_import(&actor, import.id).unwrap();
     assert_eq!(analyzed.candidates.len(), 1);
     assert!(analyzed.candidates[0].label.contains("exact catalog match"));
@@ -8838,7 +8849,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
     let publication_job = service
         .enqueue_import_publication(&actor, reviewed.id, &command())
         .unwrap();
-    assert!(service.run_next_job("game-publication").unwrap());
+    provider_drain(&service);
     let completed_publication = service.job(&actor, publication_job).unwrap();
     assert_eq!(
         completed_publication.state,
@@ -8861,7 +8872,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                 snapshot_id: Some(first_snapshot),
                 selection: RawJson::from_value(serde_json::json!({
                     "snapshot_id":SnapshotId::new(),
-                    "system":"nes",
+                    "system":"gb",
                     "input":"raw_files"
                 })),
             },
@@ -8882,14 +8893,14 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                 snapshot_id: Some(first_snapshot),
                 selection: RawJson::from_value(serde_json::json!({
                     "snapshot_id":first_snapshot,
-                    "system":"nes",
+                    "system":"gb",
                     "input":"raw_files"
                 })),
             },
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("game-verification").unwrap());
+    provider_drain(&service);
     let completed_operation = service.job(&actor, operation).unwrap();
     assert_eq!(
         completed_operation.state,
@@ -8988,8 +8999,8 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
         Digest::sha256(dat("1", "a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd").as_bytes())
     );
     assert_eq!(
-        store.active_snapshot(collection.id, &provider_id).unwrap(),
-        Some(second_snapshot)
+        store.active_game_snapshots(collection.id).unwrap(),
+        vec![second_snapshot]
     );
     let rebuilt_metadata = service.metadata_view(&actor, game.id).unwrap();
     assert_eq!(rebuilt_metadata.candidates.len(), 1);
@@ -19276,12 +19287,12 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
         )
         .unwrap();
     let metadata = DatUploadMetadata {
-        system: "nes".into(),
-        catalog: "offline fixture".into(),
+        system: "Nintendo - Game Boy".into(),
+        catalog: "No-Intro".into(),
         byte_domain: "org.junk.game.raw-bytes".into(),
     };
     let bytes = |version| {
-        format!(r#"<datafile><header><name>Offline fixture</name><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd"/></game></datafile>"#).into_bytes()
+        format!(r#"<datafile><header><name>Nintendo - Game Boy</name><author>No-Intro</author><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd"/></game></datafile>"#).into_bytes()
     };
     let configure = |store: Arc<Store>| {
         let provider = Arc::new(
@@ -19311,7 +19322,7 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
     drop(store);
     let store = Arc::new(Store::open_with_clock(&archive, &private, clock.clone()).unwrap());
     let service = configure(store.clone());
-    assert!(service.run_next_job("restarted-upload").unwrap());
+    provider_drain(&service);
     assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
     let id = SnapshotId(job.0);
     let saved = service
@@ -19358,7 +19369,7 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("second-upload").unwrap());
+    provider_drain(&service);
     service
         .activate_catalog_snapshot(&actor, collection.id, SnapshotId(second.0), &command())
         .unwrap();
@@ -19407,7 +19418,7 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("malformed-upload").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, malformed).unwrap().state,
         JobState::Failed
@@ -19433,7 +19444,7 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
     let mut corrupted = bytes("3");
     corrupted[10] ^= 1;
     std::fs::write(private.join("catalog-uploads").join(digest.hex), corrupted).unwrap();
-    assert!(service.run_next_job("corrupt-upload").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, changed).unwrap().state,
         JobState::Failed
@@ -19441,7 +19452,7 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
     // A new upload of the exact original can repair private staging and retry.
     UploadedCatalogPort::stage_uploaded_catalog(&*store, &bytes("3")).unwrap();
     service.retry_job(&actor, changed, &command()).unwrap();
-    assert!(service.run_next_job("repaired-upload").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, changed).unwrap().state,
         JobState::Completed
@@ -19462,5 +19473,319 @@ fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
             .items
             .len(),
         3
+    );
+}
+
+fn provider_drain(service: &CollectionService) {
+    for _ in 0..40 {
+        if !service.run_next_job("shared-provider-test").unwrap() {
+            return;
+        }
+    }
+    panic!("provider workflows did not settle");
+}
+
+#[test]
+fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual_fields() {
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (root, store, actor, base, _) = setup_with_clock(Some(clock.clone()));
+    let collection = base
+        .create_collection(
+            &AuthenticatedPrincipal {
+                principal: actor.clone(),
+                credential_kind: CredentialKind::TestLocal,
+                authenticated_at: clock.now(),
+            },
+            CreateCollectionCommand {
+                name: "Automatic games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let configure = |store: Arc<Store>| {
+        let provider = Arc::new(
+            LocalDatProvider::new(Default::default())
+                .unwrap()
+                .with_uploads(store.clone()),
+        );
+        CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_catalog_uploads(store)
+            .with_catalog_inspection(Arc::new(collector_providers::StandardCatalogInspector))
+            .with_streaming_provider(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+            .with_catalog_parser(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider)
+            .unwrap()
+    };
+    let service = configure(store.clone());
+    let rom = b"abc";
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "disc.bin".into(),
+                    },
+                    files: vec![UploadFile {
+                        name: "disc.bin".into(),
+                        bytes: ByteLength(3),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, import, 0, 0, rom)
+        .unwrap();
+    provider_drain(&service);
+    let game = service
+        .ingest_detail(&actor, import)
+        .unwrap()
+        .summary
+        .target_item_id
+        .unwrap();
+    assert_eq!(
+        service
+            .metadata_review(&actor, game)
+            .unwrap()
+            .display
+            .title
+            .source,
+        MetadataValueSource::Provisional
+    );
+    for number in 1..=101 {
+        let mut empty = item(collection.id);
+        empty.id = ItemId(uuid::Uuid::from_u128(number));
+        empty.domain = ModuleData {
+            module: ModuleId("org.junk.games".into()),
+            schema_version: 1,
+            payload: RawJson::from_value(serde_json::json!({})),
+        };
+        Catalog::save(&*store, empty, Revision(0)).unwrap();
+    }
+    let dat = |version: &str| {
+        format!(r#"<datafile><header><name>Game Boy</name><author>No-Intro</author><version>{version}</version></header><game name="Known game"><rom name="game.gb" size="3" sha1="a9993e364706816aba3e25717850c26c9cd0d89d"/></game></datafile>"#).into_bytes()
+    };
+    let preview = service
+        .inspect_catalog_batch(
+            &actor,
+            collection.id,
+            vec![("fixture.dat".into(), dat("1"))],
+        )
+        .unwrap();
+    let upload = preview.entries[0].upload.clone().unwrap();
+    let job = service
+        .import_uploaded_catalog(&actor, collection.id, upload, &command())
+        .unwrap();
+    provider_drain(&service);
+    let activation = service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(job.0), &command())
+        .unwrap();
+    let parent = activation.identification_job_id.unwrap();
+    assert!(service.run_next_job("first-page").unwrap());
+    let record = store.job_record(parent, actor.user_id).unwrap();
+    assert_eq!(record.state, JobState::Queued);
+    assert!(record.result.unwrap().get("cursor").is_some());
+    drop(service);
+    drop(base);
+    drop(store);
+    clock.advance(60);
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock.clone(),
+        )
+        .unwrap(),
+    );
+    let service = configure(store.clone());
+    assert!(service.run_next_job("later-page").unwrap());
+    let direct_context = command();
+    let direct = service
+        .identify_game_entry(&actor, game, &direct_context)
+        .unwrap();
+    assert_eq!(direct.len(), 1);
+    let created = service.job(&actor, direct[0]).unwrap().created_at;
+    clock.advance(60);
+    assert_eq!(
+        service
+            .identify_game_entry(&actor, game, &direct_context)
+            .unwrap(),
+        direct
+    );
+    assert_eq!(service.job(&actor, direct[0]).unwrap().created_at, created);
+    service.cancel_job(&actor, parent, &command()).unwrap();
+    assert_ne!(
+        service.job(&actor, direct[0]).unwrap().state,
+        JobState::Cancelled
+    );
+    let review = service.metadata_review(&actor, game).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            game,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: review.revision,
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "My deliberate title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, direct[0]).unwrap().state,
+        JobState::Completed
+    );
+    let review = service.metadata_review(&actor, game).unwrap();
+    assert_eq!(review.display.title.value, "My deliberate title");
+    assert_eq!(
+        review.display.domain_fields["platform"].value,
+        "Nintendo - Game Boy"
+    );
+    assert!(matches!(
+        review.identification.unwrap().status,
+        collector_modules::games::GameDetectionStatus::Recognized
+    ));
+    let preview = service
+        .inspect_catalog_batch(
+            &actor,
+            collection.id,
+            vec![("replacement.dat".into(), dat("2"))],
+        )
+        .unwrap();
+    let replacement = service
+        .import_uploaded_catalog(
+            &actor,
+            collection.id,
+            preview.entries[0].upload.clone().unwrap(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    let activation = service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(replacement.0), &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service
+            .job(&actor, activation.identification_job_id.unwrap())
+            .unwrap()
+            .state,
+        JobState::Completed
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_review(&actor, game)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "My deliberate title"
+    );
+    assert_eq!(
+        store.active_game_snapshots(collection.id).unwrap(),
+        vec![SnapshotId(replacement.0)]
+    );
+
+    // A source mutation cannot publish a successful identity even if its recorded fingerprint is unchanged.
+    let next = service
+        .identify_game_entry(&actor, game, &command())
+        .unwrap()[0];
+    let current = store.item(game).unwrap();
+    let capture = &current.captures[0];
+    let representation = &capture.representations[0];
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.join(format!("captures/{}", capture.id)).exists())
+        .unwrap();
+    let payload = collection_path.join(format!(
+        "captures/{}/payload/{}/disc.bin",
+        capture.id, representation.id
+    ));
+    std::fs::write(&payload, b"xyz").unwrap();
+    provider_drain(&service);
+    assert_eq!(service.job(&actor, next).unwrap().state, JobState::Failed);
+    std::fs::write(&payload, rom).unwrap();
+    let curator_id = store
+        .create_user("game-curator", "a long curator password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, curator_id, Role::Curator).unwrap();
+    let curator = Principal {
+        user_id: curator_id,
+        administrator: false,
+        device_id: None,
+    };
+    let denied = service
+        .identify_game_entry(&curator, game, &command())
+        .unwrap()[0];
+    Catalog::grant(&*store, collection.id, curator_id, Role::Viewer).unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        store.job_record(denied, curator_id).unwrap().state,
+        JobState::Failed
+    );
+    let preview = service
+        .inspect_catalog_batch(&actor, collection.id, vec![("third.dat".into(), dat("3"))])
+        .unwrap();
+    let third = service
+        .import_uploaded_catalog(
+            &actor,
+            collection.id,
+            preview.entries[0].upload.clone().unwrap(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    let stale = service
+        .identify_game_entry(&actor, game, &command())
+        .unwrap()[0];
+    service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(third.0), &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(service.job(&actor, stale).unwrap().state, JobState::Failed);
+    let last_owner = service
+        .identify_game_entry(&actor, game, &command())
+        .unwrap()[0];
+    service.cancel_job(&actor, last_owner, &command()).unwrap();
+    assert_eq!(
+        service.job(&actor, last_owner).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service
+            .metadata_review(&actor, game)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "My deliberate title"
     );
 }

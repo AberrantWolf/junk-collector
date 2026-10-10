@@ -48,6 +48,24 @@ Current scope and retention policy take precedence. Completed requirements remai
 useful regression criteria; deferred capabilities require fresh bounded design
 before implementation. No unrun check is marked passed by this change.
 
+## Automatic standard-game identification
+
+The accepted 2026-10-10 delivery requires upload → review → activate → automatic
+existing-game identification and future guided imports without technical fields.
+The [supported detection matrix](game-identification.md) is the contract: finite
+standard systems, supported No-Intro/Redump conventions and existing qualified
+byte interpretations. No suffix/name/size-based identity or permissive fallback
+from recognized malformed/unsupported input is permitted. Headerless bytes need a
+complete unambiguous catalog match; CRC-only evidence is explicitly weaker.
+
+Preserve failed inputs, originals, explicit authority, sources and unknown records.
+Automatic/Manual controls must apply detected fields immediately to detail, browse
+and search, while deliberate edits survive refresh. Qualify bounded DAT/ZIP batches,
+multiple active systems, ambiguity/partial coverage, restart/page recovery, shared
+owners, catalog replacement and source/permission fences through the actual worker
+and UI. [Dated delivery evidence](validation/game-identification-2026-10-10.md) does
+not imply universal format understanding or new format-algorithm qualification.
+
 ## Collection lists and playlists
 
 Lists belong to one collection and are portable with its archive. Music list units

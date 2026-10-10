@@ -83,7 +83,7 @@ impl Store {
             collector_app::WorkTarget::Job(id) => ("job", id.to_string()),
         };
         let db = lock(&self.db)?;
-        let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND json_extract(request,'$.import_id')=?3) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
+        let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND (json_extract(request,'$.import_id')=?3 OR id IN (SELECT job_id FROM private.scan_requests WHERE kind='import' AND owner=?3))) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3) OR id IN (SELECT job_id FROM private.game_scan_members WHERE parent=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
         let mut items = stmt
             .query_map(
                 params![
@@ -576,7 +576,7 @@ impl Store {
     }
     pub(crate) fn enqueue_job_record_with_owners(
         &self,
-        spec: JobSpec,
+        mut spec: JobSpec,
         batch: Option<(JobId, &str)>,
         bulk: Option<(JobId, &str, u32)>,
     ) -> Result<JobId> {
@@ -589,6 +589,11 @@ impl Store {
                 "job kind and phase are required and bounded".into(),
             ));
         }
+        let game_claim = spec
+            .request
+            .as_object_mut()
+            .and_then(|o| o.remove("game_parent_claim"))
+            .and_then(|v| v.as_str().map(str::to_owned));
         let request = serde_json::to_string(&spec.request).map_err(storage)?;
         if let Some(input) = &spec.frozen_input {
             input.validate()?;
@@ -607,6 +612,16 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        if let Some(parent) = spec
+            .request
+            .get("game_parent")
+            .and_then(serde_json::Value::as_str)
+        {
+            let allowed:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs WHERE id=? AND user_id=? AND collection_id=? AND kind='game_catalog_scan' AND state='running' AND cancellation_requested=0 AND claim_token=?)",params![parent,spec.user_id.to_string(),spec.collection_id.map(|v|v.to_string()),game_claim],|r|r.get(0)).map_err(storage)?;
+            if !allowed {
+                return Err(Error::JobCancelled);
+            }
+        }
         if let Some((parent, token, position)) = bulk {
             let allowed:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN private.bulk_library b ON b.id=j.id JOIN private.bulk_library_members m ON m.batch_id=b.id WHERE j.id=? AND j.user_id=? AND j.claim_token=? AND j.state='running' AND j.cancellation_requested=0 AND b.state='accepted' AND m.position=? AND m.state='ready' AND m.item_id=? AND m.collection_id=? AND EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=j.user_id AND u.enabled=1 AND g.collection_id=m.collection_id AND g.role>=1))",params![parent.to_string(),spec.user_id.to_string(),token,position,spec.item_id.map(|v|v.to_string()),spec.collection_id.map(|v|v.to_string())],|r|r.get(0)).map_err(storage)?;
             if !allowed {
@@ -697,6 +712,27 @@ impl Store {
             }
         }
         // Creation time belongs to the first durable request, not output identity.
+        if let Some(FrozenJobInput::GameIdentification(mut proposed)) = spec.frozen_input.clone() {
+            let saved: Option<String> = tx
+                .query_row(
+                    "SELECT frozen_input FROM private.processing_jobs WHERE job_id=?",
+                    [spec.id.to_string()],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(storage)?;
+            if let Some(saved) = saved
+                && let FrozenJobInput::GameIdentification(old) =
+                    serde_json::from_str(&saved).map_err(storage)?
+            {
+                proposed.processing.created_at = old.processing.created_at;
+                proposed.processing.observation_id = old.processing.observation_id;
+                frozen_input = Some(
+                    serde_json::to_string(&FrozenJobInput::GameIdentification(proposed))
+                        .map_err(storage)?,
+                );
+            }
+        }
         if let Some(FrozenJobInput::Derivative(mut proposed)) = spec.frozen_input.clone() {
             let retained: Option<String> = tx
                 .query_row(
@@ -1195,6 +1231,14 @@ impl Store {
                 return Err(Error::Conflict);
             }
         }
+        if kind == "game_catalog_scan" {
+            tx.execute("UPDATE private.jobs SET cancellation_requested=1,state=CASE WHEN state='queued' THEN 'cancelled' ELSE 'cancel_requested' END WHERE id IN (SELECT job_id FROM private.scan_requests WHERE kind='game_batch' AND owner=?) AND state IN ('queued','running','cancel_requested') AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND (r.kind<>'game_batch' OR r.owner<>?))",params![id.to_string(),id.to_string()]).map_err(storage)?;
+            tx.execute(
+                "DELETE FROM private.scan_requests WHERE kind='game_batch' AND owner=?",
+                [id.to_string()],
+            )
+            .map_err(storage)?;
+        }
         let scan: bool = tx
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM private.scan_admissions WHERE job_id=?)",
@@ -1601,6 +1645,9 @@ fn ensure_album_admission_capacity(
 }
 
 fn scan_key_for_spec(tx: &Connection, spec: &JobSpec) -> Result<Option<String>> {
+    if let Some(FrozenJobInput::GameIdentification(frozen)) = &spec.frozen_input {
+        return frozen.key().map(Some);
+    }
     if let Some(FrozenJobInput::Processing(frozen)) = &spec.frozen_input {
         let raw = frozen
             .snapshot_id
@@ -1669,6 +1716,10 @@ fn active_scan(
     id.map(|v| v.parse().map_err(storage)).transpose()
 }
 fn retain_scan_request(tx: &Connection, id: JobId, spec: &JobSpec) -> Result<()> {
+    let game_parent = spec
+        .request
+        .get("game_parent")
+        .and_then(serde_json::Value::as_str);
     let parent = spec
         .request
         .get("guided")
@@ -1680,14 +1731,54 @@ fn retain_scan_request(tx: &Connection, id: JobId, spec: &JobSpec) -> Result<()>
                 .and_then(serde_json::Value::as_str)
         })
         .flatten();
-    let owner = parent
+    if let Some(parent) = game_parent {
+        let representation = spec
+            .request
+            .get("representation_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(Error::Conflict)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO private.game_scan_members VALUES(?,?,?,?)",
+            params![
+                parent,
+                spec.item_id.ok_or(Error::Conflict)?.to_string(),
+                representation,
+                id.to_string()
+            ],
+        )
+        .map_err(storage)?;
+    }
+    if matches!(
+        spec.frozen_input,
+        Some(FrozenJobInput::GameIdentification(_))
+    ) && game_parent.is_none()
+        && parent.is_none()
+    {
+        tx.execute(
+            "INSERT OR IGNORE INTO private.game_direct_members VALUES(?,?,?)",
+            params![
+                spec.id.to_string(),
+                spec.user_id.to_string(),
+                id.to_string()
+            ],
+        )
+        .map_err(storage)?;
+    }
+    let owner = game_parent
+        .or(parent)
         .map(str::to_owned)
         .unwrap_or_else(|| spec.user_id.to_string());
     tx.execute(
         "INSERT OR IGNORE INTO private.scan_requests(job_id,kind,owner) VALUES(?,?,?)",
         params![
             id.to_string(),
-            if parent.is_some() { "import" } else { "direct" },
+            if game_parent.is_some() {
+                "game_batch"
+            } else if parent.is_some() {
+                "import"
+            } else {
+                "direct"
+            },
             owner
         ],
     )

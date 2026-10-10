@@ -1,5 +1,13 @@
 # Validation recorded for the foundation
 
+## Automatic standard-game identification — 2026-10-10
+
+[Delivery validation](validation/game-identification-2026-10-10.md) records shared
+DAT/format vectors, finite catalog policy, source-bound matches, paged activation
+recovery, durable requester ownership, manual authority and real offline browser
+upload/activation/identification. The [supported matrix](game-identification.md)
+limits the capability claim; this delivery does not qualify universal game formats.
+
 ## Documentation consolidation — 2026-10-09
 
 Remaining work is consolidated in [the home-lab queue](remaining-work.md).

@@ -66,6 +66,7 @@ pub struct MetadataRefreshObservation {
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum MetadataValueSource {
     Manual,
+    Provisional,
     Candidate { identity: MetadataCandidateIdentity },
 }
 
@@ -89,6 +90,8 @@ pub enum MetadataResolutionKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResolvedMetadataDisplay {
+    #[serde(default)]
+    pub domain_fields: std::collections::BTreeMap<String, ResolvedMetadataText>,
     pub title: ResolvedMetadataText,
     pub subtitle: Option<ResolvedMetadataText>,
     pub artwork: Option<AssetId>,
@@ -138,6 +141,14 @@ impl MetadataRefreshObservation {
 
 impl ResolvedMetadataDisplay {
     pub fn validate(&self) -> Result<()> {
+        if self.domain_fields.len() > 32 {
+            return Err(Error::Invalid("too many resolved domain fields".into()));
+        }
+        for (key, value) in &self.domain_fields {
+            validate_text(key, false)?;
+            validate_text(&value.value, false)?;
+            validate_value_source(&value.source)?;
+        }
         validate_text(&self.title.value, false)?;
         validate_value_source(&self.title.source)?;
         if let Some(subtitle) = &self.subtitle {
@@ -317,7 +328,7 @@ fn validate_candidate_identity(candidate: &MetadataCandidateIdentity) -> Result<
 
 fn validate_value_source(source: &MetadataValueSource) -> Result<()> {
     match source {
-        MetadataValueSource::Manual => Ok(()),
+        MetadataValueSource::Manual | MetadataValueSource::Provisional => Ok(()),
         MetadataValueSource::Candidate { identity } => validate_candidate_identity(identity),
     }
 }

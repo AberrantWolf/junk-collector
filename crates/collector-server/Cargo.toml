@@ -21,7 +21,7 @@ chrono.workspace = true
 sha2.workspace = true
 hex.workspace = true
 tokio = { version = "1", features = ["full"] }
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "multipart"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 clap = { version = "4", features = ["derive", "env"] }
 rpassword = "7"

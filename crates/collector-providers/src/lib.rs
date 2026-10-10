@@ -2,6 +2,8 @@
 //! neutral observations produced here; this crate owns filesystem/network and
 //! provider-format mechanisms only.
 
+mod catalog_inspection;
+pub use catalog_inspection::*;
 mod accuraterip;
 pub use accuraterip::*;
 mod conversion;
@@ -226,6 +228,36 @@ impl StreamingProviderPort for LocalDatProvider {
                 return Err(Error::Invalid(format!("invalid DAT catalog: {error}")));
             }
         };
+        if uploaded.is_some() {
+            let dialect = match dat.dialect {
+                junk_libs_dat::DatDialect::LogiqxXml => "Logiqx XML",
+                junk_libs_dat::DatDialect::ClrMamePro => "ClrMamePro",
+            };
+            let detected = collector_modules::games::detect_standard_catalog(
+                dialect,
+                &dat.name,
+                &dat.description,
+                &dat.author,
+                &dat.url,
+                &dat.version,
+            );
+            let detected = collector_modules::games::corrected_catalog(&detected, &source.system)
+                .unwrap_or(detected);
+            if !matches!(
+                detected.status,
+                collector_modules::games::GameDetectionStatus::Recognized
+            ) || detected
+                .system
+                .as_ref()
+                .is_none_or(|system| system.name != source.system)
+                || detected.catalog.as_deref() != Some(source.catalog.as_str())
+                || !detected.byte_domains.contains(&source.byte_domain)
+            {
+                return Err(Error::Invalid(
+                    "Catalog settings disagree with detected document contents".into(),
+                ));
+            }
+        }
         let (header, entries) =
             normalized_dat(&source, dat, &mut || execution.cancellation_requested())?;
         let mut index_bytes = 0_usize;
@@ -399,6 +431,7 @@ fn normalized_dat(
             ));
         }
         entries.push(DatCatalogEntryObservation {
+            system: None,
             record_id: format!("{}:{index}", source.catalog),
             label: game.name,
             region: game.region,

@@ -41,6 +41,7 @@ pub enum OperationScope {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DomainFieldKind {
     Text { maximum_bytes: u32 },
+    Choice { values: Vec<String> },
     Integer { minimum: i64, maximum: i64 },
     Structured,
 }
@@ -55,11 +56,32 @@ pub struct DomainFieldDescriptor {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MetadataTerms {
+    pub singular: String,
+    pub plural: String,
+    pub choice: String,
+    pub subtitle: String,
+}
+pub fn metadata_terms(module: &str) -> MetadataTerms {
+    let (singular, plural, choice, subtitle) = match module {
+        "org.junk.games" => ("game", "games", "game match", "edition details"),
+        "org.junk.music" => ("album", "albums", "album release", "artist / edition"),
+        _ => ("entry", "entries", "match", "subtitle"),
+    };
+    MetadataTerms {
+        singular: singular.into(),
+        plural: plural.into(),
+        choice: choice.into(),
+        subtitle: subtitle.into(),
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ModuleDescriptor {
     pub id: ModuleId,
     pub schema_version: u32,
     pub display_name: String,
     pub collection_type_label: String,
+    pub metadata_terms: MetadataTerms,
     pub fields: Vec<DomainFieldDescriptor>,
     pub capabilities: Vec<Capability>,
 }
@@ -562,6 +584,7 @@ impl Registry {
                 || matches!(field.kind, DomainFieldKind::Text { maximum_bytes: 0 })
                 || matches!(field.kind, DomainFieldKind::Text { maximum_bytes } if maximum_bytes > 4096)
                 || matches!(field.kind, DomainFieldKind::Integer { minimum, maximum } if minimum > maximum)
+                || matches!(&field.kind, DomainFieldKind::Choice { values } if values.is_empty() || values.len()>128 || values.iter().any(|v| !safe_descriptor_text(v,120)) || values.iter().collect::<std::collections::BTreeSet<_>>().len()!=values.len())
             {
                 return Err(Error::Invalid("invalid module field descriptor".into()));
             }
@@ -923,6 +946,7 @@ pub(crate) fn descriptor(
         schema_version: 1,
         display_name: name.into(),
         collection_type_label: name.into(),
+        metadata_terms: metadata_terms(id),
         fields,
         capabilities: vec![
             capability(
@@ -965,7 +989,10 @@ pub(crate) fn basic_presentation(
         };
         let rendered = match (&field.kind, value) {
             (_, serde_json::Value::Null) => continue,
-            (DomainFieldKind::Text { .. }, serde_json::Value::String(value)) => value.clone(),
+            (
+                DomainFieldKind::Text { .. } | DomainFieldKind::Choice { .. },
+                serde_json::Value::String(value),
+            ) => value.clone(),
             (DomainFieldKind::Integer { .. }, serde_json::Value::Number(value)) => {
                 value.to_string()
             }

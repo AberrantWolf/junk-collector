@@ -223,6 +223,7 @@ pub trait SnapshotPort: Send + Sync {
         after: Option<SnapshotId>,
         limit: u16,
     ) -> Result<collector_core::Page<SnapshotRecord>>;
+    fn active_game_snapshots(&self, collection_id: CollectionId) -> Result<Vec<SnapshotId>>;
     fn active_snapshot(
         &self,
         collection_id: CollectionId,
@@ -233,6 +234,8 @@ pub trait SnapshotPort: Send + Sync {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogSnapshotStatus {
+    pub identification_job_id: Option<collector_core::JobId>,
+    pub inactive_reason: Option<String>,
     pub snapshot: SnapshotRecord,
     pub active: bool,
 }
@@ -302,7 +305,7 @@ impl DatUploadMetadata {
         Ok(())
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UploadedDatCatalog {
     pub metadata: DatUploadMetadata,
@@ -377,6 +380,8 @@ pub struct FrozenAcquisitionJob {
 #[serde(tag = "kind", content = "input", rename_all = "snake_case")]
 pub enum FrozenJobInput {
     Processing(FrozenProcessingJob),
+    GameIdentification(crate::FrozenGameIdentification),
+    GameCatalogScan(crate::FrozenGameCatalogScan),
     Acquisition(FrozenAcquisitionJob),
     Derivative(crate::FrozenDerivativeJob),
     DerivativeBatch(crate::FrozenDerivativeBatchJob),
@@ -387,6 +392,8 @@ impl FrozenJobInput {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Processing(job) => job.validate(),
+            Self::GameIdentification(job) => job.validate(),
+            Self::GameCatalogScan(job) => job.validate(),
             Self::MetadataResolution(job) => job.validate(),
             Self::ExistingMetadata(job) => job.validate(),
             Self::Derivative(job) => job.validate(),
@@ -572,6 +579,8 @@ pub struct AcquireAccurateRipCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataInventoryState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<collector_core::ModuleData>,
     pub revision: collector_core::Revision,
     pub title: String,
     pub subtitle: String,
@@ -580,6 +589,7 @@ pub struct MetadataInventoryState {
 impl From<&collector_core::Item> for MetadataInventoryState {
     fn from(item: &collector_core::Item) -> Self {
         Self {
+            domain: Some(item.domain.clone()),
             revision: item.revision,
             title: item.title.clone(),
             subtitle: item.subtitle.clone(),
@@ -631,7 +641,7 @@ impl MetadataAuthorityRecord {
                 candidates,
                 self.current_candidates.as_deref(),
             )?;
-            let expected = crate::metadata::resolve_metadata_fields_with_policy(
+            let mut expected = crate::metadata::resolve_metadata_fields_with_policy(
                 &inventory.title,
                 &inventory.subtitle,
                 &self.authority,
@@ -642,6 +652,23 @@ impl MetadataAuthorityRecord {
                     .map_or("en", collector_core::LanguageTag::as_str),
                 self.resolution_policy == 1,
             )?;
+            if self.resolution_policy <= 2 {
+                if expected.title.source == collector_core::MetadataValueSource::Provisional {
+                    expected.title.source = collector_core::MetadataValueSource::Manual;
+                }
+                if let Some(subtitle) = &mut expected.subtitle
+                    && subtitle.source == collector_core::MetadataValueSource::Provisional
+                {
+                    subtitle.source = collector_core::MetadataValueSource::Manual;
+                }
+            } else if let Some(domain) = &inventory.domain {
+                crate::metadata::resolve_metadata_domain(
+                    domain,
+                    &self.authority,
+                    &current,
+                    &mut expected,
+                )?;
+            }
             if self.display.as_ref() != Some(&expected) || inventory.revision.0 == 0 {
                 return Err(collector_core::Error::Invalid(
                     "metadata display disagrees with its frozen inputs".into(),
@@ -652,7 +679,7 @@ impl MetadataAuthorityRecord {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if !matches!(self.resolution_policy, 1 | 2) {
+        if !matches!(self.resolution_policy, 1..=3) {
             return Err(collector_core::Error::Unavailable(
                 "unknown metadata resolution policy".into(),
             ));

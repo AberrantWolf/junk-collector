@@ -9,7 +9,7 @@ pub mod passkeys;
 use axum::{
     Json, Router,
     body::Body,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State},
+    extract::{ConnectInfo, DefaultBodyLimit, FromRequest, Multipart, Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -676,6 +676,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_music_preparation_batch))
         .routes(routes!(retry_music_preparation_batch))
         .routes(routes!(metadata_review, update_metadata_authority))
+        .routes(routes!(identify_game_entry))
         .routes(routes!(resolve_metadata, metadata_resolutions))
         .routes(routes!(metadata_care))
         .routes(routes!(preparation_care))
@@ -721,6 +722,11 @@ fn administration_api_router() -> OpenApiRouter<AppState> {
             routes!(upload_catalog_snapshot)
                 .layer(DefaultBodyLimit::max(collector_app::MAX_DAT_UPLOAD_BYTES)),
         )
+        .routes(
+            routes!(inspect_catalog_upload)
+                .layer(DefaultBodyLimit::max(512 * 1024 * 1024 + 1024 * 1024)),
+        )
+        .routes(routes!(accept_catalog_upload))
         .routes(routes!(catalog_snapshots, import_catalog_snapshot))
         .routes(routes!(activate_catalog_snapshot))
 }
@@ -733,7 +739,11 @@ pub fn openapi() -> OpenApi {
     document.info.title = "Junk Collector API".into();
     document.info.version = "1.0.0".into();
     for (path, item) in &mut document.paths.paths {
-        let limit = if path.ends_with("/cover") || path.ends_with("/assets") {
+        let limit = if path.ends_with("/catalog-upload/inspect") {
+            512 * 1024 * 1024 + 1024 * 1024
+        } else if path.ends_with("/catalog-upload") {
+            collector_app::MAX_DAT_UPLOAD_BYTES
+        } else if path.ends_with("/cover") || path.ends_with("/assets") {
             20 * 1024 * 1024
         } else if path.ends_with("/files/{index}") {
             8 * 1024 * 1024
@@ -4327,6 +4337,114 @@ async fn upload_catalog_snapshot(
         Json(serde_json::json!({"job_id":job_id})),
     )
         .into_response())
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/identify-game", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = Vec<JobId>), (status = 403), (status = 409)))]
+async fn identify_game_entry(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<(StatusCode, Json<Vec<JobId>>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(blocking(move || state.service.identify_game_entry(&actor, id, &context)).await?),
+    ))
+}
+
+/// Browser batch of binary DAT/ZIP uploads; parsing uses bounded multipart chunks.
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+struct CatalogUploadForm {
+    #[schema(value_type=Vec<String>, format=Binary)]
+    files: Vec<String>,
+}
+
+#[utoipa::path(post, path = "/api/v1/admin/collections/{id}/catalog-upload/inspect", params(("id" = CollectionId, Path)), request_body(content = CatalogUploadForm, content_type = "multipart/form-data"), responses((status = 200, body = collector_app::CatalogUploadPreview), (status = 400), (status = 403), (status = 413)))]
+async fn inspect_catalog_upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    request: Request,
+) -> ApiResult<Json<collector_app::CatalogUploadPreview>> {
+    let actor = principal(&state, &headers)?;
+    let service = state.service.clone();
+    let authorized = actor.clone();
+    blocking(move || service.authorize_game_catalog_upload(&authorized, id)).await?;
+    let _slot = state
+        .catalog_upload_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| Error::Unavailable("Other catalog uploads are in progress".into()))?;
+    let multipart = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("multipart/form-data"));
+    let mut files = vec![];
+    if multipart {
+        let mut form = Multipart::from_request(request, &state)
+            .await
+            .map_err(|_| Error::Invalid("Invalid catalog batch".into()))?;
+        let mut total = 0usize;
+        while let Some(mut field) = form
+            .next_field()
+            .await
+            .map_err(|_| Error::Invalid("Invalid catalog batch field".into()))?
+        {
+            if files.len() >= 128 {
+                return Err(Error::Invalid("Batch exceeds 128 uploaded files".into()).into());
+            }
+            let name = field.file_name().unwrap_or("Uploaded DAT").to_owned();
+            let mut data = Vec::new();
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|_| Error::Invalid("Catalog upload read failed".into()))?
+            {
+                total = total.checked_add(chunk.len()).ok_or(Error::Conflict)?;
+                if data.len() + chunk.len() > collector_app::MAX_DAT_UPLOAD_BYTES
+                    || total > 512 * 1024 * 1024
+                {
+                    return Err(Error::Invalid("Upload file or batch limit exceeded".into()).into());
+                }
+                data.extend_from_slice(&chunk);
+            }
+            files.push((name, data));
+        }
+    } else {
+        let bytes = axum::body::to_bytes(request.into_body(), collector_app::MAX_DAT_UPLOAD_BYTES)
+            .await
+            .map_err(|_| Error::Invalid("Upload files up to 64 MiB each".into()))?;
+        files.push(("Uploaded DAT".into(), bytes.to_vec()));
+    }
+    Ok(Json(
+        blocking(move || {
+            let _slot = _slot;
+            state.service.inspect_catalog_batch(&actor, id, files)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post, path = "/api/v1/admin/collections/{id}/catalog-upload/accept", params(("id" = CollectionId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::UploadedDatCatalog, responses((status = 202, body = serde_json::Value), (status = 400), (status = 403)))]
+async fn accept_catalog_upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Json(upload): Json<collector_app::UploadedDatCatalog>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job = blocking(move || {
+        state
+            .service
+            .import_uploaded_catalog(&actor, id, upload, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job})),
+    ))
 }
 
 #[utoipa::path(put, path = "/api/v1/admin/collections/{id}/catalog-snapshots/{snapshot_id}/active", params(("id" = CollectionId, Path), ("snapshot_id" = SnapshotId, Path), ("Idempotency-Key" = String, Header)), request_body = ActivateCatalogSnapshotCommand, responses((status = 200, body = CatalogSnapshotStatus), (status = 400), (status = 403), (status = 404), (status = 409)))]

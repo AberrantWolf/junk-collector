@@ -294,7 +294,7 @@
             }
           },
           "required": true,
-          "x-body-limit-bytes": 2097152
+          "x-body-limit-bytes": 67108864
         },
         "responses": {
           "202": {
@@ -312,6 +312,103 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/admin/collections/{id}/catalog-upload/accept": {
+      "post": {
+        "operationId": "accept_catalog_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadedDatCatalog"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/admin/collections/{id}/catalog-upload/inspect": {
+      "post": {
+        "operationId": "inspect_catalog_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogUploadForm"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 537919488
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogUploadPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
             "description": ""
           },
           "413": {
@@ -4776,6 +4873,50 @@
         }
       }
     },
+    "/api/v1/items/{id}/identify-game": {
+      "post": {
+        "operationId": "identify_game_entry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobId"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/metadata": {
       "get": {
         "operationId": "metadata_review",
@@ -8839,6 +8980,89 @@
           "other"
         ]
       },
+      "CatalogCandidate": {
+        "type": "object",
+        "required": [
+          "provider",
+          "provider_record_id",
+          "label",
+          "matched_units"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "matched_units": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogMatchedUnit"
+            }
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "provider_record_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogDetection": {
+        "type": "object",
+        "required": [
+          "status",
+          "dialect",
+          "system_choices",
+          "version",
+          "byte_domains",
+          "reasons"
+        ],
+        "properties": {
+          "byte_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "catalog": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dialect": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameDetectionStatus"
+          },
+          "system": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StandardGameSystem"
+              }
+            ]
+          },
+          "system_choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StandardGameSystem"
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
       "CatalogImportRequest": {
         "type": "object",
         "required": [
@@ -8847,6 +9071,138 @@
         "properties": {
           "source": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogMatchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "match"
+            ],
+            "properties": {
+              "match": {
+                "type": "string",
+                "enum": [
+                  "inconclusive"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "match"
+            ],
+            "properties": {
+              "match": {
+                "type": "string",
+                "enum": [
+                  "no_match"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidate",
+              "match"
+            ],
+            "properties": {
+              "candidate": {
+                "$ref": "#/components/schemas/CatalogCandidate"
+              },
+              "match": {
+                "type": "string",
+                "enum": [
+                  "unique_complete_match"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidates",
+              "match"
+            ],
+            "properties": {
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogCandidate"
+                }
+              },
+              "match": {
+                "type": "string",
+                "enum": [
+                  "ambiguous_complete_matches"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidates",
+              "matched_files",
+              "total_files",
+              "match"
+            ],
+            "properties": {
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogCandidate"
+                }
+              },
+              "match": {
+                "type": "string",
+                "enum": [
+                  "partial_identification"
+                ]
+              },
+              "matched_files": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "total_files": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
+      "CatalogMatchedUnit": {
+        "type": "object",
+        "required": [
+          "source_file_id",
+          "digest"
+        ],
+        "properties": {
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "source_file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          },
+          "track_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -8881,6 +9237,22 @@
           "active": {
             "type": "boolean"
           },
+          "identification_job_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          },
+          "inactive_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "snapshot": {
             "$ref": "#/components/schemas/SnapshotRecord"
           }
@@ -8913,6 +9285,85 @@
           },
           "system": {
             "type": "string"
+          }
+        }
+      },
+      "CatalogUploadEntry": {
+        "type": "object",
+        "required": [
+          "name",
+          "detection",
+          "corrections"
+        ],
+        "properties": {
+          "corrections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadedDatCatalog"
+            }
+          },
+          "detection": {
+            "$ref": "#/components/schemas/CatalogDetection"
+          },
+          "name": {
+            "type": "string"
+          },
+          "upload": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UploadedDatCatalog"
+              }
+            ]
+          }
+        }
+      },
+      "CatalogUploadForm": {
+        "type": "object",
+        "description": "Browser batch of binary DAT/ZIP uploads; parsing uses bounded multipart chunks.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        }
+      },
+      "CatalogUploadPreview": {
+        "type": "object",
+        "required": [
+          "expanded_bytes",
+          "member_count",
+          "entries",
+          "ignored"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogUploadEntry"
+            }
+          },
+          "expanded_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "ignored": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "member_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -9676,6 +10127,26 @@
       "CurrencyCode": {
         "type": "string"
       },
+      "DatUploadMetadata": {
+        "type": "object",
+        "required": [
+          "system",
+          "catalog",
+          "byte_domain"
+        ],
+        "properties": {
+          "byte_domain": {
+            "type": "string"
+          },
+          "catalog": {
+            "type": "string"
+          },
+          "system": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "DeviceId": {
         "type": "string",
         "format": "uuid"
@@ -9852,6 +10323,27 @@
                 "enum": [
                   "text"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "values",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "choice"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -10118,6 +10610,375 @@
             "type": "boolean"
           }
         }
+      },
+      "GameCatalogIdentification": {
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "snapshot_digest",
+          "byte_domain",
+          "system",
+          "catalog"
+        ],
+        "properties": {
+          "byte_domain": {
+            "type": "string"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/CatalogMatchResult"
+          },
+          "snapshot_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          },
+          "system": {
+            "type": "string"
+          }
+        }
+      },
+      "GameDetectionStatus": {
+        "type": "string",
+        "enum": [
+          "recognized",
+          "ambiguous",
+          "unrecognized",
+          "malformed",
+          "unsupported"
+        ]
+      },
+      "GameFileDigest": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "bytes",
+          "domain",
+          "digests"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Digest"
+            }
+          },
+          "domain": {
+            "$ref": "#/components/schemas/NormalizedByteDomain"
+          },
+          "file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameFormatInspection": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "status",
+          "reason"
+        ],
+        "properties": {
+          "file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameDetectionStatus"
+          }
+        }
+      },
+      "GameIdentification": {
+        "type": "object",
+        "required": [
+          "analyses",
+          "status",
+          "inspections",
+          "catalogs",
+          "candidates",
+          "limitations"
+        ],
+        "properties": {
+          "analyses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameProcessingResult"
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataCandidateObservation"
+            }
+          },
+          "catalogs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameCatalogIdentification"
+            }
+          },
+          "inspections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameFormatInspection"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameDetectionStatus"
+          }
+        }
+      },
+      "GameProcessingResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "files",
+              "result"
+            ],
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GameFileDigest"
+                }
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "hashes"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "tracks",
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "track_hashes"
+                ]
+              },
+              "tracks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GameTrackDigest"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "format",
+              "fields",
+              "result"
+            ],
+            "properties": {
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/GameStructureValue"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "format": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "structure"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "catalog",
+              "result"
+            ],
+            "properties": {
+              "catalog": {
+                "$ref": "#/components/schemas/CatalogMatchResult"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "catalog_match"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "GameStructureValue": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsigned"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "signed"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boolean"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bytes"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ByteLength"
+              }
+            }
+          }
+        ]
+      },
+      "GameTrackDigest": {
+        "type": "object",
+        "required": [
+          "track_number",
+          "source_file_id",
+          "source_byte_offset",
+          "bytes",
+          "synthetic_pregap_frames",
+          "synthetic_postgap_frames",
+          "domain",
+          "digests"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Digest"
+            }
+          },
+          "domain": {
+            "$ref": "#/components/schemas/NormalizedByteDomain"
+          },
+          "source_byte_offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source_file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          },
+          "synthetic_postgap_frames": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "synthetic_pregap_frames": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_number": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "GeoCoordinate": {
         "type": "object",
@@ -11638,6 +12499,48 @@
           {
             "type": "object",
             "required": [
+              "status",
+              "observation_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "game_identification"
+                ]
+              },
+              "observation_id": {
+                "$ref": "#/components/schemas/ObservationId"
+              },
+              "status": {
+                "$ref": "#/components/schemas/GameDetectionStatus"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "completed",
+              "kind"
+            ],
+            "properties": {
+              "completed": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "game_catalog_scan"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "snapshot_id",
               "kind"
             ],
@@ -12417,6 +13320,62 @@
         },
         "additionalProperties": false
       },
+      "MetadataCandidateObservation": {
+        "type": "object",
+        "required": [
+          "identity",
+          "title",
+          "complete_identity",
+          "strength",
+          "provider_priority",
+          "observation"
+        ],
+        "properties": {
+          "artwork": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssetId"
+              }
+            ]
+          },
+          "complete_identity": {
+            "type": "boolean",
+            "description": "A provider's complete identity assertion is ranked before all partial\nidentifier or layout evidence. It is descriptive identity evidence, not\nintegrity or catalog verification."
+          },
+          "identity": {
+            "$ref": "#/components/schemas/MetadataCandidateIdentity"
+          },
+          "observation": {
+            "type": "object"
+          },
+          "provider_priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Lower values are preferred. Policy supplies this value; array order never\nparticipates in resolution.",
+            "minimum": 0
+          },
+          "strength": {
+            "$ref": "#/components/schemas/MatchStrength"
+          },
+          "subtitle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataText"
+              }
+            ]
+          },
+          "title": {
+            "$ref": "#/components/schemas/MetadataText"
+          }
+        },
+        "additionalProperties": false
+      },
       "MetadataCandidateView": {
         "type": "object",
         "required": [
@@ -12860,7 +13819,9 @@
           "providers",
           "lookup_choices",
           "catalog_sources",
-          "permissions"
+          "permissions",
+          "terms",
+          "recognized_systems"
         ],
         "properties": {
           "authority": {
@@ -12880,6 +13841,16 @@
           },
           "display": {
             "$ref": "#/components/schemas/ResolvedMetadataDisplay"
+          },
+          "identification": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GameIdentification"
+              }
+            ]
           },
           "item_id": {
             "$ref": "#/components/schemas/ItemId"
@@ -12912,6 +13883,12 @@
               "$ref": "#/components/schemas/MetadataProviderView"
             }
           },
+          "recognized_systems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StandardGameSystem"
+            }
+          },
           "review_reasons": {
             "type": "array",
             "items": {
@@ -12920,6 +13897,9 @@
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/MetadataTerms"
           }
         }
       },
@@ -12948,6 +13928,29 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "MetadataTerms": {
+        "type": "object",
+        "required": [
+          "singular",
+          "plural",
+          "choice",
+          "subtitle"
+        ],
+        "properties": {
+          "choice": {
+            "type": "string"
+          },
+          "plural": {
+            "type": "string"
+          },
+          "singular": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
           }
         }
       },
@@ -13009,6 +14012,20 @@
           {
             "type": "object",
             "required": [
+              "source"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "provisional"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "identity",
               "source"
             ],
@@ -13053,6 +14070,7 @@
           "schema_version",
           "display_name",
           "collection_type_label",
+          "metadata_terms",
           "fields",
           "capabilities"
         ],
@@ -13077,6 +14095,9 @@
           },
           "id": {
             "$ref": "#/components/schemas/ModuleId"
+          },
+          "metadata_terms": {
+            "$ref": "#/components/schemas/MetadataTerms"
           },
           "schema_version": {
             "type": "integer",
@@ -13929,6 +14950,24 @@
           }
         }
       },
+      "NormalizedByteDomain": {
+        "type": "object",
+        "required": [
+          "name",
+          "version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "ObservationId": {
         "type": "string",
         "format": "uuid"
@@ -14388,6 +15427,22 @@
               "properties": {
                 "active": {
                   "type": "boolean"
+                },
+                "identification_job_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/JobId"
+                    }
+                  ]
+                },
+                "inactive_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "snapshot": {
                   "$ref": "#/components/schemas/SnapshotRecord"
@@ -16853,6 +17908,15 @@
               }
             ]
           },
+          "domain_fields": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ResolvedMetadataText"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "resolution": {
             "$ref": "#/components/schemas/MetadataResolutionKind"
           },
@@ -17442,6 +18506,32 @@
           }
         }
       },
+      "StandardGameSystem": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "aliases",
+          "byte_domain"
+        ],
+        "properties": {
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "byte_domain": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "StartEnrollment": {
         "type": "object",
         "required": [
@@ -17756,6 +18846,26 @@
               "string",
               "null"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadedDatCatalog": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "digest",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/DatUploadMetadata"
           }
         },
         "additionalProperties": false

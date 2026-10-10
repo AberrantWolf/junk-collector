@@ -593,7 +593,9 @@ async fn main() -> Result<()> {
                 .service
                 .clone()
                 .with_streaming_provider(provider_id.clone(), dat_provider.clone())?
-                .with_catalog_parser(provider_id, dat_provider.clone())?;
+                .with_catalog_parser(provider_id, dat_provider.clone())?
+                .with_catalog_uploads(store.clone())
+                .with_catalog_inspection(Arc::new(collector_providers::StandardCatalogInspector));
             #[cfg(debug_assertions)]
             let accuraterip =
                 if let Ok(origin) = std::env::var("JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN") {

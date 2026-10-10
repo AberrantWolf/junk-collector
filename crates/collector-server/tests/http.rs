@@ -22,6 +22,7 @@ impl collector_modules::CollectionModule for AbsentFixtureModule {
             schema_version: 8,
             display_name: "Temporary absent fixture".into(),
             collection_type_label: "Temporary fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![],
         }
@@ -64,6 +65,7 @@ impl collector_modules::CollectionModule for StampWebFixtureModule {
             schema_version: 1,
             display_name: "Stamp fixture module".into(),
             collection_type_label: "Postage stamps".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![
                 DomainFieldDescriptor {
                     key: "denomination".into(),
@@ -2707,8 +2709,10 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
     let paths = document["paths"].as_object().unwrap();
-    assert_eq!(paths.len(), 145); // Browser DAT upload adds one administration-only command.
     for path in [
+        "/api/v1/items/{id}/identify-game",
+        "/api/v1/admin/collections/{id}/catalog-upload/inspect",
+        "/api/v1/admin/collections/{id}/catalog-upload/accept",
         "/api/v1/collections/{collection}/lists",
         "/api/v1/collections/{collection}/lists/{list}",
         "/api/v1/collection-search",

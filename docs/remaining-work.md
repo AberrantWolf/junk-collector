@@ -42,6 +42,21 @@ ledger, status and dated validation together. No commits or agents without an
 explicit assignment. Apply repository gates at implementation boundaries; prose-only
 changes need architecture/link/coverage checks.
 
+## Completed requested delivery — automatic standard games, 2026-10-10
+
+The explicit user assignment for automatic standard-game identification is delivered
+across shared mechanisms, Collector services/storage/API and the real web workflow.
+See [supported matrix](game-identification.md), [status](implementation-status.md#automatic-standard-game-identification--2026-10-10)
+and [dated validation](validation/game-identification-2026-10-10.md). This supersedes
+older descriptions requiring manual system/profile selection in the ordinary game
+catalog workflow. No second remaining-work queue is created.
+
+New format/normalization algorithms, arbitrary custom systems/conventions, game
+artwork providers and provenance compaction remain deferred under existing scope
+and HL-01/HL-05/HL-08. The finite matrix does not claim all conceivable standards.
+Collector pins pushed shared-library revision
+`83177af57ca36a5b284298020fea9d5e8fb0c415`; local Cargo patches are removed.
+
 ## 1. Finish the usable installation and protect the collection
 
 ### HL-01 — Simplify contracts and retain meaningful provenance

@@ -9,6 +9,7 @@
     "check:api": "python3 ../scripts/api_contract.py",
     "generate:api": "python3 ../scripts/api_contract.py --write",
     "test:smoke": "node tests/smoke.mjs",
+    "test:game-catalog": "node tests/game-catalog-upload.mjs",
     "test:browse": "node tests/browse.mjs",
     "test:actions": "node tests/action-menu.mjs",
     "test:scans": "node tests/scans.mjs",

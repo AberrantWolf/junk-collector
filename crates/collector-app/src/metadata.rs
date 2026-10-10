@@ -51,9 +51,31 @@ pub enum MetadataAuthorityChange {
     },
     ClearArtworkChoice,
     SetDomainOverrides {
+        #[serde(deserialize_with = "deserialize_domain_override")]
         overrides: ModuleData,
     },
     ClearDomainOverrides,
+}
+
+// Internally tagged commands buffer their contents before variant decoding. Decode
+// this submitted override through Value because serde's buffer cannot supply the
+// RawValue token; immutable archived ModuleData still retains its raw JSON.
+fn deserialize_domain_override<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<ModuleData, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SubmittedOverride {
+        module: ModuleId,
+        schema_version: u32,
+        payload: serde_json::Value,
+    }
+    let value = SubmittedOverride::deserialize(deserializer)?;
+    Ok(ModuleData {
+        module: value.module,
+        schema_version: value.schema_version,
+        payload: RawJson::from_value(value.payload),
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -249,6 +271,9 @@ pub struct MetadataReviewView {
     pub lookup_choices: Vec<MetadataLookupChoice>,
     pub catalog_sources: Vec<MetadataCatalogSourceView>,
     pub permissions: MetadataPermissions,
+    pub terms: collector_modules::MetadataTerms,
+    pub recognized_systems: Vec<collector_modules::games::StandardGameSystem>,
+    pub identification: Option<collector_modules::games::GameIdentification>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -637,62 +662,6 @@ impl CollectionService {
                     effects,
                 )
             },
-        )
-    }
-
-    /// Background counterpart used by the guided-ingest coordinator. It shares
-    /// the same parser, candidate and authority effects without fabricating a
-    /// request Principal or a nested command receipt.
-    pub(crate) fn refresh_provider_metadata_for_job(
-        &self,
-        user_id: UserId,
-        item: &Item,
-        snapshot_id: SnapshotId,
-        source_observation_id: Option<ObservationId>,
-        artwork_links: Vec<ProviderArtworkLink>,
-        observation_id: ObservationId,
-    ) -> Result<MetadataAuthorityRecord> {
-        let eligibility = self.content_write_eligibility_for_user(user_id, item.collection_id)?;
-        self.validate_owned_domain(&eligibility, &item.domain)?;
-        if let Some(existing) = self
-            .processing
-            .metadata_authority(item.collection_id, item.id)?
-            && self.processing.metadata_refresh_observed(
-                item.collection_id,
-                item.id,
-                observation_id,
-            )?
-        {
-            return Ok(existing);
-        }
-        self.processing
-            .ensure_snapshot_current(item.id, snapshot_id)?;
-        let revision = self
-            .processing
-            .metadata_authority(item.collection_id, item.id)?
-            .map_or(Revision(0), |record| record.revision);
-        let observation = self.provider_metadata_observation(
-            item,
-            &eligibility.owner,
-            &RefreshProviderMetadataCommand {
-                expected_revision: revision,
-                snapshot_id,
-                source_observation_id,
-                artwork: artwork_links,
-            },
-            observation_id,
-        )?;
-        let refresh = RefreshMetadataCommand {
-            expected_revision: revision,
-            observation,
-        };
-        self.refresh_metadata_effect(
-            item,
-            &eligibility.owner,
-            &refresh,
-            &self.metadata_language(user_id)?,
-            None,
-            self.processing.as_ref(),
         )
     }
 
@@ -1352,7 +1321,65 @@ impl CollectionService {
                 strength: candidate.strength,
             })
             .collect();
+        let mut identification = None;
+        if games {
+            for representation in item
+                .captures
+                .iter()
+                .flat_map(|capture| &capture.representations)
+            {
+                let source = PackageScope::Representation(representation.id);
+                let fingerprint = self
+                    .processing
+                    .recorded_source(item.collection_id, source)?;
+                let mut after = None;
+                loop {
+                    let page = self.processing.observations(&crate::ProcessingQuery {
+                        collection_id: item.collection_id,
+                        source,
+                        source_fingerprint: fingerprint.clone(),
+                        operation: Some(OperationId::new("org.junk.games.identify")?),
+                        after,
+                        limit: 100,
+                    })?;
+                    if let Some(observation) = page
+                        .items
+                        .iter()
+                        .find(|o| o.source_fingerprint == fingerprint)
+                    {
+                        identification = Some(observation.typed_result.payload.parse()?);
+                        break;
+                    }
+                    after = page
+                        .next_cursor
+                        .map(|value| value.parse())
+                        .transpose()
+                        .map_err(|_| Error::Conflict)?;
+                    if after.is_none() {
+                        break;
+                    }
+                }
+                if identification.is_some() {
+                    break;
+                }
+            }
+        }
         Ok(MetadataReviewView {
+            terms: self
+                .modules
+                .descriptors()
+                .into_iter()
+                .find(|descriptor| descriptor.id == item.domain.module)
+                .map_or_else(
+                    || collector_modules::metadata_terms(&item.domain.module.0),
+                    |descriptor| descriptor.metadata_terms,
+                ),
+            recognized_systems: if item.domain.module.0 == "org.junk.games" {
+                collector_modules::games::standard_game_systems()
+            } else {
+                vec![]
+            },
+            identification,
             item_id,
             revision: view.revision,
             authority: view.authority,
@@ -1743,7 +1770,7 @@ impl CollectionService {
                 authority.automatic_language =
                     Some(LanguageTag::new(self.metadata_language(actor.user_id)?)?);
                 let record = MetadataAuthorityRecord {
-                    resolution_policy: 2,
+                    resolution_policy: 3,
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
                     item_id,
@@ -1884,7 +1911,7 @@ impl CollectionService {
             .validate_metadata_authority(owner, &authority)
             .map_err(Error::from)?;
         let record = MetadataAuthorityRecord {
-            resolution_policy: 2,
+            resolution_policy: 3,
             inventory: Some(item.into()),
             collection_id: item.collection_id,
             item_id: item.id,
@@ -2122,7 +2149,7 @@ impl CollectionService {
         self.processing.publish_metadata_for_job(
             claim,
             MetadataAuthorityRecord {
-                resolution_policy: 2,
+                resolution_policy: 3,
                 inventory: Some((&item).into()),
                 collection_id: item.collection_id,
                 item_id: item.id,
@@ -2272,7 +2299,12 @@ fn safe_candidate_details(candidate: &MetadataCandidateObservation) -> Option<se
             .observation
             .parse::<collector_modules::games::DatCatalogEntryObservation>()
             .ok()?;
-        if row.record_id != candidate.identity.provider_record_id {
+        if row.record_id != candidate.identity.provider_record_id
+            && !candidate
+                .identity
+                .provider_record_id
+                .ends_with(&format!(":{}", row.record_id))
+        {
             return None;
         }
         serde_json::to_value(row).ok()
@@ -2487,13 +2519,82 @@ pub fn resolve_metadata_display(
     candidates: &[MetadataCandidateObservation],
     preferred_language: &str,
 ) -> Result<ResolvedMetadataDisplay> {
-    resolve_metadata_fields(
+    let mut display = resolve_metadata_fields(
         &item.title,
         &item.subtitle,
         authority,
         candidates,
         preferred_language,
-    )
+    )?;
+    resolve_metadata_domain(&item.domain, authority, candidates, &mut display)?;
+    Ok(display)
+}
+
+pub(crate) fn resolve_metadata_domain(
+    domain: &ModuleData,
+    authority: &MetadataAuthority,
+    candidates: &[MetadataCandidateObservation],
+    display: &mut ResolvedMetadataDisplay,
+) -> Result<()> {
+    if domain.module.0 == "org.junk.games" && domain.schema_version == 1 {
+        let overrides = authority
+            .domain_overrides
+            .as_ref()
+            .map(|data| {
+                data.payload
+                    .parse::<collector_modules::games::GameMetadataOverrides>()
+            })
+            .transpose()?;
+        let automatic = overrides
+            .as_ref()
+            .is_some_and(|value| value.automatic_platform);
+        let manual = overrides
+            .as_ref()
+            .and_then(|value| value.platform.clone())
+            .or_else(|| {
+                (!automatic)
+                    .then(|| {
+                        domain
+                            .payload
+                            .parse::<collector_modules::games::GameItemData>()
+                            .ok()?
+                            .platform
+                    })
+                    .flatten()
+            })
+            .filter(|value| !value.trim().is_empty());
+        let detected = display
+            .candidate
+            .as_ref()
+            .and_then(|identity| candidates.iter().find(|c| &c.identity == identity))
+            .filter(|c| {
+                c.complete_identity && display.resolution != MetadataResolutionKind::Tentative
+            })
+            .and_then(|c| {
+                c.observation
+                    .parse::<collector_modules::games::DatCatalogEntryObservation>()
+                    .ok()?
+                    .system
+                    .map(|system| (system, c.identity.clone()))
+            });
+        if let Some(value) = manual
+            .map(|value| ResolvedMetadataText {
+                value,
+                language: None,
+                source: MetadataValueSource::Manual,
+            })
+            .or_else(|| {
+                detected.map(|(value, identity)| ResolvedMetadataText {
+                    value,
+                    language: None,
+                    source: MetadataValueSource::Candidate { identity },
+                })
+            })
+        {
+            display.domain_fields.insert("platform".into(), value);
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_metadata_fields(
@@ -2585,7 +2686,7 @@ pub(crate) fn resolve_metadata_fields_with_policy(
                 ResolvedMetadataText {
                     value: inventory_title.to_owned(),
                     language: None,
-                    source: MetadataValueSource::Manual,
+                    source: MetadataValueSource::Provisional,
                 },
                 |candidate| ResolvedMetadataText {
                     value: candidate.title.value.clone(),
@@ -2608,7 +2709,7 @@ pub(crate) fn resolve_metadata_fields_with_policy(
                 return Some(ResolvedMetadataText {
                     value: inventory_subtitle.to_owned(),
                     language: None,
-                    source: MetadataValueSource::Manual,
+                    source: MetadataValueSource::Provisional,
                 });
             }
             candidate.and_then(|selected_candidate| {
@@ -2635,8 +2736,16 @@ pub(crate) fn resolve_metadata_fields_with_policy(
     let manual = candidate.is_none()
         || !authority.field_overrides.is_empty()
         || authority.artwork_choice.is_some()
-        || authority.domain_overrides.is_some();
+        || authority.domain_overrides.as_ref().is_some_and(|data| {
+            !(data.module.0 == "org.junk.games"
+                && data.schema_version == 1
+                && data
+                    .payload
+                    .parse::<collector_modules::games::GameMetadataOverrides>()
+                    .is_ok_and(|value| value.automatic_platform && value.platform.is_none()))
+        });
     Ok(ResolvedMetadataDisplay {
+        domain_fields: BTreeMap::new(),
         title,
         subtitle,
         artwork: authority
@@ -2752,6 +2861,7 @@ pub fn same_metadata_album(
         }
     }
     left.identity.provider_record_id == right.identity.provider_record_id
+        || collector_modules::games::equivalent_game_candidates(left, right)
 }
 
 pub fn automatic_metadata_candidate<'a>(

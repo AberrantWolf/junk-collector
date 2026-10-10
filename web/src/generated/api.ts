@@ -84,6 +84,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/collections/{id}/catalog-upload/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["accept_catalog_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/collections/{id}/catalog-upload/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["inspect_catalog_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/default-user/{id}": {
         parameters: {
             query?: never;
@@ -1476,6 +1508,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/identify-game": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["identify_game_entry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/metadata": {
         parameters: {
             query?: never;
@@ -2590,8 +2638,54 @@ export interface components {
         CarrierId: string;
         /** @enum {string} */
         CarrierKind: "cartridge" | "optical_disc" | "tape" | "card" | "booklet" | "case" | "other";
+        CatalogCandidate: {
+            label: string;
+            matched_units: components["schemas"]["CatalogMatchedUnit"][];
+            provider: components["schemas"]["ModuleId"];
+            provider_record_id: string;
+        };
+        CatalogDetection: {
+            byte_domains: string[];
+            catalog?: string | null;
+            dialect: string;
+            reasons: string[];
+            status: components["schemas"]["GameDetectionStatus"];
+            system?: null | components["schemas"]["StandardGameSystem"];
+            system_choices: components["schemas"]["StandardGameSystem"][];
+            version: string;
+        };
         CatalogImportRequest: {
             source: string;
+        };
+        CatalogMatchResult: {
+            /** @enum {string} */
+            match: "inconclusive";
+            reason: string;
+        } | {
+            /** @enum {string} */
+            match: "no_match";
+        } | {
+            candidate: components["schemas"]["CatalogCandidate"];
+            /** @enum {string} */
+            match: "unique_complete_match";
+        } | {
+            candidates: components["schemas"]["CatalogCandidate"][];
+            /** @enum {string} */
+            match: "ambiguous_complete_matches";
+        } | {
+            candidates: components["schemas"]["CatalogCandidate"][];
+            /** @enum {string} */
+            match: "partial_identification";
+            /** Format: int32 */
+            matched_files: number;
+            /** Format: int32 */
+            total_files: number;
+        };
+        CatalogMatchedUnit: {
+            digest: components["schemas"]["Digest"];
+            source_file_id: components["schemas"]["PackageFileId"];
+            /** Format: int32 */
+            track_number?: number | null;
         };
         CatalogSnapshot: {
             digest: components["schemas"]["Digest"];
@@ -2601,6 +2695,8 @@ export interface components {
         };
         CatalogSnapshotStatus: {
             active: boolean;
+            identification_job_id?: null | components["schemas"]["JobId"];
+            inactive_reason?: string | null;
             snapshot: components["schemas"]["SnapshotRecord"];
         };
         CatalogSourceView: {
@@ -2610,6 +2706,23 @@ export interface components {
             catalog: string;
             id: string;
             system: string;
+        };
+        CatalogUploadEntry: {
+            corrections: components["schemas"]["UploadedDatCatalog"][];
+            detection: components["schemas"]["CatalogDetection"];
+            name: string;
+            upload?: null | components["schemas"]["UploadedDatCatalog"];
+        };
+        /** @description Browser batch of binary DAT/ZIP uploads; parsing uses bounded multipart chunks. */
+        CatalogUploadForm: {
+            files: string[];
+        };
+        CatalogUploadPreview: {
+            entries: components["schemas"]["CatalogUploadEntry"][];
+            expanded_bytes: components["schemas"]["ByteLength"];
+            ignored: string[];
+            /** Format: int32 */
+            member_count: number;
         };
         ChangePassword: {
             confirmation: string;
@@ -2801,6 +2914,11 @@ export interface components {
             prepare_music?: boolean;
         };
         CurrencyCode: string;
+        DatUploadMetadata: {
+            byte_domain: string;
+            catalog: string;
+            system: string;
+        };
         /** Format: uuid */
         DeviceId: string;
         Digest: {
@@ -2850,6 +2968,10 @@ export interface components {
             maximum_bytes: number;
             /** @enum {string} */
             type: "text";
+        } | {
+            /** @enum {string} */
+            type: "choice";
+            values: string[];
         } | {
             /** Format: int64 */
             maximum: number;
@@ -2916,6 +3038,91 @@ export interface components {
             default_username?: string | null;
             multi_user: boolean;
             passkeys: boolean;
+        };
+        GameCatalogIdentification: {
+            byte_domain: string;
+            catalog: components["schemas"]["CatalogMatchResult"];
+            snapshot_digest: components["schemas"]["Digest"];
+            snapshot_id: components["schemas"]["SnapshotId"];
+            system: string;
+        };
+        /** @enum {string} */
+        GameDetectionStatus: "recognized" | "ambiguous" | "unrecognized" | "malformed" | "unsupported";
+        GameFileDigest: {
+            bytes: components["schemas"]["ByteLength"];
+            digests: components["schemas"]["Digest"][];
+            domain: components["schemas"]["NormalizedByteDomain"];
+            file_id: components["schemas"]["PackageFileId"];
+        };
+        GameFormatInspection: {
+            file_id: components["schemas"]["PackageFileId"];
+            reason: string;
+            status: components["schemas"]["GameDetectionStatus"];
+        };
+        GameIdentification: {
+            analyses: components["schemas"]["GameProcessingResult"][];
+            candidates: components["schemas"]["MetadataCandidateObservation"][];
+            catalogs: components["schemas"]["GameCatalogIdentification"][];
+            inspections: components["schemas"]["GameFormatInspection"][];
+            limitations: string[];
+            status: components["schemas"]["GameDetectionStatus"];
+        };
+        GameProcessingResult: {
+            files: components["schemas"]["GameFileDigest"][];
+            /** @enum {string} */
+            result: "hashes";
+        } | {
+            /** @enum {string} */
+            result: "track_hashes";
+            tracks: components["schemas"]["GameTrackDigest"][];
+        } | {
+            fields: {
+                [key: string]: components["schemas"]["GameStructureValue"];
+            };
+            format: string;
+            /** @enum {string} */
+            result: "structure";
+        } | {
+            catalog: components["schemas"]["CatalogMatchResult"];
+            /** @enum {string} */
+            result: "catalog_match";
+        };
+        GameStructureValue: {
+            /** @enum {string} */
+            type: "text";
+            value: string;
+        } | {
+            /** @enum {string} */
+            type: "unsigned";
+            /** Format: int64 */
+            value: number;
+        } | {
+            /** @enum {string} */
+            type: "signed";
+            /** Format: int64 */
+            value: number;
+        } | {
+            /** @enum {string} */
+            type: "boolean";
+            value: boolean;
+        } | {
+            /** @enum {string} */
+            type: "bytes";
+            value: components["schemas"]["ByteLength"];
+        };
+        GameTrackDigest: {
+            bytes: components["schemas"]["ByteLength"];
+            digests: components["schemas"]["Digest"][];
+            domain: components["schemas"]["NormalizedByteDomain"];
+            /** Format: int64 */
+            source_byte_offset: number;
+            source_file_id: components["schemas"]["PackageFileId"];
+            /** Format: int32 */
+            synthetic_postgap_frames: number;
+            /** Format: int32 */
+            synthetic_pregap_frames: number;
+            /** Format: int32 */
+            track_number: number;
         };
         GeoCoordinate: {
             /** Format: double */
@@ -3281,6 +3488,16 @@ export interface components {
         JobId: string;
         JobResultView: {
             /** @enum {string} */
+            kind: "game_identification";
+            observation_id: components["schemas"]["ObservationId"];
+            status: components["schemas"]["GameDetectionStatus"];
+        } | {
+            /** Format: int64 */
+            completed: number;
+            /** @enum {string} */
+            kind: "game_catalog_scan";
+        } | {
+            /** @enum {string} */
             kind: "catalog_snapshot";
             snapshot_id: components["schemas"]["SnapshotId"];
         };
@@ -3459,6 +3676,26 @@ export interface components {
             provider_record_id: string;
             provider_record_version?: string | null;
         };
+        MetadataCandidateObservation: {
+            artwork?: null | components["schemas"]["AssetId"];
+            /**
+             * @description A provider's complete identity assertion is ranked before all partial
+             *     identifier or layout evidence. It is descriptive identity evidence, not
+             *     integrity or catalog verification.
+             */
+            complete_identity: boolean;
+            identity: components["schemas"]["MetadataCandidateIdentity"];
+            observation: Record<string, never>;
+            /**
+             * Format: int32
+             * @description Lower values are preferred. Policy supplies this value; array order never
+             *     participates in resolution.
+             */
+            provider_priority: number;
+            strength: components["schemas"]["MatchStrength"];
+            subtitle?: null | components["schemas"]["MetadataText"];
+            title: components["schemas"]["MetadataText"];
+        };
         MetadataCandidateView: {
             accepted_automatically: boolean;
             artwork?: null | components["schemas"]["AssetId"];
@@ -3561,14 +3798,17 @@ export interface components {
             candidates: components["schemas"]["MetadataCandidateView"][];
             catalog_sources: components["schemas"]["MetadataCatalogSourceView"][];
             display: components["schemas"]["ResolvedMetadataDisplay"];
+            identification?: null | components["schemas"]["GameIdentification"];
             item_id: components["schemas"]["ItemId"];
             lookup_choices: components["schemas"]["MetadataLookupChoice"][];
             permissions: components["schemas"]["MetadataPermissions"];
             preferred_language: components["schemas"]["LanguageTag"];
             proposed_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
             providers: components["schemas"]["MetadataProviderView"][];
+            recognized_systems: components["schemas"]["StandardGameSystem"][];
             review_reasons: components["schemas"]["MetadataReviewReason"][];
             revision: components["schemas"]["Revision"];
+            terms: components["schemas"]["MetadataTerms"];
         };
         MetadataState: {
             candidates: components["schemas"]["MetadataCandidate"][];
@@ -3576,6 +3816,12 @@ export interface components {
                 [key: string]: unknown;
             };
             selected?: string | null;
+        };
+        MetadataTerms: {
+            choice: string;
+            plural: string;
+            singular: string;
+            subtitle: string;
         };
         MetadataText: {
             language?: null | components["schemas"]["LanguageTag"];
@@ -3589,6 +3835,9 @@ export interface components {
         MetadataValueSource: {
             /** @enum {string} */
             source: "manual";
+        } | {
+            /** @enum {string} */
+            source: "provisional";
         } | {
             identity: components["schemas"]["MetadataCandidateIdentity"];
             /** @enum {string} */
@@ -3610,6 +3859,7 @@ export interface components {
             display_name: string;
             fields: components["schemas"]["DomainFieldDescriptor"][];
             id: components["schemas"]["ModuleId"];
+            metadata_terms: components["schemas"]["MetadataTerms"];
             /** Format: int32 */
             schema_version: number;
         };
@@ -3822,6 +4072,11 @@ export interface components {
             password: string;
             username: string;
         };
+        NormalizedByteDomain: {
+            name: string;
+            /** Format: int32 */
+            version: number;
+        };
         /** Format: uuid */
         ObservationId: string;
         /** @enum {string} */
@@ -3933,6 +4188,8 @@ export interface components {
         Page_CatalogSnapshotStatus: {
             items: {
                 active: boolean;
+                identification_job_id?: null | components["schemas"]["JobId"];
+                inactive_reason?: string | null;
                 snapshot: components["schemas"]["SnapshotRecord"];
             }[];
             next_cursor?: string | null;
@@ -4489,6 +4746,9 @@ export interface components {
         ResolvedMetadataDisplay: {
             artwork?: null | components["schemas"]["AssetId"];
             candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+            domain_fields?: {
+                [key: string]: components["schemas"]["ResolvedMetadataText"];
+            };
             resolution: components["schemas"]["MetadataResolutionKind"];
             subtitle?: null | components["schemas"]["ResolvedMetadataText"];
             title: components["schemas"]["ResolvedMetadataText"];
@@ -4632,6 +4892,12 @@ export interface components {
             import: components["schemas"]["ImportView"];
             job_id: components["schemas"]["JobId"];
         };
+        StandardGameSystem: {
+            aliases: string[];
+            byte_domain: string;
+            id: string;
+            name: string;
+        };
         StartEnrollment: {
             device_name: string;
         };
@@ -4707,6 +4973,11 @@ export interface components {
             bytes: components["schemas"]["ByteLength"];
             name: string;
             sha256?: string | null;
+        };
+        UploadedDatCatalog: {
+            bytes: components["schemas"]["ByteLength"];
+            digest: components["schemas"]["Digest"];
+            metadata: components["schemas"]["DatUploadMetadata"];
         };
         /** Format: uuid */
         UserId: string;
@@ -5020,6 +5291,88 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    accept_catalog_upload: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadedDatCatalog"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    inspect_catalog_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["CatalogUploadForm"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogUploadPreview"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8608,6 +8961,41 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    identify_game_entry: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobId"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -12,6 +12,23 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Junk Collector preserves evidence and owned collection history independently of how content is consumed. The server is a modular monolith: one process composes independent domain, application, storage, authentication, HTTP, and job capabilities. It is not a set of microservices.
 
+## Standard game identification delivery — 2026-10-10
+
+Shared junk-libs readers own content inspection and DAT decoding; Games owns a
+finite standard-system registry and catalog interpretation. Application policy
+owns multi-catalog identification and activation-triggered background work.
+Filename extensions are routing hints, never identity evidence. A recognized
+malformed/unsupported input cannot fall through to raw matching. Headerless
+inputs need complete catalog evidence. Provisional labels are not manual authority.
+Active DAT selection is scoped by system, family and byte domain; snapshot bytes
+and accepted sources remain immutable. Durable jobs own cancellation/recovery;
+client polling never hashes originals. The [supported matrix and workflow](game-identification.md)
+record limits; [dated validation](validation/game-identification-2026-10-10.md) records acceptance.
+Activation scans page durable member admissions and yield while children run.
+Equivalent direct/import/scan requests share active work with durable ownership.
+Per-field Automatic/Manual controls preserve explicit authority independently of
+source-bound identification; effective system fields are module-owned metadata.
+
 ## Bulk library delivery contract
 
 The accepted [bulk-library delivery](bulk-library-plan.md) extends intake,

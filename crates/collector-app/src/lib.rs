@@ -1,4 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod game_identification;
+pub use game_identification::*;
 mod music_search;
 pub use music_search::*;
 mod collection_lists;
@@ -887,7 +889,16 @@ pub fn metadata_artwork_error<'a>(
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobResultView {
-    CatalogSnapshot { snapshot_id: SnapshotId },
+    GameIdentification {
+        status: collector_modules::games::GameDetectionStatus,
+        observation_id: ObservationId,
+    },
+    GameCatalogScan {
+        completed: u64,
+    },
+    CatalogSnapshot {
+        snapshot_id: SnapshotId,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -930,6 +941,8 @@ impl From<JobRecord> for JobView {
                     | "metadata_resolution"
                     | "bulk_intake"
                     | "metadata_existing"
+                    | "game_identification"
+                    | "game_catalog_scan"
             )
             || record.state == JobState::Completed
                 && metadata_artwork_error(&record.kind, record.result.as_ref()).is_some();
@@ -958,6 +971,18 @@ impl From<JobRecord> for JobView {
 }
 
 fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<JobResultView> {
+    if kind == "game_identification" {
+        let result = result?;
+        return Some(JobResultView::GameIdentification {
+            status: serde_json::from_value(result.get("status")?.clone()).ok()?,
+            observation_id: result.get("observation_id")?.as_str()?.parse().ok()?,
+        });
+    }
+    if kind == "game_catalog_scan" {
+        return Some(JobResultView::GameCatalogScan {
+            completed: result?.get("completed")?.as_u64()?,
+        });
+    }
     if kind != "catalog_acquisition" {
         return None;
     }
@@ -976,7 +1001,26 @@ pub trait JobPort: Send + Sync {
         settle: &mut dyn FnMut(UserId, &WorkTarget) -> Result<bool>,
     ) -> Result<()>;
     fn scan_jobs(&self, user: UserId, key: &str) -> Result<Vec<JobRecord>>;
+    fn game_scan_member(
+        &self,
+        user: UserId,
+        parent: JobId,
+        item: ItemId,
+        representation: RepresentationId,
+    ) -> Result<Option<JobRecord>>;
+    fn game_import_job(&self, user: UserId, import: ImportId) -> Result<Option<JobRecord>>;
+    fn game_scan_page(&self, claim: &JobClaim, after: Option<ItemId>) -> Result<Vec<ItemId>>;
+    fn game_scan_status(&self, user: UserId, parent: JobId) -> Result<GameScanStatus>;
+    fn reconcile_game_scans(&self) -> Result<()>;
+    fn checkpoint_game_scan(
+        &self,
+        claim: &JobClaim,
+        after: Option<ItemId>,
+        admissions_done: bool,
+    ) -> Result<()>;
+
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId>;
+    fn enqueue_game_identifications(&self, specs: Vec<JobSpec>) -> Result<Vec<JobId>>;
     fn enqueue_preparation_member(
         &self,
         batch: JobId,
@@ -1047,6 +1091,7 @@ pub trait AdministrationPort: Send + Sync {
         collection: CollectionId,
         provider: &ModuleId,
         snapshot: SnapshotId,
+        identification: JobSpec,
     ) -> Result<CatalogSnapshotStatus>;
 }
 
@@ -1413,6 +1458,7 @@ pub struct CollectionService {
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
     artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
     catalog_uploads: Option<Arc<dyn UploadedCatalogPort>>,
+    catalog_inspector: Option<Arc<dyn CatalogUploadInspectionPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
     modules: Arc<Registry>,
@@ -2123,6 +2169,7 @@ impl CollectionService {
             audio_converter: None,
             artwork_preview: None,
             catalog_uploads: None,
+            catalog_inspector: None,
             streaming_providers: Arc::new(Default::default()),
             catalog_parsers: Arc::new(Default::default()),
             modules,
@@ -2392,6 +2439,24 @@ impl CollectionService {
         let (effective_permissions, content_permissions) =
             self.presented_content_permissions(role, &collection, Some(&item.domain));
         let mut presentation = self.modules.presentation(&item.domain);
+        if presentation.available && item.domain.module.0 == "org.junk.games" {
+            for (key, value) in &effective_metadata.domain_fields {
+                if let Some(field) = presentation
+                    .values
+                    .iter_mut()
+                    .find(|v| v.label.eq_ignore_ascii_case(key))
+                {
+                    field.value = serde_json::Value::String(value.value.clone());
+                } else {
+                    presentation
+                        .values
+                        .push(collector_modules::PresentationValue {
+                            label: "Platform".into(),
+                            value: serde_json::Value::String(value.value.clone()),
+                        });
+                }
+            }
+        }
         let mut asset_states = self
             .content
             .asset_states_for_item(item.id)?
@@ -3800,15 +3865,45 @@ impl CollectionService {
                     .processing
                     .recorded_source(record.view.collection_id, inventory.scope)?;
                 let provider = ModuleId("org.junk.providers.local-dat".into());
-                let snapshot_id = self
-                    .processing
-                    .active_snapshot(record.view.collection_id, &provider)?;
                 let domain = record
                     .view
                     .association
                     .item_id
                     .map(|item| self.reader.item(item).map(|item| item.domain))
                     .transpose()?;
+                let snapshot_id = if module.0 == "org.junk.games" {
+                    let system = domain
+                        .as_ref()
+                        .and_then(|d| {
+                            d.payload
+                                .parse::<collector_modules::games::GameItemData>()
+                                .ok()
+                        })
+                        .and_then(|d| d.platform)
+                        .and_then(|p| collector_modules::games::standard_system(&p));
+                    let mut compatible = vec![];
+                    if let Some(system) = system {
+                        for id in self
+                            .processing
+                            .active_game_snapshots(record.view.collection_id)?
+                        {
+                            let snapshot = self.processing.snapshot(SnapshotQuery {
+                                collection_id: record.view.collection_id,
+                                snapshot_id: id,
+                            })?;
+                            if game_catalog_slot(&snapshot)?.is_some_and(|slot| {
+                                slot.system == system.id
+                                    && slot.byte_domain == "org.junk.game.raw-bytes"
+                            }) {
+                                compatible.push(id);
+                            }
+                        }
+                    }
+                    (compatible.len() == 1).then(|| compatible[0])
+                } else {
+                    self.processing
+                        .active_snapshot(record.view.collection_id, &provider)?
+                };
                 let selection = RawJson::from_value(serde_json::json!({
                     "import_id": id,
                     "representation_id": record.view.representation_id,
@@ -4759,11 +4854,26 @@ impl CollectionService {
         let page = self.processing.snapshots(collection_id, after, limit)?;
         let mut items = Vec::with_capacity(page.items.len());
         for snapshot in page.items {
-            let active = self
-                .processing
-                .active_snapshot(collection_id, &snapshot.provider)?
-                == Some(snapshot.id);
-            items.push(CatalogSnapshotStatus { snapshot, active });
+            let active = if snapshot.provider.0 == "org.junk.providers.local-dat" {
+                self.processing
+                    .active_game_snapshots(collection_id)?
+                    .contains(&snapshot.id)
+            } else {
+                self.processing
+                    .active_snapshot(collection_id, &snapshot.provider)?
+                    == Some(snapshot.id)
+            };
+            let inactive_reason = if game_catalog_slot(&snapshot)?.is_none() {
+                Some("Historical system, convention or byte variant is unsupported; retained inactive".into())
+            } else {
+                None
+            };
+            items.push(CatalogSnapshotStatus {
+                snapshot,
+                active,
+                identification_job_id: None,
+                inactive_reason,
+            });
         }
         Ok(Page {
             items,
@@ -4790,7 +4900,30 @@ impl CollectionService {
             context,
             "catalog.snapshot.activate",
             &(collection_id, snapshot_id),
-            |effects| effects.activate_catalog_snapshot(collection_id, &provider, snapshot_id),
+            |effects| {
+                let eligibility = self.content_write_eligibility(actor, collection_id)?;
+                let scan = FrozenGameCatalogScan {
+                    collection_id,
+                    collection_binding: eligibility.binding,
+                    activated_snapshot: snapshot_id,
+                };
+                effects.activate_catalog_snapshot(
+                    collection_id,
+                    &provider,
+                    snapshot_id,
+                    JobSpec {
+                        id: deterministic_job_id(actor.user_id, "game.catalog.scan", context.key()),
+                        user_id: actor.user_id,
+                        collection_id: Some(collection_id),
+                        item_id: None,
+                        kind: "game_catalog_scan".into(),
+                        phase: "queued".into(),
+                        total_units: 0,
+                        request: serde_json::json!({"snapshot_id":snapshot_id}),
+                        frozen_input: Some(FrozenJobInput::GameCatalogScan(scan)),
+                    },
+                )
+            },
         )
     }
 
@@ -4840,7 +4973,37 @@ impl CollectionService {
         )
     }
 
+    fn report_processing_phase(&self, claim: &JobClaim, phase: &str) -> Result<()> {
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        match self.jobs.heartbeat_job(
+            claim.id,
+            &claim.claim_token,
+            phase,
+            claim.completed_units,
+            30,
+        ) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                // Cancellation can arrive between the checkpoint and phase write.
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)?
+                {
+                    Err(Error::JobCancelled)
+                } else {
+                    Err(error)
+                }
+            }
+        }
+    }
+
     pub fn run_next_job(&self, worker_instance: &str) -> Result<bool> {
+        self.jobs.reconcile_game_scans()?;
         let Some(claim) = self.jobs.claim_job(worker_instance, 30)? else {
             return Ok(false);
         };
@@ -5081,6 +5244,8 @@ impl CollectionService {
             "metadata_resolution" => self.run_metadata_resolution(&claim),
             "bulk_intake" => self.run_bulk_intake(&claim),
             "bulk_library" => self.run_bulk_library(&claim),
+            "game_identification" => self.run_game_identification(&claim),
+            "game_catalog_scan" => self.run_game_catalog_scan(&claim),
             "metadata_existing" => self.run_existing_metadata(&claim),
             "music_derivative" => self.run_music_derivative(&claim),
             "music_derivative_batch" => self.run_music_derivative_batch(&claim),
@@ -5252,6 +5417,7 @@ impl CollectionService {
                 self.jobs
                     .complete_job(claim.id, &claim.claim_token, result)?;
             }
+            Err(Error::CommandInProgress) if claim.kind == "game_catalog_scan" => {}
             Err(Error::JobCancelled) => {
                 if claim.kind.starts_with("import_")
                     && let Some(import_id) = claim
@@ -5261,6 +5427,10 @@ impl CollectionService {
                         .and_then(|value| value.parse().ok())
                 {
                     let _ = self.provisional_imports.cancel_import(import_id);
+                }
+                if self.jobs.job_record(claim.id, claim.user_id)?.state == JobState::Running {
+                    self.jobs
+                        .request_job_cancellation(claim.id, claim.user_id)?;
                 }
                 self.jobs.cancel_claimed_job(claim.id, &claim.claim_token)?
             }
@@ -5410,6 +5580,8 @@ impl CollectionService {
                 | "metadata_resolution"
                 | "bulk_intake"
                 | "metadata_existing"
+                | "game_identification"
+                | "game_catalog_scan"
         ) {
             self.content_write_eligibility_for_job(actor.user_id, job.collection_id, job.item_id)?;
         }
@@ -5430,6 +5602,8 @@ impl CollectionService {
                 | "metadata_resolution"
                 | "bulk_intake"
                 | "metadata_existing"
+                | "game_identification"
+                | "game_catalog_scan"
                 | "music_derivative"
                 | "processing_operation" => effects.retry_failed_job(id, actor.user_id),
                 "music_derivative_batch" => effects

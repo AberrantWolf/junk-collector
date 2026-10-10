@@ -999,6 +999,35 @@ impl SnapshotPort for Store {
         Ok(Page { items, next_cursor })
     }
 
+    fn active_game_snapshots(&self, collection_id: CollectionId) -> Result<Vec<SnapshotId>> {
+        let db = lock(&self.db)?;
+        let mut stmt=db.prepare("SELECT s.record FROM private.active_game_catalogs a JOIN snapshots s ON s.id=a.snapshot_id WHERE a.collection_id=?").map_err(storage)?;
+        let records = stmt
+            .query_map(params![collection_id.to_string()], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(storage)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?;
+        let mut slots = std::collections::BTreeMap::new();
+        for raw in records {
+            let record: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
+            let Some(slot) = collector_app::game_catalog_slot(&record)? else {
+                continue;
+            };
+            let slot = (slot.system, slot.catalog, slot.byte_domain);
+            slots.insert(slot, record.id);
+        }
+        if slots.len() > 128 {
+            return Err(Error::Unavailable(
+                "At most 128 game catalog slots may be active".into(),
+            ));
+        }
+        let mut result: Vec<_> = slots.into_values().collect();
+        result.sort();
+        result.dedup();
+        Ok(result)
+    }
     fn active_snapshot(
         &self,
         collection_id: CollectionId,
@@ -1395,9 +1424,22 @@ pub(crate) fn project_effective_metadata_search(
     let display = collector_app::resolve_record_metadata(&item, record, &candidates)?;
     let artist = collector_app::music_search_artist_override(&item, record)?;
     music_search::project(tx, &item, Some(&display), &candidates, artist.as_deref())?;
+    let platform = display
+        .domain_fields
+        .get("platform")
+        .map(|value| value.value.clone())
+        .unwrap_or_else(|| collector_app::browse_sort_fields(&item).1);
     tx.execute(
-        "UPDATE browse_items SET title_key=? WHERE id=?",
-        params![display.title.value.to_lowercase(), item.id.to_string()],
+        "UPDATE browse_items SET title_key=?,platform_key=? WHERE id=?",
+        params![
+            display.title.value.to_lowercase(),
+            if platform.is_empty() {
+                "\u{10ffff}".to_owned()
+            } else {
+                platform.to_lowercase()
+            },
+            item.id.to_string()
+        ],
     )
     .map_err(storage)?;
     tx.execute(
@@ -1418,7 +1460,7 @@ pub(crate) fn project_effective_metadata_search(
                     .map(|value| value.value.as_str())
                     .unwrap_or(""),
                 collector_app::browse_sort_fields(&item).0,
-                collector_app::browse_sort_fields(&item).1
+                platform
             )
         ],
     )
@@ -1453,6 +1495,34 @@ impl Store {
             || record.kind != claim.kind
         {
             return Err(Error::Conflict);
+        }
+        if let Some(collector_app::FrozenJobInput::GameIdentification(frozen)) = &claim.frozen_input
+        {
+            let item = self.item(frozen.item_id)?;
+            if item.deleted
+                || self.collection(collection)?.binding != frozen.processing.collection_binding
+                || item.lifecycle.generation != frozen.generation
+                || self.recorded_source(collection, frozen.processing.source)?
+                    != frozen.processing.source_fingerprint
+                || self.active_game_snapshots(collection)? != frozen.snapshots
+            {
+                return Err(Error::Conflict);
+            }
+            self.validate_item_effect(
+                collector_app::ItemEffectContext {
+                    item_id: frozen.item_id,
+                    generation: frozen.generation,
+                    source: collector_app::ItemEffectSource::Job {
+                        id: claim.id,
+                        claim: claim.claim_token.parse().map_err(storage)?,
+                    },
+                },
+                collection,
+            )?;
+            let allowed: bool = lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=? AND u.enabled=1 AND g.collection_id=? AND g.role>=1)", params![claim.user_id.to_string(),collection.to_string()],|r|r.get(0)).map_err(storage)?;
+            if !allowed {
+                return Err(Error::Forbidden);
+            }
         }
         if self.cancellation_requested_record(claim.id, &claim.claim_token)? {
             return Err(Error::JobCancelled);
@@ -1495,6 +1565,11 @@ impl Store {
                 baseline.revision != item.revision
                     || baseline.title != item.title
                     || baseline.subtitle != item.subtitle
+                    || baseline.domain.as_ref().is_some_and(|domain| {
+                        domain.module != item.domain.module
+                            || domain.schema_version != item.domain.schema_version
+                            || domain.payload != item.domain.payload
+                    })
             })
         {
             return Err(Error::Conflict);
@@ -1690,5 +1765,38 @@ impl collector_app::UploadedCatalogPort for Store {
             ));
         }
         Ok(Box::new(file))
+    }
+}
+
+impl Store {
+    pub(crate) fn convert_active_game_catalogs(&self) -> Result<()> {
+        let mut db = lock(&self.db)?;
+        let rows = {
+            let mut statement=db.prepare("SELECT s.record,a.activated_at FROM private.active_catalog_snapshots a JOIN snapshots s ON s.id=a.snapshot_id AND s.collection_id=a.collection_id WHERE a.provider='org.junk.providers.local-dat'").map_err(storage)?;
+            statement
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        let tx = db.transaction().map_err(storage)?;
+        for (raw, activated) in rows {
+            let record: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
+            if let Some(slot) = collector_app::game_catalog_slot(&record)? {
+                tx.execute(
+                    "INSERT OR IGNORE INTO private.active_game_catalogs VALUES(?,?,?,?,?,?)",
+                    params![
+                        record.collection_id.to_string(),
+                        slot.system,
+                        slot.catalog,
+                        slot.byte_domain,
+                        record.id.to_string(),
+                        activated
+                    ],
+                )
+                .map_err(storage)?;
+            }
+        }
+        tx.commit().map_err(storage)
     }
 }

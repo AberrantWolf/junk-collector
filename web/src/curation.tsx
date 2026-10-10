@@ -69,6 +69,7 @@ export default function Curation({initialCollectionId,initialSection='details',c
 }
 
 function DomainFieldInput({field,value,busy,onChange}:{field:DomainField;value:string;busy:boolean;onChange:(value:string)=>void}){
+ if(field.kind.type==='choice')return <label>{field.label}<select aria-label={field.label} disabled={busy} required={field.required} value={value} onChange={event=>onChange(event.target.value)}><option value="">Automatic / unspecified</option>{value&&!field.kind.values.includes(value)&&<option value={value}>{value} (historical)</option>}{field.kind.values.map(choice=><option key={choice} value={choice}>{choice}</option>)}</select></label>;
  if(field.kind.type==='structured')return <div className="read-only-field"><strong>{field.label}</strong><span>This information is saved but cannot be edited here.</span></div>;
  if(!field.editable)return <div className="read-only-field"><strong>{field.label}</strong><span>This field cannot be edited here.</span></div>;
  return <label>{field.label}<input disabled={busy} required={field.required} type={field.kind.type==='integer'?'number':'text'} min={field.kind.type==='integer'?field.kind.minimum:undefined} max={field.kind.type==='integer'?field.kind.maximum:undefined} maxLength={field.kind.type==='text'?field.kind.maximum_bytes:undefined} value={value} onChange={event=>onChange(event.target.value)}/></label>;

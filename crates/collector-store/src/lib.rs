@@ -306,6 +306,7 @@ impl Store {
             elapsed_ms = startup.elapsed().as_millis(),
             "startup catalog ready"
         );
+        store.convert_active_game_catalogs()?;
         store.rebuild_scan_admissions()?;
         store.recover_private_publications()?;
         store.reconcile_job_publications()?;
@@ -361,7 +362,8 @@ impl Store {
     /// Rebuild committed metadata and validate prepared derivative payloads.
     /// No grants are reconstructed. Startup uses the metadata-only variant.
     pub fn reindex(&self) -> Result<()> {
-        self.reindex_catalog(true)
+        self.reindex_catalog(true)?;
+        self.convert_active_game_catalogs()
     }
 
     fn reindex_catalog(&self, verify_derivative_bytes: bool) -> Result<()> {
@@ -1372,6 +1374,83 @@ impl JobPort for Store {
             .collect()
     }
 
+    fn game_scan_member(
+        &self,
+        user: UserId,
+        parent: JobId,
+        item: ItemId,
+        representation: RepresentationId,
+    ) -> Result<Option<JobRecord>> {
+        let id:Option<String>=lock(&self.db)?.query_row("SELECT m.job_id FROM private.game_scan_members m JOIN private.jobs j ON j.id=m.parent WHERE m.parent=? AND m.item_id=? AND m.representation_id=? AND j.user_id=?",params![parent.to_string(),item.to_string(),representation.to_string(),user.to_string()],|r|r.get(0)).optional().map_err(storage)?;
+        id.map(|id| self.job_record(id.parse().map_err(storage)?, user))
+            .transpose()
+    }
+    fn game_import_job(&self, user: UserId, import: ImportId) -> Result<Option<JobRecord>> {
+        let id: Option<String> = lock(&self.db)?.query_row("SELECT j.id FROM private.scan_requests r JOIN private.jobs j ON j.id=r.job_id WHERE r.kind='import' AND r.owner=? AND j.user_id=? AND j.kind='game_identification' ORDER BY j.created_at DESC,j.id DESC LIMIT 1", params![import.to_string(), user.to_string()], |r| r.get(0)).optional().map_err(storage)?;
+        id.map(|id| self.job_record(id.parse().map_err(storage)?, user))
+            .transpose()
+    }
+    fn game_scan_page(&self, claim: &JobClaim, after: Option<ItemId>) -> Result<Vec<ItemId>> {
+        let db = lock(&self.db)?;
+        let mut stmt = db.prepare("SELECT i.id FROM items i JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=? WHERE i.collection_id=? AND i.deleted=0 AND (? IS NULL OR i.id>?) ORDER BY i.id LIMIT 100").map_err(storage)?;
+        stmt.query_map(
+            params![
+                claim.user_id.to_string(),
+                claim.collection_id.map(|id| id.to_string()),
+                after.map(|id| id.to_string()),
+                after.map(|id| id.to_string())
+            ],
+            |r| r.get::<_, String>(0),
+        )
+        .map_err(storage)?
+        .map(|v| v.map_err(storage)?.parse().map_err(storage))
+        .collect()
+    }
+    fn game_scan_status(
+        &self,
+        user: UserId,
+        parent: JobId,
+    ) -> Result<collector_app::GameScanStatus> {
+        lock(&self.db)?.query_row("SELECT COALESCE(SUM(j.state IN ('queued','running','cancel_requested')),0),COALESCE(SUM(j.state='completed'),0),COALESCE(SUM(j.state='failed'),0),COALESCE(SUM(j.state='cancelled'),0) FROM private.scan_requests r JOIN private.jobs j ON j.id=r.job_id WHERE r.kind='game_batch' AND r.owner=? AND j.user_id=?", params![parent.to_string(), user.to_string()], |r| Ok(collector_app::GameScanStatus { pending:r.get(0)?,completed:r.get(1)?,failed:r.get(2)?,cancelled:r.get(3)? })).map_err(storage)
+    }
+    fn reconcile_game_scans(&self) -> Result<()> {
+        lock(&self.db)?.execute("UPDATE private.jobs SET phase='queued' WHERE kind='game_catalog_scan' AND state='queued' AND phase='waiting_games' AND NOT EXISTS(SELECT 1 FROM private.scan_requests r JOIN private.jobs child ON child.id=r.job_id WHERE r.kind='game_batch' AND r.owner=jobs.id AND child.state IN ('queued','running','cancel_requested'))", []).map_err(storage)?;
+        Ok(())
+    }
+    fn checkpoint_game_scan(
+        &self,
+        claim: &JobClaim,
+        after: Option<ItemId>,
+        admissions_done: bool,
+    ) -> Result<()> {
+        let progress = serde_json::json!({"cursor":after,"admissions_done":admissions_done});
+        let changed = lock(&self.db)?.execute("UPDATE private.jobs SET state='queued',phase=?,result=?,claim_token=NULL,lease_expires=NULL,worker_instance=NULL WHERE id=? AND user_id=? AND claim_token=? AND state='running' AND cancellation_requested=0", params![if admissions_done {"waiting_games"} else {"queued"},progress.to_string(),claim.id.to_string(),claim.user_id.to_string(),claim.claim_token]).map_err(storage)?;
+        if changed != 1 {
+            return Err(Error::JobCancelled);
+        }
+        Ok(())
+    }
+    fn enqueue_game_identifications(&self, specs: Vec<JobSpec>) -> Result<Vec<JobId>> {
+        let mut ids = vec![];
+        let mut admissions = self.clone();
+        admissions.receipt = None;
+        admissions.command_result = None;
+        for spec in specs {
+            if spec.kind != "game_identification" {
+                return Err(Error::Conflict);
+            }
+            let recorded:Option<String>=lock(&self.db)?.query_row("SELECT job_id FROM private.game_direct_members WHERE request_id=? AND user_id=?",params![spec.id.to_string(),spec.user_id.to_string()],|r|r.get(0)).optional().map_err(storage)?;
+            ids.push(match recorded {
+                Some(id) => id.parse().map_err(storage)?,
+                None => admissions.enqueue_job_record(spec)?,
+            });
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        self.record_command(&tx, &ids)?;
+        tx.commit().map_err(storage)?;
+        Ok(ids)
+    }
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId> {
         self.enqueue_job_record(spec)
     }
@@ -1514,8 +1593,10 @@ impl AdministrationPort for Store {
         collection: CollectionId,
         provider: &ModuleId,
         snapshot: SnapshotId,
+        identification: JobSpec,
     ) -> Result<collector_app::CatalogSnapshotStatus> {
         provider.validate()?;
+        let _writer = lock(&self.writer)?;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         let record: String = tx
@@ -1534,13 +1615,33 @@ impl AdministrationPort for Store {
                 "snapshot provider does not match activation target".into(),
             ));
         }
+        let slot = collector_app::game_catalog_slot(&record)?.ok_or_else(|| {
+            Error::Invalid("This catalog system or convention is unsupported".into())
+        })?;
         let result = collector_app::CatalogSnapshotStatus {
             snapshot: record,
             active: true,
+            identification_job_id: Some(identification.id),
+            inactive_reason: None,
         };
         tx.execute(
-            "INSERT INTO private.active_catalog_snapshots(collection_id,provider,snapshot_id,activated_at) VALUES(?,?,?,?) ON CONFLICT(collection_id,provider) DO UPDATE SET snapshot_id=excluded.snapshot_id,activated_at=excluded.activated_at",
-            params![collection.to_string(), provider.0, snapshot.to_string(), self.clock.now().timestamp()],
+            "INSERT INTO private.active_game_catalogs(collection_id,system,catalog,byte_domain,snapshot_id,activated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(collection_id,system,catalog,byte_domain) DO UPDATE SET snapshot_id=excluded.snapshot_id,activated_at=excluded.activated_at",
+            params![collection.to_string(), slot.system, slot.catalog, slot.byte_domain, snapshot.to_string(), self.clock.now().timestamp()],
+        )
+        .map_err(storage)?;
+        identification
+            .frozen_input
+            .as_ref()
+            .ok_or(Error::Conflict)?
+            .validate()?;
+        let now = self.clock.now().timestamp();
+        tx.execute("INSERT OR IGNORE INTO private.jobs(id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,request,result,worker_instance,lease_expires,claim_token,cancellation_requested) VALUES(?,?,?,NULL,'game_catalog_scan','queued','queued',0,0,1,?,?,NULL,NULL,?,NULL,NULL,NULL,NULL,0)", params![identification.id.to_string(),identification.user_id.to_string(),collection.to_string(),now,now,serde_json::to_string(&identification.request).map_err(storage)?]).map_err(storage)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO private.processing_jobs(job_id,frozen_input) VALUES(?,?)",
+            params![
+                identification.id.to_string(),
+                serde_json::to_string(&identification.frozen_input.unwrap()).map_err(storage)?
+            ],
         )
         .map_err(storage)?;
         self.record_command(&tx, &result)?;
@@ -1840,6 +1941,9 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.game_direct_members(request_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,job_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS private.game_scan_members(parent TEXT NOT NULL,item_id TEXT NOT NULL,representation_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(parent,item_id,representation_id));
+            CREATE TABLE IF NOT EXISTS private.active_game_catalogs(collection_id TEXT NOT NULL,system TEXT NOT NULL,catalog TEXT NOT NULL,byte_domain TEXT NOT NULL,snapshot_id TEXT NOT NULL,activated_at INTEGER NOT NULL,PRIMARY KEY(collection_id,system,catalog,byte_domain));").map_err(storage)?;
     if private_version > 19 {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
@@ -2655,6 +2759,13 @@ impl CollectionTypePort for Store {
                     .transpose()
                     .map_err(storage)?
                     .map(|input| match input {
+                        collector_app::FrozenJobInput::GameIdentification(job) => {
+                            job.processing.operation
+                        }
+                        collector_app::FrozenJobInput::GameCatalogScan(_) => {
+                            collector_core::OperationId::new("org.junk.games.identify")
+                                .expect("static operation")
+                        }
                         collector_app::FrozenJobInput::Processing(job) => job.operation,
                         collector_app::FrozenJobInput::Acquisition(job) => job.request.operation,
                         collector_app::FrozenJobInput::MetadataResolution(job) => {

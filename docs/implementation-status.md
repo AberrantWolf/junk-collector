@@ -18,6 +18,24 @@ Use the [consolidated backlog](remaining-work.md) for all remaining work and
 [release requirements](release-requirements.md) for the revised home-lab gate.
 Older dated entries below describe their state at the time, not the current queue.
 
+## Automatic standard-game identification — 2026-10-10
+
+Standard DAT/ZIP batch review detects No-Intro/Redump conventions and recognized
+systems, without required technical selections. Scoped active slots queue durable
+identification scans of existing entries; guided imports and Identify game use the
+same application service. Complete unambiguous catalog evidence applies automatic
+titles, edition details and systems. Partial/competing matches stay reviewable;
+malformed/unsupported recognized input cannot fall through to raw identity.
+Provisional import labels and deliberate per-field overrides are distinct, with
+Use detected controls and game terminology. Unsupported historical settings remain
+inactive and explained; originals and existing evidence are preserved.
+
+The [supported matrix](game-identification.md) limits the claim to existing byte
+interpretations and recognized standards. CHD/UNIF/compressed game containers,
+arbitrary systems and new normalization algorithms remain unsupported/deferred.
+[Delivery validation](validation/game-identification-2026-10-10.md) records format,
+archive bounds, durable recovery, publication fences and browser acceptance.
+
 ## Current scope and remaining work — 2026-10-09
 
 Web and Trash Amp are the client targets; Phono Junk is no longer a target.
