@@ -399,6 +399,55 @@ try{
  await page.waitForFunction(()=>{const image=document.querySelector('img[alt="Front cover preview"]');return image?.complete&&image.naturalWidth>0;});
  await metadataReview.getByRole('button',{name:/Front cover/}).click();
  await metadataReview.getByText('Artwork request completed.',{exact:false}).waitFor();
+ // A fresh lookup has its own recoverable Job but adds no equivalent provider
+ // snapshot, cover Asset or authority revision. Exercise the actual UI commands.
+ const retainedCoverState=()=>page.evaluate(async()=>{
+  const id=localStorage.getItem('primary-music-item-id');
+  const item=await(await fetch(`/api/v1/items/${id}`)).json();
+  const metadata=await(await fetch(`/api/v1/items/${id}/metadata`)).json();
+  const snapshots=await(await fetch(`/api/v1/collections/${item.collection_id}/catalog-snapshots?limit=100`)).json();
+  if(snapshots.next_cursor)throw new Error('fixture snapshot page is incomplete');
+  return {assets:item.assets.map(asset=>asset.id).sort(),revision:metadata.revision,artwork:metadata.authority.artwork_choice,snapshots:snapshots.items.filter(value=>value.snapshot.provider==='org.junk.providers.cover-art-archive').map(value=>value.snapshot.id).sort()};
+ });
+ const beforeRepeatedCover=await retainedCoverState();
+ async function repeatCoverCommand(button,feedback){
+  const [response]=await Promise.all([page.waitForResponse(response=>response.request().method()==='POST'&&response.url().endsWith('/metadata/resolutions')),button.click()]);
+  assert.equal(response.status(),202);
+  const {job_id}=await response.json();
+  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/jobs/${id}`)).json()).state,job_id),{timeout:30000}).toBe('completed');
+  await metadataReview.getByText(feedback,{exact:false}).waitFor();
+ }
+ await repeatCoverCommand(japaneseCandidate.getByRole('button',{name:'Find cover art',exact:true}),'Choose an image to save below.');
+ await repeatCoverCommand(metadataReview.getByRole('button',{name:/Front cover/}),'Artwork request completed.');
+ assert.deepEqual(await retainedCoverState(),beforeRepeatedCover,'equivalent cover lookup grew retained collection state');
+ // Archive the selected provider cover, reload, then explicitly select it again.
+ // The existing archive-control UI is exercised earlier in this same journey.
+ const archivedCover=await page.evaluate(async()=>{
+  const id=localStorage.getItem('primary-music-item-id');
+  const item=await(await fetch(`/api/v1/items/${id}`)).json();
+  const metadata=await(await fetch(`/api/v1/items/${id}/metadata`)).json();
+  const asset=item.assets.find(asset=>asset.id===metadata.authority.artwork_choice);
+  if(!asset)throw new Error('selected provider cover is missing');
+  const response=await fetch(`/api/v1/collections/${item.collection_id}/assets/${asset.id}/archive?expected_revision=${asset.revision}`,{method:'POST',headers:{'idempotency-key':crypto.randomUUID()}});
+  if(!response.ok)throw new Error(`archive provider cover: ${response.status} ${await response.text()}`);
+  const refreshed=await(await fetch(`/api/v1/items/${id}`)).json();
+  if(refreshed.assets.some(value=>value.id===asset.id))throw new Error('archived cover stayed active');
+  return asset;
+ });
+ await page.reload();
+ await metadataReview.getByRole('heading',{name:'Cover Art Archive choices'}).waitFor();
+ await repeatCoverCommand(metadataReview.getByRole('button',{name:/Front cover/}),'Artwork request completed.');
+ assert.deepEqual(await retainedCoverState(),beforeRepeatedCover,'restoration duplicated provider snapshots, assets or metadata');
+ const restoredCover=await page.evaluate(async id=>{
+  const item=await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}`)).json();
+  const asset=item.assets.find(value=>value.id===id);
+  const response=await fetch(`/api/v1/collections/${item.collection_id}/assets/${id}/thumbnail`);
+  return {asset,status:response.status};
+ },archivedCover.id);
+ assert.equal(restoredCover.status,200);
+ assert.equal(restoredCover.asset.revision,archivedCover.revision+2);
+ assert.equal(restoredCover.asset.visibility,archivedCover.visibility);
+ assert.equal(restoredCover.asset.alt_text,archivedCover.alt_text);
  // An explicit release lookup produces a new version; artwork publication itself
  // must not depend on a second network request or change metadata selection.
  await sourceSelect.selectOption('custom-release');

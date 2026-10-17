@@ -1241,10 +1241,7 @@ impl ProcessingPort for Store {
             return Err(Error::JobCancelled);
         }
         if record.acquisition_key.is_some()
-            && matches!(
-                record.provider.0.as_str(),
-                "org.junk.providers.accuraterip" | "org.junk.providers.musicbrainz"
-            )
+            && collector_app::reuses_equivalent_provider_responses(&record.provider)
         {
             let response_key = collector_app::snapshot_response_key(&record)?;
             let mut after = None;

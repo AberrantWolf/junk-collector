@@ -91,3 +91,21 @@ pages; periodic recovery covers all unfinished pages. Metadata and preparation f
 loaded result pages, selections and review drafts survive task navigation. The player
 remains outside task pages; mobile reviews have an explicit return path and keyboard
 focus returns to the originating result.
+
+## BL1 retention follow-up — 2026-10-17
+
+The bounded [HL-01 audit](retention-audit.md) extends the existing shared resolution
+pipeline to reuse exact equivalent CAA listings/images/negative responses. A new
+automatic cover Asset belongs to item + image Snapshot, independent of curator;
+changed bytes keep a separate source/Asset. Existing history/manual authority and
+private command recovery remain intact. General record/log deletion is outside
+this delivery. See [dated acceptance](validation/retention-audit-2026-10-17.md).
+
+
+### BL1 review repairs — 2026-10-18
+
+Concurrent provider-cover creation and equal selection converge on one item-owned
+Asset and authority change. Explicit image selection can restore an archived cover
+with preserved payloads, visibility, alternative text and tombstone history;
+automatic refresh cannot restore it. [Repair validation](validation/retention-review-2026-10-18.md)
+covers both reported defects and the effect's conflict/recovery guarantees.

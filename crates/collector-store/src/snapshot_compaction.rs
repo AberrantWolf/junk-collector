@@ -182,10 +182,7 @@ impl Store {
                 let value: serde_json::Value = serde_json::from_str(&raw).map_err(storage)?;
                 let record: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
 
-                if !matches!(
-                    record.provider.0.as_str(),
-                    "org.junk.providers.accuraterip" | "org.junk.providers.musicbrainz"
-                ) {
+                if !collector_app::reuses_equivalent_provider_responses(&record.provider) {
                     continue;
                 }
                 if unresolved {

@@ -70,6 +70,17 @@ impl CollectionService {
     }
 }
 
+/// Owned response-retention policy, shared by publication and explicit conversion.
+/// Other providers require a separate assessment of their identity/consumers.
+pub fn reuses_equivalent_provider_responses(provider: &ModuleId) -> bool {
+    matches!(
+        provider.0.as_str(),
+        "org.junk.providers.accuraterip"
+            | collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+            | collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID
+    )
+}
+
 /// Operational cache bypass is not part of provider response meaning.
 pub fn snapshot_response_key(record: &SnapshotRecord) -> Result<String> {
     let mut parsed = record.parsed_observation.value()?;

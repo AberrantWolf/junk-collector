@@ -1,6 +1,6 @@
 # Stopped-server snapshot payload conversion
 
-AccurateRip and MusicBrainz refreshes now retain one snapshot for equivalent bytes,
+AccurateRip, MusicBrainz and Cover Art Archive refreshes retain one snapshot for equivalent bytes,
 inputs and parsed outcomes. Older redundant payloads require an explicit conversion;
 normal serving never compacts existing snapshots. Historical IDs, JSON envelopes,
 evidence, accepted metadata and audio-verification dates remain unchanged.
@@ -57,3 +57,18 @@ make a record ineligible. Applying a plan rechecks this layout before removing a
 payload. A complete temporary reference left by an interrupted conversion is
 validated against the journal mapping before cleanup; inconsistent contents require
 restoration rather than being silently discarded.
+
+
+The 2026-10-17 [bounded retention audit](retention-audit.md) extends this same
+conversion to CAA listings/images/negative responses. It does not delete Snapshot
+envelopes, Assets or authority history. New automatic cover Assets are item-owned,
+so repeated requests by different curators reuse the same item's materialization;
+two items sharing the same image response still have distinct Assets. Existing
+requester-derived Assets are retained. Other providers are outside this conversion.
+
+
+The 2026-10-18 review repair also permits explicit image selection to restore an
+archived provider cover through a new Asset revision. Its tombstone and original
+bytes remain preserved; automatic refresh does not restore archived images. This
+is an ordinary authorized metadata workflow, separate from stopped-server payload
+conversion. See [repair validation](validation/retention-review-2026-10-18.md).

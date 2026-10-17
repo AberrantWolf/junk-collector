@@ -20166,9 +20166,16 @@ fn provider_response_identity_distinguishes_changed_bytes_inputs_and_collections
 
 #[test]
 fn snapshot_duplicate_conversion_preserves_ids_rebuilds_and_requires_verified_backup() {
-    snapshot_duplicate_conversion_case(None);
+    snapshot_duplicate_conversion_case(None, ACCURATERIP_PROVIDER_ID);
+    snapshot_duplicate_conversion_case(
+        None,
+        collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID,
+    );
 }
-fn snapshot_duplicate_conversion_case(fault: Option<collector_store::PublicationFaultPoint>) {
+fn snapshot_duplicate_conversion_case(
+    fault: Option<collector_store::PublicationFaultPoint>,
+    provider: &str,
+) {
     let (root, store, actor, service, collection) = setup();
     let mut ids = Vec::new();
     let payload = b"existing duplicate response";
@@ -20183,7 +20190,7 @@ fn snapshot_duplicate_conversion_case(fault: Option<collector_store::Publication
                     acquisition_key: None,
                     id,
                     collection_id: collection.id,
-                    provider: ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+                    provider: ModuleId(provider.into()),
                     media_type: "application/octet-stream".into(),
                     bytes: ByteLength(payload.len() as u64),
                     digest: Digest::sha256(payload),
@@ -20207,6 +20214,8 @@ fn snapshot_duplicate_conversion_case(fault: Option<collector_store::Publication
         let frozen = shared_provider_input(&collection, "legacy");
         let mut frozen = frozen;
         frozen.snapshot_id = id;
+        frozen.request.provider = ModuleId(provider.into());
+        frozen.request.operation = OperationId::new(format!("{provider}.acquire")).unwrap();
         let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
         private
             .execute(
@@ -20405,6 +20414,45 @@ fn snapshot_duplicate_conversion_case(fault: Option<collector_store::Publication
     reuse(&store);
     drop(service);
     drop(store);
+    // Restore the verified pre-conversion backup into empty roots with the
+    // original private identity stopped, and prove its accounts and bytes work.
+    let restored_archive = root.path().join("restored/archive");
+    let restored_state = root.path().join("restored/state");
+    copy_tree(&backup.join("archive"), &restored_archive);
+    copy_tree(&backup.join("state"), &restored_state);
+    assert_eq!(
+        tree_hashes(&backup.join("archive")),
+        tree_hashes(&restored_archive)
+    );
+    assert_eq!(
+        tree_hashes(&backup.join("state")),
+        tree_hashes(&restored_state)
+    );
+    let restored = Store::open(&restored_archive, &restored_state).unwrap();
+    restored
+        .login(
+            "owner",
+            "a long test password",
+            "restored conversion backup",
+        )
+        .unwrap();
+    assert_eq!(
+        Catalog::role(&restored, actor.user_id, collection.id).unwrap(),
+        Role::Owner
+    );
+    for id in &ids {
+        let mut bytes = vec![];
+        restored
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: *id,
+            })
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, payload);
+    }
+    drop(restored);
     let archive_only = Store::open(
         root.path().join("archive"),
         root.path().join("archive-only"),
@@ -20434,7 +20482,11 @@ fn snapshot_duplicate_conversion_recovers_every_mutation_boundary() {
         Point::PayloadPublished,
         Point::ProjectionApplied,
     ] {
-        snapshot_duplicate_conversion_case(Some(point));
+        snapshot_duplicate_conversion_case(Some(point), ACCURATERIP_PROVIDER_ID);
+        snapshot_duplicate_conversion_case(
+            Some(point),
+            collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID,
+        );
     }
 }
 
@@ -21031,4 +21083,1097 @@ fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual
             .value,
         "My deliberate title"
     );
+}
+
+#[test]
+fn cover_art_retention_reuses_responses_with_item_owned_assets_and_durable_retries() {
+    use collector_app::{AcquireMetadataCommand, ResolveMetadataCommand};
+    use collector_modules::music::{COVER_ART_ARCHIVE_PROVIDER_ID, MUSICBRAINZ_PROVIDER_ID};
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let items = [
+        save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap(),
+        save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap(),
+    ];
+    let release = "22222222-2222-4222-8222-222222222222";
+    let mb_body = serde_json::to_vec(
+        &serde_json::json!({"releases":[{"id":release,"title":"Retained album"}]}),
+    )
+    .unwrap();
+    let mb_fixture =
+        metadata_fixture_server(vec![("200 OK\r\nContent-Type: application/json", mb_body)]);
+    let mb = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "collector-test/0.1 (test@example.invalid)",
+            &mb_fixture.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let image = encoded.into_inner();
+    let mut changed = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([56, 34, 12]))
+        .write_to(&mut changed, image::ImageFormat::Png)
+        .unwrap();
+    let changed = changed.into_inner();
+    let listing = serde_json::to_vec(&serde_json::json!({"release":format!("https://musicbrainz.org/release/{release}"),"images":[{"id":"9001","front":true,"back":false,"approved":true,"types":["Front"]}]})).unwrap();
+    let mut replies = vec![
+        ("200 OK\r\nContent-Type: application/json", listing.clone()),
+        ("200 OK\r\nContent-Type: application/json", listing),
+    ];
+    replies.extend((0..4).map(|_| ("200 OK\r\nContent-Type: image/png", image.clone())));
+    replies.push(("200 OK\r\nContent-Type: image/png", changed));
+    replies.extend((0..2).map(|_| {
+        (
+            "404 Not Found\r\nContent-Type: text/html",
+            b"no artwork".to_vec(),
+        )
+    }));
+    // A pending request resumes after reopening and returns to the older, exact image.
+    replies.push(("200 OK\r\nContent-Type: image/png", image.clone()));
+    replies.push(("200 OK\r\nContent-Type: image/png", image.clone()));
+    let fixture = metadata_fixture_server(replies);
+    let caa = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "collector-test/0.1 (test@example.invalid)",
+            &fixture.origin,
+            &[fixture.origin.as_str()],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
+    let configure = |service: CollectionService| {
+        service
+            .with_streaming_provider(
+                ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                Arc::new(collector_app::BoundedProviderAdapter(caa.clone())),
+            )
+            .unwrap()
+            .with_catalog_parser(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
+            .unwrap()
+    };
+    let service = configure(
+        service
+            .with_streaming_provider(
+                ModuleId(MUSICBRAINZ_PROVIDER_ID.into()),
+                Arc::new(collector_app::BoundedProviderAdapter(mb.clone())),
+            )
+            .unwrap()
+            .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), mb)
+            .unwrap(),
+    );
+    let lookup = ResolveMetadataCommand {
+        lookup: AcquireMetadataCommand::MusicBrainzSearch {
+            query: "retained album".into(),
+            refresh: true,
+        },
+        acquire_artwork: false,
+    };
+    let text_jobs: Vec<_> = items
+        .iter()
+        .map(|item| {
+            service
+                .resolve_metadata(&actor, item.id, lookup.clone(), &command())
+                .unwrap()
+        })
+        .collect();
+    provider_drain(&service);
+    for job in text_jobs {
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    }
+    let candidate = service
+        .metadata_view(&actor, items[0].id)
+        .unwrap()
+        .candidates[0]
+        .identity
+        .clone();
+    let listing_lookup = AcquireMetadataCommand::CoverArtListing {
+        candidate: candidate.clone(),
+    };
+    let image_lookup = AcquireMetadataCommand::CoverArtImage {
+        candidate,
+        image_id: "9001".into(),
+    };
+    let resolve = |who: &Principal, item_id, lookup| {
+        clock.advance(60);
+        let job = service
+            .resolve_metadata(
+                who,
+                item_id,
+                ResolveMetadataCommand {
+                    lookup,
+                    acquire_artwork: false,
+                },
+                &command(),
+            )
+            .unwrap();
+        provider_drain(&service);
+        let view = service
+            .metadata_resolutions(who, item_id)
+            .unwrap()
+            .into_iter()
+            .find(|value| value.job.id == job)
+            .unwrap();
+        assert_eq!(view.job.state, JobState::Completed, "{:?}", view.job.error);
+        view.result.unwrap().snapshot_id
+    };
+    let listing_id = resolve(&actor, items[0].id, listing_lookup.clone());
+    assert_eq!(
+        resolve(&actor, items[0].id, listing_lookup.clone()),
+        listing_id
+    );
+    let image_id = resolve(&actor, items[0].id, image_lookup.clone());
+    let first = service.metadata_view(&actor, items[0].id).unwrap();
+    let first_asset = first.authority.artwork_choice.unwrap();
+    assert_eq!(resolve(&actor, items[0].id, image_lookup.clone()), image_id);
+    assert_eq!(
+        service.metadata_view(&actor, items[0].id).unwrap().revision,
+        first.revision
+    );
+    assert_eq!(resolve(&actor, items[1].id, image_lookup.clone()), image_id);
+    let second_asset = service
+        .metadata_view(&actor, items[1].id)
+        .unwrap()
+        .authority
+        .artwork_choice
+        .unwrap();
+    assert_ne!(
+        first_asset, second_asset,
+        "shared provider bytes must not share item ownership"
+    );
+    let other_id = store
+        .create_user("cover-curator", "a long test password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, other_id, Role::Curator).unwrap();
+    let other = Principal {
+        user_id: other_id,
+        administrator: false,
+        device_id: None,
+    };
+    assert_eq!(resolve(&other, items[0].id, image_lookup.clone()), image_id);
+    assert_eq!(
+        store.asset_states_for_item(items[0].id).unwrap().len(),
+        1,
+        "requester identity must not duplicate a cover"
+    );
+    let changed_id = resolve(&actor, items[0].id, image_lookup.clone());
+    assert_ne!(changed_id, image_id);
+    assert_eq!(
+        store.asset_states_for_item(items[0].id).unwrap().len(),
+        2,
+        "changed artwork retains its own source and Asset"
+    );
+    let no_data = resolve(&actor, items[0].id, listing_lookup.clone());
+    assert_ne!(no_data, listing_id);
+    assert_eq!(resolve(&actor, items[0].id, listing_lookup), no_data);
+    let pending_request = ResolveMetadataCommand {
+        lookup: image_lookup,
+        acquire_artwork: false,
+    };
+    let receipt = command();
+    let pending = service
+        .resolve_metadata(&actor, items[0].id, pending_request.clone(), &receipt)
+        .unwrap();
+    let cancelled = service
+        .resolve_metadata(&actor, items[1].id, pending_request.clone(), &command())
+        .unwrap();
+    service.cancel_job(&actor, cancelled, &command()).unwrap();
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        items[0].title
+    );
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock,
+        )
+        .unwrap(),
+    );
+    let service = configure(CollectionService::new(
+        store.clone(),
+        Arc::new(Registry::builtins()),
+    ));
+    assert_eq!(
+        service
+            .resolve_metadata(&actor, items[0].id, pending_request.clone(), &receipt)
+            .unwrap(),
+        pending
+    );
+    provider_drain(&service);
+    let view = service
+        .metadata_resolutions(&actor, items[0].id)
+        .unwrap()
+        .into_iter()
+        .find(|value| value.job.id == pending)
+        .unwrap();
+    assert_eq!(view.job.state, JobState::Completed, "{:?}", view.job.error);
+    assert_eq!(view.result.unwrap().snapshot_id, image_id);
+    assert_eq!(
+        service.job(&actor, cancelled).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        Some(first_asset)
+    );
+    assert_eq!(store.asset_states_for_item(items[0].id).unwrap().len(), 2);
+    // Access loss cannot turn shared response ownership into a new write grant.
+    AccessPort::set_grant(&*store, collection.id, other_id, Revision(1), None).unwrap();
+    assert!(matches!(
+        service.resolve_metadata(&other, items[0].id, pending_request.clone(), &command()),
+        Err(Error::Forbidden)
+    ));
+    let payload = files_named(&root.path().join("archive"), "source.bin")
+        .into_iter()
+        .find(|path| {
+            path.components()
+                .any(|part| part.as_os_str() == image_id.to_string().as_str())
+        })
+        .unwrap();
+    std::fs::write(payload, vec![0; image.len()]).unwrap();
+    let corrupt = service
+        .resolve_metadata(&actor, items[0].id, pending_request, &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, corrupt).unwrap().state,
+        JobState::Failed,
+        "corrupt retained bytes must never become an unchanged success"
+    );
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        Some(first_asset)
+    );
+    assert_eq!(fixture.requests.lock().unwrap().len(), 11);
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 100)
+            .unwrap()
+            .items
+            .len(),
+        5,
+        "one text response and four distinct artwork responses"
+    );
+}
+
+struct CoverArtReviewFixture {
+    root: tempfile::TempDir,
+    store: Arc<Store>,
+    actor: Principal,
+    service: CollectionService,
+    collection: Collection,
+    item: Item,
+    image_command: collector_app::ResolveMetadataCommand,
+    clock: Arc<TestClock>,
+    _musicbrainz: MetadataFixtureServer,
+    artwork: MetadataFixtureServer,
+    artwork_provider: Arc<CoverArtArchiveProvider>,
+}
+
+impl CoverArtReviewFixture {
+    fn reopen(self) -> Self {
+        let Self {
+            root,
+            store,
+            actor,
+            service,
+            collection,
+            item,
+            image_command,
+            clock,
+            _musicbrainz,
+            artwork,
+            artwork_provider,
+        } = self;
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_clock(
+                root.path().join("archive"),
+                root.path().join("state"),
+                clock.clone(),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_streaming_provider(
+                ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                Arc::new(collector_app::BoundedProviderAdapter(
+                    artwork_provider.clone(),
+                )),
+            )
+            .unwrap()
+            .with_catalog_parser(
+                ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                artwork_provider.clone(),
+            )
+            .unwrap();
+        Self {
+            root,
+            store,
+            actor,
+            service,
+            collection,
+            item,
+            image_command,
+            clock,
+            _musicbrainz,
+            artwork,
+            artwork_provider,
+        }
+    }
+}
+
+fn review_cover_image() -> Vec<u8> {
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(1024, 1024, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    encoded.into_inner()
+}
+
+fn cover_art_review_fixture(replies: Vec<(&'static str, Vec<u8>)>) -> CoverArtReviewFixture {
+    use collector_modules::music::{COVER_ART_ARCHIVE_PROVIDER_ID, MUSICBRAINZ_PROVIDER_ID};
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let musicbrainz = metadata_fixture_server(vec![(
+        "200 OK\r\nContent-Type: application/json",
+        br#"{"releases":[{"id":"22222222-2222-4222-8222-222222222222","title":"Retained album"}]}"#
+            .to_vec(),
+    )]);
+    let mb = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "collector-test/0.1 (test@example.invalid)",
+            &musicbrainz.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let artwork = metadata_fixture_server(replies);
+    let caa = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "collector-test/0.1 (test@example.invalid)",
+            &artwork.origin,
+            &[artwork.origin.as_str()],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
+    let service = service
+        .with_streaming_provider(
+            ModuleId(MUSICBRAINZ_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(mb.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), mb)
+        .unwrap()
+        .with_streaming_provider(
+            ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(caa.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
+        .unwrap();
+    let text = service
+        .resolve_metadata(
+            &actor,
+            saved.id,
+            collector_app::ResolveMetadataCommand {
+                lookup: collector_app::AcquireMetadataCommand::MusicBrainzSearch {
+                    query: "retained album".into(),
+                    refresh: false,
+                },
+                acquire_artwork: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, text).unwrap().state,
+        JobState::Completed
+    );
+    let candidate = service.metadata_view(&actor, saved.id).unwrap().candidates[0]
+        .identity
+        .clone();
+    CoverArtReviewFixture {
+        root,
+        store,
+        actor,
+        service,
+        collection,
+        item: saved,
+        image_command: collector_app::ResolveMetadataCommand {
+            lookup: collector_app::AcquireMetadataCommand::CoverArtImage {
+                candidate,
+                image_id: "9001".into(),
+            },
+            acquire_artwork: false,
+        },
+        clock,
+        _musicbrainz: musicbrainz,
+        artwork,
+        artwork_provider: caa,
+    }
+}
+
+#[test]
+fn concurrent_cover_creation_converges_across_curators_and_metadata_selection() {
+    let image = review_cover_image();
+    let fixture =
+        cover_art_review_fixture(vec![("200 OK\r\nContent-Type: image/png", image.clone())]);
+    let second_user = fixture
+        .store
+        .create_user("cover-review-curator", "a long test password", false)
+        .unwrap();
+    Catalog::grant(
+        &*fixture.store,
+        fixture.collection.id,
+        second_user,
+        Role::Curator,
+    )
+    .unwrap();
+    let second = Principal {
+        user_id: second_user,
+        administrator: false,
+        device_id: None,
+    };
+    let people = [&fixture.actor, &second];
+    fixture.clock.advance(60);
+    let before = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    let jobs: Vec<_> = people
+        .iter()
+        .map(|who| {
+            fixture
+                .service
+                .resolve_metadata(
+                    who,
+                    fixture.item.id,
+                    fixture.image_command.clone(),
+                    &command(),
+                )
+                .unwrap()
+        })
+        .collect();
+    // Both requester Jobs wait on this one acquisition. Then both processing
+    // slots materialize the same cover concurrently, using one process identity.
+    assert!(
+        fixture
+            .service
+            .run_next_job("shared-cover-download")
+            .unwrap()
+    );
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    barrier.wait();
+                    fixture
+                        .service
+                        .run_next_job("shared-cover-workers")
+                        .unwrap()
+                })
+            })
+            .collect();
+        for thread in threads {
+            assert!(thread.join().unwrap());
+        }
+    });
+    provider_drain(&fixture.service);
+    for (who, job) in people.into_iter().zip(jobs) {
+        let view = fixture.service.job(who, job).unwrap();
+        assert_eq!(view.state, JobState::Completed, "{:?}", view.error);
+    }
+    let assets = fixture
+        .store
+        .asset_states_for_item(fixture.item.id)
+        .unwrap();
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].revision, Revision(1));
+    assert_eq!(
+        resource_bytes(
+            fixture
+                .service
+                .asset_resource(
+                    &fixture.actor,
+                    fixture.collection.id,
+                    assets[0].asset.id,
+                    false
+                )
+                .unwrap()
+        ),
+        image
+    );
+    let after = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    assert_eq!(
+        after.revision,
+        Revision(before.revision.0 + 1),
+        "equal selections commit one authority change"
+    );
+    assert_eq!(after.authority.artwork_choice, Some(assets[0].asset.id));
+    assert_eq!(after.display.title.value, fixture.item.title);
+    assert_eq!(fixture.artwork.requests.lock().unwrap().len(), 1);
+    fixture.store.reindex().unwrap();
+    assert_eq!(
+        fixture
+            .service
+            .metadata_view(&fixture.actor, fixture.item.id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        after.authority.artwork_choice
+    );
+}
+
+#[test]
+fn explicit_cover_reacquisition_restores_history_but_automatic_refresh_cannot() {
+    let image = review_cover_image();
+    let listing = br#"{"release":"https://musicbrainz.org/release/22222222-2222-4222-8222-222222222222","images":[{"id":"9001","front":true,"back":false,"approved":true,"types":["Front"]}]}"#.to_vec();
+    let mut fixture = cover_art_review_fixture(vec![
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: application/json", listing),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+    ]);
+    let first = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture.service.job(&fixture.actor, first).unwrap().state,
+        JobState::Completed
+    );
+    let asset = fixture
+        .store
+        .asset_states_for_item(fixture.item.id)
+        .unwrap()
+        .remove(0);
+    let edited = fixture
+        .service
+        .update_asset(
+            &fixture.actor,
+            asset.asset.id,
+            asset.revision,
+            UpdateAssetCommand {
+                visibility: Visibility::Curators,
+                alt_text: "My retained cover description".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let archived = fixture
+        .service
+        .tombstone_asset(&fixture.actor, asset.asset.id, edited.revision, &command())
+        .unwrap();
+    let tombstone = files_named(&fixture.root.path().join("archive"), "record.v3.json")
+        .into_iter()
+        .find(|path| {
+            path.components()
+                .any(|part| part.as_os_str() == asset.asset.id.to_string().as_str())
+                && std::fs::read_to_string(path).is_ok_and(|raw| raw.contains("\"deleted\": true"))
+        })
+        .unwrap();
+    let tombstone_bytes = std::fs::read(&tombstone).unwrap();
+    let current = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    fixture
+        .service
+        .update_metadata_authority(
+            &fixture.actor,
+            fixture.item.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: current.revision,
+                change: MetadataAuthorityChange::ClearArtworkChoice,
+            },
+            &command(),
+        )
+        .unwrap();
+    // A selected release gives the text-first automatic workflow a concrete
+    // album whose front cover it should attempt to acquire.
+    let cleared = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    fixture
+        .service
+        .update_metadata_authority(
+            &fixture.actor,
+            fixture.item.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: cleared.revision,
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: current.candidates[0].identity.clone(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    fixture.clock.advance(60);
+    let automatic = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            collector_app::ResolveMetadataCommand {
+                lookup: collector_app::AcquireMetadataCommand::MusicBrainzSearch {
+                    query: "retained album".into(),
+                    refresh: false,
+                },
+                acquire_artwork: true,
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    let automatic = fixture
+        .service
+        .metadata_resolutions(&fixture.actor, fixture.item.id)
+        .unwrap()
+        .into_iter()
+        .find(|view| view.job.id == automatic)
+        .unwrap();
+    assert_eq!(automatic.job.state, JobState::Completed);
+    assert!(
+        automatic.result.unwrap().artwork_error.is_some(),
+        "automatic refresh must explain why archived artwork was not selected"
+    );
+    assert!(fixture.store.asset_state(asset.asset.id).unwrap().deleted);
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        archived.revision
+    );
+    fixture.clock.advance(60);
+    let receipt = command();
+    let restore = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &receipt,
+        )
+        .unwrap();
+    fixture = fixture.reopen();
+    provider_drain(&fixture.service);
+    let restored = fixture.store.asset_state(asset.asset.id).unwrap();
+    assert_eq!(
+        fixture.service.job(&fixture.actor, restore).unwrap().state,
+        JobState::Completed
+    );
+    assert!(!restored.deleted);
+    assert_eq!(restored.revision, Revision(archived.revision.0 + 1));
+    assert_eq!(restored.asset.visibility, Visibility::Curators);
+    assert_eq!(restored.asset.alt_text, "My retained cover description");
+    assert_eq!(
+        fixture
+            .store
+            .asset_states_for_item(fixture.item.id)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        resource_bytes(
+            fixture
+                .service
+                .asset_resource(&fixture.actor, fixture.collection.id, asset.asset.id, false)
+                .unwrap()
+        ),
+        image
+    );
+    assert_eq!(std::fs::read(&tombstone).unwrap(), tombstone_bytes);
+    assert_eq!(
+        fixture
+            .service
+            .resolve_metadata(
+                &fixture.actor,
+                fixture.item.id,
+                fixture.image_command.clone(),
+                &receipt
+            )
+            .unwrap(),
+        restore
+    );
+    fixture.store.reindex().unwrap();
+    let authority = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    assert_eq!(authority.authority.artwork_choice, Some(asset.asset.id));
+    assert_eq!(authority.display.title.value, fixture.item.title);
+    // A later direct selection reuses the restored revision rather than restoring again.
+    let again = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture.service.job(&fixture.actor, again).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        restored.revision
+    );
+    // Keep the clock unchanged: revision ownership, not time inference, must
+    // prevent an old queued lookup from undoing a newer archive decision.
+    let older_lookup = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    let later_archive = fixture
+        .service
+        .tombstone_asset(
+            &fixture.actor,
+            asset.asset.id,
+            restored.revision,
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture
+            .service
+            .job(&fixture.actor, older_lookup)
+            .unwrap()
+            .state,
+        JobState::Failed
+    );
+    assert!(fixture.store.asset_state(asset.asset.id).unwrap().deleted);
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        later_archive.revision
+    );
+    let fresh = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture.service.job(&fixture.actor, fresh).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        Revision(later_archive.revision.0 + 1)
+    );
+}
+
+#[test]
+fn provider_cover_materialization_fences_content_restore_revision_and_job_claim() {
+    use collector_app::{ItemEffectContext, ItemEffectSource};
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (_root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let other = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let image = review_cover_image();
+    let asset = AssetId::new();
+    let input = CreateAssetCommand {
+        collection_id: collection.id,
+        subject: AssetSubject::Item { item_id: saved.id },
+        kind: AssetKind::Cover,
+        visibility: Visibility::Shared,
+        alt_text: "Provider cover".into(),
+    };
+    let context = ItemEffectContext {
+        item_id: saved.id,
+        generation: 0,
+        source: ItemEffectSource::Command,
+    };
+    let created = store
+        .materialize_provider_artwork(asset, input.clone(), &image, context, None)
+        .unwrap();
+    let mut different = input.clone();
+    different.subject = AssetSubject::Item { item_id: other.id };
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            different,
+            &image,
+            ItemEffectContext {
+                item_id: other.id,
+                ..context
+            },
+            None
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    let mut changed = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([56, 34, 12]))
+        .write_to(&mut changed, image::ImageFormat::Png)
+        .unwrap();
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &changed.into_inner(),
+            context,
+            None
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    let archived = store.tombstone_asset(asset, created.revision).unwrap();
+    assert!(matches!(
+        store.materialize_provider_artwork(asset, input.clone(), &image, context, None),
+        Err(Error::Conflict)
+    ));
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            context,
+            Some(created.revision)
+        ),
+        Err(Error::Conflict)
+    ));
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            ItemEffectContext {
+                generation: 1,
+                ..context
+            },
+            Some(archived.revision)
+        ),
+        Err(Error::Conflict)
+    ));
+    let restored = store
+        .materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            context,
+            Some(archived.revision),
+        )
+        .unwrap();
+    assert!(!restored.deleted);
+    assert_eq!(restored.revision, Revision(archived.revision.0 + 1));
+    // A second authorized restorer accepts the already restored effect without
+    // another revision; a newer tombstone must reject the old restore revision.
+    assert_eq!(
+        store
+            .materialize_provider_artwork(
+                asset,
+                input.clone(),
+                &image,
+                context,
+                Some(archived.revision)
+            )
+            .unwrap()
+            .revision,
+        restored.revision
+    );
+    let archived_again = store.tombstone_asset(asset, restored.revision).unwrap();
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            context,
+            Some(archived.revision)
+        ),
+        Err(Error::Conflict)
+    ));
+    let job = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: job,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(saved.id),
+            kind: "test.cover".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let claim = store.claim_job("cover-claim-fence", 30).unwrap().unwrap();
+    let claimed = ItemEffectContext {
+        source: ItemEffectSource::Job {
+            id: job,
+            claim: claim.claim_token.parse().unwrap(),
+        },
+        ..context
+    };
+    clock.advance(31);
+    assert!(
+        store
+            .materialize_provider_artwork(
+                asset,
+                input.clone(),
+                &image,
+                claimed,
+                Some(archived_again.revision)
+            )
+            .is_err()
+    );
+    let current = store.claim_job("cover-claim-fence", 30).unwrap().unwrap();
+    store.request_job_cancellation(job, actor.user_id).unwrap();
+    let cancelled = ItemEffectContext {
+        source: ItemEffectSource::Job {
+            id: job,
+            claim: current.claim_token.parse().unwrap(),
+        },
+        ..context
+    };
+    assert!(
+        store
+            .materialize_provider_artwork(
+                asset,
+                input,
+                &image,
+                cancelled,
+                Some(archived_again.revision)
+            )
+            .is_err()
+    );
+    assert!(store.asset_state(asset).unwrap().deleted);
+    assert_eq!(
+        store.asset_state(asset).unwrap().revision,
+        archived_again.revision
+    );
+}
+
+#[test]
+fn provider_cover_restoration_recovers_before_and_after_revision_commit() {
+    use collector_app::{ItemEffectContext, ItemEffectSource};
+    use collector_store::PublicationFaultPoint;
+    for point in [
+        PublicationFaultPoint::Prepared,
+        PublicationFaultPoint::RevisionCommitted,
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        let image = review_cover_image();
+        let asset = AssetId::new();
+        let input = CreateAssetCommand {
+            collection_id: collection.id,
+            subject: AssetSubject::Item { item_id: saved.id },
+            kind: AssetKind::Cover,
+            visibility: Visibility::Shared,
+            alt_text: "Restored cover".into(),
+        };
+        let context = ItemEffectContext {
+            item_id: saved.id,
+            generation: 0,
+            source: ItemEffectSource::Command,
+        };
+        let created = store
+            .materialize_provider_artwork(asset, input.clone(), &image, context, None)
+            .unwrap();
+        let archived = store.tombstone_asset(asset, created.revision).unwrap();
+        drop(service);
+        drop(store);
+        let failed = Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap();
+        assert!(
+            failed
+                .materialize_provider_artwork(
+                    asset,
+                    input.clone(),
+                    &image,
+                    context,
+                    Some(archived.revision)
+                )
+                .is_err()
+        );
+        drop(failed);
+        let recovered =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        assert_eq!(
+            recovered.asset_state(asset).unwrap().deleted,
+            point == PublicationFaultPoint::Prepared
+        );
+        let restored = recovered
+            .materialize_provider_artwork(asset, input, &image, context, Some(archived.revision))
+            .unwrap();
+        assert!(!restored.deleted);
+        assert_eq!(
+            restored.revision,
+            Revision(archived.revision.0 + 1),
+            "recovery/retry cannot restore twice"
+        );
+        recovered.reindex().unwrap();
+        let service = CollectionService::new(recovered, Arc::new(Registry::builtins()));
+        assert_eq!(
+            resource_bytes(
+                service
+                    .asset_resource(&actor, collection.id, asset, false)
+                    .unwrap()
+            ),
+            image
+        );
+    }
 }

@@ -1220,6 +1220,30 @@ impl ContentPort for Store {
         self.asset_states_for_item_record(item)
     }
 
+    fn archived_item_cover_revisions(
+        &self,
+        item: ItemId,
+        limit: u16,
+    ) -> Result<Vec<(AssetId, Revision)>> {
+        if !(1..=4097).contains(&limit) {
+            return Err(Error::Invalid(
+                "archived cover limit must be 1..=4097".into(),
+            ));
+        }
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("SELECT id,revision FROM assets WHERE json_extract(record,'$.asset.subject.item_id')=? AND deleted=1 AND json_extract(record,'$.asset.kind')='cover' ORDER BY id LIMIT ?").map_err(storage)?;
+        statement
+            .query_map(params![item.to_string(), limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            })
+            .map_err(storage)?
+            .map(|row| {
+                let (id, revision) = row.map_err(storage)?;
+                Ok((id.parse().map_err(storage)?, Revision(revision)))
+            })
+            .collect()
+    }
+
     fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId> {
         self.asset_subject_collection_record(subject)
     }
@@ -1236,6 +1260,17 @@ impl ContentPort for Store {
         context: collector_app::AssetWriteContext,
     ) -> Result<AssetState> {
         self.create_asset_record(asset, command, bytes, context)
+    }
+
+    fn materialize_provider_artwork(
+        &self,
+        asset: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+        context: collector_app::ItemEffectContext,
+        restore_archived: Option<Revision>,
+    ) -> Result<AssetState> {
+        self.materialize_provider_artwork_record(asset, command, bytes, context, restore_archived)
     }
 
     fn update_asset(
@@ -2595,7 +2630,8 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
-    db.execute_batch("CREATE TABLE IF NOT EXISTS browse_items (
+    db.execute_batch("CREATE INDEX IF NOT EXISTS assets_item_cover_state ON assets(json_extract(record,'$.asset.subject.item_id'),deleted,id) WHERE json_extract(record,'$.asset.kind')='cover';
+        CREATE TABLE IF NOT EXISTS browse_items (
         id TEXT PRIMARY KEY, collection_id TEXT NOT NULL, title_key TEXT NOT NULL,
         artist_key TEXT NOT NULL, platform_key TEXT NOT NULL, recent_key TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS browse_title ON browse_items(title_key,id);

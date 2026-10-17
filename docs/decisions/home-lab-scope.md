@@ -5,6 +5,10 @@ contract/retention expectations. It does not claim implementation or authorize
 pruning current user data. [The consolidated backlog](../remaining-work.md) is
 the only remaining-work queue; HL-01 owns the concrete simplification policy.
 
+The [2026-10-17 bounded audit](../retention-audit.md) now records concrete
+consumer/reference rules and the delivered CAA response/Asset simplification.
+General history/log deletion remains conditional, not an implemented capability.
+
 ## Useful, clean software before speculative contracts
 
 Junk Collector primarily serves a home lab. Web and Trash Amp are the current

@@ -2,6 +2,8 @@
 //! Provider I/O and archive publication use the existing bounded processing ports.
 use crate::*;
 
+const MAX_ARCHIVED_COVER_RESTORES: usize = 4096;
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResolveMetadataCommand {
@@ -22,12 +24,23 @@ pub struct FrozenMetadataResolution {
     pub acquire_artwork: bool,
     pub artwork_candidate: Option<MetadataCandidateIdentity>,
     pub authority_revision: Revision,
+    /// Only revisions already archived when this explicit image request was
+    /// admitted may be restored. Missing historical inputs grant no restoration.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub archived_cover_restores: std::collections::BTreeMap<AssetId, Revision>,
 }
 impl FrozenMetadataResolution {
     pub fn validate(&self) -> Result<()> {
         FrozenJobInput::Acquisition(self.acquisition.clone()).validate()?;
         LanguageTag::new(self.language.as_str())?;
-        if self.acquisition.item_id != Some(self.item_id) || self.sources.len() > 1024 {
+        if self.acquisition.item_id != Some(self.item_id)
+            || self.sources.len() > 1024
+            || self.archived_cover_restores.len() > MAX_ARCHIVED_COVER_RESTORES
+            || self
+                .archived_cover_restores
+                .values()
+                .any(|revision| revision.0 == 0)
+        {
             return Err(Error::Invalid("invalid metadata resolution inputs".into()));
         }
         for source in &self.sources {
@@ -39,6 +52,21 @@ impl FrozenMetadataResolution {
                 ..Default::default()
             }
             .validate()?;
+        }
+        if !self.archived_cover_restores.is_empty()
+            && (self.acquisition.request.provider.0
+                != collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID
+                || !matches!(
+                    self.acquisition
+                        .request
+                        .query
+                        .parse::<collector_modules::music::CoverArtArchiveQuery>()?,
+                    collector_modules::music::CoverArtArchiveQuery::Image { .. }
+                ))
+        {
+            return Err(Error::Invalid(
+                "only explicit image selection can restore archived covers".into(),
+            ));
         }
         Ok(())
     }
@@ -174,6 +202,21 @@ impl CollectionService {
                 "this lookup requires a music collection".into(),
             ));
         }
+        let explicit_image = matches!(
+            &command.lookup,
+            AcquireMetadataCommand::CoverArtImage { .. }
+        );
+        let archived_cover_restores = if explicit_image {
+            let revisions = self
+                .content
+                .archived_item_cover_revisions(item.id, (MAX_ARCHIVED_COVER_RESTORES + 1) as u16)?;
+            if revisions.len() > MAX_ARCHIVED_COVER_RESTORES {
+                return Err(Error::Invalid("This item has more than 4,096 archived covers. Attach an image manually instead.".into()));
+            }
+            revisions.into_iter().collect()
+        } else {
+            Default::default()
+        };
         let (provider, operation, query, bound, artwork_candidate) = match command.lookup {
             AcquireMetadataCommand::MusicBrainzRelease {
                 release_id,
@@ -269,6 +312,7 @@ impl CollectionService {
             sources,
             acquire_artwork: command.acquire_artwork,
             artwork_candidate,
+            archived_cover_restores,
             authority_revision: self
                 .processing
                 .metadata_authority(item.collection_id, item.id)?
@@ -532,16 +576,26 @@ impl CollectionService {
     ) -> Result<AssetId> {
         let item = self.resolution_item(claim, frozen)?;
         let asset = AssetId(deterministic_inventory_uuid(
-            claim.user_id,
-            "resolution-cover",
+            // A response is shared across items and requesters. Its materialized
+            // cover belongs to one item, independently of who requested it.
+            item.id,
+            "resolution-cover-item",
             &snapshot_id.to_string(),
         ));
-        match self.content.asset_state(asset) {
-            Ok(state) if !state.deleted => return Ok(asset),
-            Err(Error::NotFound) => {}
-            Ok(_) => return Err(Error::Conflict),
+        let restore_archived = match self.content.asset_state(asset) {
+            Ok(state) if !state.deleted => None,
+            Ok(state) if frozen.archived_cover_restores.get(&asset) == Some(&state.revision) => {
+                Some(state.revision)
+            }
+            Ok(_) => {
+                return Err(Error::Unavailable(
+                    "This cover was archived. Select the image in Find cover art to restore it."
+                        .into(),
+                ));
+            }
+            Err(Error::NotFound) => None,
             Err(error) => return Err(error),
-        }
+        };
         let snapshot = self.processing.snapshot(SnapshotQuery {
             collection_id: item.collection_id,
             snapshot_id,
@@ -564,7 +618,8 @@ impl CollectionService {
                     .cancellation_requested(claim.id, &claim.claim_token)
             },
         )?;
-        self.content.create_asset(
+        self.resolution_item(claim, frozen)?;
+        self.content.materialize_provider_artwork(
             asset,
             CreateAssetCommand {
                 collection_id: item.collection_id,
@@ -576,14 +631,15 @@ impl CollectionService {
                 ),
             },
             &bytes,
-            AssetWriteContext::Item(ItemEffectContext {
+            ItemEffectContext {
                 item_id: item.id,
                 generation: frozen.generation,
                 source: ItemEffectSource::Job {
                     id: claim.id,
                     claim: claim.claim_token.parse().map_err(|_| Error::Conflict)?,
                 },
-            }),
+            },
+            restore_archived,
         )?;
         Ok(asset)
     }

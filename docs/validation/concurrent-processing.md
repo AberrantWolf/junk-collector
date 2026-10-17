@@ -100,3 +100,19 @@ web type checking/build and embedded-server rebuild passed. The focused real-bro
 audio-check status and AccurateRip response-selection journeys passed again.
 The preceding full smoke qualification remains recorded above. No live archive
 conversion, external submission or additional push was performed in this commit.
+
+## Later bounded retention delivery — 2026-10-17
+
+The [HL-01 audit](../retention-audit.md) extends response reuse and explicit duplicate
+payload conversion to Cover Art Archive, and binds automatic materialized covers
+to item + image Snapshot. [Its dated validation](retention-audit-2026-10-17.md) records
+the new provider workflow, conversion recovery and repository/browser checks; the
+October 10 results above remain historical evidence for their original delivery.
+
+## Cover reuse review repairs — 2026-10-18
+
+The [repair report](retention-review-2026-10-18.md) adds concurrent cover creation,
+explicit restoration with admission-bound archived revisions, rejection of newer
+archive decisions, and restore-publication recovery. These cases were absent from
+the original sequential reuse evidence; the dated October 10/17 results above are
+retained without extending their original claims.

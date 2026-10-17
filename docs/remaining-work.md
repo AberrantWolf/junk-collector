@@ -19,9 +19,9 @@ controls are essential even for one user. Keep working security controls; simpli
 future scope rather than weakening authorization or TLS.
 
 The numbered groups below are priority order, not a serial dependency chain.
-Phono Junk is no longer a target. Begin with the contract/retention reassessment,
-then finish available Group 1 work. Unavailable hardware does not prevent
-independent backup or deployment work. Group 2's public-access checks are required
+Phono Junk is no longer a target. The bounded contract/retention reassessment is
+complete (2026-10-17); finish available Group 1 work. Unavailable hardware does not
+prevent independent backup or deployment work. Group 2's public-access checks are required
 before describing an Internet-facing installation as qualified. Group 3 is useful
 when actual usage calls for it. Group 4 remains documented without blocking a
 home-lab release. A concrete vulnerability or low-effort hardening fix moves ahead
@@ -61,40 +61,40 @@ Collector pins pushed shared-library revision
 
 ### HL-01 — Simplify contracts and retain meaningful provenance
 
-**State:** the 2026-10-10 provider acquisition/response delivery is implemented; the broader retention audit remains.
-See [delivery validation](validation/concurrent-processing.md) and [stopped-server conversion](snapshot-duplicate-conversion.md).
-Two processing slots and one provider slot, active request sharing, equivalent response reuse and explicit duplicate-payload conversion address provider redundancy. Other retention policies remain unimplemented; no live archive cleanup was performed.
+**State:** the bounded retention audit and justified CAA response/Asset simplification
+are delivered 2026-10-17, with the concurrent-creation and archived-cover reacquisition
+review repairs implemented 2026-10-18, including admission-bound restoration that
+respects later archive decisions. See [audit and policies](retention-audit.md),
+[initial validation](validation/retention-audit-2026-10-17.md) and
+[repair validation](validation/retention-review-2026-10-18.md). Equivalent CAA
+listings/images/negative responses share validated snapshots; automatic covers
+belong to item + image Snapshot, independent of requester. Existing duplicate CAA
+payloads use the explicit stopped-server conversion. No live archive was pruned.
+The audit retires blanket permanent equivalent-lookup history. General deletion of
+revisions/candidates/occurrences/Assets, private receipt/log expiration and upload-spool
+reclamation remain unimplemented, conditional on actual growth/need and exact
+reference/replay rules. They do not reopen the completed bounded assignment.
+The earlier processing/request-sharing delivery remains accepted; see its
+[validation](validation/concurrent-processing.md) and the
+[stopped-server conversion](snapshot-duplicate-conversion.md).
 **Maps:** A04/P01/D06/FX-02 and old history requirements. **Owner:** application
 policy, module evidence semantics and archive/private-state adapters.
 
-Review proposed contracts and current mechanisms against one actual user outcome
-before implementation or refactoring. Remove speculative abstractions, frozen
-checkpoint compatibility, redundant state and mandatory handoffs with no real
-consumer/recovery purpose. Preserve clean ownership and real data guarantees.
+The completed [audit](retention-audit.md) defines the minimal owned policies and
+maps actual consumers: originals, inventory/manual facts, accepted sources,
+substantive evidence and unknown data are retained; equivalent provider bytes
+and current projections/cache state do not require duplicate permanent copies.
+Inspection reports exact conversion effects. Verified backup, interruption-safe
+conversion, current reads, reindex, archive-only rebuild and private retry/recovery
+remain required. Existing envelopes, choices and meaningful dates stay intact.
 
-Define and implement a bounded retention policy. Keep originals, user inventory/
-manual choices, accepted metadata/artwork with enough source information to explain
-it, and substantive source-bound verification results. Do not treat “looked up album
-art on X, Y and Z days” as collection provenance. Repeated equivalent metadata or
-artwork fetches need at most bounded diagnostic/cache state; redundant candidate
-versions, raw responses and check occurrences need a demonstrated user/evidence
-purpose rather than automatic permanent retention. Meaningful changed results or
-user-requested rechecks can have useful history without retaining every access.
-
-Separate durable command receipts needed for uncertain retries and unfinished-work
-recovery from expired operational logs. Audit archive growth from revisions,
-provider observations, snapshots, tombstones and derived assets; define reference
-reachability and retention before implementing compaction. Do not invent a generic
-retention engine if a few owned policies suffice.
-
-**Done when:** the policy distinguishes must-keep collection data, replaceable/
-bounded diagnostics and removable redundancy; dry-run cleanup shows exact effects,
-backup/conversion and interrupted-compaction recovery are proven, current reads/
-reindex/unknown data/manual authority and real outstanding retries survive, and
-unreferenced records are not still required by meaningful evidence. Retire invalid
-old contracts explicitly. No deletion of originals as routine history cleanup.
-See [scope and retention](decisions/home-lab-scope.md). This is a priority design
-and simplification delivery, not approval to prune the user's archive now.
+Broader deletion remains conditional future work under this entry. Before touching
+revisions, candidate/occurrence history, Assets, receipts/logs or upload spools,
+establish a demonstrated need, complete reference/replay rules, exact dry-run
+reporting and tested backup/recovery. A current graph index or a completed Job is
+not proof of safe deletion. Do not invent a generic retention engine. No deletion
+of originals as routine history cleanup, and no permission to prune the user's
+live archive is implied. See [scope and retention](decisions/home-lab-scope.md).
 
 ### HL-02 — Complete web and Trash Amp LAN qualification
 
@@ -507,19 +507,20 @@ implemented; provider-access restoration or automated scraping is not an open ta
 
 ## Ready-to-send next assignment
 
-> Reassess and simplify **HL-01** from `docs/remaining-work.md`. Read AGENTS.md,
-> architecture, current status, release requirements and the home-lab scope policy.
-> Inspect the actual consumers/storage; identify old proposed contracts without a
-> useful user outcome and excessive metadata/artwork/provider/operational retention.
-> Produce concrete minimal contracts and retention rules, with an explicit mapping
-> of retained, bounded and obsolete mechanisms. Implement only a bounded, justified
-> simplification with safe backup/conversion/recovery and relevant acceptance; do
-> not invent a generic retention framework. Preserve originals, manual authority,
-> meaningful evidence, unknown data and real outstanding retries. Do not prune the
-> user's archive as an experiment or start Phono Junk work. Update the queue, owning
-> ledgers, status and dated validation. Do not commit or spawn agents without an
-> explicit user request. HL-02 LAN qualification and HL-03 backup tooling remain
-> independent follow-ups when their required inputs are available.
+The bounded HL-01 audit and CAA simplification are delivered; do not restart that
+completed scope. HL-02 LAN qualification and HL-03 general stopped-server backup/
+restore tooling are the next independent Group 1 outcomes. HL-03 is the next
+implementation assignment that does not require a second physical device:
+
+> Implement the smallest coherent HL-03 stopped-server backup, validation and
+> restore workflow from this queue. Reassess/reuse the existing conversion backup
+> and working restore runbook; complete the general operator workflow with explicit
+> empty-root restore, corruption/interruption/live-lock refusal and preserved
+> originals, private identity, unknown data and pending work. Read architecture,
+> current status, release requirements and the bounded retention audit. Do not
+> broaden into online backup, scheduling, export/deltas or a dashboard. Update the
+> owning records, status, queue and dated validation. Do not commit or spawn agents
+> without an explicit user request.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

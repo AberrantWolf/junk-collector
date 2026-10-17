@@ -838,3 +838,26 @@ checksummed payload-reference sidecars preserve immutable envelopes and evidence
 IDs. The private conversion journal makes publish-reference/remove-payload/reindex
 steps resumable. See [the conversion runbook](snapshot-duplicate-conversion.md).
 This is a provider-owned policy, not a general retention/workflow engine.
+
+
+### Bounded provider retention — 2026-10-17
+
+The [retention audit](retention-audit.md) records the current consumer/reference
+assessment and supersedes blanket permanent equivalent-lookup history requirements.
+Application-owned response reuse and stopped-server duplicate conversion now include
+Cover Art Archive listings, images and negative responses alongside MusicBrainz and
+AccurateRip. Exact collection/input/bytes/interpretation identity and validated reads
+remain required. Changed responses retain distinct sources. Automatic CAA Asset
+identity binds item and image Snapshot, independent of requester; a shared response
+cannot give two items the same owned Asset. Existing Assets, metadata authority,
+unknown data, historical envelopes and private retry/recovery state remain intact.
+No general archive or operational-state garbage collector is introduced.
+
+The 2026-10-18 review repair makes provider cover materialization an atomic
+create/reuse effect under the archive writer, with the existing Item/Job fences.
+Application policy freezes archived Asset revisions at explicit CAA image admission
+through a bounded indexed projection read. Only those revisions may be restored;
+a later archive invalidates an older queued lookup. Restoration publishes a new revision of the same Asset,
+retaining the tombstone, original bytes, visibility and alternative text; automatic
+refresh cannot restore archived artwork. Concurrent equal selections converge on
+the already committed artwork choice without rewriting unrelated metadata.

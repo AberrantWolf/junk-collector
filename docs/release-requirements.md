@@ -16,7 +16,8 @@ See [the accepted scope policy](decisions/home-lab-scope.md).
   and meaningful source-bound evidence. Keep accepted metadata/artwork attribution;
   do not require a permanent history of every lookup or equivalent provider response.
   Simplification/compaction must preserve actual data and recovery through an
-  explicit tested policy, not silent deletion.
+  explicit tested policy, not silent deletion. The [bounded retention audit](retention-audit.md)
+  records current owned policies and the limits of implemented response reuse/conversion.
 - Deliver actual web and Trash Amp collection/listening workflows. Complete relevant
   LAN/native qualification and meaningful format/audio oracles for advertised
   support. Phono-specific acceptance is retired. Missing capabilities stay labeled.

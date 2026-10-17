@@ -18,6 +18,35 @@ Use the [consolidated backlog](remaining-work.md) for all remaining work and
 [release requirements](release-requirements.md) for the revised home-lab gate.
 Older dated entries below describe their state at the time, not the current queue.
 
+## HL-01 cover reuse review repairs — 2026-10-18
+
+Provider cover creation/reuse now converges under the archive writer for concurrent
+curators, with matching-content, Item-generation and live-claim checks. Concurrent
+identical cover selections preserve one committed authority change. Explicit CAA
+image selection restores an archived cover through a new revision of the same Asset,
+retaining its tombstone, bytes, visibility and alternative text. Automatic refresh
+and older requests admitted before a later archive cannot restore it. Restore
+permissions persist with the admitted Job across restart. Stale restore revisions and mismatched content/ownership fail
+closed. See [repair validation](validation/retention-review-2026-10-18.md) and the
+[updated retention policy](retention-audit.md). No live archive was changed.
+
+## Bounded retention audit and CAA response reuse — 2026-10-17
+
+The [audit](retention-audit.md) maps current storage/consumers to must-keep data,
+bounded response/cache state and obsolete blanket lookup-history requirements.
+CAA listings, images and negative responses now reuse exact validated equivalent
+snapshots through the existing acquisition/publication pipeline. Automatic cover
+Assets bind item and image Snapshot, independent of requester, preventing both
+cross-item ownership collisions and repeat materialization by another curator.
+Changed artwork keeps a distinct source/Asset. Existing Assets and archive IDs are
+preserved. The explicit stopped-server backup/inspect/apply conversion now includes
+proven duplicate CAA payloads, with the same recovery and unknown-data guards.
+
+No live cleanup, general history deletion, command-receipt expiration or spool purge
+was performed or implemented. Private Jobs/receipts still accumulate under their
+existing replay contract; response reuse does not bound that database. General
+operator backup/restore remains HL-03. See [dated validation](validation/retention-audit-2026-10-17.md).
+
 ## Automatic standard-game identification — 2026-10-10
 
 Standard DAT/ZIP batch review detects No-Intro/Redump conventions and recognized
@@ -47,9 +76,9 @@ independent evidence for advertised formats and a bounded release audit. Optiona
 features and advanced security remain there with reasons for deferral.
 
 Old proposed contracts require reassessment. Repeated artwork/metadata lookups do
-not require permanent provenance history. The current append-only storage and raw
-observations still exist; no compaction, record deletion or retention conversion
-has been implemented. See [the accepted scope policy](decisions/home-lab-scope.md).
+not require permanent provenance history. The current append-only envelopes and raw observations still exist. The later
+2026-10-10 and 2026-10-17 deliveries reuse equivalent responses and provide explicit
+duplicate-payload conversion; general record deletion remains unimplemented. See [the accepted scope policy](decisions/home-lab-scope.md).
 
 ## Game-disc listening scope — 2026-10-10
 

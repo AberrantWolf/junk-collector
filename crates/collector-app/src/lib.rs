@@ -340,6 +340,11 @@ pub trait ContentPort: Send + Sync {
     fn asset_resource(&self, asset: AssetId, thumbnail: bool) -> Result<MediaResource>;
     fn asset_state(&self, asset: AssetId) -> Result<AssetState>;
     fn asset_states_for_item(&self, item: ItemId) -> Result<Vec<AssetState>>;
+    fn archived_item_cover_revisions(
+        &self,
+        item: ItemId,
+        limit: u16,
+    ) -> Result<Vec<(AssetId, Revision)>>;
     fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId>;
     fn asset_subject_item(&self, subject: AssetSubject) -> Result<Option<ItemId>>;
     fn create_asset(
@@ -348,6 +353,16 @@ pub trait ContentPort: Send + Sync {
         command: CreateAssetCommand,
         bytes: &[u8],
         context: AssetWriteContext,
+    ) -> Result<AssetState>;
+    /// Atomically create or reuse matching item-owned provider artwork. Only an
+    /// explicitly authorized selection may restore the exact archived revision.
+    fn materialize_provider_artwork(
+        &self,
+        asset: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+        context: ItemEffectContext,
+        restore_archived: Option<Revision>,
     ) -> Result<AssetState>;
     fn update_asset(
         &self,
@@ -6249,9 +6264,13 @@ fn deterministic_collection_id(user: UserId, key: &str) -> CollectionId {
     CollectionId(uuid::Uuid::from_bytes(bytes))
 }
 
-fn deterministic_inventory_uuid(user: UserId, kind: &str, key: &str) -> uuid::Uuid {
+fn deterministic_inventory_uuid(
+    owner: impl std::fmt::Display,
+    kind: &str,
+    key: &str,
+) -> uuid::Uuid {
     use sha2::{Digest as _, Sha256};
-    let mut bytes: [u8; 16] = Sha256::digest(format!("junk-collector:{kind}:{user}:{key}"))[..16]
+    let mut bytes: [u8; 16] = Sha256::digest(format!("junk-collector:{kind}:{owner}:{key}"))[..16]
         .try_into()
         .expect("SHA-256 prefix has fixed length");
     bytes[6] = (bytes[6] & 0x0f) | 0x50;

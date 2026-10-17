@@ -2229,7 +2229,7 @@ impl CollectionService {
             &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
             frozen.language.as_str(),
         )?;
-        self.processing.publish_metadata_for_job(
+        let published = self.processing.publish_metadata_for_job(
             claim,
             MetadataAuthorityRecord {
                 resolution_policy: 3,
@@ -2243,7 +2243,25 @@ impl CollectionService {
                 display: Some(display),
                 updated_at: self.authentication.now(),
             },
-        )
+        );
+        match published {
+            Err(Error::Conflict) => {
+                // A concurrent equal selection can commit after our read. Only
+                // accept the requested choice; never replay stale other fields.
+                let current = self.resolution_item(claim, frozen)?;
+                if self
+                    .authority_or_inventory(&current)?
+                    .authority
+                    .artwork_choice
+                    == Some(asset)
+                {
+                    Ok(())
+                } else {
+                    Err(Error::Conflict)
+                }
+            }
+            result => result,
+        }
     }
 
     fn authority_or_inventory(&self, item: &Item) -> Result<LoadedMetadataAuthority> {
