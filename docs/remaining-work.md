@@ -271,11 +271,13 @@ D05/D07 listening extensions, D06 follow-ups, FX-04 history bound, P06/R02 pract
 
 #### Collection convenience and performance follow-ups
 
-- Repair Library “Back to results” after nested Work & history navigation: an
-  older `work` URL entry can reopen the history modal instead of returning to the
-  unselected list. Observed in the 2026-10-09 AccurateRip shortcut smoke journey;
-  Library navigation avoids that history-stack defect. Preserve intentional
-  browser Back restoration of a work detail while correcting the browse return.
+Completed 2026-10-18: Library “Back to results” now returns through nested Work &
+history entries to the original list, preserving loaded pages, scroll and focus.
+Intentional browser Back/Forward work restoration and direct-link returns remain
+covered by the [browser regression and validation record](validation/library-work-return-2026-10-18.md).
+Self-review strengthened restoration coverage after the modal unmounts; it passes.
+This closes the defect observed in the 2026-10-09 AccurateRip shortcut journey.
+
 - Add document attachments when manuals/receipts are needed, using existing Asset
   visibility/publication with bounded validation and honest download/preview types.
   Image Covers/Photos/Scans already work. Do not imply arbitrary documents work now.

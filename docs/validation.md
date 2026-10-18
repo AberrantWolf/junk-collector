@@ -4287,6 +4287,9 @@ explicitly distinguish opening an album from its independent AccurateRip shortcu
 The existing nested Work & history browser-Back issue is recorded under HL-08;
 this journey returns to the list through Library navigation.
 
+Dated follow-up (2026-10-18): the explicit Library return defect is now repaired;
+see the [nested-work navigation regression](validation/library-work-return-2026-10-18.md).
+
 Live owned-disc AccurateRip qualification remains unperformed; this delivery does
 not broaden the verifier's existing evidence or coverage claims.
 

@@ -30,7 +30,9 @@ try{
   const collections=(await(await fetch('/api/v1/collection-search?limit=100')).json()).items;const music=collections.find(c=>c.name==='Browse music');const ids=[];
   for(let n=0;n<62;n++){
    const id=crypto.randomUUID();const response=await fetch('/api/v1/items/'+id,{method:'PUT',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({expected_revision:0,edit:{collection_id:music.id,title:'Album '+String(n).padStart(3,'0'),subtitle:'Browser fixture',identity_link:{kind:'none'},domain_edit:{module:'org.junk.music',fields:{artist:n%2?'Zebra':'Alpha'}},identity:'unidentified',translations:[],identifiers:[],wishlist:n%2===0}})});if(!response.ok)throw new Error(await response.text());ids.push(id);
-  }return {music:music.id,ids};
+  }
+  const response=await fetch('/api/v1/imports',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({collection_id:music.id,package_name:'Browse return work',files:[{name:'disc.bin',bytes:4,sha256:null}]})});if(!response.ok)throw new Error(await response.text());
+  return {music:music.id,ids,importId:(await response.json()).id};
  });
  await page.reload();await page.locator('.collection-row').first().waitFor();await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
  assert.equal(await page.locator('.collection-row').count(),50);assert.match(await page.locator('.collection-row').first().innerText(),/Album 000/);
@@ -42,6 +44,23 @@ try{
  await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item'));
  assert.equal(await page.locator('.collection-row').count(),62);await page.waitForFunction(y=>Math.abs(scrollY-y)<8,scroll);assert.equal(await page.evaluate(()=>document.activeElement?.dataset.itemId),seed.ids[55]);
  await page.goForward();await page.getByLabel('Album 055 details',{exact:true}).waitFor();await page.reload();await page.getByLabel('Album 055 details',{exact:true}).waitFor();
+ // Nested work navigation must not change the explicit Library return target.
+ async function openWork(){
+  await clickAction(page,'Edit / attach files');const curator=page.getByRole('dialog');await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();await curator.getByRole('button',{name:'Open work & history for this entry',exact:true}).click();
+  const work=page.getByRole('dialog',{name:'Work & history'});await work.waitFor();await work.getByRole('button',{name:'Show work for all entries',exact:true}).click();await work.getByLabel('Search work',{exact:true}).fill('Browse return work');await work.locator(`[data-work-open="import:${seed.importId}"]`).click();await work.getByRole('region',{name:'Selected work'}).waitFor();return work;
+ }
+ const work=await openWork();
+ await page.goBack();await work.getByRole('button',{name:'Refresh work',exact:true}).waitFor();assert.equal(new URL(page.url()).searchParams.get('work'),'list');
+ // Restore through popstate after the modal has actually unmounted, too.
+ await work.getByRole('button',{name:'Close work history'}).click();await work.waitFor({state:'detached'});
+ await page.goForward();await work.getByRole('region',{name:'Selected work'}).getByRole('heading',{name:'Browse return work',exact:true}).waitFor();assert.equal(new URL(page.url()).searchParams.get('work'),`import:${seed.importId}`);
+ // Leaving the document and intentionally going Back must restore the work detail.
+ await page.goto(origin+'/?item='+seed.ids[54]);await page.getByLabel('Album 054 details',{exact:true}).waitFor();await page.goBack();await work.getByRole('region',{name:'Selected work'}).getByRole('heading',{name:'Browse return work',exact:true}).waitFor();
+ await work.getByRole('button',{name:'Close work history'}).click();
+ const reopenedWork=await openWork();await reopenedWork.getByRole('button',{name:'Back to history',exact:true}).click();await reopenedWork.getByRole('button',{name:'Refresh work',exact:true}).waitFor();await reopenedWork.locator(`[data-work-open="import:${seed.importId}"]`).click();await reopenedWork.getByRole('region',{name:'Selected work'}).waitFor();await reopenedWork.getByRole('button',{name:'Close work history'}).click();
+ await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item')&&!new URL(location.href).searchParams.has('work'));
+ assert.equal(await work.count(),0,'Back to results reopened Work & history');assert.equal(await page.locator('.collection-row').count(),62);await page.waitForFunction(y=>Math.abs(scrollY-y)<8,scroll);assert.equal(await page.evaluate(()=>document.activeElement?.dataset.itemId),seed.ids[55]);
+ await row.click();await page.getByLabel('Album 055 details',{exact:true}).waitFor();
  await clickAction(page,'Edit / attach files');const editor=page.getByRole('dialog');await editor.getByLabel('Title',{exact:true}).fill('Edited album 055');await editor.getByRole('button',{name:'Save details',exact:true}).click();await editor.getByText('Entry saved.',{exact:false}).waitFor();await editor.getByRole('button',{name:'Artwork',exact:true}).click();
  await page.route('**/assets/*/thumbnail*',route=>route.fulfill({status:503,body:'Temporary image failure'}));
  await editor.getByLabel('Artwork image').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});await editor.getByRole('button',{name:'Attach image',exact:true}).click();await editor.getByText('Artwork and photos updated.',{exact:true}).waitFor();
@@ -71,9 +90,11 @@ try{
  if(process.env.BROWSE_SCREENSHOTS)await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'desktop-detail.png')});
  await page.goto(origin+'/?item='+randomUUID());await page.getByRole('button',{name:'Retry entry'}).waitFor();assert.equal(await page.locator('.detail').count(),0);
  await page.route('**/api/v1/items/'+seed.ids[0],route=>route.fulfill({status:403,json:{error:{code:'forbidden',message:'Access revoked'}}}));await page.goto(origin+'/?collection='+seed.music+'&item='+seed.ids[0]);await page.getByText('This entry is unavailable or you no longer have access.',{exact:false}).waitFor();assert.equal(await page.locator('.detail').count(),0);await page.unroute('**/api/v1/items/'+seed.ids[0]);await page.getByRole('button',{name:'Retry entry'}).click();await page.getByLabel('Album 000 details',{exact:true}).waitFor();
+ // A directly opened detail has no earlier results entry to traverse back to.
+ const directWork=await openWork();await directWork.getByRole('button',{name:'Close work history'}).click();await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item')&&!new URL(location.href).searchParams.has('work'));assert.equal(new URL(page.url()).searchParams.get('collection'),seed.music);assert.equal(await work.count(),0);
  await page.goto(origin+'/?collection='+seed.music);await page.locator('.collection-row').first().waitFor();
  await page.route('**/api/v1/items?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/items?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
- assert.deepEqual(errors,[]);console.log(`FX-01 browser journey passed (${await browser.version()}): pagination/history/edit, sorting/filtering, responsive keyboard navigation, delayed evidence and read recovery.`);
+ assert.deepEqual(errors,[]);console.log(`FX-01 browser journey passed (${await browser.version()}): pagination/history/edit, nested work return and intentional browser Back/Forward, sorting/filtering, responsive keyboard navigation, delayed evidence and read recovery.`);
 }catch(error){if(page){console.error(await page.locator('body').ariaSnapshot());await page.screenshot({path:'/tmp/fx01-browser-failure.png',fullPage:true});}throw error;}finally{
  if(browser)await browser.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(()=>{server.kill('SIGKILL');r();},5000))]);}await rm(scratch,{recursive:true,force:true});
 }

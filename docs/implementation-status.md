@@ -18,6 +18,19 @@ Use the [consolidated backlog](remaining-work.md) for all remaining work and
 [release requirements](release-requirements.md) for the revised home-lab gate.
 Older dated entries below describe their state at the time, not the current queue.
 
+## HL-08 Library return after nested work — 2026-10-18
+
+Library “Back to results” now includes nested Work & history list/detail entries
+in the distance to the originating results. Repeated modal visits return to the
+loaded pages, scroll position and focused row. Intentional browser Back/Forward
+still restores work views, and direct detail links retain their local return
+fallback. A real-server Chrome regression reproduces the previous modal reopening
+and covers both navigation intents, including same-document restoration after the
+modal unmounts and the identity of the restored work. Self-review found no further
+production-code defect. See the
+[dated validation](validation/library-work-return-2026-10-18.md). Other HL-08
+conveniences, game-disc listening and performance follow-ups remain open.
+
 ## HL-03 stopped-server backup and restore — 2026-10-18
 
 The CLI supplies `backup`, `validate-backup` and `restore`, including explicit

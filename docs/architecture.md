@@ -503,6 +503,11 @@ requester's failed Jobs or Imports awaiting review, without exposing other users
 private work. These filters query committed metadata only; they do not scan or
 hash payloads. UI query parameters identify scope and selected item; history
 state stores page count, scroll and focus identity, never private item contents.
+The explicit detail return tracks the distance to the originating results entry.
+Shared Work & history URL navigation counts its list/detail pushes in that same
+distance, so closing nested work cannot redirect “Back to results” into an older
+modal. Browser Back/Forward still restores the requested work URL. Direct detail
+links without a recorded results target replace the current entry on return.
 The mounted browser caches loaded pages for incremental Load more; a scope change,
 session clear or explicit refresh invalidates reuse. Reload restores only the
 number of pages previously requested, using bounded cursor reads.

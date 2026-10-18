@@ -13,6 +13,7 @@ import CollectionLists from './collection-lists';
 import CollectionListChooser from './collection-list-chooser';
 import {setMusicQueueUser,addMusicTracks,audioMediaType} from './music-queue';
 import {useBrowseNavigation,type BrowseLocation} from './browse-navigation';
+import {pushWorkLocation} from './work-navigation';
 import type {Props as PreparationPageProps} from './library-preparation';
 import type {Props as ActivityPageProps} from './library-activity';
 import type {Props as ImportsPageProps} from './library-imports';
@@ -153,7 +154,7 @@ function App(){
  }
  async function openManagement(kind:'curation'|'administration'|'security'|'work-history'|'collection-access',adding=false,initialSection:'details'|'files'|'evidence'|'reimport'|'recovery'='details',target=selected,initialAnalysis?:{sourceId?:string;operation:'structure'|'accuraterip'}){
   if(menuOpen)menuToggle.current?.focus();setMenuOpen(false);
-  if(kind==='work-history'&&!new URL(location.href).searchParams.has('work')){const url=new URL(location.href);url.searchParams.set('work','list');history.pushState({...history.state},'',url);}
+  if(kind==='work-history'&&!new URL(location.href).searchParams.has('work'))pushWorkLocation('list');
   managementRequest.current?.abort();const controller=new AbortController();managementRequest.current=controller;
   try{
    // Browse rows can lag a just-published Capture. Open curation from a fresh

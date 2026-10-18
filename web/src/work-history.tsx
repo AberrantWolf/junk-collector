@@ -9,6 +9,7 @@ import {UploadMeter} from './work-progress';
 import {bytes} from './work-progress';
 import DestinationChooser from './destination-chooser';
 import {CollectionChooser,useCollectionSearch} from './collection-chooser';
+import {pushWorkLocation} from './work-navigation';
 type Entry=components['schemas']['WorkEntry'];
 function workName(entry:Entry){return entry.target.kind==='job'?presentationLabel(entry.kind,'Background task'):entry.name;}
 type Target=components['schemas']['WorkTarget'];
@@ -60,7 +61,7 @@ export default function WorkHistory({collections,onClose,onSessionExpired,initia
   return()=>{controller.abort();clearTimeout(start);clearTimeout(timer);};
  },[scope]);
  async function more(){if(!cursor||loading)return;loadedPages.current++;setLoading(true);await refresh.current();}
- async function open(e:Entry){listScroll.current=dialog.ref.current?.scrollTop||0;fromList.current=true;const url=new URL(location.href);url.searchParams.set('work',key(e.target));history.pushState({...history.state},'',url);setDetail(e);}
+ async function open(e:Entry){listScroll.current=dialog.ref.current?.scrollTop||0;fromList.current=true;pushWorkLocation(key(e.target));setDetail(e);}
  function back(){if(fromList.current){history.back();return;}const url=new URL(location.href);url.searchParams.set('work','list');history.replaceState({...history.state},'',url);setDetail(undefined);}
  useEffect(()=>{let controller=new AbortController();const read=async()=>{controller.abort();controller=new AbortController();const signal=controller.signal;const value=new URL(location.href).searchParams.get('work');if(!value){onClose();return;}if(value==='list'){setDetail(undefined);return;}const [kind,id]=value.split(':');if(!['import','job'].includes(kind)||!id){setError('Invalid work link.');return;}try{const entry=await api<Entry>('/work/entry',{method:'POST',body:JSON.stringify({kind,id}),signal});if(!signal.aborted)setDetail(entry);}catch(e){if(!signal.aborted){fail(e);setDetail(undefined);}}};const pop=()=>void read();window.addEventListener('popstate',pop);void read();return()=>{controller.abort();window.removeEventListener('popstate',pop);};},[]);
  async function preview(action:Action){setError('');try{const values=await Promise.all(entries.filter(e=>selected.includes(key(e.target))).map(e=>api<Entry>('/work/entry',{method:'POST',body:JSON.stringify(e.target),signal:lifecycle.current.signal})));setReview({action,entries:values,keys:values.map(()=>crypto.randomUUID())});setOutcomes([]);}catch(e){fail(e);}}
