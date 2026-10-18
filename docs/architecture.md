@@ -12,6 +12,52 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Junk Collector preserves evidence and owned collection history independently of how content is consumed. The server is a modular monolith: one process composes independent domain, application, storage, authentication, HTTP, and job capabilities. It is not a set of microservices.
 
+## Stopped-server backup and recovery contract — HL-03
+
+The operator CLI composes an offline recovery workflow. Application-owned backup
+inventory validation defines the complete archive/private/config unit and full
+versus archive-only recovery. The store adapter owns exclusive root locks, journal
+settlement, SQLite checkpoints, bounded metadata reads, streaming copies/digests,
+durability and restrictive permissions. No HTTP or background backup service is
+introduced. `backup`, `validate-backup` and `restore` are local operator commands.
+
+A backup includes all regular files and empty directories under both roots,
+including unknown data, TLS and unfinished-work scratch, plus the configuration.
+Symlinks/special files are refused. The digest inventory is sealed with a completion
+marker written last. Validation never opens or migrates a database and rejects
+missing, changed, duplicate, unsafe or unlisted files. Restore validates first,
+locks available original roots and both empty destination roots, checks each copied
+file again, then publishes the relocated configuration last. Interrupted restores
+leave markers in both roots; normal Store startup refuses them before database
+opening. Retry uses newly empty roots, never an overlay. Backups are immutable
+operator inputs; failed backups have no completion marker and must be retried at
+a fresh destination.
+
+Full recovery preserves server identity, TLS, credentials, grants and pending work;
+the original and restored instance must never run together. Remote/offline copies
+cannot be fenced by local filesystem locks, so the operator must retire the source.
+Archive-only recovery copies no private files or TLS and requires setup of a fresh
+identity plus explicit access reassignment. External inboxes, DAT source files and
+encoder executables are reported for operator relocation, not silently copied or
+rewritten. Neither mode deletes or alters the backup or source records.
+
+HL-03 review repairs: `unowned-collections` provides bounded stopped-server
+discovery and `recover-collection-owner --collection-id … --username …` assigns
+the first Owner explicitly. Local filesystem authority plus both process locks
+authorize this recovery; ordinary HTTP grants still require a collection Owner.
+Application security policy refuses disabled targets and replacement of an existing
+Owner (including a disabled Owner); repeating the same successful assignment is a
+read-only success. The adapter evaluates that policy and applies the shared grant
+effect plus a private audit entry in one transaction. No module availability or
+content write eligibility is required to recover read access to historical data.
+
+An original root may survive disaster recovery without its lockfile. Restore
+creates/acquires the normal lock there when absent, or acquires the existing lock
+read-only, before touching destination roots. Backup lockfiles remain required and
+are never created or rewritten. A visible live original still refuses restoration;
+missing original roots do not need to be recreated. New source lockfiles contain
+no data and only fence local startup; source archive/private records are untouched.
+
 ## Standard game identification delivery — 2026-10-10
 
 Shared junk-libs readers own content inspection and DAT decoding; Games owns a

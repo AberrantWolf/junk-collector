@@ -1,10 +1,9 @@
 # Local-alpha installation and stopped-server recovery
 
-This runbook qualifies one local installation under
-[LA3](local-alpha-plan.md#la3-acceptance-a-usable-installation). It is deliberately
-smaller than P05: it copies one stopped installation as a coherent unit. It is not
-a portable export, incremental change bundle, replication protocol, or archive-only
-access recovery procedure.
+This runbook provides the HL-03 stopped-server backup and recovery workflow.
+The dated [LA3](local-alpha-plan.md#la3-acceptance-a-usable-installation) qualification
+below remains historical evidence. Portable exports, deltas, online backup and
+scheduling are outside this workflow.
 
 ## Qualification record
 
@@ -143,82 +142,128 @@ TLS key/certificate material, resumable Import/upload scratch, derivative scratc
 durable Jobs, accounts, grants and sessions. Do not select individual SQLite, WAL,
 scratch or TLS files. Protect the backup as credential-bearing private data.
 
-Before stopping, leave one harmless test import partially uploaded or one accepted
-test job pending and record its Import/Job identity and current progress. Then stop
-the server cleanly and wait for the process to exit. Prove quiescence by running a
-short command that opens the same store exclusively:
+Stop the server cleanly and wait for it to exit. Run the compiled server binary
+from the installation's normal working directory (relative configuration paths
+retain their existing meaning):
 
 ```sh
-cargo run -p collector-server --locked -- --config /absolute/path/collector.toml pairing >/dev/null
+collector-server --config /absolute/path/collector.toml backup --destination /backup/new-collector-backup
+collector-server validate-backup --backup /backup/new-collector-backup
 ```
 
-If this reports a lock conflict, do not copy anything. Locate and stop the process
-using the installation. `doctor` is not a quiescence check because it intentionally
-does not acquire the archive lock.
+The destination must **not exist**; its parent must exist, outside both storage
+roots. The command requires an existing installation, holds both normal server
+locks, settles known publication journals through startup recovery, and checkpoints
+both SQLite databases before copying. A live lock or unresolved journal refuses
+backup. Unknown staging is retained; symlinks and special files are refused rather
+than followed. Every regular file and empty directory is included. Neither external
+inboxes, external DAT source files nor encoder executables are copied.
 
-Create file manifests while stopped. The following records relative path, byte
-length and SHA-256 for every regular file, including original, evidence and metadata
-records. Run it once for each selected root and preserve its output with the drill
-notes. On macOS, replace `sha256sum` with `shasum -a 256` if GNU coreutils is absent.
+`inventory.v1.json` lists relative paths, lengths and SHA-256 digests, original root
+locations and a logical private-state digest used by snapshot conversion.
+`complete.sha256` seals that inventory and is written/synced last, after verification.
+Validation checks the entire file set and bytes without opening any database or
+running migrations. New inventories also bind the directory set. Older conversion
+backups remain readable, but cannot prove which empty directories existed.
+Inventory metadata is bounded to 64 MiB (also enforced during traversal); directory
+nesting is at most 256 levels. Large payloads stream through the copy and digest
+checks without being loaded into memory.
 
-```sh
-(cd /selected/archive && find . -type f -exec sha256sum {} + | LC_ALL=C sort)
-(cd /selected/private-state && find . -type f -exec sha256sum {} + | LC_ALL=C sort)
-sha256sum /absolute/path/collector.toml
-```
-
-Confirm the backup destination is the explicitly recorded empty directory. Copy the
-roots without dereferencing or selecting their contents piecemeal. One suitable
-local command is `cp -a`; use a platform-equivalent metadata-preserving copy when it
-is unavailable.
-
-```sh
-mkdir /selected/empty-backup
-cp -a /selected/archive /selected/empty-backup/archive
-cp -a /selected/private-state /selected/empty-backup/state
-cp -a /absolute/path/collector.toml /selected/empty-backup/collector.toml
-```
-
-Recompute manifests under the backup and compare them to the stopped source. Any
-missing path, changed length or changed digest fails the backup attempt.
+On Unix, backup directories use mode `0700` and files `0600`. Keep the backup on
+trusted storage: it includes account hashes, sessions, credentials and private TLS
+keys. The checksum detects corruption, not deliberate replacement by someone who
+can rewrite the backup and its seal. A failed/interrupted backup has no valid
+completion marker. Keep it for diagnosis or remove that specific failed backup;
+retry at a fresh destination. Do not manufacture a completion marker or edit the
+inventory to bypass a failed check. `doctor` checks configuration and does not prove
+quiescence; only commands acquiring both locks do that.
 
 ## Restore drill into empty roots
 
-Keep the original server stopped for the entire restore validation. The restored
-copy has the same server identity, accounts, credentials and TLS private key; never
-run it concurrently with the original, even on different ports.
+Keep the original server stopped throughout restoration and validation. Full
+restore preserves the same ServerId, accounts, grants, sessions, pending Jobs,
+upload scratch and TLS private key. **Retire the original instance before starting
+the restored one. Never run both copies, even on different ports.** Restore locks
+available original roots on this host and refuses a live original. Local locks
+cannot fence an original on another host or an offline disk; retiring it remains
+an operator responsibility.
 
-1. Confirm the recorded restore archive and state paths do not exist or are empty.
-2. Copy `backup/archive` and `backup/state` to those exact paths.
-3. Copy `backup/collector.toml` to the recorded restore-configuration path.
-4. Change only `archive` and `state` in that copied configuration to the restore
-   roots. Keep the authentication origin, TLS names and listener composition intact.
-5. Compare restored archive and state manifests with the backup before opening the
-   restored Store. The copied configuration is expected to differ only in its two
-   root values.
-6. Run `doctor`, then stopped-server `reindex`. Reindex validates/rebuilds the
-   catalog projection; it does not reconstruct grants from the archive.
-7. Start only the restored server. Sign in as both recorded accounts, verify their
-   collection roles, browse the qualified game/CD entries, read original and
-   evidence/metadata history, and play a prepared FLAC.
-8. Resume the recorded partial Import or pending Job. Verify the same durable
-   identity and retained progress, then allow it to settle.
-9. Stop the restored server cleanly. Record post-run archive manifests and explain
-   any new records caused by the resumed work. Do not replace the original roots as
-   part of this drill.
+Original directories can survive with their lockfiles lost. Restore recreates and
+acquires the normal lock in a writable surviving directory, without opening or
+modifying its records. Existing locks are acquired read-only and still refuse a
+live writer. Symlink/special lockfiles are refused. Completely absent original
+roots stay absent. The backup's own lockfiles remain required, unchanged inputs.
+
+Choose two separate absent or empty roots and a **new** output configuration path;
+all parent directories must already exist. Restore never overlays existing data.
+If recovering to the original paths, first move both old roots and configuration
+aside without deleting them.
 
 ```sh
-cargo run -p collector-server --locked -- --config /restore/collector.toml doctor
-cargo run -p collector-server --locked -- --config /restore/collector.toml reindex
-cargo run -p collector-server --locked -- --config /restore/collector.toml serve
+collector-server --config /restore/collector.toml restore --backup /backup/new-collector-backup --archive /restore/archive --state /restore/state
+collector-server --config /restore/collector.toml doctor
+collector-server --config /restore/collector.toml reindex
+collector-server --config /restore/collector.toml serve
 ```
 
-Acceptance requires exact stopped-copy digests, readable originals and retained
-evidence/metadata, both accounts and grants, the same TLS/server identity, and
-successful resumption of the recorded work. Record failures and repair their owning
-layer before retrying from newly empty restore roots. Do not call the installation
-qualified when an owned format, live provider, second device, or the actual restore
-drill was replaced by a synthetic fixture.
+`--config` names the **output** during restore; no current configuration is read.
+The command first validates the backup, then locks both empty destination roots.
+It copies and rechecks each selected file, preserving empty directories, and writes
+the relocated configuration last. Only `archive` and `state` values change;
+other configuration values, including unfamiliar fields, survive serialization.
+No restored database is opened/migrated during restore or validation. Subsequent
+`reindex`/`serve` may perform normal current-format startup recovery and migrations.
+On Unix, copied files/config use `0600` and directories use `0700`.
+
+Review the command's external inbox, DAT source and encoder path report. Those
+paths were retained, not relocated or copied. Update them for this host and check
+listener addresses, TLS names, allowed origins, endpoints and available disk space.
+Frozen pending work may still refer to an old inbox/tool path: restore that path
+or explicitly retry/reselect its input through the normal workflow. Do not change
+private database rows to make a frozen request silently mean something different.
+
+Interrupted restore leaves `.restore-in-progress` in both roots. Normal startup
+refuses either marker **before** opening databases or recovering journals. Preserve
+the partial roots/configuration for diagnosis and retry into newly empty roots.
+Never remove the markers to start a partial restore. The backup remains unchanged.
+
+For a deliberate independent clone, or recovery of archive history without private
+credentials, use the same command with `--archive-only`:
+
+```sh
+collector-server --config /independent/collector.toml restore --backup /backup/new-collector-backup --archive /independent/archive --state /independent/state --archive-only
+collector-server --config /independent/collector.toml setup --username owner
+collector-server --config /independent/collector.toml unowned-collections --limit 50
+collector-server --config /independent/collector.toml recover-collection-owner --collection-id COLLECTION_ID --username owner
+```
+
+This copies archive history only. Setup creates a **fresh** ServerId, account and
+TLS identity. No old grants, sessions, credentials or unfinished private jobs are
+copied. `unowned-collections` lists IDs/names and a cursor for additional pages.
+Run `recover-collection-owner` for each collection you explicitly choose, naming
+an existing enabled account by its sign-in username. Both commands require the
+server stopped and acquire both normal process locks. The assignment writes a
+private security audit entry and refuses collections with any existing Owner,
+including disabled accounts; recover that existing account or use normal owner
+controls instead. Repeating the same successful assignment is safe and leaves its
+grant revision/audit unchanged. Unknown or unavailable modules do not prevent
+recovering access to their retained history.
+
+Then sign in as that Owner and grant other accounts access through the ordinary
+collection controls. A fresh server administrator alone cannot perform that first
+grant through Administration: server administration does not confer collection
+ownership. Archive records never infer grants. Pair clients with the new identity. This mode still
+validates the complete backup before copying; salvage of a damaged private backup
+is not implemented.
+
+For an acceptance drill, record a partially uploaded Import or pending Job before
+stopping. After full restore, sign in with the recorded accounts, confirm roles,
+original bytes, loans, unknown data, manual authority, evidence and accepted cover
+sources. Resume the same Import/Job identity and retained progress. Stop cleanly
+and explain new records created by that resumed work. Do not replace production
+roots during a drill. [HL-03 validation](validation/backup-restore-2026-10-18.md)
+records temporary-root CLI and recovery tests; the dated physical-installation
+results below are not replaced by those fixtures.
 
 ## Supplied corpus inventory — 2026-09-17
 

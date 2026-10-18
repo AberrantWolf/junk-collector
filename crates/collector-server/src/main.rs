@@ -36,10 +36,41 @@ enum Command {
     Doctor,
     Serve,
     Reindex,
-    /// Write a verified full stopped-server backup for snapshot conversion.
-    SnapshotDuplicateBackup {
+    /// Write a verified complete backup. Stop the server first.
+    Backup {
         #[arg(long)]
         destination: PathBuf,
+    },
+    /// Validate every backup byte without opening or migrating a database.
+    ValidateBackup {
+        #[arg(long)]
+        backup: PathBuf,
+    },
+    /// Restore into empty roots; --config names a new output configuration.
+    Restore {
+        #[arg(long)]
+        backup: PathBuf,
+        #[arg(long)]
+        archive: PathBuf,
+        #[arg(long)]
+        state: PathBuf,
+        /// Recover archive history with a fresh private identity and explicit grants.
+        #[arg(long)]
+        archive_only: bool,
+    },
+    /// List collections without any Owner grant. Stop the server first.
+    UnownedCollections {
+        #[arg(long, default_value_t = 50)]
+        limit: u16,
+        #[arg(long)]
+        cursor: Option<CollectionId>,
+    },
+    /// Explicitly assign the first Owner of a recovered collection. Stop the server first.
+    RecoverCollectionOwner {
+        #[arg(long)]
+        collection_id: CollectionId,
+        #[arg(long)]
+        username: String,
     },
     /// Inspect exact duplicate provider payloads; stop the server first.
     InspectSnapshotDuplicates,
@@ -379,6 +410,150 @@ async fn main() -> Result<()> {
         )
         .init();
     let cli = Cli::parse();
+    if matches!(
+        cli.command,
+        Command::UnownedCollections { .. } | Command::RecoverCollectionOwner { .. }
+    ) {
+        let paths = storage_paths(&cli.config)?;
+        anyhow::ensure!(
+            cli.config.is_file()
+                && paths.archive.is_dir()
+                && paths.state.join("private.sqlite").is_file(),
+            "ownership recovery requires an existing installation and account state; run setup first"
+        );
+        let store = Arc::new(Store::open(&paths.archive, &paths.state)?);
+        let service = collector_app::LocalOwnershipRecoveryService::new(store);
+        match &cli.command {
+            Command::UnownedCollections { cursor, limit } => {
+                let page = service.unowned_collections(*cursor, *limit)?;
+                for collection in page.items {
+                    println!("{}\t{:?}", collection.id, collection.name);
+                }
+                if let Some(cursor) = page.next_cursor {
+                    println!("More collections: unowned-collections --cursor {cursor}");
+                }
+            }
+            Command::RecoverCollectionOwner {
+                collection_id,
+                username,
+            } => {
+                let grant = service.recover_owner(*collection_id, username)?;
+                println!(
+                    "Owner access confirmed: {:?} for collection {} (grant revision {}).",
+                    grant.username, grant.collection_id, grant.revision.0
+                );
+                println!(
+                    "Sign in to manage this collection and grant other accounts access through its normal controls."
+                );
+            }
+            _ => unreachable!(),
+        }
+        return Ok(());
+    }
+    if let Command::Backup { destination } = &cli.command {
+        let paths = storage_paths(&cli.config)?;
+        anyhow::ensure!(
+            cli.config.is_file()
+                && paths.archive.is_dir()
+                && paths.state.join("private.sqlite").is_file(),
+            "backup requires an existing installation and configuration; check paths before retrying"
+        );
+        let store = Store::open(&paths.archive, &paths.state)?;
+        store.backup(destination, &cli.config)?;
+        println!("Verified backup: {}", destination.display());
+        println!(
+            "Includes private credentials, TLS and pending-work scratch. Keep the backup private."
+        );
+        return Ok(());
+    }
+    if let Command::ValidateBackup { backup } = &cli.command {
+        let inventory = collector_store::validate_backup(backup)?;
+        println!(
+            "Backup valid: {} files; original archive: {}; original private state: {}",
+            inventory.files.len(),
+            inventory.archive_root,
+            inventory.state_root
+        );
+        println!("Validation checked bytes only; no database was opened or migrated.");
+        return Ok(());
+    }
+    if let Command::Restore {
+        backup,
+        archive,
+        state,
+        archive_only,
+    } = &cli.command
+    {
+        let inventory = collector_store::validate_backup(backup)?;
+        let expected = inventory
+            .files
+            .iter()
+            .find(|f| f.path == "collector.toml")
+            .context("configuration missing from backup")?;
+        anyhow::ensure!(
+            expected.bytes.0 <= 4 * 1024 * 1024,
+            "configuration exceeds 4 MiB"
+        );
+        let mut original = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(
+                std::fs::File::open(backup.join("collector.toml"))?,
+                4 * 1024 * 1024 + 1,
+            ),
+            &mut original,
+        )?;
+        anyhow::ensure!(
+            Digest::sha256(&original) == expected.digest,
+            "configuration changed after validation"
+        );
+        let mut value: toml::Value = toml::from_str(std::str::from_utf8(&original)?)?;
+        let archive = std::path::absolute(archive)?;
+        let state = std::path::absolute(state)?;
+        value["archive"] =
+            toml::Value::String(archive.to_str().context("non-UTF8 archive path")?.into());
+        value["state"] = toml::Value::String(state.to_str().context("non-UTF8 state path")?.into());
+        let configuration = toml::to_string_pretty(&value)?;
+        let output = std::path::absolute(&cli.config)?;
+        collector_store::restore_backup(
+            backup,
+            &archive,
+            &state,
+            &output,
+            configuration.as_bytes(),
+            if *archive_only {
+                collector_app::RestoreScope::ArchiveOnly
+            } else {
+                collector_app::RestoreScope::Full
+            },
+        )?;
+        println!("Restore complete. Configuration: {}", output.display());
+        println!(
+            "Archive: {}\nPrivate state: {}",
+            archive.display(),
+            state.display()
+        );
+        println!(
+            "Private directories use mode 0700 and copied files/configuration use mode 0600 on Unix."
+        );
+        if *archive_only {
+            println!(
+                "Fresh private identity required: run setup, then unowned-collections and recover-collection-owner --collection-id ID --username NAME. No accounts, grants, TLS or pending jobs were copied."
+            );
+        } else {
+            println!(
+                "Server identity, credentials and TLS were preserved. Retire the original instance; never run both copies."
+            );
+        }
+        for field in ["inboxes", "dat_sources", "encoders"] {
+            if let Some(paths) = value.get(field) {
+                println!("Review external {field} paths for this host (not copied): {paths}");
+            }
+        }
+        println!(
+            "Review listener addresses, TLS names, allowed origins and endpoints, then run doctor before serve."
+        );
+        return Ok(());
+    }
     if matches!(cli.command, Command::Paths) {
         let paths = storage_paths(&cli.config)?;
         for (label, path) in [
@@ -532,9 +707,12 @@ async fn main() -> Result<()> {
         Command::RecoverAccount { .. } | Command::Accounts { .. } | Command::Paths => {
             unreachable!()
         }
-        Command::SnapshotDuplicateBackup { destination } => {
-            store.backup_snapshot_conversion(&destination, &cli.config)?;
-            println!("Verified backup: {}", destination.display());
+        Command::Backup { .. }
+        | Command::ValidateBackup { .. }
+        | Command::Restore { .. }
+        | Command::UnownedCollections { .. }
+        | Command::RecoverCollectionOwner { .. } => {
+            unreachable!()
         }
         Command::InspectSnapshotDuplicates => {
             println!(

@@ -109,7 +109,9 @@ revision/candidate/occurrence/Asset deletion, private receipt/log expiration and
 upload-spool reclamation are deliberately unimplemented: each needs a demonstrated
 need and its own exact reference/replay policy before deletion. They remain visible
 within HL-01, not a new queue or mandatory framework. General operator backup/restore
-commands remain HL-03; this delivery reuses the existing conversion backup/recovery.
+is separately delivered by HL-03 (2026-10-18), reusing and strengthening the same
+conversion backup/recovery adapter. See the
+[operator workflow](local-alpha-installation.md#stopped-server-backup).
 
 
 ## Review repairs — 2026-10-18

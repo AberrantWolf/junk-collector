@@ -18,6 +18,29 @@ Use the [consolidated backlog](remaining-work.md) for all remaining work and
 [release requirements](release-requirements.md) for the revised home-lab gate.
 Older dated entries below describe their state at the time, not the current queue.
 
+## HL-03 stopped-server backup and restore — 2026-10-18
+
+The CLI supplies `backup`, `validate-backup` and `restore`, including explicit
+archive-only recovery. The conversion backup implementation is shared by the
+general workflow. Both roots are locked, startup settles journals and SQLite is
+checkpointed before a complete copy of archive/private state, TLS/config and
+pending-work scratch. Validation checks the sealed inventory and complete file set
+without opening databases. Empty-root restore rechecks copied bytes, publishes
+relocated configuration last and fences interrupted roots before normal startup.
+Full recovery retains identity; archive-only recovery requires fresh setup and
+explicit grants. The HL-03 review repairs add stopped-server `unowned-collections`
+discovery and `recover-collection-owner` for the first explicit Owner assignment;
+ordinary web grants still require an Owner. Existing Owners and disabled targets
+are protected, and repeat assignments preserve the grant revision. The private
+grant/audit commit uses the same grant effect as normal access changes. Restore
+now recreates lost original lockfiles in writable surviving roots while preserving
+live-writer refusal and read-only backup inputs. Compiled-CLI regressions cover
+both findings, including normal access after local recovery. External inbox/DAT/tool paths are reported for review. See the
+[operator runbook](local-alpha-installation.md#stopped-server-backup) and
+[dated validation](validation/backup-restore-2026-10-18.md). No live archive was
+backed up, restored or converted. Online backup, scheduling, export/deltas and a
+dashboard remain outside this delivery. Linux deployment qualification remains HL-04.
+
 ## HL-01 cover reuse review repairs — 2026-10-18
 
 Provider cover creation/reuse now converges under the archive writer for concurrent

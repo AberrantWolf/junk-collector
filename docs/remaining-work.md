@@ -129,26 +129,32 @@ mechanisms remain useful; do not remove working services just to retire a client
 
 ### HL-03 — Make stopped-server backup and restore dependable to operate
 
-**State:** an actual stopped-copy/restore drill passed; dedicated tooling is missing.
-**Maps:** practical P05.2–P05.3 subset. **Owner:** application preflight/recovery,
-archive/private-state adapters and CLI; web offers instructions/status.
-Reassess the old P05 design for the smallest
-coherent backup/restore workflow; its individual proposed commands are not binding.
+**State:** delivered 2026-10-18. The local operator CLI supplies `backup`,
+`validate-backup` and empty-root `restore`, plus explicit `--archive-only` recovery.
+The shared conversion/general backup locks both roots, settles known journals,
+checkpoints SQLite and includes complete archive/private state, TLS/config and
+pending scratch. A sealed inventory/completion marker and copied-file revalidation
+precede restored database opening. Interrupted restores are fenced; live locks,
+corruption, unsafe paths and overlays fail closed. Full recovery preserves identity;
+independent recovery uses fresh private identity and explicit grants. External
+inbox/DAT/tool paths and restrictive Unix permissions are reported.
 
-Start from [the working runbook](local-alpha-installation.md). Build the smallest
-coherent stopped-server workflow; no online-backup system is required. Provide explicit stopped-server backup, validation and restore into empty
-roots. Lock both storage roots, settle journals, include archive, private state,
-TLS/config and pending-work scratch coherently, and write a digest inventory plus
-completion marker last. Validate before opening/migrating restored data. Report
-relocated inbox/tool paths and restrictive private-state permissions.
+Review repairs on the same date add real stopped-server discovery and first-Owner
+assignment (`unowned-collections`, `recover-collection-owner`), preserving existing
+Owners, disabled-account restrictions and ordinary web authorization. Missing
+original lockfiles no longer prevent recovery from otherwise lost source roots;
+normal live locks and unsafe aliases still refuse restore. Compiled-CLI regression
+workflows replace the earlier storage-only Owner assignment shortcut.
 
-**Done when:** temporary-root tests/drills cover live-lock refusal, interrupted or
-corrupt backups, exact originals/unknown data/manual metadata/loans/evidence,
-accounts/grants and resumed pending work. Full restore preserves identity with
-only one active instance; archive-only recovery/independent clones use fresh
-private identity and explicit grants. Portable export/deltas are HL-09; they are
-not prerequisites for a safe full backup. An actionable CLI and runbook suffice;
-a backup dashboard and unattended scheduling are optional later work.
+See [operator workflow](local-alpha-installation.md#stopped-server-backup),
+[architecture](architecture.md#stopped-server-backup-and-recovery-contract--hl-03)
+and [dated acceptance](validation/backup-restore-2026-10-18.md). Temporary-root
+adapter and compiled-CLI drills cover exact originals, unknown data, loans,
+manual authority/evidence, accounts/grants/TLS and resumed partial imports. The
+historical LA3 installation drill remains dated evidence. No live archive was
+changed. Linux/NAS and actual-host restore qualification remain HL-04. Online
+backup, scheduling and a dashboard are not required; portable export/deltas remain
+HL-09. Do not reopen this tooling delivery as a new remaining task.
 
 ## 2. Secure and qualify the actual home-server deployment
 
@@ -507,20 +513,20 @@ implemented; provider-access restoration or automated scraping is not an open ta
 
 ## Ready-to-send next assignment
 
-The bounded HL-01 audit and CAA simplification are delivered; do not restart that
-completed scope. HL-02 LAN qualification and HL-03 general stopped-server backup/
-restore tooling are the next independent Group 1 outcomes. HL-03 is the next
-implementation assignment that does not require a second physical device:
+The bounded HL-01 retention audit/CAA simplification and HL-03 stopped-server
+backup/restore tooling are delivered. Do not restart those completed scopes.
+HL-02 actual web/Trash Amp LAN qualification and HL-04 intended Linux/NAS/public
+installation qualification are the next independent outcomes; choose the one for
+which the required host/devices are available.
 
-> Implement the smallest coherent HL-03 stopped-server backup, validation and
-> restore workflow from this queue. Reassess/reuse the existing conversion backup
-> and working restore runbook; complete the general operator workflow with explicit
-> empty-root restore, corruption/interruption/live-lock refusal and preserved
-> originals, private identity, unknown data and pending work. Read architecture,
-> current status, release requirements and the bounded retention audit. Do not
-> broaden into online backup, scheduling, export/deltas or a dashboard. Update the
-> owning records, status, queue and dated validation. Do not commit or spawn agents
-> without an explicit user request.
+> Qualify the intended HL-04 home-server installation using the current queue,
+> architecture, release requirements and operator runbook. Exercise its actual
+> storage mounts/permissions, stopped-server backup/restore, interrupted work and
+> intended ingress/exposure. Reuse HL-03 tooling. Keep claims limited to the host,
+> filesystem and failure model actually tested; do not substitute fixtures for
+> unavailable deployment/device evidence or broaden into online backup or export.
+> Update current status, this queue and dated validation together. Do not commit
+> or spawn agents without an explicit user request.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

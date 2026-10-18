@@ -10,7 +10,7 @@ exclusive archive and private-state locks as the server. Run these commands with
 the installation's configuration and a backup destination **outside both roots**:
 
 ```sh
-collector-server --config /path/collector.toml snapshot-duplicate-backup --destination /backup/collector-before-conversion
+collector-server --config /path/collector.toml backup --destination /backup/collector-before-conversion
 collector-server --config /path/collector.toml inspect-snapshot-duplicates > /backup/reviewed-snapshot-plan.json
 collector-server --config /path/collector.toml apply-snapshot-duplicates --plan /backup/reviewed-snapshot-plan.json --backup /backup/collector-before-conversion
 ```
@@ -39,15 +39,14 @@ the server stopped and rerun the **same plan and backup**. Each completed file s
 is verified and safe to repeat. A changed/corrupt journal, reference, canonical
 payload or backup fails closed; do not delete a journal to bypass that refusal.
 
-To restore instead, keep the server stopped. Move the current archive and state
-roots aside without deleting them. Copy the backup's `archive` and `state`
-directories into the original, now-empty root locations, preserving permissions;
-restore `collector.toml` if required. Verify every file against `inventory.v1.json`
-and its `complete.sha256` before starting. Restore both roots together: copying
-only the archive cannot restore credentials, grants or unfinished command receipts.
-The backup is the pre-conversion installation; archive-only rebuild preserves
-collection evidence but deliberately cannot reconstruct private operational history.
-Never restore by overlaying a backup onto nonempty roots.
+To restore instead, keep the server stopped and follow the general
+[stopped-server restore runbook](local-alpha-installation.md#restore-drill-into-empty-roots).
+Move current roots/configuration aside and use `restore --backup … --archive …
+--state …` with a new output `--config`. Validation and copied-file digest checks
+precede database opening. Restore both roots together to retain credentials,
+grants and unfinished receipts; never overlay nonempty roots. The backup is the
+pre-conversion installation. `--archive-only` deliberately creates no private
+history or access assignments and requires a fresh identity plus explicit grants.
 
 Development validation uses temporary installations and offline provider fixtures.
 No conversion has been run against the user's live archive.

@@ -339,6 +339,11 @@ The examples below use the built binary; place `--config /absolute/path/collecto
 | `serve` | Run listeners and background workers. Stop with Ctrl-C. |
 | `doctor` | Check configuration and optional encoders without locking the archive; can run while serving. Does not test provider reachability, passwords, grants, or browser certificate trust. |
 | `reindex` | Rebuild the catalog from archive records. Stop the server first. |
+| `backup --destination PATH` | Lock the stopped installation, settle journals/checkpoint SQLite and write a verified complete backup to a new directory. |
+| `validate-backup --backup PATH` | Check the sealed inventory, complete file set and every digest without opening databases or current configuration. |
+| `restore --backup PATH --archive PATH --state PATH [--archive-only]` | Validate and copy into empty roots. `--config` names a new output configuration. Archive-only recovery requires a fresh identity and explicit grants. |
+| `unowned-collections [--limit 50] [--cursor ID]` | List recovered collections with no Owner grant. Run while stopped. |
+| `recover-collection-owner --collection-id ID --username NAME` | Explicitly assign the first Owner to an enabled account while stopped. Refuses replacing any existing Owner; repeating the same assignment leaves its revision unchanged. |
 | `pairing` | Export server identity, public certificate, and endpoint data as JSON. Transfer it through a trusted channel; it contains no login credential and does not establish browser trust. Run while stopped. |
 | `paths` | Show absolute configuration, account-storage, archive and public-certificate locations with existence status. Safe while serving; reads configuration only. |
 | `accounts [--limit 50] [--cursor USERNAME]` | List sign-in usernames and enabled/admin/default status. Run while stopped. |
@@ -350,14 +355,39 @@ The [account delivery ledger](docs/account-usability-delivery.md) documents sche
 
 ### Full backup
 
-1. Stop the server.
-2. Copy the complete `archive` directory, complete `state` directory, and `collector.toml` together to the backup destination.
-3. Verify the copy and protect it like the live private state.
-4. Restart the server.
+Stop the server, then run:
+
+```sh
+collector-server --config /absolute/path/collector.toml backup --destination /backup/new-collector-backup
+collector-server validate-backup --backup /backup/new-collector-backup
+```
+
+The destination must not exist; its parent must exist outside both storage roots.
+Protect it like live private state. The completion marker is written last; failed
+or interrupted backups must be retried at a fresh destination. Restart the source
+only when the backup command has exited.
 
 The state root includes pending uploads and work as well as SQLite databases and TLS keys. Do not copy live SQLite files as an ordinary filesystem backup. Keep inbox originals and external DAT source files in your backup plan too; those paths are outside the server roots.
 
-To restore, copy the saved roots into place, adjust configured filesystem paths if necessary, and start one server using that configuration. Do not run two copies of the same server identity concurrently. Archive-only reindexing does not restore accounts or access grants.
+Restore with the original server stopped:
+
+```sh
+collector-server --config /restore/collector.toml restore --backup /backup/new-collector-backup --archive /restore/archive --state /restore/state
+```
+
+The two roots must be absent or empty, their parents must exist, and the output
+configuration must not exist. Review reported external paths and run `doctor`
+before starting the restored server. Retire the original instance: full restore
+preserves identity, accounts, grants and TLS keys, so never run both copies.
+Interrupted roots are fenced from startup; retry with newly empty roots.
+For a deliberate independent clone, use `--archive-only`, then `setup` for a fresh
+identity. While still stopped, use `unowned-collections` to find its collection IDs,
+then `recover-collection-owner --collection-id ID --username NAME` for each
+collection you intend to claim. Sign in as that Owner to share access normally.
+Existing Owners and disabled accounts cannot be bypassed through this command.
+Missing original lockfiles are recreated when their writable directories survive;
+live original locks still refuse restore. See the complete
+[operator runbook](docs/local-alpha-installation.md#stopped-server-backup).
 
 ## Troubleshooting
 

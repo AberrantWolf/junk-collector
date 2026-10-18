@@ -5,6 +5,116 @@ use rand::{RngCore, rngs::OsRng};
 use rusqlite::TransactionBehavior;
 use std::path::Path;
 
+impl collector_app::LocalOwnershipRecoveryPort for Store {
+    fn unowned_collections(
+        &self,
+        after: Option<CollectionId>,
+        limit: u16,
+    ) -> Result<Page<Collection>> {
+        if !(1..=100).contains(&limit) {
+            return Err(Error::Invalid("invalid collection page size".into()));
+        }
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("SELECT c.record FROM collections c WHERE (?1 IS NULL OR c.id>?1) AND NOT EXISTS(SELECT 1 FROM private.grants g WHERE g.collection_id=c.id AND g.role=?2) ORDER BY c.id LIMIT ?3").map_err(storage)?;
+        let rows = statement
+            .query_map(
+                params![
+                    after.map(|id| id.to_string()),
+                    Role::Owner as i64,
+                    u32::from(limit) + 1
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(storage)?;
+        let mut items = rows
+            .map(|row| serde_json::from_str::<Collection>(&row.map_err(storage)?).map_err(storage))
+            .collect::<Result<Vec<_>>>()?;
+        let next_cursor = if items.len() > usize::from(limit) {
+            items.truncate(usize::from(limit));
+            items.last().map(|collection| collection.id.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
+    fn recover_collection_owner(
+        &self,
+        collection: CollectionId,
+        username: &str,
+    ) -> Result<collector_app::GrantView> {
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM collections WHERE id=?)",
+                [collection.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        if !exists {
+            return Err(Error::NotFound);
+        }
+        let (user, enabled): (String, bool) = tx
+            .query_row(
+                "SELECT id,enabled FROM private.users WHERE username=?",
+                [username],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        let user: UserId = user.parse().map_err(storage)?;
+        let current: Option<(i64, u64)> = tx
+            .query_row(
+                "SELECT role,revision FROM private.grants WHERE collection_id=? AND user_id=?",
+                params![collection.to_string(), user.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(storage)?;
+        let current_role = current
+            .map(|(role, _)| role_from_database(role))
+            .transpose()?;
+        let has_owner: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.grants WHERE collection_id=? AND role=?)",
+                params![collection.to_string(), Role::Owner as i64],
+                |row| row.get(0),
+            )
+            .map_err(storage)?;
+        if !collector_app::security::recover_initial_owner(enabled, current_role, has_owner)? {
+            return Ok(collector_app::GrantView {
+                collection_id: collection,
+                user_id: user,
+                username: username.into(),
+                role: Role::Owner,
+                revision: Revision(current.ok_or(Error::Conflict)?.1),
+            });
+        }
+        let grant = self
+            .set_grant_effect(
+                &tx,
+                collection,
+                user,
+                Revision(current.map_or(0, |(_, revision)| revision)),
+                Some(Role::Owner),
+            )?
+            .ok_or(Error::Conflict)?;
+        insert_security_audit(
+            &tx,
+            None,
+            "local_collection_owner_recovered",
+            serde_json::json!({"collection_id":collection,"user_id":user,"grant_revision":grant.revision}),
+            self.clock.now().timestamp(),
+        )?;
+        tx.commit().map_err(storage)?;
+        Ok(grant)
+    }
+}
+
 fn security_cursor(cursor: Option<&str>, first: i64) -> Result<(i64, String)> {
     let Some(cursor) = cursor else {
         return Ok((first, String::new()));
@@ -1715,6 +1825,7 @@ fn open_local_state(state: &Path) -> Result<(std::fs::File, Connection)> {
     private_lock.try_lock_exclusive().map_err(|_| {
         Error::Unavailable("private state is already in use; stop the server first".into())
     })?;
+    ensure_restore_complete(state)?;
     let path = std::fs::canonicalize(database).map_err(storage)?;
     let uri = format!(
         "file:{}?mode=rw",

@@ -3,6 +3,7 @@ mod acquisitions;
 mod album_grouping;
 mod archive_v3;
 mod auth;
+mod backup;
 mod browse;
 mod bulk_intake;
 mod bulk_library;
@@ -18,6 +19,7 @@ mod library_care;
 mod migration;
 mod migration_v3;
 mod music_search;
+pub use backup::{restore_backup, validate_backup};
 mod snapshot_compaction;
 pub use snapshot_compaction::{SnapshotDuplicate, SnapshotDuplicatePlan};
 mod processing;
@@ -240,6 +242,9 @@ impl Store {
             .try_lock_exclusive()
             .map_err(|_| Error::Unavailable("archive already has a writer".into()))?;
         let archive_lock = ProcessLock(archive_lock);
+        for root in [&archive, &state] {
+            ensure_restore_complete(root)?;
+        }
         for dir in ["collections", ".staging", ".transactions"] {
             fs::create_dir_all(archive.join(dir)).map_err(storage)?;
         }
@@ -3606,6 +3611,19 @@ impl Store {
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(storage)?;
+        let result = self.set_grant_effect(&tx, collection, user, expected, role)?;
+        tx.commit().map_err(storage)?;
+        Ok(result)
+    }
+
+    fn set_grant_effect(
+        &self,
+        tx: &Connection,
+        collection: CollectionId,
+        user: UserId,
+        expected: Revision,
+        role: Option<Role>,
+    ) -> Result<Option<GrantView>> {
         let enabled: Option<bool> = tx
             .query_row(
                 "SELECT enabled FROM private.users WHERE id=?",
@@ -3685,8 +3703,7 @@ impl Store {
                 None
             }
         };
-        self.record_command(&tx, &result)?;
-        tx.commit().map_err(storage)?;
+        self.record_command(tx, &result)?;
         Ok(result)
     }
 }
@@ -4602,6 +4619,13 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     File::open(path).and_then(|f| f.sync_all()).map_err(storage)
+}
+pub(crate) fn ensure_restore_complete(root: &Path) -> Result<()> {
+    match fs::symlink_metadata(root.join(".restore-in-progress")) {
+        Ok(_) => Err(Error::Unavailable("incomplete restore: retain these roots for inspection and restore into newly empty roots".into())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(storage(error)),
+    }
 }
 pub(crate) fn private_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]

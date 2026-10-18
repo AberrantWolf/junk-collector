@@ -22,8 +22,9 @@ See [the accepted scope policy](decisions/home-lab-scope.md).
   LAN/native qualification and meaningful format/audio oracles for advertised
   support. Phono-specific acceptance is retired. Missing capabilities stay labeled.
 - Provide an executable stopped-server backup/restore workflow and qualify the
-  intended Linux binary/container and storage layout. A tested manual runbook is
-  existing evidence; dedicated backup tooling is still open.
+  intended Linux binary/container and storage layout. The HL-03 CLI and tested
+  [operator runbook](local-alpha-installation.md#stopped-server-backup) provide the
+  stopped-server workflow; actual Linux deployment qualification remains open.
 - For supported public access, qualify trusted HTTPS, listener/page/API exposure,
   roles, Origin/session controls, recovery/revocation, credential redaction and
   bounded untrusted work on the intended ingress. Keep focused security review;

@@ -8213,7 +8213,7 @@ fn browser_import_resumes_from_durable_offsets_after_restart() {
 }
 
 #[test]
-fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch() {
+fn stopped_backup_restore_preserves_archive_accounts_authority_loans_and_pending_scratch() {
     let (root, store, actor, service, collection) = setup();
     let owner_session = store
         .login("owner", "a long test password", "restore rehearsal")
@@ -8232,7 +8232,48 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         )
         .unwrap();
 
-    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let mut value = item(collection.id);
+    value.specimens.push(Specimen {
+        id: SpecimenId::new(),
+        label: "Loaned copy".into(),
+        condition: Condition::Good,
+        ownership: Ownership::Owned,
+        possession: Possession::Lent,
+        components: vec![],
+        acquisition: None,
+        private_notes: Some("retain private inventory".into()),
+        loans: vec![Loan {
+            id: LoanId::new(),
+            contact: "Trusted friend".into(),
+            lent_at: chrono::Utc::now().date_naive(),
+            due_at: None,
+            returned_at: None,
+        }],
+    });
+    let saved = Catalog::save(&*store, value, Revision(0)).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "Manual restore title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let saved = store.item(saved.id).unwrap();
+    let mut unknown = item(collection.id);
+    unknown.domain = ModuleData {
+        module: ModuleId("org.junk.music".into()),
+        schema_version: 900,
+        payload: RawJson::from_json(r#"{"future":{"nested":[1,"retained"]}}"#).unwrap(),
+    };
+    let unknown = Catalog::save(&*store, unknown, Revision(0)).unwrap();
     let original = b"synthetic stopped-server rehearsal original";
     let upload = service
         .create_upload(
@@ -8288,21 +8329,45 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         .map(|account| account.username)
         .collect::<Vec<_>>();
     let evidence_records = serde_json::to_value(store.evidence(saved.id).unwrap()).unwrap();
+    let authority =
+        serde_json::to_value(store.metadata_authority(collection.id, saved.id).unwrap()).unwrap();
+    let loans = serde_json::to_value(store.item(saved.id).unwrap().specimens).unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let config = root.path().join("collector.toml");
+    std::fs::write(
+        &config,
+        format!("archive = {archive:?}\nstate = {state:?}\n"),
+    )
+    .unwrap();
+    let backup = root.path().join("backup");
+    store.backup(&backup, &config).unwrap();
     drop(service);
     drop(store);
 
-    let archive = root.path().join("archive");
-    let state = root.path().join("state");
-    let archive_hashes = tree_hashes(&archive);
-    let state_hashes = tree_hashes(&state);
     let restore = root.path().join("isolated-restore");
+    std::fs::create_dir(&restore).unwrap();
     let restored_archive = restore.join("archive");
     let restored_state = restore.join("state");
-    assert!(!restore.exists());
-    copy_tree(&archive, &restored_archive);
-    copy_tree(&state, &restored_state);
-    assert_eq!(tree_hashes(&restored_archive), archive_hashes);
-    assert_eq!(tree_hashes(&restored_state), state_hashes);
+    let restored_config = restore.join("collector.toml");
+    let configuration = format!("archive = {restored_archive:?}\nstate = {restored_state:?}\n");
+    collector_store::restore_backup(
+        &backup,
+        &restored_archive,
+        &restored_state,
+        &restored_config,
+        configuration.as_bytes(),
+        collector_app::RestoreScope::Full,
+    )
+    .unwrap();
+    assert_eq!(
+        tree_hashes(&restored_archive),
+        tree_hashes(&backup.join("archive"))
+    );
+    assert_eq!(
+        tree_hashes(&restored_state),
+        tree_hashes(&backup.join("state"))
+    );
 
     let restored = Arc::new(Store::open(&restored_archive, &restored_state).unwrap());
     assert_eq!(restored.server_id().unwrap(), server_id);
@@ -8326,6 +8391,23 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         Role::Viewer
     );
 
+    assert_eq!(
+        serde_json::to_value(restored.item(unknown.id).unwrap().domain).unwrap(),
+        serde_json::to_value(&unknown.domain).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(restored.item(saved.id).unwrap().specimens).unwrap(),
+        loans
+    );
+    assert_eq!(
+        serde_json::to_value(
+            restored
+                .metadata_authority(collection.id, saved.id)
+                .unwrap()
+        )
+        .unwrap(),
+        authority
+    );
     let restored_service = CollectionService::new(restored.clone(), Arc::new(Registry::builtins()));
     assert_eq!(
         resource_bytes(
@@ -8348,6 +8430,51 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         .unwrap();
     assert_eq!(completed.phase, ImportPhase::Analyzing);
     assert_eq!(completed.files[0].digest, Some(Digest::sha256(b"data")));
+    drop(restored_service);
+    drop(restored);
+    let independent_archive = root.path().join("independent-archive");
+    let independent_state = root.path().join("independent-state");
+    let independent_config = root.path().join("independent.toml");
+    let configuration =
+        format!("archive = {independent_archive:?}\nstate = {independent_state:?}\n");
+    collector_store::restore_backup(
+        &backup,
+        &independent_archive,
+        &independent_state,
+        &independent_config,
+        configuration.as_bytes(),
+        collector_app::RestoreScope::ArchiveOnly,
+    )
+    .unwrap();
+    assert!(!independent_state.join("private.sqlite").exists());
+    let independent = Arc::new(Store::open(&independent_archive, &independent_state).unwrap());
+    assert_ne!(independent.server_id().unwrap(), server_id);
+    assert_eq!(independent.user_count().unwrap(), 0);
+    assert!(Catalog::role(&*independent, viewer, collection.id).is_err());
+    let new_owner = independent
+        .create_user("new-owner", "a fresh long password", true)
+        .unwrap();
+    assert!(Catalog::role(&*independent, new_owner, collection.id).is_err());
+    collector_app::LocalOwnershipRecoveryService::new(independent.clone())
+        .recover_owner(collection.id, "new-owner")
+        .unwrap();
+    assert_eq!(
+        Catalog::role(&*independent, new_owner, collection.id).unwrap(),
+        Role::Owner
+    );
+    assert_eq!(
+        serde_json::to_value(independent.item(unknown.id).unwrap().domain).unwrap(),
+        serde_json::to_value(&unknown.domain).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(
+            independent
+                .metadata_authority(collection.id, saved.id)
+                .unwrap()
+        )
+        .unwrap(),
+        authority
+    );
 }
 
 #[test]
@@ -20286,7 +20413,7 @@ fn snapshot_duplicate_conversion_case(
     let config = root.path().join("collector.toml");
     std::fs::write(&config, "fixture configuration").unwrap();
     let backup = root.path().join("backup");
-    store.backup_snapshot_conversion(&backup, &config).unwrap();
+    store.backup(&backup, &config).unwrap();
     if let Some(point) = fault {
         drop(service);
         drop(store);

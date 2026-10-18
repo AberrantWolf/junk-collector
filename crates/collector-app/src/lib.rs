@@ -1,4 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod backup;
+pub use backup::*;
 mod game_identification;
 pub use game_identification::*;
 mod acquisitions;
