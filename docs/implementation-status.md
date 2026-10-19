@@ -21,6 +21,20 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Container release preparation — HL-07D, 2026-10-20
+
+The workspace is prepared as `0.1.0-alpha.2`, with draft storage/update notes.
+The existing workflow separates prerelease `preview` and stable `latest`, verifies
+both architectures and source labels, records exact digests, gates anonymous pulls
+before channel promotion, and pins self-contained installation bundles to that
+manifest. Older release runs cannot downgrade a channel. Manual dispatch verifies
+an unpublished OCI export and retains local-build instructions.
+Policy/bundle tests, actual multiarch verifier-fixture export/copy/config checks and
+Actionlint passed; see [dated preparation evidence](validation/container-release-preparation-2026-10-20.md).
+**HL-07D remains open:** no tag/release/image was published and the full workflow,
+anonymous public Collector pulls and Portainer pull/redeploy are unexercised.
+The [alpha.2 notes](releases/v0.1.0-alpha.2.md) are explicitly prepared, not published.
+
 ## Scalable update recovery — HL-05B, 2026-10-20
 
 The actual DSM Collector root is an eligible single Btrfs subvolume. A qualified

@@ -498,7 +498,17 @@ UI, CLI output and instructions agree with current web/Trash Amp behavior.
 
 #### HL-07D — Automated pullable Docker releases
 
-**State:** workflow scaffold exists; public publication/update qualification is open.
+**State:** complete source preparation delivered 2026-10-20; public publication/
+update qualification remains open. The existing workflow implements disjoint
+`preview`/stable `latest`, version/source/digest checks, both-architecture and anonymous
+pull gates, non-downgrading channel promotion and digest-pinned complete bundles.
+The workspace is prepared as alpha.2 with honest storage/update notes. Policy tests,
+a real local multiarch OCI verifier fixture and Actionlint passed. See
+[preparation evidence](validation/container-release-preparation-2026-10-20.md) and
+[prepared notes](releases/v0.1.0-alpha.2.md). No alpha.2 tag/release/image was published.
+Do not repeat the source implementation; execute the GitHub workflow, anonymous
+Collector pulls/manifest checks and actual Portainer pull/redeploy after the applicable
+adoption/recovery/advertised-platform gates are resolved.
 **Owner:** release CI/container packaging with HL-05 deployment acceptance.
 
 Release packaging requirement added 2026-10-19: users must be able to install and
@@ -860,12 +870,14 @@ HL-04 device and parent HL-05 permanent-installation/public-ingress qualificatio
 remain available when the actual hosts/devices are accessible. HL-07D publication
 must retain its applicable recovery and deployment dependencies.
 
-> Continue HL-07D's independent release preparation: complete moving stable/prerelease
-> channels, exact version/source/digest records, both architecture manifest checks and
-> honest install/update notes in the existing workflow. Public publication and an
-> actual pull/redeploy are not qualified by a workflow file or locally loaded image.
-> Before production adoption/public release, retain the selected consistent recovery
-> policy and resolve HL-05B's permanent independent destination.
+> Complete HL-07D publication acceptance from the prepared alpha.2 source. Source
+> channel/digest/bundle implementation is delivered; do not call the product released
+> until the existing workflow actually builds/publishes, both platforms pull anonymously,
+> recorded labels/digests match, and an isolated Portainer pull/redeploy retains config,
+> accounts, originals and pending work. Keep the selected consistent recovery policy;
+> resolve HL-05B's permanent independent destination/adoption before production changes.
+> Remaining trusted-device/public-ingress/format qualifications apply only to advertised
+> scope. No production or publication change has been made by the preparation commits.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

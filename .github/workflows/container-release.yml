@@ -7,36 +7,27 @@ on:
 permissions:
   contents: read
 
+# Avoid an older queued release moving a channel after a newer release finishes.
+concurrency:
+  group: collector-container-release
+  cancel-in-progress: false
+
 jobs:
   checks:
     uses: ./.github/workflows/check.yml
   container:
     needs: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Select image and verify release version
+      - name: Select version and stable or preview channel
         id: release
-        env:
-          REPOSITORY: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          python3 - <<'PY'
-          import os, tomllib
-          image = 'ghcr.io/' + os.environ['REPOSITORY'].lower()
-          tag = os.environ['TAG'] if os.environ['EVENT'] == 'release' else 'dry-run'
-          if os.environ['EVENT'] == 'release':
-              with open('Cargo.toml', 'rb') as f:
-                  version = tomllib.load(f)['workspace']['package']['version']
-              if tag != 'v' + version:
-                  raise SystemExit('Release tag must match workspace version')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'image={image}:{tag}\n')
-          PY
+        run: python3 scripts/container_release.py plan
+      - run: sudo apt-get update && sudo apt-get install -y skopeo
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Build native smoke image
@@ -47,7 +38,7 @@ jobs:
           tags: junk-collector:release-smoke
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - run: python3 scripts/check_container.py junk-collector:release-smoke
+      - run: python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox
       - name: Log in to GHCR
         if: github.event_name == 'release'
         uses: docker/login-action@v3
@@ -55,49 +46,71 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build both architectures; publish only for a release
+      - name: Build both architectures; publish version tag only for a release
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'release' }}
-          tags: ${{ steps.release.outputs.image }}
+          outputs: ${{ github.event_name != 'release' && 'type=oci,dest=/tmp/collector-multiarch.oci.tar' || '' }}
+          tags: ${{ steps.release.outputs.reference }}
           labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.release.outputs.revision }}
+            org.opencontainers.image.source=${{ steps.release.outputs.source }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Require anonymous release-image access
+      - name: Verify exported dry-run platforms and labels
+        if: github.event_name != 'release'
+        env:
+          BUILD_DIGEST: ${{ steps.image.outputs.digest }}
+        run: python3 scripts/container_release.py verify oci-archive:/tmp/collector-multiarch.oci.tar "$BUILD_DIGEST"
+      - name: Require anonymous version pulls, both platforms and matching source labels
         if: github.event_name == 'release'
         env:
-          RELEASE_IMAGE: ${{ steps.release.outputs.image }}
-        run: |
-          docker logout ghcr.io
-          docker pull "$RELEASE_IMAGE"
-      - name: Package installation bundle
+          RELEASE_IMAGE: ${{ steps.release.outputs.reference }}
+          BUILD_DIGEST: ${{ steps.image.outputs.digest }}
+        run: python3 scripts/container_release.py verify "docker://$RELEASE_IMAGE" "$BUILD_DIGEST"
+      - name: Select channel promotion without downgrading to an older release
+        if: github.event_name == 'release'
+        id: channel
         env:
-          RELEASE_IMAGE: ${{ steps.release.outputs.image }}
-          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p /tmp/collector-bundle/junk-collector-container
-          cp deploy/container/compose.yaml deploy/container/compose.inbox.yaml deploy/container/.env.example deploy/container/collector.proxy.toml.example deploy/container/README.md deploy/container/recovery.md deploy/container/snapshot-recovery.md deploy/container/freeze-tar-time.py /tmp/collector-bundle/junk-collector-container/
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          p = Path('/tmp/collector-bundle/junk-collector-container/.env.example')
-          if os.environ['EVENT'] == 'release':
-              p.write_text(p.read_text().replace('COLLECTOR_IMAGE=junk-collector:local', 'COLLECTOR_IMAGE=' + os.environ['RELEASE_IMAGE']))
-          PY
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" > release-pages.json
+          python3 scripts/container_release.py promote
+      - name: Promote verified digest to its moving channel
+        if: github.event_name == 'release' && steps.channel.outputs.promote == 'true'
+        env:
+          RELEASE_IMAGE: ${{ steps.release.outputs.reference }}
+          CHANNEL: ${{ steps.release.outputs.channel }}
+          BUILD_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          IMAGE="${RELEASE_IMAGE%:*}"
+          docker buildx imagetools create --tag "$IMAGE:$CHANNEL" "$IMAGE@$BUILD_DIGEST"
+          docker buildx imagetools inspect "$IMAGE:$CHANNEL" --format '{{json .Manifest}}' > channel-index.json
+          python3 - <<'PYTHON'
+          import json, os
+          with open('channel-index.json') as source:
+              assert json.load(source)['digest'] == os.environ['BUILD_DIGEST'], 'Channel digest changed'
+          PYTHON
+      - name: Package installation bundle with exact digest and evidence
+        run: |
+          python3 scripts/container_release.py bundle /tmp/collector-bundle/junk-collector-container
           tar -czf junk-collector-container.tar.gz -C /tmp/collector-bundle junk-collector-container
-          sha256sum junk-collector-container.tar.gz > junk-collector-container.tar.gz.sha256
+          sha256sum junk-collector-container.tar.gz release-image.json > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: junk-collector-container
           path: |
             junk-collector-container.tar.gz
-            junk-collector-container.tar.gz.sha256
-      - name: Attach installation bundle to release
+            release-image.json
+            SHA256SUMS
+            release-plan.json
+      - name: Attach installation bundle and image record to release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" junk-collector-container.tar.gz junk-collector-container.tar.gz.sha256
+        run: gh release upload "$RELEASE_TAG" junk-collector-container.tar.gz release-image.json SHA256SUMS --clobber

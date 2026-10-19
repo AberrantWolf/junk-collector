@@ -15,9 +15,11 @@ state which installation paths have actually been exercised.
 
 ## 1. Select an image and storage
 
-Use an explicit image version or digest supplied by a release. Registry images
-have not yet been published; for the current source checkout, build from the
-repository root:
+Use an explicit image version or digest supplied by a release.
+
+<!-- release-image:start -->
+Registry images have not yet been published; for the current source checkout,
+build from the repository root:
 
 ```sh
 docker build -t junk-collector:local .
@@ -30,6 +32,7 @@ junk-collector-image.tar junk-collector:local`, transfer that archive to the Doc
 host, then load it with `docker load -i junk-collector-image.tar`. The DS1522+ uses
 `linux/amd64`. Published multiarch images remove the need to build or transfer
 images manually. Use a distinct local tag for subsequent builds you want to retain.
+<!-- release-image:end -->
 
 Extract the release installation bundle on the server, or use this directory from
 a source checkout. Run the remaining commands beside `compose.yaml`; use `sudo`

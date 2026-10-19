@@ -18,6 +18,12 @@ GNU tar exports to independent storage. The deployment adapter binds the tar wor
 cutoff to snapshot time; application backup/storage formats and domain services are
 unchanged. See [qualified recovery and limits](validation/snapshot-recovery-2026-10-20.md).
 
+Release planning/OCI verification/bundle assembly (HL-07D preparation, 2026-10-20)
+live in `scripts/container_release.py` and the existing workflow, outside application
+and domain services. Public version verification precedes `preview`/stable `latest`
+promotion; bundles pin the verified manifest digest. Local OCI verification is
+separate from actual registry/pull deployment acceptance, which remains open.
+
 **Current direction (2026-10-09):** [remaining work](remaining-work.md)
 is the only remaining-work queue. Older assignment/order and gap statements below
 are historical. Proposed contracts require reassessment under
