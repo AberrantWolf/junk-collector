@@ -184,6 +184,13 @@ pages at one list revision before replacing the personal queue, and show
 unavailable-track exclusions. Shuffle changes the playback order, not the saved
 list. Reload restores a paused queue; the shell player persists across navigation.
 
+HL-07B direct Play controls reuse the existing application-owned client playback
+snapshot and fresh authorized availability. The browser chooses only an existing
+decodable format, then atomically replaces its personal queue through the shared
+start operation. No encoding or provider command is admitted by Play. A panel-owned
+abort controller fences obsolete reads before queue mutation; the shell player
+retains media permission checks and lifecycle ownership. See [acceptance](validation/direct-playback-2026-10-19.md).
+
 ## Local-alpha guided ingestion
 
 New guided imports create one default owned, present physical copy on their new

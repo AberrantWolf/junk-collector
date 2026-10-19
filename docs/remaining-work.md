@@ -13,7 +13,7 @@ have been removed; completed work is described by status and dated validation.
 Queue updated 2026-10-19 after native digital-album delivery, live NAS use and
 issue triage. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
 qualification remains open; HL-07A's import-review repairs are delivered. The next
-independent code delivery is HL-07B's direct playback controls. NAS operations/recovery belong to HL-05A/B; Docker publication
+independent code delivery is HL-07C's bounded setup/release wording cleanup. NAS operations/recovery belong to HL-05A/B; Docker publication
 and release usability belong to HL-07A–D. Keep the existing milestone numbers.
 The earlier insertion assigned
 digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
@@ -440,7 +440,12 @@ Cleanup of source directories is outside this delivery.
 
 #### HL-07B — Direct album and track playback actions
 
-**State:** requested 2026-10-19; new entry-point controls are not implemented.
+**State:** delivered 2026-10-19. Album/track Play and explicit per-import Play
+reuse existing authorized playback scope and atomically replace the personal queue.
+Real Chrome qualifies multi-disc order, direct FLAC/MP3 originals, unprepared and
+ambiguous selections, explicit encoding choices, seek/next, obsolete-response fencing
+and a request denied by actual grant revocation. See [dated acceptance](validation/direct-playback-2026-10-19.md).
+The completed delivery contract follows for reference.
 **Owner:** web presentation over existing authorized listening/queue services.
 
 Provide clear **Play album** and individual-track **Play** buttons where albums
@@ -821,18 +826,19 @@ HL-01 retention/CAA simplification, HL-02 FLAC/MP3 purchases and HL-03 stopped-s
 backup/restore tooling are delivered. Do not restart those completed scopes.
 The grouped-disc publication repair is also implemented and operator-reported as
 working on the NAS. HL-07A is delivered with [local acceptance](validation/intake-review-2026-10-19.md).
-Next complete HL-07B's direct album/track playback actions, followed by HL-07C's
-bounded setup/release wording cleanup. HL-04 device qualification and HL-05A/B
+HL-07B is delivered with [local acceptance](validation/direct-playback-2026-10-19.md).
+Next complete HL-07C's bounded setup/release wording cleanup. HL-04 device qualification and HL-05A/B
 deployment/recovery remain independently available when the actual hosts are
 accessible. HL-07D publication follows its deployment/update acceptance dependencies.
 Preserve milestone numbers and do not reopen completed scopes.
 
-> Complete HL-07B — Direct album and track playback actions. Reuse the persistent
-> player, authorized availability and queue. Explicit playback replaces the personal
-> queue and starts immediately; album order follows numeric disc/track positions.
-> Preserve alternate-source review, unavailable-audio guidance and explicit encoding.
-> Exercise prepared CD and digital originals through the actual UI, then self-review,
-> update status/delivery evidence/this queue and commit before proceeding.
+> Complete HL-07C — Clear release and setup wording. Remove obsolete Phono
+> instructions from startup/doctor output, enrollment and certificate help. Describe
+> the actual web/Trash Amp connection controls and distinguish browser trust from
+> native enrollment. Use precise protection wording for existing settings/manual
+> choices and saved/kept for stored files. Preserve technical policy/identifiers and
+> dated historical evidence. Check served UI, CLI and operator instructions, update
+> status/evidence/this queue and self-review/commit before proceeding.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

@@ -52,6 +52,29 @@ try{
  const stored=await page.evaluate(async id=>await(await fetch(`/api/v1/items/${id}`)).json(),item);assert.equal(stored.title,'Purchased album');assert.equal(stored.specimens.length,0);assert.equal(stored.captures[0].purchase.store,'Private store');assert.equal(stored.captures[0].purchase.cost.minor_units,1500);assert.ok(stored.primary_artwork);
  await page.goto(`${origin}/?collection=${collection}&item=${item}`);
  const tracks=page.getByRole('region',{name:'Album tracks'});await tracks.getByText('1. FLAC original',{exact:true}).waitFor();await tracks.getByText('2. MP3 original',{exact:true}).waitFor();assert.equal(await tracks.getByText('Inspect CD structure',{exact:true}).count(),0);
+ const player=page.getByRole('region',{name:'Music player'});
+ await tracks.getByRole('button',{name:'Play album',exact:true}).click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02;}return false;});
+ await expect(player.getByRole('button',{name:'Queue (2)',exact:true})).toBeVisible();
+ await player.getByRole('button',{name:'Next track',exact:true}).click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentSrc.endsWith('/1');});
+ await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
+ await tracks.locator('.music-track').last().getByRole('button',{name:/^Play track /}).click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02&&audio.currentSrc.endsWith('/1');}return false;});
+ await expect(player.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();await expect(player.getByRole('button',{name:'Next track',exact:true})).toBeDisabled();
+ await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
+ // Close an album while its real server response is withheld. A later response
+ // cannot replace a new track selected after reopening the panel.
+ let releaseAlbum;const heldAlbum=new Promise(resolve=>{releaseAlbum=resolve;});
+ let albumRequested;const requestedAlbum=new Promise(resolve=>{albumRequested=resolve;});
+ await page.route(`**/api/v1/items/${item}/client-playback`,async route=>{const response=await route.fetch();albumRequested();await heldAlbum;await route.fulfill({response}).catch(()=>{});},{times:1});
+ await tracks.getByRole('button',{name:'Play album',exact:true}).click();await requestedAlbum;
+ await page.getByRole('button',{name:'Close details',exact:true}).click();
+ await page.locator('.collection-row').filter({hasText:'Purchased album'}).click();
+ await tracks.locator('.music-track').last().getByRole('button',{name:/^Play track /}).click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02&&audio.currentSrc.endsWith('/1');}return false;});
+ releaseAlbum();await expect(player.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();
+ await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
  await clickAction(tracks,'Add album to list');const chooser=page.getByRole('dialog',{name:'Add to list',exact:true});await chooser.getByLabel('New list name').fill('Purchased playlist');await chooser.getByRole('button',{name:'Append to list',exact:true}).click();await chooser.getByRole('button',{name:'Open list',exact:true}).click();
  const lists=page.getByRole('region',{name:'Collection lists'});await expect(lists.locator('.saved-list-entries li')).toHaveCount(2);await lists.getByRole('button',{name:'Play playlist',exact:true}).click();
  await page.waitForFunction(()=>{const a=document.querySelector('.music-player audio');if(a){a.loop=true;return !a.paused&&a.currentTime>.02;}return false;});
@@ -88,5 +111,34 @@ try{
  await page.goto(`${origin}/?collection=${collection}&item=${broken}`);
  await page.getByText(/Purchased files are preserved, but playable audio analysis is not complete/).waitFor();
  assert.equal(await page.getByText('Inspect CD structure',{exact:true}).count(),0);
- assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, FLAC+MP3 playback, playlists, paused reload, manual title/purchase edits, failed-source guidance and mobile layout. Artifacts: ${scratch}`);
+ // Alternate encodings remain an explicit album choice; track Play stays usable.
+ await copyFile(path.join(fixture,'02.mp3'),path.join(fixture,'01.mp3'));
+ await page.goto(`${origin}/imports?collection=${collection}`);
+ await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','01.mp3'].map(name=>path.join(fixture,name)));
+ await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
+ const alternateIntake=new URL(page.url()).searchParams.get('item');let alternate;
+ await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,alternateIntake);alternate=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:60000}).toBe('succeeded');
+ await page.goto(`${origin}/?collection=${collection}&item=${alternate}`);
+ await tracks.getByText(/Alternate encodings need a choice/).waitFor();
+ const beforeAmbiguous=await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.')));
+ await tracks.getByRole('button',{name:'Play album',exact:true}).click();
+ await tracks.getByRole('alert').getByText(/Choose which alternate encodings/).waitFor();
+ assert.deepEqual(await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.'))),beforeAmbiguous);
+ await tracks.locator('.music-track').last().getByRole('button',{name:/^Play track /}).click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02&&audio.currentSrc.endsWith('/1');}return false;});
+ await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
+ await page.getByRole('button',{name:'Album management',exact:true}).click();await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
+ await editor.getByRole('button',{name:'Music',exact:true}).click();
+ for(const [index,included] of [[0,true],[1,false]]){
+  await clickAction(editor,'Edit track details',index);
+  await editor.getByLabel('Include in album playback and lists',{exact:true}).setChecked(included);
+  await editor.getByRole('button',{name:'Save track details',exact:true}).click();
+  await expect(editor.getByRole('form',{name:'Edit purchased track'})).toHaveCount(0);
+ }
+ await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();
+ await tracks.getByRole('button',{name:'Play album',exact:true}).click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02&&audio.currentSrc.endsWith('/0');}return false;});
+ await expect(player.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();
+ await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
+ assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance and mobile layout. Artifacts: ${scratch}`);
 }catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText().catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();server.kill('SIGINT');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(r,5000))]);if(server.exitCode===null)server.kill('SIGKILL');}

@@ -19,7 +19,7 @@ import type {Props as ActivityPageProps} from './library-activity';
 import type {Props as ImportsPageProps} from './library-imports';
 import type {Props as MetadataPageProps} from './library-metadata';
 
-export {useMusicQueue,addMusicTracks} from './runtime';
+export {useMusicQueue,addMusicTracks,startMusicTracks} from './runtime';
 export {OperationScope,useOperationScope,setApiIdentity,getApiIdentity,default,useState,useEffect,useRef,useId,ApiRequestError,isApiRequestError,requestErrorMessage,api} from './runtime';
 
 type Collection=components['schemas']['PresentedCollection'];

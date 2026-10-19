@@ -64,6 +64,17 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  const merged=await page.evaluate(async ids=>Promise.all(ids.map(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()))),ids);
  assert.equal(merged[0].merged_into,destinationId);assert.equal(merged[1].specimens.length,2);assert.equal(merged[1].captures.length,2);
  await page.setViewportSize({width:1440,height:1000});
+ // Playback is an explicit read; unprepared audio cannot replace a working queue.
+ await nav.getByRole('button',{name:'Library',exact:true}).click();
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('Bulk resolved album');
+ await page.locator('.collection-row').filter({hasText:'Bulk resolved album'}).click();
+ const unprepared=page.getByRole('region',{name:'Album tracks'});
+ await unprepared.locator('.music-track').first().waitFor();
+ const beforeUnprepared=await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.')));
+ await unprepared.getByRole('button',{name:'Play album',exact:true}).click();
+ await unprepared.getByRole('alert').getByText(/Some tracks are unavailable or unsupported/).waitFor();
+ assert.deepEqual(await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.'))),beforeUnprepared);
+ await expect(unprepared.locator('.music-track').first().getByRole('button',{name:/^Play track /})).toBeDisabled();
  if(hasFlac){
   await nav.getByRole('button',{name:'Prepare audio',exact:true}).click();
   const preparation=page.getByRole('region',{name:'Prepare audio workspace'});
@@ -82,6 +93,29 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   await nav.getByRole('button',{name:'Library',exact:true}).click();
   await page.locator('.collection-row').filter({hasText:'Bulk resolved album'}).click();
   const album=page.getByRole('region',{name:'Album tracks'});
+  await album.getByRole('button',{name:'Play album',exact:true}).click();
+  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1;}return false;});
+  const directQueue=await page.evaluate(()=>{const key=Object.keys(localStorage).find(k=>k.startsWith('collector.music-queue.v1.'));return JSON.parse(localStorage.getItem(key));});
+  assert.equal(directQueue.tracks.length,2,'Album Play did not replace the earlier queue');
+  const availability=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,destinationId);
+  assert.deepEqual(directQueue.tracks.map(track=>track.representationId),availability.map(track=>track.state.representation_id),'Album Play did not follow server disc order');
+  const directPlayer=page.getByRole('region',{name:'Music player'});
+  await directPlayer.getByRole('slider').fill('1');
+  await expect.poll(()=>directPlayer.locator('audio').evaluate(audio=>audio.currentTime)).toBeGreaterThan(.9);
+  await directPlayer.getByRole('button',{name:'Next track',exact:true}).click();
+  await page.waitForFunction(expected=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.dataset.representationId===expected;},availability[1].state.representation_id);
+  await directPlayer.getByRole('button',{name:'Pause',exact:true}).click();
+  await directPlayer.locator('audio').evaluate(audio=>audio.loop=false);
+  await album.locator('.music-track').last().getByRole('button',{name:/^Play track /}).click();
+  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1;}return false;});
+  await expect(directPlayer.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();
+  await expect(directPlayer.getByRole('button',{name:'Next track',exact:true})).toBeDisabled();
+  await directPlayer.getByRole('button',{name:'Pause',exact:true}).click();
+  await directPlayer.locator('audio').evaluate(audio=>audio.loop=false);
+  await album.locator('.music-disc').last().getByRole('button',{name:'Play original',exact:true}).click();
+  await page.waitForFunction(expected=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1&&audio.dataset.representationId===expected;}return false;},availability[1].state.representation_id);
+  await expect(directPlayer.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();
+  await directPlayer.getByRole('button',{name:'Pause',exact:true}).click();await directPlayer.locator('audio').evaluate(audio=>audio.loop=false);
   await album.getByRole('button',{name:'Add album to queue',exact:true}).click();
   const player=page.getByRole('region',{name:'Music player'});if(!await player.locator('.queue-track').first().isVisible())await player.getByRole('button',{name:/Queue \(/}).click();
   await player.locator('.queue-track').filter({hasText:'Bulk resolved album'}).last().click();
@@ -98,6 +132,6 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  }
  await nav.getByRole('button',{name:'Library',exact:true}).click();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('pressing');
- console.log('Bulk library journey passed: interrupted folder upload, metadata, confirmed grouping, FLAC preparation, Activity, mobile/keyboard review and actual playback.');
+ console.log('Bulk library journey passed: interrupted folder upload, metadata, confirmed grouping, FLAC preparation, Activity, mobile/keyboard review and actual playback including direct album/track Play with queue replacement, numeric disc order, seek and next.');
  return {album:merged[1]};
 }

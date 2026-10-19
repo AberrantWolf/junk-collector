@@ -72,7 +72,7 @@ async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean
  return result;
 }
 
-export {useMusicQueue,addMusicTracks} from './music-queue';
+export {useMusicQueue,addMusicTracks,startMusicTracks} from './music-queue';
 export type {QueuedTrack} from './music-queue';
 
 export {OperationScope} from './operation-scope';

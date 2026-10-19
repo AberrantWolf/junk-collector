@@ -935,7 +935,15 @@ try{
   await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();await rebuiltPlayer.waitFor();
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
 
+  let releaseDirect;const heldDirect=new Promise(resolve=>{releaseDirect=resolve;});
+  let directRequested;const requestedDirect=new Promise(resolve=>{directRequested=resolve;});
+  await playbackPage.route(`**/api/v1/items/${playbackFixture.itemId}/client-playback`,async route=>{directRequested();await heldDirect;await route.continue();},{times:1});
+  const queueBeforeDenied=await playbackPage.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.')));
+  await playbackPage.getByRole('region',{name:'Album tracks'}).getByRole('button',{name:'Play album',exact:true}).click();await requestedDirect;
   await page.evaluate(async({collectionId})=>{const grants=await(await fetch(`/api/v1/collections/${collectionId}/grants`)).json();const grant=grants.items.find(value=>value.username==='playback-viewer');const response=await fetch(`/api/v1/collections/${collectionId}/grants/playback-viewer?expected_revision=${grant.revision}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`grant revocation: ${response.status} ${await response.text()}`);},playbackFixture);
+  releaseDirect();
+  await expect.poll(()=>playbackPage.getByRole('region',{name:'Album tracks'}).getByRole('alert').count()).toBeGreaterThan(0);
+  assert.deepEqual(await playbackPage.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.'))),queueBeforeDenied,'Denied direct album Play changed the queue');
   await rebuiltPlayer.getByRole('alert').getByText('Access to this queued album is no longer available.',{exact:false}).waitFor();
   assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'revoked viewer retained an active media request');assert.deepEqual(playbackErrors,[]);
   console.log(`Browser playback qualified: Google Chrome ${browserVersion}; audio/flac=${codec.support}; actual start, pause/resume, seek, next/previous, natural ended advance, clean reload, and grant revocation passed.`);

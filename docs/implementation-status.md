@@ -21,6 +21,19 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Direct web playback — HL-07B, 2026-10-19
+
+Album and preparation views expose Play album, per-import Play original and
+individual-track Play. Explicit Play replaces the personal queue and starts
+immediately; Add to queue remains available separately. Whole-album expansion and
+numeric order reuse the existing authorized client playback snapshot. Fresh
+availability requires a browser-decodable existing format for every selected track;
+unavailable or ambiguous selections keep the old queue and show recovery guidance.
+Digital alternate-encoding choices retain their existing metadata authority.
+Closing/replacing a panel cancels its reads before they can change a newer queue.
+See [dated validation](validation/direct-playback-2026-10-19.md). No Play action
+starts encoding, and the persistent player's permission/revocation checks remain.
+
 ## Multi-disc inbox review — HL-07A, 2026-10-19
 
 Batch import review now exposes CUE/Redumper anchor selection through shared
