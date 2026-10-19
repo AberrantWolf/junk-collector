@@ -1,0 +1,25 @@
+# Replace collector.example.com with the exact HTTPS hostname used by browsers.
+archive = "/data/archive"
+state = "/data/state"
+public_bind = "127.0.0.1:9841"
+private_bind = "127.0.0.1:9842"
+# Direct TLS is unused in the proxy setup and stays on loopback.
+lan_bind = "127.0.0.1:9843"
+tls_names = ["localhost", "127.0.0.1"]
+allowed_origins = ["http://localhost:9842", "https://collector.example.com"]
+authentication_origin = "https://collector.example.com"
+endpoints = ["https://collector.example.com"]
+
+[exposure]
+# Set public_administration = true to manage through the external hostname.
+# This also enables curation. Account and collection permissions still apply.
+public_curation = false
+public_administration = false
+
+[encoders]
+flac = "/usr/bin/flac"
+opus = "/usr/bin/opusenc"
+
+# Optional metadata acquisition; replace with a real contact before enabling.
+# [providers]
+# musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"

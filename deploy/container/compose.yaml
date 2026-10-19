@@ -1,0 +1,48 @@
+name: junk-collector
+
+x-runtime: &runtime
+  image: ${COLLECTOR_IMAGE:?Set COLLECTOR_IMAGE to a versioned image tag or digest}
+  user: "10001:10001"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=256m
+  entrypoint: ["junk-collector", "--config", "/data/config/collector.toml"]
+
+services:
+  collector:
+    <<: *runtime
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 60s
+    volumes:
+      - ${COLLECTOR_DATA:?Set COLLECTOR_DATA to an absolute local directory}/config:/data/config:ro
+      - ${COLLECTOR_DATA}/archive:/data/archive
+      - ${COLLECTOR_DATA}/state:/data/state
+    command: ["serve"]
+
+  cli:
+    <<: *runtime
+    profiles: ["tools"]
+    network_mode: none
+    volumes:
+      - ${COLLECTOR_DATA}:/data
+    command: ["doctor"]
+
+  initialize:
+    image: ${COLLECTOR_IMAGE}
+    profiles: ["tools"]
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      COLLECTOR_HOST: ${COLLECTOR_HOST:-}
+      COLLECTOR_PRIVATE_IP: ${COLLECTOR_PRIVATE_IP:-}
+    volumes:
+      - ${COLLECTOR_DATA}:/data
+    entrypoint: ["/usr/local/bin/collector-initialize"]

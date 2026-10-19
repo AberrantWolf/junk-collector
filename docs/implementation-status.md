@@ -43,6 +43,21 @@ publication replaces local Cargo patches with exact pushed sibling revisions,
 recorded in manifests and lockfiles; no sibling checkout is required.
 Further codecs, DRM and album-image splitting remain deferred.
 
+## HL-08 AccurateRip contribution investigation — 2026-10-18
+
+The bounded [contribution investigation](accuraterip-contribution-investigation.md)
+is complete. It recommends EAC or dBpoweramp on Windows with the physical disc,
+AccurateRip drive calibration, secure full-disc extraction and the ripper's own
+consented submission workflow. Maintainer statements distinguish those submitting
+clients from Mac and file-verification tools; CTDB contribution is a separate
+service. Collector's DBAR acquisition and source-bound comparison evidence do not
+supply a supported write contract or attest to a calibrated physical rip. Direct
+integration remains blocked pending that contract and typed provenance policy.
+Sending results does not verify audio; later self-matches are not automatically
+independent corroboration. See the [dated validation and limits](validation/accuraterip-contribution-2026-10-18.md).
+No uploader was implemented, disc re-ripped, live archive changed or result submitted.
+The external workflow was documented, not runtime-qualified.
+
 ## HL-08 Library return after nested work — 2026-10-18
 
 Library “Back to results” now includes nested Work & history list/detail entries
@@ -248,6 +263,23 @@ promise stable interfaces/storage upgrades, or claim the planned first release
 complete. No prebuilt binary or registry image is supplied.
 
 ## Shared-library release baseline — 2026-10-09
+
+Actual-host continuation (2026-10-19): the Synology DS1522+ x86-64 container
+passed owner login, import/download byte comparisons, recreated-container
+session/account/original persistence and a full stopped-server backup/restore
+with restored-original SHA-256 comparisons. The default SIGTERM defect is corrected
+in source; SIGINT remains the workaround for the older tested image. The
+[Compose install/update package](../deploy/container/README.md) and versioned
+image/bundle release workflow are implemented; publication and actual DSM
+acceptance of the new package remain open.
+Packaging changes and available checks are recorded in
+[container packaging validation](validation/container-packaging-2026-10-19.md).
+The operator guide now uses generic storage/host examples and leads with an
+external HTTPS proxy/tunnel configuration; direct TLS remains an alternative.
+Historical local installation observations are retained separately from setup.
+See [partial qualification](validation/synology-deployment-2026-10-19.md).
+Interrupted work, filesystem failure and public-ingress acceptance remain open
+under HL-05.
 
 Collector's seven `junk-libs` dependencies now use the published `v0.1.0` Git tag;
 `Cargo.lock` freezes commit `a0abcdae1bafec8793ce77111f58aa9ab5675c4e`.

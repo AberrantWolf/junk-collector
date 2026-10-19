@@ -4338,3 +4338,13 @@ This establishes missing database data for this TOC at the time of the check,
 not absence for every pressing or proof of audio accuracy. No full audio-payload
 scan or new verification run was performed. AccurateRip submission investigation
 remains an HL-08 follow-up.
+
+Dated follow-up (2026-10-18): the bounded
+[contribution investigation](accuraterip-contribution-investigation.md) is complete,
+with a supported Windows external-tool recommendation and explicit blockers to
+Collector submission. No results were submitted or new lookup performed.
+
+## Container install/update packaging — 2026-10-19
+
+See [container packaging checks and execution limits](validation/container-packaging-2026-10-19.md)
+and the separate [actual NAS preservation/recovery drill](validation/synology-deployment-2026-10-19.md).

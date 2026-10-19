@@ -208,8 +208,14 @@ mechanisms remain useful; do not remove working services just to retire a client
 
 ### HL-05 — Linux, NAS and optional public-Internet deployment
 
-**State:** Linux ARM64 Docker Desktop runtime/persistence passed locally; actual
-home-server, NAS and public ingress qualification remains. **Maps:** R02/R03
+**State:** Linux ARM64 Docker Desktop runtime/persistence passed locally;
+[Synology x86-64 import/download, recreated-container persistence and full backup/restore](validation/synology-deployment-2026-10-19.md)
+passed on the actual NAS. The found SIGTERM defect is corrected in source;
+the Compose install/update package and release workflow are prepared for validation
+and publication. The general install guide includes a proxy/tunnel config example;
+qualify the selected external HTTPS ingress and new image/package on the actual host.
+Remaining interrupted-work/failure and public ingress
+qualification stays open. **Maps:** R02/R03
 practical deployment, S01–S03 external qualification. **Owner:** release/server
 adapters and focused security review.
 
@@ -401,25 +407,34 @@ listening. Deliver the complete workflow across layers as one assignment.
 
 #### AccurateRip contribution investigation
 
-**State:** requested 2026-10-10; submission support is not implemented.
+**State:** bounded investigation delivered 2026-10-18; supported external-tool
+workflow documented, not executed. Collector submission support is not implemented.
 **Owner:** application/provider policy; adapters own any supported submission mechanism.
 
-Investigate how to contribute eligible AccurateRip results, especially for discs
-whose lookup returns no data. Motivating case: **SQ Relax - Krystelle's Chillwave
+The [investigation and operator guidance](accuraterip-contribution-investigation.md)
+recommend physical-disc extraction and the built-in contribution workflow in EAC
+or dBpoweramp on Windows. Maintainer statements identify those two submitting
+clients and explicitly exclude Mac dBpoweramp. CTDB submission is a separate
+service. AccurateRip drive calibration, secure full-disc extraction and explicit
+consent are prerequisites for the recommended workflow. A Mac-only setup or
+missing physical disc/configured drive blocks this route; stored Collector CRCs
+and comparison offsets are not calibrated-ripper submission evidence.
+
+Motivating case: **SQ Relax - Krystelle's Chillwave
 Vol. 2**, by SQUARE ENIX MUSIC & Krystelle. An independent original-TOC calculation
 and fresh HTTP/HTTPS requests confirmed no data for its exact disc layout; see
 [lookup validation](validation.md#sq-relax-vol-2-live-accuraterip-lookup--2026-10-10).
+That observation remains dated; the investigation did not repeat it or submit data.
 
-Establish the supported submission route, provider access requirements, eligibility
-and required drive/rip information. Assess a Collector workflow or guidance through
-a supported external tool. Keep missing provider data distinct from a verification
-failure; submitting results must not itself confer verified status. Require explicit
-user authorization before submitting results externally.
-
-**Done when:** the supported route and prerequisites are documented, and the
-investigation recommends a feasible integration, an external-tool workflow, or
-records a concrete blocker. Implementation is a separate scoped assignment after
-that assessment; this investigation does not authorize external submission.
+Direct Collector integration is blocked by the lack of an established supported
+provider submission contract and typed physical-drive/calibration/rip provenance.
+No public write schema or acceptance contract was established. Provider-specific
+agreement and a separate scoped assignment would precede implementation. Missing
+data stays distinct from failure; sending results does not verify audio, and later
+self-matches need explicit interpretation. See the
+[dated evidence and limits](validation/accuraterip-contribution-2026-10-18.md).
+The bounded research assignment is closed; external submission still requires
+explicit user authorization. It is not a new implementation assignment.
 
 #### Completed presentation follow-ups
 

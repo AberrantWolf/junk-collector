@@ -7,3 +7,7 @@
 
 /collector.toml
 /collector.toml.*.bak
+/deploy/container/.env
+/deploy/container/.env.before-update
+/deploy/container/collector.toml
+/deploy/container/collector-cert.pem

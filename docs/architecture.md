@@ -1,5 +1,13 @@
 # Architecture
 
+Container packaging (2026-10-19) lives in `deploy/container` and the Dockerfile,
+outside domain/application services. A root one-shot initializer prepares only
+the selected mount roots and initial config; the server/CLI run as UID 10001.
+Linux host networking preserves loopback HTTP and explicit private TLS listener
+composition. Deployment configuration/credentials persist independently of image
+replacement. The process adapter accepts both SIGINT and SIGTERM through the
+existing stop path; this is not a new active-job drain guarantee.
+
 **Current direction (2026-10-09):** [remaining work](remaining-work.md)
 is the only remaining-work queue. Older assignment/order and gap statements below
 are historical. Proposed contracts require reassessment under
@@ -837,6 +845,17 @@ The web list summarizes original-level results and opens the existing processing
 workspace, whose application commands remain responsible for eligibility, snapshots
 and publication. A verified original count does not establish album disc coverage
 or MusicBrainz identity.
+
+### AccurateRip contribution boundary — 2026-10-18
+
+Collector's AccurateRip provider acquires reference responses; it does not submit
+contributions. Comparison offsets/checksums are not optical-drive calibration or
+secure-extraction attestations. The completed
+[HL-08 investigation](accuraterip-contribution-investigation.md) recommends a
+supported Windows ripper's physical-disc workflow. Future direct contribution
+would first require provider support and application-owned eligibility, consent,
+replay/recovery and self-match policy. Submission receipt state must not promote
+audio-verification status. No new command, transport or durable schema is introduced.
 
 ### AccurateRip response selection — 2026-10-09
 

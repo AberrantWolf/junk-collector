@@ -316,6 +316,21 @@ fn probe_optional_encoder(
         }
     }
 }
+async fn shutdown_signal() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .context("install SIGTERM handler")?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.context("wait for interrupt"),
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await.context("wait for interrupt")
+}
+
 fn password() -> Result<String> {
     use std::io::{IsTerminal, Read};
     if std::io::stdin().is_terminal() {
@@ -942,7 +957,7 @@ async fn main() -> Result<()> {
                 result=axum::serve(private_listener,private.into_make_service_with_connect_info::<SocketAddr>())=>{result?;},
                 result=axum_server::bind_rustls(config.lan_bind,tls_config).serve(lan.into_make_service_with_connect_info::<SocketAddr>())=>{result?;},
                 result=private_tls_server=>{result?;},
-                _=tokio::signal::ctrl_c()=>{tracing::info!("stopping listeners; durable uploads remain resumable");}
+                result=shutdown_signal()=>{result?; tracing::info!("stopping listeners; durable uploads remain resumable");}
             }
         }
     }

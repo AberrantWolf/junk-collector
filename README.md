@@ -1,20 +1,33 @@
 # Junk Collector
 
-Junk Collector is a self-hosted archive for physical video games and music CDs: inventory, original dumps, artwork, metadata, and verification evidence in one place.
+Junk Collector is a self-hosted archive for video games, music CDs, and supported digital music purchases: inventory, original dumps, artwork, metadata, and verification evidence in one place.
 
 The web app supports collections with or without attached dumps, guided imports, optional metadata and artwork acquisition, game DAT matching, AccurateRip checks, and playback of prepared CD tracks. Each collection has one type—games or music CDs. Original files are retained alongside derived files and recorded evidence.
 
 ## Alpha release
 
-`v0.1.0-alpha.1` is an experimental source release for local evaluation and
-pinned Rust consumers such as Trash Amp. It is not a production-ready release;
-interfaces and storage formats may still change. Back up archive, private state
-and configuration before upgrading. See [release notes](docs/releases/v0.1.0-alpha.1.md)
-for the qualified scope and remaining gates.
+The latest tagged source release is `v0.1.0-alpha.1`; the current checkout includes
+later development. Builds are suitable for evaluating supported workflows and
+backed-up personal use as an experimental alpha. Keep source originals and back up
+the complete archive, private state, and configuration before updates. Storage
+formats and interfaces may change; a stable upgrade contract and completed
+Internet-deployment security qualification are not claimed.
+
+See the [tagged release notes](docs/releases/v0.1.0-alpha.1.md) for that release,
+and [current implementation status](docs/implementation-status.md) for newer
+features and remaining limits. Prebuilt registry images are not yet published.
 
 ## Quick start
 
-### Requirements
+For a Linux Docker host or compatible NAS, use the
+[container installation guide](deploy/container/README.md). It covers reverse
+proxies and Cloudflare Tunnel, one-time account setup, bundled audio encoders,
+persistent storage, updates, and recovery. Bring a browser-trusted HTTPS hostname;
+direct HTTPS is available when no proxy is used.
+
+To run the native server from source, follow the steps below.
+
+### Source build requirements
 
 - Rust 1.99.0 (the tested release toolchain, pinned in `rust-toolchain.toml`), a C/C++ build toolchain, CMake, and pkg-config. Linux builds also need OpenSSL development headers.
 - Network access on the first build to fetch Cargo dependencies, including the exact `junk-libs` Git revision pinned in `Cargo.toml`. No sibling checkout is required.
@@ -69,7 +82,7 @@ Run the server as an ordinary user with access to its storage and configured inb
 
 ## Add your first collection
 
-1. Sign in at the private management address and choose **Create collection** or **Administration**. Choose **Games** or **Music CDs** and give the collection a name.
+1. Sign in at a management-enabled address and choose **Create collection** or **Administration**. Choose **Games** or **Music CDs** and give the collection a name.
 2. Open the collection and choose **Add / import → Dump folder**. Select a folder containing complete dumps; subfolders are scanned for packages. Unrecognized files are listed separately and are not uploaded. To track an item without files, choose **Enter inventory manually**.
 3. Review the package count. **Package details and import options** shows missing companions or unsupported operations and lets you change an ambiguous analysis anchor. Metadata and artwork gathering is enabled by default.
 4. For supported CDs, optionally select **Prepare supported music as FLAC after preservation**. Choose **Import … packages**. Each package gets its own saved entry automatically; no title or separate inventory save is required.
@@ -279,55 +292,22 @@ Add each browser-facing HTTPS origin to `allowed_origins`, including its port wh
 
 Keep private and public proxy destinations separate. Public tunnels must target `public_bind`, even when they connect from localhost. Never publish the private management listener through a public tunnel.
 
-## Connect Phono Junk
+## Direct HTTPS and certificate trust
 
-In Phono Junk’s Collector view, choose **Add server**, enter the full HTTPS
-address, then choose **Connect with web sign-in**. Approve the request with your
-normal browser account; Phono completes automatically and saves its separate,
-revocable credential in Keychain. You do not enter your username or password in
-Phono. The same collection permissions apply.
+A reverse proxy or tunnel normally manages the browser-facing certificate. It
+does not use Collector's generated certificate when its upstream is loopback HTTP.
 
-### Self-signed certificates and local connections
+For direct HTTPS, configure certificate names before `setup`, obtain only the
+public `state/tls/cert.pem` through a trusted administrator channel, and compare
+its file SHA-256 with the fingerprint in startup output. Install it in the trust
+store used by the browser/client, then connect using a matching name or IP.
+Never distribute `key.pem` or bypass certificate validation. The generated
+certificate is not automatically trusted by other devices.
 
-On the same computer, the default HTTPS client address is
-`https://localhost:9843`; `http://localhost:9842` is the local browser management
-address. Startup reports the configured local HTTPS address separately from
-advertised names. A `.local` name must resolve separately; setup does not create
-DNS or an mDNS service. `localhost` on another computer means that other computer.
-
-Collector setup generates a self-signed certificate, which is not automatically
-trusted. Sign in to the trusted browser management interface and open
-**Administration → Server settings → HTTPS certificate**. Download the public
-PEM; the panel includes instructions and its Phono PEM-file SHA-256. The startup
-output prints the certificate’s absolute file location and the same fingerprint,
-and `paths` lists the certificate location while serving. Only `cert.pem` is
-public; keep `key.pem` private.
-
-For normal HTTPS enrollment on macOS:
-
-1. Obtain the public certificate from the server computer or a separately trusted
-   owner channel. Compare `shasum -a 256 FILE.pem` with trusted startup output.
-2. Open Keychain Access through Spotlight. Select the login keychain and use
-   **File → Import Items** to add the certificate.
-3. Double-click it, expand **Trust**, and set **Secure Sockets Layer (SSL)** to
-   **Always Trust**. Close the window and authenticate if prompted.
-4. Restart Phono and your browser, then connect to the configured HTTPS address.
-
-See [Apple’s trust instructions](https://support.apple.com/guide/keychain-access/change-the-trust-settings-of-a-certificate-kyca11871/mac).
-
-Alternatively, trust this connection only in Phono: select **This server uses an
-owner-provided certificate**, import the public PEM, enter the independently
-verified PEM-file SHA-256 and confirm verification. Importing into Phono does not
-establish browser trust. On the server computer, you can enter the approval code
-at the local management `/pair` page (normally `http://localhost:9842/pair`);
-remote browser approval requires trusted HTTPS. A browser-only certificate
-exception does not establish system trust. Never disable certificate validation.
-
-The Phono fingerprint hashes PEM file bytes; certificate viewers may show a
-fingerprint of the binary certificate encoding instead. The download is the
-direct Collector HTTPS listener’s certificate; a reverse proxy can have a
-different certificate. Do not trust a download obtained solely through an
-untrusted HTTPS connection.
+Certificate names and advertised endpoints do not create DNS or mDNS records.
+A `.local` name must resolve independently. Changing configured names does not
+replace an existing certificate; plan certificate renewal/trust updates explicitly.
+The optional direct listeners are separate from the proxy's certificate lifecycle.
 
 ## Operations and backups
 
@@ -336,7 +316,7 @@ The examples below use the built binary; place `--config /absolute/path/collecto
 | Command | Purpose |
 |---|---|
 | `setup [--username NAME]` | Initialize storage, TLS, the default account, and local browser configuration. Run while stopped. |
-| `serve` | Run listeners and background workers. Stop with Ctrl-C. |
+| `serve` | Run listeners and background workers. Stop with Ctrl-C or SIGTERM on Unix. |
 | `doctor` | Check configuration and optional encoders without locking the archive; can run while serving. Does not test provider reachability, passwords, grants, or browser certificate trust. |
 | `reindex` | Rebuild the catalog from archive records. Stop the server first. |
 | `backup --destination PATH` | Lock the stopped installation, settle journals/checkpoint SQLite and write a verified complete backup to a new directory. |

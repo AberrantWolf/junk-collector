@@ -1,0 +1,103 @@
+name: Container release
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/check.yml
+  container:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select image and verify release version
+        id: release
+        env:
+          REPOSITORY: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          image = 'ghcr.io/' + os.environ['REPOSITORY'].lower()
+          tag = os.environ['TAG'] if os.environ['EVENT'] == 'release' else 'dry-run'
+          if os.environ['EVENT'] == 'release':
+              with open('Cargo.toml', 'rb') as f:
+                  version = tomllib.load(f)['workspace']['package']['version']
+              if tag != 'v' + version:
+                  raise SystemExit('Release tag must match workspace version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'image={image}:{tag}\n')
+          PY
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build native smoke image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: junk-collector:release-smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: python3 scripts/check_container.py junk-collector:release-smoke
+      - name: Log in to GHCR
+        if: github.event_name == 'release'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build both architectures; publish only for a release
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'release' }}
+          tags: ${{ steps.release.outputs.image }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Require anonymous release-image access
+        if: github.event_name == 'release'
+        env:
+          RELEASE_IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          docker logout ghcr.io
+          docker pull "$RELEASE_IMAGE"
+      - name: Package installation bundle
+        env:
+          RELEASE_IMAGE: ${{ steps.release.outputs.image }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          mkdir -p /tmp/collector-bundle/junk-collector-container
+          cp deploy/container/compose.yaml deploy/container/.env.example deploy/container/collector.proxy.toml.example deploy/container/README.md deploy/container/recovery.md /tmp/collector-bundle/junk-collector-container/
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path('/tmp/collector-bundle/junk-collector-container/.env.example')
+          if os.environ['EVENT'] == 'release':
+              p.write_text(p.read_text().replace('COLLECTOR_IMAGE=junk-collector:local', 'COLLECTOR_IMAGE=' + os.environ['RELEASE_IMAGE']))
+          PY
+          tar -czf junk-collector-container.tar.gz -C /tmp/collector-bundle junk-collector-container
+          sha256sum junk-collector-container.tar.gz > junk-collector-container.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: junk-collector-container
+          path: |
+            junk-collector-container.tar.gz
+            junk-collector-container.tar.gz.sha256
+      - name: Attach installation bundle to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" junk-collector-container.tar.gz junk-collector-container.tar.gz.sha256
