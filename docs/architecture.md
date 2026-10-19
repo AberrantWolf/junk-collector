@@ -7,6 +7,12 @@ Linux host networking preserves loopback HTTP and explicit private TLS listener
 composition. Deployment configuration/credentials persist independently of image
 replacement. The process adapter accepts both SIGINT and SIGTERM through the
 existing stop path; this is not a new active-job drain guarantee.
+The fresh-install proxy-config transport (HL-05A, 2026-10-20) refuses existing
+archive/private state and empty input before atomic replacement. Setup/doctor own
+configuration validation and provider-contact readiness. The optional inbox Compose
+override supplies the same read-only bind and supplemental group to server and CLI;
+filesystem ACLs remain a host mechanism. Actual Synology update/resume/restore and
+remote-browser checks are recorded in [NAS operations acceptance](validation/nas-operations-2026-10-20.md).
 
 **Current direction (2026-10-09):** [remaining work](remaining-work.md)
 is the only remaining-work queue. Older assignment/order and gap statements below

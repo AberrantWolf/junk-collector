@@ -1,0 +1,23 @@
+# Add with: docker compose -f compose.yaml -f compose.inbox.yaml ...
+# Keep the supplemental GID and bind source aligned with the host's share ACL.
+services:
+  collector:
+    group_add:
+      - ${COLLECTOR_INBOX_GID:?Set COLLECTOR_INBOX_GID to the host inbox-reader group}
+    volumes:
+      - type: bind
+        source: ${COLLECTOR_INBOX:?Set COLLECTOR_INBOX to an existing absolute inbox directory}
+        target: /inbox
+        read_only: true
+        bind:
+          create_host_path: false
+  cli:
+    group_add:
+      - ${COLLECTOR_INBOX_GID}
+    volumes:
+      - type: bind
+        source: ${COLLECTOR_INBOX}
+        target: /inbox
+        read_only: true
+        bind:
+          create_host_path: false

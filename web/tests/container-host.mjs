@@ -1,0 +1,39 @@
+// Browser handoff for check_container.py, including actual remote-host TLS/media.
+import {chromium,expect} from '@playwright/test';
+import {readFile,mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import https from 'node:https';
+import {createHash} from 'node:crypto';
+import assert from 'node:assert/strict';
+const fixture=JSON.parse(await readFile(process.argv[2],'utf8'));
+const scratch=await mkdtemp(path.join(tmpdir(),'collector-container-browser-'));
+// Validate the isolated host's actual certificate/name/server identity before login.
+const identity=await new Promise((resolve,reject)=>{const req=https.get(fixture.origin+'/api/v1/identity',{ca:fixture.certificate_pem,...fixture.private_ip?{family:4,lookup:(_hostname,_options,callback)=>callback(null,fixture.private_ip,4)}:{}},response=>{let body='';response.on('data',part=>body+=part);response.on('end',()=>{try{assert.equal(response.statusCode,200);resolve(JSON.parse(body));}catch(error){reject(error);}});});req.setTimeout(10000,()=>req.destroy(Error('Private HTTPS identity timed out')));req.on('error',reject);});
+assert.equal(identity.server_id,fixture.server_id);
+let browser,page;
+try{
+ browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:fixture.private_ip?[`--host-resolver-rules=MAP ${new URL(fixture.origin).hostname} ${fixture.private_ip}`]:[]});
+ // Test-only self-signed browser acceptance; the PEM/name was independently validated above.
+ const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
+ page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.goto(fixture.origin);await page.getByLabel('Password',{exact:true}).fill(fixture.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
+ await page.goto(`${fixture.origin}/?collection=${fixture.collection_id}&item=${fixture.item_id}`);
+ const tracks=page.getByRole('region',{name:'Album tracks'});const player=page.getByRole('region',{name:'Music player'});
+ await tracks.getByRole('button',{name:'Play album',exact:true}).click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1;}return false;});
+ await player.getByRole('slider').fill('1');await expect.poll(()=>player.locator('audio').evaluate(audio=>audio.currentTime)).toBeGreaterThan(.9);
+ await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
+ await page.getByText('Album details, evidence & files',{exact:true}).click();
+ for(const [name,expected] of Object.entries(fixture.originals)){
+  const link=page.locator('.entry-inspection').getByRole('link',{name,exact:true});const href=await link.getAttribute('href');assert.ok(href);
+  const response=await page.request.get(new URL(href,fixture.origin).toString());assert.equal(response.status(),200);const bytes=await response.body();assert.equal(bytes.length,expected.bytes);assert.equal(createHash('sha256').update(bytes).digest('hex'),expected.sha256);
+ }
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(scratch,'nas-mobile.png'),fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:path.join(scratch,'nas-desktop.png'),fullPage:true});
+ await tracks.locator('.music-track').first().getByRole('button',{name:/^Play track /}).click();await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1;}return false;});
+ const element=await player.locator('audio').elementHandle();await page.getByRole('button',{name:'Close details',exact:true}).click();assert.deepEqual(await element.evaluate(audio=>({connected:audio.isConnected,paused:audio.paused})),{connected:true,paused:false});await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
+ assert.deepEqual(errors,[]);console.log(`Actual container-host browser passed (Chrome ${await browser.version()}): trusted PEM/name/identity, login, album/track playback, seek, exact original downloads, persistent playback and mobile layout. Artifacts: ${scratch}`);
+}catch(error){console.error('Browser location:',page?.url());await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;
+}finally{await browser?.close();}

@@ -18,13 +18,20 @@ and account/TLS identity restored from the backup. The old instance must remain 
 if it lives on another host. Local locks cannot enforce that across hosts or
 when old paths are hidden by different mounts.
 
-Create only the destination directories, without creating a config file:
+Create the selected host bind source first (DSM rejects a missing directory),
+then only the destination children, without creating a config file:
 
 ```sh
+mkdir -p /volume1/junk-collector-recovered
 docker compose run --rm --entrypoint install initialize \
   -d -m 0700 -o 10001 -g 10001 \
   /data/config /data/archive /data/state /data/backups
 ```
+
+Use the exact new absolute `COLLECTOR_DATA` path for `mkdir`, with host administrator
+privileges if required. For a Portainer-managed installation, keep its Collector
+service stopped and use SSH Compose only for these one-shot tools; do not replace
+the live stack or its tunnel services.
 
 Replace `/absolute/path/to/old/backups/before-update-UNIQUE` below with the
 actual sealed backup directory, outside the new data directory:

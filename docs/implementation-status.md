@@ -21,6 +21,26 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Reproducible NAS operations — HL-05A, 2026-10-20
+
+Fresh-install proxy configuration uses guarded, byte-checked atomic stdin transfer.
+The runbooks create DSM bind roots before initialize/restore, distinguish inbox ACLs
+from mount writability, supply a shared supplemental-group override, and keep
+Portainer runtime/SSH CLI image IDs aligned without removing tunnel services.
+Startup/doctor distinguish configured provider contact from network/match success.
+
+On the actual DS1522+ Btrfs host, isolated amd64 installations passed distinct-image
+update with resumed partial upload, retained account/session/ServerId/config/TLS,
+exact original downloads, inbox group access, explicit FLAC preparation, clean
+SIGTERM and full stopped-server restore. Real remote Chrome exercised album/track
+play, seek, persistent playback, mobile layout and exact downloads before and after
+restore. Configured provider acquisition completed; absent configuration left a
+visible metadata failure without blocking originals/audio. See [dated evidence](validation/nas-operations-2026-10-20.md).
+The live Portainer installation and tunnels were inspected only. Permanent-installation
+inventory/enrichment acceptance, public ingress, system-browser trust, power-loss
+behavior and HL-05B's scalable independent recovery remain open. Public registry
+pull/update acceptance remains HL-07D.
+
 ## Release/setup wording — HL-07C, 2026-10-20
 
 Current startup/doctor, enrollment and certificate help describe web/Trash Amp
@@ -30,7 +50,8 @@ for stored files and precise protection/reset wording for existing accounts, TLS
 manual choices and collection history. README intake/listening instructions match
 the Imports/Prepare audio pages and persistent player. Technical storage/state
 identifiers and dated Phono evidence are unchanged. See [dated acceptance](validation/release-wording-2026-10-20.md).
-Fresh NAS installation/update readiness and scalable recovery remain HL-05A/B.
+HL-05A installation/update operations are now accepted separately above; scalable
+recovery remains HL-05B.
 
 ## Direct web playback — HL-07B, 2026-10-19
 

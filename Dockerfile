@@ -10,6 +10,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 flac opus-tools && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home collector
 COPY --from=builder /build/target/release/collector-server /usr/local/bin/junk-collector
 COPY --chmod=755 deploy/container/initialize.sh /usr/local/bin/collector-initialize
+COPY --chmod=755 deploy/container/install-proxy-config.sh /usr/local/bin/collector-install-proxy-config
 LABEL org.opencontainers.image.source="https://github.com/AberrantWolf/junk-collector"
 USER collector
 WORKDIR /home/collector

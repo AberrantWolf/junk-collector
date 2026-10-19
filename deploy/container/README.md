@@ -75,7 +75,8 @@ Edit `collector.toml`:
    This also enables imports/curation; account and collection permissions still
    apply. For a browse/listen-only hostname, leave both exposure flags false and
    provide a separate private management route to create/manage collections.
-3. Optionally uncomment `[providers]` and provide a monitored MusicBrainz contact address. A MusicBrainz account is not required.
+3. Optionally uncomment `[providers]` and provide a monitored MusicBrainz contact
+   address. A MusicBrainz account is not required.
    Metadata acquisition is otherwise unavailable; preservation still works.
 
 Configure the proxy/tunnel route:
@@ -145,21 +146,38 @@ For a published image, pull it first; skip pulling for an image built/loaded loc
 docker compose pull collector cli initialize
 ```
 
-Prepare private directories and a starting configuration:
+Create the exact host directory selected as `COLLECTOR_DATA` before initialization.
+For example, with `COLLECTOR_DATA=/volume1/junk-collector`:
 
 ```sh
+mkdir -p /volume1/junk-collector
 docker compose run --rm initialize
 ```
+
+Use the same absolute path as `.env`, and use host administrator privileges for
+`mkdir` if required. DSM rejects a bind source that does not exist. Initialization
+creates the `config`, `archive`, `state` and `backups` children with UID/GID 10001;
+it does not recursively change an existing archive.
 
 **For the proxy setup**, install the edited working config before account setup:
 
 ```sh
-docker compose run --rm --entrypoint sh cli \
-  -c 'cat > /data/config/collector.toml' < collector.toml
+docker compose run --rm -T --entrypoint collector-install-proxy-config cli < collector.toml
+sha256sum collector.toml
+docker compose run --rm --entrypoint sha256sum cli /data/config/collector.toml
 ```
 
-This copy is a fresh-install step. Do not repeat it over an existing installation
-when updating; edit the actual retained configuration deliberately while stopped.
+The two configuration digests must match. `-T` passes redirected input without a
+pseudo-terminal. The helper refuses empty input, existing archive data or private
+state; it publishes a private temporary file atomically rather than truncating the
+current config. This replaces the previously unverified stdin-copy step with a
+checked transfer; the cause of that historical failed copy was not established.
+Setup normalizes config formatting and saves a previous-file backup. Check the
+actual origins/exposure in doctor afterward; a changed formatting digest alone is
+not proof the copy failed. Configuration syntax and provider contact are validated
+by setup/doctor.
+Do not use this fresh-install helper over an established installation. Correct the
+actual retained config deliberately while stopped, without rerunning account setup.
 For direct HTTPS, keep the initializer's generated config and skip this copy.
 
 Create the owner account, check configuration, and start:
@@ -182,6 +200,49 @@ host/IP values do not rewrite retained config or certificates; the actual config
 is `COLLECTOR_DATA/config/collector.toml`. The archive and complete private state
 are in its sibling `archive` and `state` directories.
 
+### Optional SMB/server inbox
+
+Give the non-root process read access through a dedicated host group and share
+ACL. A bind mount's `ro`/`rw` flag does not grant host filesystem permission.
+The live Synology installation uses `collector-inbox-readers`, GID 65538; discover
+the actual GID on another host rather than copying that number blindly.
+
+For the shipped Compose setup, add these values to `.env`:
+
+```dotenv
+COMPOSE_FILE=compose.yaml:compose.inbox.yaml
+COLLECTOR_INBOX=/volume1/junk-collector-inbox
+COLLECTOR_INBOX_GID=65538
+```
+
+The inbox source must already exist; the override refuses to create a misspelled
+source path. It mounts `/inbox` read-only and applies the same supplemental group
+to server and CLI tools. Add this section to the actual server config while stopped:
+
+```toml
+[inboxes]
+cds = "/inbox"
+```
+
+Then inspect `docker compose config` and test the effective runtime identity/read:
+
+```sh
+docker compose run --rm --entrypoint id cli
+docker compose run --rm --entrypoint ls cli /inbox
+```
+
+Grant traverse/read permission to the host group on the share and package
+subdirectories, including SMB-created files. If explicitly choosing a writable
+mount, edit `read_only` in the override and grant the corresponding host ACL; neither
+change enables source cleanup. Imports keep source files. Optional cleanup remains
+unimplemented. Do not recursively change ownership of an existing music share.
+
+Doctor reports whether provider contact is configured and validates its format.
+A monitored MusicBrainz contact is required, not an account. Configured providers
+still need network access and a matching release; doctor does not establish either.
+Unconfigured/unavailable providers must leave original preservation usable. The
+import review's typed readiness and final outcomes show what can actually run.
+
 ## 4. Check before bulk intake
 
 Create a collection, import one complete supported package, download its originals,
@@ -194,6 +255,38 @@ These checks establish the workflows exercised through the chosen ingress, not
 complete Internet security or power-loss certification. If an operation is
 unsupported or a provider/tool is unavailable, keep its failure visible rather
 than assuming identification, verification or playback succeeded.
+
+## Portainer-managed stacks and SSH maintenance
+
+Keep the existing Portainer Collector definition, mounts, supplemental groups and
+connector topology. The CLI-only files here do not declare your tunnel connector;
+Compose may warn that it is an orphan. That warning is expected. Do not use
+`--remove-orphans`, or `compose down`, against the live Portainer project. Keep the
+existing bridge connector and unrelated routes; the Collector host-local connector
+can remain a separate service.
+
+Before maintenance, compare the running Collector's image with the CLI image:
+
+```sh
+docker ps --filter label=com.docker.compose.service=collector --format '{{.Names}} {{.Image}}'
+docker inspect --format '{{.Config.Image}} {{.Image}}' YOUR_COLLECTOR_CONTAINER
+docker compose config --images
+docker image inspect YOUR_COLLECTOR_IMAGE --format '{{.Id}}'
+```
+
+The local image ID used by CLI tools must match the running image before a backup
+or other storage-opening command. Set `.env`'s `COLLECTOR_IMAGE` accordingly; for a
+locally loaded image the exact `sha256:...` image ID also avoids mutable-tag drift.
+Do not open live data using a newer/older CLI merely because its tag looks familiar.
+
+For an update, stop only Collector through Portainer, make the selected consistent
+recovery point with the old CLI, then change the Collector image in Portainer and
+the CLI `.env` together. Pull/redeploy only the intended service with its existing
+mount/group settings. Compare the resulting image IDs again. Do not reset accounts,
+replace retained config from the sample or remove a tunnel to clear an orphan warning.
+The standalone Compose commands below apply to installations actually managed by
+those complete files; do not use them to overwrite an incomplete copy of a live
+Portainer definition.
 
 ## Update
 
@@ -250,3 +343,12 @@ container recreation and full backup/restore. The revised Compose package and
 proxy/tunnel setup still require runtime and actual-ingress acceptance. Current
 status and dated evidence live in the repository's implementation/validation docs;
 this guide describes the installation process, not a security certification.
+
+## Actual-host qualification
+
+The isolated DS1522+ install/distinct-image update/partial-upload resume/FLAC/full
+restore path and remote Chrome playback/seek/download checks passed on 2026-10-20.
+See [evidence and limits](../../docs/validation/nas-operations-2026-10-20.md) and
+`scripts/check_container.py` in the source tree. Production Portainer/tunnels were
+inspected only. Public registry pulls and scalable routine recovery remain separate
+release work; the full-copy procedure above is the qualified fallback.

@@ -205,6 +205,18 @@ impl Default for Config {
 fn local_origin(config: &Config) -> String {
     format!("http://localhost:{}", config.private_bind.port())
 }
+fn metadata_readiness(config: &ProviderConfig) {
+    if config.musicbrainz_user_agent.is_some() {
+        println!(
+            "Optional metadata/artwork: MusicBrainz and Cover Art Archive are configured. A matching release and successful provider responses are still required; this is not a network availability check."
+        );
+    } else {
+        println!(
+            "Optional metadata/artwork: not configured. Set providers.musicbrainz_user_agent with a monitored contact address; a MusicBrainz account is not required. Saving originals and manual metadata/artwork remain available."
+        );
+    }
+}
+
 fn instructions(config: &Config, path: &std::path::Path) {
     println!(
         "\nLocal management: {} (open this exact address on the server computer)",
@@ -251,6 +263,7 @@ fn instructions(config: &Config, path: &std::path::Path) {
             );
         }
     }
+    metadata_readiness(&config.providers);
     println!(
         "After sign-in: open Account & security to save recovery codes, then create a collection and import."
     );

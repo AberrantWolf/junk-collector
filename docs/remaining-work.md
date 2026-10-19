@@ -10,11 +10,11 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-Queue updated 2026-10-20 after HL-07A/B/C import review, direct playback and
-release/setup wording acceptance. The 2026-10-19 native delivery and live-use triage
+Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
+actual-host isolated install/update/restore qualification. The 2026-10-19 native delivery and live-use triage
 remain recorded below. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
 qualification remains open; HL-07A/B/C are delivered. Continue with
-HL-05A/B deployment and practical recovery acceptance before HL-07D publication. NAS operations/recovery belong to HL-05A/B; Docker publication
+HL-05B practical scalable recovery before HL-07D publication. NAS operations/recovery belong to HL-05A/B; Docker publication
 and release usability belong to HL-07A–D. Keep the existing milestone numbers.
 The earlier insertion assigned
 digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
@@ -72,8 +72,8 @@ queue. Dated reports and workarounds remain in the
 | NAS SFTP and SSH key exchange | HL-05 operator follow-up | Host administration; not a Collector release blocker |
 | Grouped-disc revision conflict and repeated failed retry | Completed repair below | Keep regression coverage; remaining deployment acceptance stays HL-05 |
 
-HL-07A is delivered. HL-07B/C are also delivered; HL-05A/B remain
-independent complete deployment/recovery deliveries. HL-07D publishes after the applicable acceptance
+HL-07A/B/C and HL-05A are delivered. HL-05B remains the independent
+scalable-recovery delivery. HL-07D publishes after the applicable acceptance
 checks and update/recovery procedure are ready. Continue HL-04/HL-06 hardware and
 format qualification when the required devices/reference material are available.
 Do not wait for optional HL-09 cleanup or unrelated host administration to deliver
@@ -296,9 +296,18 @@ matrix, automatic route switching and every browser/platform are unnecessary.
 
 #### HL-05A — Reproducible NAS and Portainer operations
 
-**State:** open follow-up from the live installation. **Owner:** process/container
-adapters and operator documentation. Qualify one complete fresh-install and update
-path, including the optional provider and SMB inbox setup actually used:
+**State:** delivered 2026-10-20 for the isolated actual-host operations path.
+Guarded config transfer, DSM bind-root creation, inbox supplemental groups,
+provider readiness and Portainer/CLI image-alignment guidance are shipped. Actual
+DS1522+ Btrfs/amd64 tests passed a distinct-image update with pending-upload resume,
+account/session/config/TLS persistence, inbox import and explicit FLAC, exact original
+downloads, clean SIGTERM and full restore. Remote Chrome passed playback/seek/downloads
+before and after restore. See [dated acceptance and limits](validation/nas-operations-2026-10-20.md).
+The permanent installation/tunnels were not changed. Its final inventory/enrichment
+checks and public-ingress qualification remain under parent HL-05; registry pull
+acceptance remains HL-07D. HL-05B still owns practical scalable recovery.
+**Owner:** process/container adapters and operator documentation.
+Completed delivery contract:
 
 - Create bind source directories before initialization; DSM rejected a missing
   source. Resolve or explain the failed proxy-config copy step: initial setup
@@ -834,21 +843,23 @@ The grouped-disc publication repair is also implemented and operator-reported as
 working on the NAS. HL-07A is delivered with [local acceptance](validation/intake-review-2026-10-19.md).
 HL-07B is delivered with [local acceptance](validation/direct-playback-2026-10-19.md).
 HL-07C is delivered with [local acceptance](validation/release-wording-2026-10-20.md).
-Next qualify HL-05A's reproducible NAS/Portainer install/update path and HL-05B's
-practical consistent-snapshot/incremental recovery procedure. HL-04 device qualification and HL-05A/B
-deployment/recovery remain independently available when the actual hosts are
-accessible. HL-07D publication follows its deployment/update acceptance dependencies.
+HL-05A is delivered with [actual-host isolated acceptance](validation/nas-operations-2026-10-20.md).
+Next qualify HL-05B's practical consistent-snapshot/incremental recovery procedure. HL-04 device qualification and parent HL-05 permanent-installation/public-ingress
+acceptance remain available when the actual hosts/devices are accessible. HL-07D publication follows its deployment/update acceptance dependencies.
 Preserve milestone numbers and do not reopen completed scopes.
 
-> Complete HL-05A — Reproducible NAS and Portainer operations. Inspect the actual
-> host and deployment read-only first. Repair the shipped fresh-install/config-copy,
-> bind-directory, supplemental-group/provider readiness and image-alignment guidance,
-> then qualify the complete installation/update/recovery workflow using isolated
-> temporary data. Preserve the live installation, accounts, credentials, configuration,
-> originals and pending work. Do not remove unrelated Portainer/tunnel services.
-> Coordinate HL-05B's actual snapshot/independent-backup eligibility; do not claim
-> full-copy tooling supplies scalable routine updates. Update status/evidence/queue,
-> self-review and commit complete deliveries before HL-07D publication.
+> Complete HL-05B — Practical scalable update recovery. Establish actual Btrfs/DSM
+> snapshot/shared-folder eligibility and an operator-selected independent destination.
+> Qualify a short consistent stopped-server recovery point over archive, complete
+> private state and config, incremental independent backup, interrupted-update
+> recovery and full restore using isolated data. Do not change the live layout,
+> install DSM packages or configure a permanent backup destination by assumption.
+> The host is Btrfs, but Snapshot Replication/Hyper Backup were not installed during
+> HL-05A and the Collector root's eligible shared-folder boundary is not established.
+> A destination choice is pending. Continue independent release preparation while
+> external choices remain unresolved; do not claim full-copy tooling is scalable
+> routine recovery. Update status/evidence/queue, self-review and commit deliveries
+> before HL-07D publication.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout
