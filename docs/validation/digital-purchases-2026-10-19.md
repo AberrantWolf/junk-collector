@@ -137,5 +137,42 @@ Trash Amp pins that shared revision and the pushed Collector revision. Dedicated
 `codex/hl02-digital-purchases` branches preserve unrelated local release/research
 work. Tags and existing remote branches are not rewritten.
 
-Publication checks are rerun against the Git-backed dependency graph. The final
-results and clean-source checks are recorded after completion below.
+Implementation commits are Collector `201085448cbd727bd04f60275e47431c2c7dd3bd`
+and Trash Amp `e957f7a68dacb351fdc2e183113f0dcf4f978ec9`; validation-only
+follow-ups record the results without changing those dependency inputs.
+
+All publication checks passed using the Git-backed dependency graph:
+
+- junk-libs: formatting, all-feature workspace tests (**274 passed, 7 existing
+  opt-in tests ignored**) and strict all-target/all-feature Clippy.
+- Collector: architecture/document/fixture checks, formatting, workspace tests
+  (**427 passed, 4 existing opt-in tests ignored**), strict all-target Clippy,
+  TypeScript, generated API contract, web build and embedded-server rebuild.
+  Full real-Chrome smoke passed again, including playback/seek/transitions,
+  revocation, concurrent provider work, interrupted/bulk intake, lists/repeats,
+  receipt recovery, WebAuthn and mobile. The FLAC/MP3 purchase journey passed
+  again; final artifacts are `collector-purchases-pNI5Cy` in the test temp root.
+- Trash Amp: an isolated export of exactly the HL-02 candidate source passed
+  formatting, workspace tests (**51 passed, 2 existing opt-in tests ignored**),
+  strict all-target Clippy and the normal desktop build on Rust 1.95.0. The
+  working checkout also passed (**53 passed, 2 ignored**) with the user's staged
+  release work retained. Those two additional tests belong to the separate
+  release work and are excluded from the HL-02 commit.
+- The native real CoreAudio callback test was separately rerun from the isolated
+  source against the pinned siblings: FLAC peak **0.088371746**, MP3
+  **0.08895567**, both beyond **0.0213125 s**; passed for each fresh Player.
+- Cargo metadata confirms Collector's seven shared-library packages and all
+  16 Trash Amp sibling packages resolve from the exact pushed revisions, with
+  no sibling paths or Cargo patches. An export of the staged Collector source
+  passed architecture/document/fixture checks without the unrelated research
+  files. Every tracked native candidate file matched its isolated checked source.
+
+The first isolated native build exposed three test fixture `include_bytes!`
+references into a sibling Collector checkout. Generated FLAC, MP3 and cover bytes
+now live in Trash Amp's own test fixtures; tests and the acceptance example build
+without either sibling checkout. The isolated gates passed after this repair.
+The 31 nonoverlapping staged release paths were preserved byte-for-byte; shared
+manifests/source files retain the release changes while dependency pins supersede
+the previous local/tag choices. Unrelated AccurateRip research remains local and
+uncommitted. No existing tags or remote branches were rewritten and no live
+installation was modified.
