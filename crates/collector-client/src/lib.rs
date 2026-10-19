@@ -435,8 +435,11 @@ impl Pairing {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CacheEntry {
     pub server_id: ServerId,
+    pub user_id: UserId,
     pub representation_id: RepresentationId,
-    pub profile: ConversionProfile,
+    pub file_id: PackageFileId,
+    pub digest: Digest,
+    pub profile: Option<ConversionProfile>,
     pub bytes: u64,
     pub pinned: bool,
     pub last_used: u64,
@@ -445,15 +448,21 @@ pub struct CacheEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheKey {
     pub server_id: ServerId,
+    pub user_id: UserId,
     pub representation_id: RepresentationId,
-    pub profile: ConversionProfile,
+    pub file_id: PackageFileId,
+    pub digest: Digest,
+    pub profile: Option<ConversionProfile>,
 }
 impl CacheEntry {
     pub fn key(&self) -> CacheKey {
         CacheKey {
             server_id: self.server_id,
+            user_id: self.user_id,
             representation_id: self.representation_id,
             profile: self.profile.clone(),
+            file_id: self.file_id,
+            digest: self.digest.clone(),
         }
     }
 }

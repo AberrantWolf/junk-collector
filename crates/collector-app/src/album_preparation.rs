@@ -310,8 +310,7 @@ impl CollectionService {
             return Err(Error::Invalid("select at least one captured disc".into()));
         }
         let selected_rows = rows.iter().filter(|row| {
-            row.profile == ConversionProfile::Flac
-                && selected.contains(&row.source_representation_id)
+            row.primary_playback() && selected.contains(&row.source_representation_id)
         });
         if selected_rows.clone().count() > MAX_ALBUM_PREPARATION_MEMBERS {
             return Err(Error::Invalid(format!(
@@ -345,8 +344,7 @@ impl CollectionService {
             .collect::<Vec<_>>();
         let mut members = Vec::new();
         for mut row in rows.into_iter().filter(|row| {
-            row.profile == ConversionProfile::Flac
-                && selected.contains(&row.source_representation_id)
+            row.primary_playback() && selected.contains(&row.source_representation_id)
         }) {
             // Another actor's Job is private. Admit our own request, converging on
             // the immutable output at publication without exposing their Job.
@@ -966,10 +964,7 @@ fn album_plan_from_rows(
         CaptureId,
         std::collections::BTreeMap<RepresentationId, Vec<&MusicTrackAvailability>>,
     >::new();
-    for row in rows
-        .iter()
-        .filter(|row| row.profile == ConversionProfile::Flac)
-    {
+    for row in rows.iter().filter(|row| row.primary_playback()) {
         grouped
             .entry(row.capture_id)
             .or_default()
@@ -1132,6 +1127,9 @@ mod tests {
         let first = RepresentationId::new();
         let second = RepresentationId::new();
         let row = |source_representation_id| MusicTrackAvailability {
+            album_selection: collector_api_types::MusicAlbumSelection::Included,
+            display_position: None,
+            audio_format: None,
             source_label: "Original".into(),
             disc_position: Some(1),
             capture_id: capture,
@@ -1140,7 +1138,7 @@ mod tests {
             start_frame: PcmFrame(0),
             frame_count: PcmFrame(588),
             title: "Track 01".into(),
-            profile: ConversionProfile::Flac,
+            profile: Some(ConversionProfile::Flac),
             state: MusicTrackAvailabilityState::Unavailable {
                 reason: "not prepared".into(),
             },
@@ -1162,6 +1160,9 @@ mod tests {
         let source = RepresentationId::new();
         let oversized = (1..=257)
             .map(|track_position| MusicTrackAvailability {
+                album_selection: collector_api_types::MusicAlbumSelection::Included,
+                display_position: None,
+                audio_format: None,
                 source_label: "Original".into(),
                 disc_position: Some(1),
                 capture_id: CaptureId::new(),
@@ -1170,7 +1171,7 @@ mod tests {
                 start_frame: PcmFrame(u64::from(track_position - 1) * 588),
                 frame_count: PcmFrame(588),
                 title: format!("Track {track_position:02}"),
-                profile: ConversionProfile::Flac,
+                profile: Some(ConversionProfile::Flac),
                 state: MusicTrackAvailabilityState::Unavailable {
                     reason: "not prepared".into(),
                 },

@@ -1193,6 +1193,7 @@ impl ContentPort for Store {
             _ => "application/octet-stream",
         };
         Ok(MediaResource {
+            visibility: file.visibility,
             reader: Box::new(reader),
             length,
             media_type: media_type.into(),
@@ -1208,6 +1209,7 @@ impl ContentPort for Store {
         let reader = File::open(path).map_err(storage)?;
         let length = reader.metadata().map_err(storage)?.len();
         Ok(MediaResource {
+            visibility: Default::default(),
             reader: Box::new(reader),
             length,
             media_type,
@@ -2435,6 +2437,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         }
     }
     for (column, declaration) in [
+        ("purchase", "TEXT"),
         ("prepare_music", "INTEGER NOT NULL DEFAULT 0"),
         ("preparation_batch_id", "TEXT"),
         ("preparation_error", "TEXT"),

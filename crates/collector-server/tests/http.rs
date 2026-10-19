@@ -2094,11 +2094,13 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
                 },
                 files: vec![
                     collector_app::UploadFile {
+                        visibility: Default::default(),
                         name: "disc.cue".into(),
                         bytes: ByteLength(cue.len() as u64),
                         sha256: None,
                     },
                     collector_app::UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(pcm.len() as u64),
                         sha256: None,
@@ -3009,6 +3011,7 @@ async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "fixture.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -3293,6 +3296,7 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "fixture.bin".into(),
                 bytes: ByteLength(upload_bytes.len() as u64),
                 sha256: None,
@@ -4473,6 +4477,7 @@ async fn metadata_review_routes_are_curation_only_and_effective_display_is_viewe
             &owner_actor,
             saved.id,
             collector_app::RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(0),
                 observation: MetadataRefreshObservation {
                     id: ObservationId::new(),

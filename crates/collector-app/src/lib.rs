@@ -1,4 +1,8 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod file_music;
+pub use file_music::{
+    UpdateDigitalPurchase, file_music_search_projection, import_preservation_format,
+};
 mod backup;
 pub use backup::*;
 mod game_identification;
@@ -235,6 +239,7 @@ pub trait MediaReader: Read + Seek + Send {}
 impl<T: Read + Seek + Send> MediaReader for T {}
 
 pub struct MediaResource {
+    pub visibility: Visibility,
     pub reader: Box<dyn MediaReader>,
     pub length: u64,
     pub media_type: String,
@@ -379,6 +384,8 @@ pub trait ContentPort: Send + Sync {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UploadFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<Visibility>,
     pub name: String,
     pub bytes: ByteLength,
     pub sha256: Option<String>,
@@ -426,6 +433,8 @@ pub struct ImportSourceSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ImportDeclaredFile {
+    #[serde(default, skip_serializing_if = "Visibility::is_shared")]
+    pub visibility: Visibility,
     pub name: String,
     pub bytes: ByteLength,
     pub received_bytes: ByteLength,
@@ -519,6 +528,8 @@ pub use collector_modules::{IngestAnchorChoice, IngestBlocker, IngestBlockerKind
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPlanPackage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     // Retained private intake plans may predate this presentation capability.
     #[serde(default)]
     pub music_actions_available: bool,
@@ -557,6 +568,8 @@ pub struct PlanIngestCommand {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IngestPackageSelection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     pub source: ImportSourceSummary,
     pub files: Vec<UploadFile>,
     #[serde(default)]
@@ -573,6 +586,8 @@ pub struct IngestPlan {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StartIngestCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     #[serde(default)]
     pub clean_reimport: Option<CleanReimportOptions>,
     pub plan: IngestPlan,
@@ -614,6 +629,8 @@ pub struct GuidedBulkContext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GuidedIngestIntent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     #[serde(default)]
     pub bulk_context: Option<GuidedBulkContext>,
     pub clean_reimport: Option<CleanReimportOptions>,
@@ -1541,27 +1558,6 @@ struct ContentWriteEligibility {
     schema_version: u32,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportAnalysisCandidateOutput {
-    key: String,
-    label: String,
-    observation: RawJson,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportAnalysisOutput {
-    #[serde(default)]
-    candidates: Vec<ImportAnalysisCandidateOutput>,
-    #[serde(default)]
-    limitations: Vec<String>,
-    #[serde(default, rename = "observations")]
-    _observations: Vec<RawJson>,
-    #[serde(default, rename = "selection")]
-    _selection: Option<RawJson>,
-}
-
 struct ProcessingHost<'a> {
     port: &'a dyn ProcessingPort,
     access: PackageAccess,
@@ -1890,24 +1886,82 @@ impl PresentedSpecimen {
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedCapture {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     pub id: CaptureId,
     pub collection_id: CollectionId,
     pub revision: Revision,
     pub association: CaptureAssociation,
     pub created_at: DateTime<Utc>,
-    pub representations: Vec<Representation>,
+    pub representations: Vec<PresentedRepresentation>,
 }
 
 impl From<Capture> for PresentedCapture {
     fn from(capture: Capture) -> Self {
         Self {
+            purchase: capture.purchase,
             id: capture.id,
             collection_id: capture.collection_id,
             revision: capture.revision,
             association: capture.association,
             created_at: capture.created_at,
-            representations: capture.representations,
+            representations: capture
+                .representations
+                .into_iter()
+                .map(|r| PresentedRepresentation {
+                    id: r.id,
+                    role: r.role,
+                    format: r.format,
+                    source: r.source,
+                    profile: r.profile,
+                    files: r
+                        .files
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, file)| PresentedFile {
+                            index,
+                            visibility: file.visibility,
+                            name: file.name,
+                            bytes: file.bytes,
+                            digest: file.digest,
+                        })
+                        .collect(),
+                })
+                .collect(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PresentedFile {
+    pub index: usize,
+    pub visibility: Visibility,
+    pub name: String,
+    pub bytes: ByteLength,
+    pub digest: Digest,
+}
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PresentedRepresentation {
+    pub id: RepresentationId,
+    pub role: RepresentationRole,
+    pub format: String,
+    pub source: Option<RepresentationId>,
+    pub profile: Option<ConversionProfile>,
+    pub files: Vec<PresentedFile>,
+}
+
+impl PresentedCapture {
+    fn for_role(capture: Capture, role: Role) -> Self {
+        let mut capture = Self::from(capture);
+        if role == Role::Viewer {
+            capture.purchase = None;
+            for representation in &mut capture.representations {
+                representation
+                    .files
+                    .retain(|file| file.visibility == Visibility::Shared);
+            }
+        }
+        capture
     }
 }
 
@@ -1923,6 +1977,7 @@ pub struct PresentedAudioCheck {
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
+    pub digital_audio: bool,
     pub workflow_generation: u64,
     pub merged_into: Option<ItemId>,
     pub merge_group: Option<TransactionId>,
@@ -2581,6 +2636,7 @@ impl CollectionService {
             .artwork
             .filter(|asset_id| asset_states.iter().any(|state| state.asset.id == *asset_id));
         let primary_artwork = effective_metadata.artwork.or(primary_artwork);
+        let mut digital_audio = false;
         let accuraterip = if item.domain.module.0 == "org.junk.music" {
             let mut checks = Vec::new();
             for capture in item
@@ -2593,6 +2649,14 @@ impl CollectionService {
                     .iter()
                     .filter(|source| source.role == RepresentationRole::PreservationMaster)
                 {
+                    if source.format == "original-file-audio-package"
+                        || self
+                            .recorded_file_tracks(item.collection_id, source.id)?
+                            .is_some()
+                    {
+                        digital_audio = true;
+                        continue;
+                    }
                     let status = match self.latest_music_result(
                         item.collection_id,
                         source.id,
@@ -2619,6 +2683,7 @@ impl CollectionService {
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
+            digital_audio,
             workflow_generation: item.lifecycle.generation,
             merged_into: item.lifecycle.merged_into,
             merge_group: item.lifecycle.merge_group,
@@ -2662,7 +2727,11 @@ impl CollectionService {
                 .collect(),
             wishlist: item.wishlist,
             accuraterip,
-            captures: item.captures.into_iter().map(Into::into).collect(),
+            captures: item
+                .captures
+                .into_iter()
+                .map(|capture| PresentedCapture::for_role(capture, role))
+                .collect(),
             assets: asset_states
                 .into_iter()
                 .map(|state| PresentedAsset::from_state(state, role))
@@ -3287,10 +3356,10 @@ impl CollectionService {
         }
         Ok(item.into())
     }
-    pub fn capture(&self, actor: &Principal, id: CaptureId) -> Result<Capture> {
+    pub fn capture(&self, actor: &Principal, id: CaptureId) -> Result<PresentedCapture> {
         let capture = self.reader.capture(id)?;
-        self.authorize(actor, capture.collection_id, Action::Browse)?;
-        Ok(capture)
+        let role = self.authorize(actor, capture.collection_id, Action::Browse)?;
+        Ok(PresentedCapture::for_role(capture, role))
     }
     pub fn work(&self, actor: &Principal, id: WorkId) -> Result<Work> {
         let work = self.reader.work(id)?;
@@ -3400,7 +3469,7 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Capture> {
         let request = (id, expected, command.clone());
-        let (revision, created_at, representations) = match self.reader.capture(id) {
+        let (revision, created_at, representations, purchase) = match self.reader.capture(id) {
             Ok(previous) => {
                 self.content_write_eligibility(actor, previous.collection_id)?;
                 if previous.collection_id != command.collection_id {
@@ -3412,13 +3481,15 @@ impl CollectionService {
                     previous.revision,
                     previous.created_at,
                     previous.representations,
+                    previous.purchase,
                 )
             }
-            Err(Error::NotFound) => (Revision(0), Utc::now(), vec![]),
+            Err(Error::NotFound) => (Revision(0), Utc::now(), vec![], None),
             Err(error) => return Err(error),
         };
         self.content_write_eligibility(actor, command.collection_id)?;
         let capture = Capture {
+            purchase,
             id,
             collection_id: command.collection_id,
             revision,
@@ -3565,11 +3636,17 @@ impl CollectionService {
         index: usize,
     ) -> Result<MediaResource> {
         let item = self.reader.item(item_id)?;
-        self.authorize(actor, item.collection_id, Action::Browse)?;
+        let role = self.authorize(actor, item.collection_id, Action::Browse)?;
         if item.deleted {
             return Err(Error::NotFound);
         }
-        self.content.representation(item_id, representation, index)
+        let resource = self
+            .content
+            .representation(item_id, representation, index)?;
+        if resource.visibility == Visibility::Curators && role == Role::Viewer {
+            return Err(Error::Forbidden);
+        }
+        Ok(resource)
     }
     pub fn asset(
         &self,
@@ -3798,6 +3875,13 @@ impl CollectionService {
             association,
             expected_item_revision,
         );
+        let file_audio = eligibility.owner.0 == "org.junk.music"
+            && collector_modules::music::files::is_file_package(
+                &files
+                    .iter()
+                    .map(|f| PackageFileName::new(&f.name))
+                    .collect::<Result<Vec<_>>>()?,
+            );
         let empty_digest = Digest::sha256(b"");
         let declared_files = files
             .into_iter()
@@ -3820,6 +3904,9 @@ impl CollectionService {
                     supplied_digest
                 };
                 Ok(ImportDeclaredFile {
+                    visibility: file
+                        .visibility
+                        .unwrap_or_else(|| default_import_visibility(file_audio, &file.name)),
                     name: file.name,
                     bytes: file.bytes,
                     received_bytes: ByteLength(0),
@@ -4165,7 +4252,7 @@ impl CollectionService {
         }
         let (support, typed_result, limitations) = match analyzed {
             Ok(output) => {
-                let parsed: ImportAnalysisOutput = output.value.parse()?;
+                let parsed: collector_modules::ImportAnalysisSummary = output.value.parse()?;
                 record.view.candidates = parsed
                     .candidates
                     .into_iter()
@@ -6401,4 +6488,19 @@ fn validate_security_page(cursor: Option<&str>, limit: u16) -> Result<()> {
         return Err(Error::Invalid("invalid security page".into()));
     }
     Ok(())
+}
+
+/// New digital packages share playable files and ordinary covers. Companions
+/// require explicit review; old stored visibility is never rewritten.
+fn default_import_visibility(file_audio: bool, name: &str) -> Visibility {
+    let basename = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+    let ordinary_cover = basename.rsplit_once('.').is_some_and(|(stem, ext)| {
+        ["cover", "folder", "front"].contains(&stem)
+            && ["jpg", "jpeg", "png", "webp"].contains(&ext)
+    });
+    if file_audio && !collector_modules::music::files::is_audio_name(name) && !ordinary_cover {
+        Visibility::Curators
+    } else {
+        Visibility::Shared
+    }
 }

@@ -1,5 +1,6 @@
 use collector_core::PackageFileName;
 pub mod catalog;
+pub mod files;
 use catalog::{DbarOutcome, DbarSnapshotObservation, ParsedDbarSnapshot};
 use std::io::{Read, SeekFrom};
 
@@ -60,9 +61,23 @@ pub struct MusicItemPatch {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MusicMetadataOverrides {
+    #[serde(default)]
+    pub track_overrides: Vec<MusicTrackOverride>,
     pub artist: Option<String>,
     #[serde(default)]
     pub disc_assignments: Vec<MusicDiscAssignment>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MusicTrackOverride {
+    #[serde(default)]
+    pub album_selected: Option<bool>,
+    pub source_representation_id: RepresentationId,
+    pub track_position: u16,
+    pub title: Option<String>,
+    pub disc_position: Option<u16>,
+    pub display_position: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -142,6 +157,8 @@ struct MusicImportAnalysisInput {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MusicImportAnalysisOutput {
+    #[serde(default)]
+    pub file_tracks: Option<files::FileTrackManifest>,
     candidates: Vec<serde_json::Value>,
     limitations: Vec<String>,
     pub observations: Vec<RawJson>,
@@ -1847,6 +1864,17 @@ impl CollectionModule for Music {
         input: &RawJson,
     ) -> ModuleResult<crate::scan_inputs::ScanInputs> {
         let mut plan = crate::scan_inputs::ScanInputs::new(input)?;
+        if operation.as_str() == "org.junk.music.import-analysis"
+            && files::is_file_package(
+                &inventory
+                    .files
+                    .iter()
+                    .map(|f| f.display_name.clone())
+                    .collect::<Vec<_>>(),
+            )
+        {
+            return Ok(plan);
+        }
         plan.file(inventory, "anchor_file_index", |n| {
             let n = n.to_ascii_lowercase();
             n.ends_with(".cue") || n.ends_with(".toc")
@@ -1947,7 +1975,62 @@ impl CollectionModule for Music {
         &self,
         names: &[PackageFileName],
     ) -> Vec<crate::import_discovery::DiscoveredImportPackage> {
-        crate::import_discovery::discover(names, false)
+        let mut packages = crate::import_discovery::discover(names, false);
+        let mut used = packages
+            .iter()
+            .flat_map(|p| p.file_indices.iter().copied())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut folders = std::collections::BTreeSet::new();
+        for (index, name) in names.iter().enumerate() {
+            if !used.contains(&index) && files::is_audio_name(name.as_str()) {
+                let folder = name.as_str().rsplit_once('/').map_or("", |(dir, _)| dir);
+                // Disc subfolders of a purchase remain one reviewed package.
+                let (parent, leaf) = folder.rsplit_once('/').unwrap_or(("", folder));
+                let lower = leaf.to_ascii_lowercase();
+                let disc = lower
+                    .strip_prefix("disc")
+                    .or_else(|| lower.strip_prefix("cd"))
+                    .map(|suffix| suffix.trim_start_matches([' ', '_', '-']))
+                    .is_some_and(|suffix| {
+                        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
+                    });
+                let folder = if disc { parent } else { folder };
+                folders.insert(folder.to_owned());
+            }
+        }
+        let mut folders = folders.into_iter().collect::<Vec<_>>();
+        folders.sort_by_key(|folder| std::cmp::Reverse(folder.len()));
+        for folder in folders {
+            let prefix = format!("{folder}/");
+            let file_indices = names
+                .iter()
+                .enumerate()
+                .filter(|(i, n)| {
+                    !used.contains(i)
+                        && (if folder.is_empty() {
+                            true
+                        } else {
+                            n.as_str().starts_with(&prefix)
+                        })
+                })
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>();
+            if file_indices
+                .iter()
+                .any(|i| files::is_audio_name(names[*i].as_str()))
+            {
+                used.extend(file_indices.iter().copied());
+                packages.push(crate::import_discovery::DiscoveredImportPackage {
+                    label: if folder.is_empty() {
+                        "Digital purchase".into()
+                    } else {
+                        folder.rsplit('/').next().unwrap().into()
+                    },
+                    file_indices,
+                });
+            }
+        }
+        packages
     }
     fn import_readiness(
         &self,
@@ -1955,6 +2038,12 @@ impl CollectionModule for Music {
         anchor_file_index: Option<usize>,
     ) -> crate::ImportReadiness {
         use crate::{ImportReadiness, IngestAnchorChoice, IngestBlocker, IngestBlockerKind};
+        if files::is_file_package(names) && anchor_file_index.is_none() {
+            return ImportReadiness {
+                anchors: vec![],
+                blockers: vec![],
+            };
+        }
         let choices = package_anchors(names);
         let anchors = choices
             .iter()
@@ -2015,7 +2104,7 @@ impl CollectionModule for Music {
     fn descriptor(&self) -> ModuleDescriptor {
         let mut descriptor = descriptor(
             "org.junk.music",
-            "Music CDs",
+            "Music",
             vec![
                 text_field("artist", "Artist"),
                 text_field("label", "Label"),
@@ -2092,6 +2181,20 @@ impl CollectionModule for Music {
             .parse()
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
         validate_texts([&value.artist])?;
+        if value.track_overrides.len() > 10_000 {
+            return Err(ModuleError::Invalid("too many track edits".into()));
+        }
+        let mut tracks = std::collections::BTreeSet::new();
+        for track in &value.track_overrides {
+            validate_texts([&track.title])?;
+            if track.track_position == 0
+                || track.disc_position == Some(0)
+                || track.display_position == Some(0)
+                || !tracks.insert((track.source_representation_id, track.track_position))
+            {
+                return Err(ModuleError::Invalid("invalid source track edit".into()));
+            }
+        }
         if value.disc_assignments.len() > 128 {
             return Err(ModuleError::Invalid("too many disc assignments".into()));
         }
@@ -2116,6 +2219,17 @@ impl CollectionModule for Music {
             let output: MusicImportAnalysisOutput = result
                 .parse()
                 .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+            if let Some(manifest) = &output.file_tracks {
+                if !output.candidates.is_empty()
+                    || !output.observations.is_empty()
+                    || output.selection.is_some()
+                {
+                    return Err(ModuleError::Invalid(
+                        "file analysis cannot assert CD evidence".into(),
+                    ));
+                }
+                return manifest.validate();
+            }
             if !output.candidates.is_empty()
                 || output.observations.len() != 1
                 || output.limitations.len() > 64
@@ -2217,6 +2331,29 @@ impl CollectionModule for Music {
                     .input
                     .parse()
                     .map_err(|error| ModuleError::Invalid(error.to_string()))?;
+                if input.anchor_file_index.is_none()
+                    && files::is_file_package(
+                        &inventory
+                            .files
+                            .iter()
+                            .map(|f| f.display_name.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                {
+                    let manifest = files::analyze_files(host, access, &inventory)?;
+                    return Ok(OperationOutput {
+                        value: RawJson::from_value(
+                            serde_json::to_value(MusicImportAnalysisOutput {
+                                file_tracks: Some(manifest),
+                                candidates: vec![],
+                                limitations: vec![],
+                                observations: vec![],
+                                selection: None,
+                            })
+                            .map_err(|error| ModuleError::Invalid(error.to_string()))?,
+                        ),
+                    });
+                }
                 let selection = match input.anchor_file_index {
                     Some(anchor_file_index) => {
                         let names = inventory
@@ -2247,6 +2384,7 @@ impl CollectionModule for Music {
                 return Ok(OperationOutput {
                     value: RawJson::from_value(
                         serde_json::to_value(MusicImportAnalysisOutput {
+                            file_tracks: None,
                             candidates: vec![],
                             limitations,
                             observations: vec![RawJson::from_value(

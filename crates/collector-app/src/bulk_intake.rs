@@ -203,7 +203,7 @@ impl CollectionService {
             let found=self.modules.discover_imports(&eligibility.owner,&names)?;
             if found.len()>INTAKE_PACKAGE_LIMIT as usize {return Err(Error::Invalid("This folder contains more than 10,000 packages. Select a smaller folder or split it into separate intakes.".into()));}
             let mut used=BTreeSet::new();let mut selections=Vec::new();
-            for p in found {let files=p.file_indices.into_iter().map(|index|{if !used.insert(index){return Err(Error::Invalid("Overlapping discovered packages".into()));}command.files.get(index).cloned().ok_or_else(||Error::Invalid("Invalid discovered file".into()))}).collect::<Result<Vec<_>>>()?;selections.push(IngestPackageSelection{source:ImportSourceSummary{kind:ImportSourceKind::Browser,label:None,package_name:p.label},files,anchor_file_index:None});}
+            for p in found {let files=p.file_indices.into_iter().map(|index|{if !used.insert(index){return Err(Error::Invalid("Overlapping discovered packages".into()));}command.files.get(index).cloned().ok_or_else(||Error::Invalid("Invalid discovered file".into()))}).collect::<Result<Vec<_>>>()?;selections.push(IngestPackageSelection{purchase:None,source:ImportSourceSummary{kind:ImportSourceKind::Browser,label:None,package_name:p.label},files,anchor_file_index:None});}
             let mut packages=Vec::new();for page in selections.chunks(64){packages.extend(self.plan_ingest(actor,PlanIngestCommand{collection_id:command.collection_id,packages:page.to_vec()})?.packages);}
             let unassigned=command.files.iter().enumerate().filter(|(i,_)|!used.contains(i)).map(|(_,f)|f.name.clone()).collect::<Vec<_>>();
             effects.freeze_intake_discovery(actor.user_id,IntakeDiscovery{id:deterministic_job_id(actor.user_id,"intake.discover",context.key()),collection_id:command.collection_id,package_count:packages.len() as u32,unassigned_count:unassigned.len() as u32},packages,unassigned)
@@ -506,6 +506,7 @@ impl CollectionService {
                     _ => None,
                 };
                 let command = StartIngestCommand {
+                    purchase: None,
                     clean_reimport: None,
                     plan: IngestPlan {
                         collection_id: intake.session.collection_id,

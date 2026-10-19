@@ -17,7 +17,7 @@ for the qualified scope and remaining gates.
 ### Requirements
 
 - Rust 1.99.0 (the tested release toolchain, pinned in `rust-toolchain.toml`), a C/C++ build toolchain, CMake, and pkg-config. Linux builds also need OpenSSL development headers.
-- Network access on the first build to fetch Cargo dependencies, including the pinned `junk-libs` `v0.1.0` Git tag. No sibling checkout is required.
+- Network access on the first build to fetch Cargo dependencies, including the exact `junk-libs` Git revision pinned in `Cargo.toml`. No sibling checkout is required.
 - Writable storage for the archive and private server state.
 - Optional: `flac` for lossless CD preparation; `opusenc` for smaller audio copies.
 

@@ -1435,15 +1435,16 @@ impl ProcessingPort for Store {
         &self,
         transaction: TransactionId,
         record: MetadataAuthorityRecord,
+        context: Option<collector_app::ItemEffectContext>,
     ) -> Result<()> {
-        self.publish_metadata_record(transaction, record, None)
+        self.publish_metadata_record(transaction, record, None, context)
     }
     fn publish_metadata_for_job(
         &self,
         claim: &JobClaim,
         record: MetadataAuthorityRecord,
     ) -> Result<()> {
-        self.publish_metadata_record(TransactionId::new(), record, Some(claim))
+        self.publish_metadata_record(TransactionId::new(), record, Some(claim), None)
     }
 
     fn metadata_authority(
@@ -1635,6 +1636,7 @@ impl Store {
         transaction: TransactionId,
         record: MetadataAuthorityRecord,
         claim: Option<&JobClaim>,
+        context: Option<collector_app::ItemEffectContext>,
     ) -> Result<()> {
         record.validate()?;
         if self.item(record.item_id)?.collection_id != record.collection_id {
@@ -1644,6 +1646,9 @@ impl Store {
         if let Some(claim) = claim {
             self.validate_publication_claim(claim, record.collection_id)?;
             self.ensure_job_continues(claim.id, Some(&claim.claim_token))?;
+        }
+        if let Some(context) = context {
+            self.validate_item_effect(context, record.collection_id)?;
         }
         let current = lock(&self.db)?
             .query_row(
@@ -1730,6 +1735,9 @@ impl Store {
             }
         }
         let mut guarded = || {
+            if let Some(context) = context {
+                self.validate_item_effect(context, record.collection_id)?;
+            }
             if let Some(claim) = claim {
                 self.validate_publication_claim(claim, record.collection_id)?;
                 let db = lock(&self.db)?;

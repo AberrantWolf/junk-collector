@@ -12,6 +12,33 @@ Pre-release evolution follows [the accepted compatibility and contract policy](d
 
 Junk Collector preserves evidence and owned collection history independently of how content is consumed. The server is a modular monolith: one process composes independent domain, application, storage, authentication, HTTP, and job capabilities. It is not a set of microservices.
 
+## Digital purchases — HL-02, 2026-10-19
+
+Purchased FLAC/MP3 packages use existing Music Items, collection-level Captures
+and preservation Representations without physical Specimens or CD layouts.
+`Capture.purchase` owns portable private acquisition facts; `StoredFile.visibility`
+protects individual originals. Role is independent of codec/lossiness. Existing
+stored files retain their old shared policy; old physical inventory is preserved.
+
+Music owns fingerprint-bound immutable file-track manifests and descriptive tag
+interpretation. Narrow junk-libs readers own bounded structural/tag/picture
+parsing and native PCM decoding. Application services resolve direct originals,
+metadata, artwork and album/list inclusion through existing intake, publication,
+authorization and recovery boundaries. Adapters retain I/O. A nullable conversion
+profile and native audio format distinguish originals from CD derivatives; media
+and cache identities include the actual package file. Display order never changes
+source coordinates. Ambiguous alternate encodings require an album choice.
+
+Catalog queries use recorded observations, never full-media decoding/hashing.
+Background analysis and artwork validate consumed source bytes with cancellation;
+publication retains Item/import generation fences. Digital integrity, decode
+validity and descriptive metadata never assert CD or catalog verification.
+See [implementation and supported matrix](digital-purchases.md) and
+[qualification evidence](validation/digital-purchases-2026-10-19.md). Further codecs
+and image splitting remain outside this initial delivery. Actual Chrome and native
+GUI streaming, seeking, downloads and retained offline use passed on the named
+clients; broader LAN/device qualification remains HL-04.
+
 ## Stopped-server backup and recovery contract — HL-03
 
 The operator CLI composes an offline recovery workflow. Application-owned backup

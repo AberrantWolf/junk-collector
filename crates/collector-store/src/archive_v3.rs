@@ -231,6 +231,7 @@ mod tests {
             specimens: vec![],
             wishlist: false,
             captures: vec![Capture {
+                purchase: None,
                 id: CaptureId::new(),
                 collection_id: CollectionId::new(),
                 revision: Revision(2),

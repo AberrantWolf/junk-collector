@@ -1860,6 +1860,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{item}/captures/{capture}/purchase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_digital_purchase"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{item}/client-playback": {
         parameters: {
             query?: never;
@@ -2614,6 +2630,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["CaptureId"];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
             representations: components["schemas"]["Representation"][];
             revision: components["schemas"]["Revision"];
         };
@@ -2935,6 +2952,15 @@ export interface components {
             algorithm: components["schemas"]["HashAlgorithm"];
             hex: string;
         };
+        /** @description Acquisition facts belong to the purchased package, independently of physical copies. */
+        DigitalPurchase: {
+            cost?: null | components["schemas"]["Money"];
+            /** Format: date */
+            date?: string | null;
+            order_reference?: string | null;
+            source_url?: string | null;
+            store?: string | null;
+        };
         DiscardIngestCommand: {
             /** Format: int64 */
             expected_revision: number;
@@ -3191,6 +3217,7 @@ export interface components {
             digest?: null | components["schemas"]["Digest"];
             name: string;
             received_bytes: components["schemas"]["ByteLength"];
+            visibility?: components["schemas"]["Visibility"];
         };
         /** Format: uuid */
         ImportId: string;
@@ -3298,6 +3325,7 @@ export interface components {
         IngestPackageSelection: {
             anchor_file_index?: number | null;
             files: components["schemas"]["UploadFile"][];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
             source: components["schemas"]["ImportSourceSummary"];
         };
         IngestPermissions: {
@@ -3324,6 +3352,7 @@ export interface components {
             position: number;
             preparation_available: boolean;
             preparation_reason?: string | null;
+            purchase?: null | components["schemas"]["DigitalPurchase"];
             source: components["schemas"]["ImportSourceSummary"];
         };
         IngestRejectedPackage: {
@@ -3921,6 +3950,8 @@ export interface components {
             /** Format: int32 */
             total_tracks: number;
         };
+        /** @enum {string} */
+        MusicAlbumSelection: "included" | "excluded" | "needs_review";
         MusicAlbumSourcePlan: {
             /** Format: int32 */
             already_available: number;
@@ -3933,6 +3964,19 @@ export interface components {
             source_representation_id: components["schemas"]["RepresentationId"];
             /** Format: int32 */
             track_count: number;
+        };
+        MusicAudioFormat: {
+            /** Format: int32 */
+            bits_per_sample?: number | null;
+            /** Format: int32 */
+            channels: number;
+            codec: string;
+            /** Format: int32 */
+            delay_frames?: number | null;
+            /** Format: int32 */
+            padding_frames?: number | null;
+            /** Format: int32 */
+            sample_rate: number;
         };
         /** @enum {string} */
         MusicDiscMatchState: "no_release" | "no_layout" | "disc_id_matched" | "curator_assigned" | "single_medium" | "needs_assignment" | "disc_id_not_listed" | "ambiguous_disc_id" | "assignment_conflicts_with_disc_id" | "track_layout_mismatch";
@@ -4019,17 +4063,21 @@ export interface components {
             track_position: number;
         };
         MusicTrackAvailability: {
+            album_selection?: components["schemas"]["MusicAlbumSelection"];
+            audio_format?: null | components["schemas"]["MusicAudioFormat"];
             /** @description Current actor, module, source and encoder permit explicit preparation. */
             can_prepare: boolean;
             capture_id: components["schemas"]["CaptureId"];
             /** Format: int32 */
             disc_position?: number | null;
-            /** @description Exact track-local integer stereo PCM frame count. */
+            /** Format: int32 */
+            display_position?: number | null;
+            /** @description Decoded track-local frames; MP3 gapless knowledge is separate in audio_format. */
             frame_count: components["schemas"]["PcmFrame"];
-            profile: components["schemas"]["ConversionProfile"];
+            profile?: null | components["schemas"]["ConversionProfile"];
             source_label: string;
             source_representation_id: components["schemas"]["RepresentationId"];
-            /** @description Exact coordinate in the source's integer stereo PCM timeline. */
+            /** @description Coordinate in the source PCM timeline at sample_rate(), with native channels. */
             start_frame: components["schemas"]["PcmFrame"];
             state: components["schemas"]["MusicTrackAvailabilityState"];
             title: string;
@@ -4257,6 +4305,7 @@ export interface components {
                 position: number;
                 preparation_available: boolean;
                 preparation_reason?: string | null;
+                purchase?: null | components["schemas"]["DigitalPurchase"];
                 source: components["schemas"]["ImportSourceSummary"];
             }[];
             next_cursor?: string | null;
@@ -4412,6 +4461,7 @@ export interface components {
                 collection_id: components["schemas"]["CollectionId"];
                 content_permissions: components["schemas"]["ContentPermissions"];
                 deleted: boolean;
+                digital_audio: boolean;
                 domain: components["schemas"]["PresentedModuleData"];
                 effective_metadata: components["schemas"]["ResolvedMetadataDisplay"];
                 effective_permissions: components["schemas"]["EffectivePermissions"];
@@ -4614,7 +4664,8 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["CaptureId"];
-            representations: components["schemas"]["Representation"][];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
+            representations: components["schemas"]["PresentedRepresentation"][];
             revision: components["schemas"]["Revision"];
         };
         PresentedCollection: {
@@ -4642,6 +4693,13 @@ export interface components {
             provenance_limitation?: string | null;
             representation_id: components["schemas"]["RepresentationId"];
         };
+        PresentedFile: {
+            bytes: components["schemas"]["ByteLength"];
+            digest: components["schemas"]["Digest"];
+            index: number;
+            name: string;
+            visibility: components["schemas"]["Visibility"];
+        };
         /**
          * @description Explicit response shape: unrestricted stored Item records are never
          *     flattened into a transport response.
@@ -4653,6 +4711,7 @@ export interface components {
             collection_id: components["schemas"]["CollectionId"];
             content_permissions: components["schemas"]["ContentPermissions"];
             deleted: boolean;
+            digital_audio: boolean;
             domain: components["schemas"]["PresentedModuleData"];
             effective_metadata: components["schemas"]["ResolvedMetadataDisplay"];
             effective_permissions: components["schemas"]["EffectivePermissions"];
@@ -4683,6 +4742,14 @@ export interface components {
             payload?: unknown;
             /** Format: int32 */
             schema_version: number;
+        };
+        PresentedRepresentation: {
+            files: components["schemas"]["PresentedFile"][];
+            format: string;
+            id: components["schemas"]["RepresentationId"];
+            profile?: null | components["schemas"]["ConversionProfile"];
+            role: components["schemas"]["RepresentationRole"];
+            source?: null | components["schemas"]["RepresentationId"];
         };
         PresentedSpecimen: {
             acquisition?: null | components["schemas"]["Acquisition"];
@@ -4941,6 +5008,7 @@ export interface components {
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
             plan: components["schemas"]["IngestPlan"];
             prepare_music?: boolean;
+            purchase?: null | components["schemas"]["DigitalPurchase"];
         };
         StartIntake: {
             expected_revision: components["schemas"]["Revision"];
@@ -4968,6 +5036,7 @@ export interface components {
             bytes: components["schemas"]["ByteLength"];
             digest: components["schemas"]["Digest"];
             name: string;
+            visibility?: components["schemas"]["Visibility"];
         };
         /** Format: uuid */
         TransactionId: string;
@@ -4982,6 +5051,10 @@ export interface components {
         UpdateCollectionList: {
             change: components["schemas"]["CollectionListChange"];
             expected_revision: components["schemas"]["Revision"];
+        };
+        UpdateDigitalPurchase: {
+            expected_revision: components["schemas"]["Revision"];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
         };
         UpdateMetadataAuthorityCommand: {
             change: components["schemas"]["MetadataAuthorityChange"];
@@ -5006,6 +5079,7 @@ export interface components {
             bytes: components["schemas"]["ByteLength"];
             name: string;
             sha256?: string | null;
+            visibility?: null | components["schemas"]["Visibility"];
         };
         UploadedDatCatalog: {
             bytes: components["schemas"]["ByteLength"];
@@ -10185,6 +10259,58 @@ export interface operations {
                 content?: never;
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_digital_purchase: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                item: components["schemas"]["ItemId"];
+                capture: components["schemas"]["CaptureId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDigitalPurchase"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedCapture"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -41,6 +41,25 @@ proposed contracts must be reviewed for validity and excessive complexity before
 implementation. No older ticket is a mandatory stability/retention promise merely
 because it was written down.
 
+## Digital purchases — requested 2026-10-19
+
+[HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)
+owns complete DRM-free FLAC/MP3 purchase support: preserve exact originals,
+record digital acquisition without a physical copy, review tags/artwork and use
+normal library/search, playback, playlists and Trash Amp online/offline listening.
+Native high-resolution FLAC and MP3 timing/seek behavior require named independent
+vectors and actual client evidence. Private purchase facts/companions remain
+protected through APIs, original downloads and offline manifests. Lossy originals
+remain preservation masters without claims of recovered lossless quality, CD
+identity or catalog/audio verification. The [implementation](digital-purchases.md)
+is delivered; [qualification](validation/digital-purchases-2026-10-19.md) records
+independent vectors, actual Chrome and native GUI playback/seek/download/offline
+acceptance on the named clients. Additional codecs, DRM and album-image splitting
+are outside its first delivery.
+Raw-disc guided imports retain their physical-copy default; digital intake must
+explicitly follow the new acquisition policy. HL-02 contains the implementation
+sequence and acceptance matrix; it remains the sole queue entry for this outcome.
+
 ## Broader product target reference
 
 The sections below retain the earlier product goals, detailed safety constraints

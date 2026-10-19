@@ -88,6 +88,8 @@ pub struct UpdateMetadataAuthorityCommand {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RefreshMetadataCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_import: Option<ImportId>,
     pub expected_revision: Revision,
     pub observation: MetadataRefreshObservation,
 }
@@ -650,6 +652,7 @@ impl CollectionService {
                     ),
                 )?;
                 let refresh = RefreshMetadataCommand {
+                    source_import: None,
                     expected_revision: command.expected_revision,
                     observation,
                 };
@@ -1722,7 +1725,7 @@ impl CollectionService {
                 if revision != command.expected_revision {
                     return Err(Error::Conflict);
                 }
-                let previous_disc_assignments = authority
+                let previous_music_overrides = authority
                     .domain_overrides
                     .as_ref()
                     .and_then(|overrides| {
@@ -1731,7 +1734,6 @@ impl CollectionService {
                             .parse::<collector_modules::music::MusicMetadataOverrides>()
                             .ok()
                     })
-                    .map(|overrides| overrides.disc_assignments)
                     .unwrap_or_default();
                 let mut candidates = self
                     .processing
@@ -1749,11 +1751,16 @@ impl CollectionService {
                     MetadataAuthorityChange::SetDomainOverrides { .. }
                 ) && item.domain.module.0 == "org.junk.music"
                 {
+                    self.validate_file_track_edits(
+                        &item,
+                        &authority,
+                        &previous_music_overrides.track_overrides,
+                    )?;
                     validate_music_disc_assignment_change(
                         &item,
                         &authority,
                         &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
-                        &previous_disc_assignments,
+                        &previous_music_overrides.disc_assignments,
                     )?;
                 }
                 if let MetadataAuthorityChange::SetArtworkChoice { asset_id } = &command.change
@@ -1787,7 +1794,7 @@ impl CollectionService {
                     updated_at: Utc::now(),
                 };
                 record.validate()?;
-                effects.publish_metadata_authority(TransactionId::new(), record.clone())?;
+                effects.publish_metadata_authority(TransactionId::new(), record.clone(), None)?;
                 Ok(record)
             },
         )
@@ -2014,7 +2021,17 @@ impl CollectionService {
         if let Some(claim) = claim {
             effects.publish_metadata_for_job(claim, record.clone())?;
         } else {
-            effects.publish_metadata_authority(TransactionId::new(), record.clone())?;
+            effects.publish_metadata_authority(
+                TransactionId::new(),
+                record.clone(),
+                command
+                    .source_import
+                    .map(|import| crate::ItemEffectContext {
+                        item_id: item.id,
+                        generation: item.lifecycle.generation,
+                        source: crate::ItemEffectSource::GuidedImport(import),
+                    }),
+            )?;
         }
         Ok(record)
     }
@@ -2127,6 +2144,7 @@ impl CollectionService {
                 &item,
                 &eligibility.owner,
                 &RefreshMetadataCommand {
+                    source_import: None,
                     expected_revision: revision,
                     observation,
                 },
@@ -2183,6 +2201,7 @@ impl CollectionService {
             &item,
             &eligibility.owner,
             &RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: revision,
                 observation,
             },
@@ -2974,7 +2993,11 @@ pub fn automatic_metadata_candidate<'a>(
 ) {
     let eligible = candidates
         .iter()
-        .filter(|value| value.complete_identity && value.strength != MatchStrength::Name)
+        .filter(|value| {
+            // Preserved file tags supply descriptive defaults, never catalog identity.
+            value.identity.provider.0 == "org.junk.music.file-tags"
+                || (value.complete_identity && value.strength != MatchStrength::Name)
+        })
         .collect::<Vec<_>>();
     let Some(best) = eligible
         .iter()

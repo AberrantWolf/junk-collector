@@ -348,7 +348,9 @@ pub struct PrepareMusicTrack {
     pub profile: ConversionProfile,
 }
 
-pub use collector_api_types::{MusicTrackAvailability, MusicTrackAvailabilityState};
+pub use collector_api_types::{
+    MusicAlbumSelection, MusicTrackAvailability, MusicTrackAvailabilityState,
+};
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MusicAlbumCoverage {
@@ -1041,6 +1043,10 @@ impl CollectionService {
                     collector_core::RepresentationRole::PreservationMaster
                 )
             }) {
+                if let Some(manifest) = self.recorded_file_tracks(item.collection_id, source.id)? {
+                    rows.extend(self.file_track_rows(item, capture, source, manifest, user_id)?);
+                    continue;
+                }
                 let mut tracks = Vec::<ConversionTrack>::new();
                 let mut source_readable = false;
                 if !recorded_only
@@ -1208,6 +1214,9 @@ impl CollectionService {
                             MusicTrackAvailabilityState::Unavailable { reason }
                         };
                         rows.push(MusicTrackAvailability {
+                            album_selection: collector_api_types::MusicAlbumSelection::Included,
+                            display_position: None,
+                            audio_format: None,
                             capture_id: capture.id,
                             source_label: source
                                 .files
@@ -1232,7 +1241,7 @@ impl CollectionService {
                                     })
                                 })
                                 .unwrap_or_else(|| format!("Track {:02}", track.position)),
-                            profile,
+                            profile: Some(profile),
                             can_prepare: writable_music
                                 && source_readable
                                 && encoder_ready
@@ -1248,7 +1257,7 @@ impl CollectionService {
                 row.capture_id,
                 row.source_representation_id,
                 row.track_position,
-                profile_order(&row.profile),
+                row.profile.as_ref().map_or(0, profile_order),
             )
         });
         Ok(rows)

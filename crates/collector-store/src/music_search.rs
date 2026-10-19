@@ -25,7 +25,7 @@ pub(super) fn project(
     )
     .map_err(storage)?;
     let mut songs = collector_app::music_search_projection(item, display, candidates, artist);
-    if songs.is_empty() && item.domain.module.0 == "org.junk.music" && !item.deleted {
+    if item.domain.module.0 == "org.junk.music" && !item.deleted {
         let mut hydrated = item.clone();
         hydrate_captures(db, &mut hydrated)?;
         let mut observations = Vec::new();
@@ -50,17 +50,41 @@ pub(super) fn project(
                 }
             }
         }
+        let artist_override = artist;
         let (album, artist) = collector_app::music_search_labels(item, display, artist);
-        for position in collector_app::recorded_song_positions(&observations)? {
-            songs.push(MusicSearchRecord {
-                duration_ms: None,
-                item_id: item.id,
-                title: format!("Track {position:02}"),
-                artist: artist.clone(),
-                album: album.clone(),
-                disc_position: None,
-                track_position: position,
-            });
+        let authority: Option<collector_app::MetadataAuthorityRecord> = db
+            .query_row(
+                "SELECT record FROM metadata_authorities WHERE id=?",
+                [item.id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .map(|raw| serde_json::from_str(&raw).map_err(storage))
+            .transpose()?;
+        let file_songs = collector_app::file_music_search_projection(
+            &hydrated,
+            &observations,
+            &album,
+            &artist,
+            artist_override,
+            authority.as_ref(),
+        )?;
+        if !file_songs.is_empty() {
+            songs = file_songs;
+        }
+        if songs.is_empty() {
+            for position in collector_app::recorded_song_positions(&observations)? {
+                songs.push(MusicSearchRecord {
+                    duration_ms: None,
+                    item_id: item.id,
+                    title: format!("Track {position:02}"),
+                    artist: artist.clone(),
+                    album: album.clone(),
+                    disc_position: None,
+                    track_position: position,
+                });
+            }
         }
     }
     for song in songs {

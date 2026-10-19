@@ -16,7 +16,7 @@ utoipa.workspace = true
 sha2.workspace = true
 hex.workspace = true
 uuid.workspace = true
-junk-libs-audio.workspace = true
+junk-libs-audio = { workspace = true, features = ["decode-compressed"] }
 junk-libs-disc.workspace = true
 
 [dev-dependencies]

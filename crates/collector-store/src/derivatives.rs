@@ -216,6 +216,7 @@ impl Store {
             role,
             format: format.into(),
             files: vec![StoredFile {
+                visibility: Default::default(),
                 name: name.clone(),
                 bytes: validation.bytes,
                 digest: validation.digest.clone(),

@@ -458,6 +458,7 @@ impl CollectionService {
                 &item,
                 &ModuleId("org.junk.games".into()),
                 &RefreshMetadataCommand {
+                    source_import: None,
                     expected_revision: revision,
                     observation: MetadataRefreshObservation {
                         id: ObservationId(claim.id.0),

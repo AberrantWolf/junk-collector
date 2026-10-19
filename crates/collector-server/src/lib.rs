@@ -660,6 +660,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_job))
         .routes(routes!(retry_job))
         .routes(routes!(prepare_music_track))
+        .routes(routes!(update_digital_purchase).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(music_album_preparation_plan))
         .routes(routes!(prepare_music_album, music_preparation_batches))
         .routes(routes!(music_preparation_batch))
@@ -3115,11 +3116,7 @@ async fn append_intake(
                     for package in &plan.packages {
                         if package.source.kind == ImportSourceKind::Inbox {
                             let (_, files) = resolve_inbox_package(&state, &package.source)?;
-                            if serde_json::to_value(files)
-                                .map_err(|e| Error::Invalid(e.to_string()))?
-                                != serde_json::to_value(&package.files)
-                                    .map_err(|e| Error::Invalid(e.to_string()))?
-                            {
+                            if !same_upload_inventory(&files, &package.files) {
                                 return Err(Error::Conflict);
                             }
                         }
@@ -3210,7 +3207,13 @@ async fn plan_ingest(
                 .authorize(&actor, command.collection_id, Action::Curate)?;
             for package in &mut command.packages {
                 if package.source.kind == ImportSourceKind::Inbox {
-                    let (_, files) = resolve_inbox_package(&state, &package.source)?;
+                    let (_, mut files) = resolve_inbox_package(&state, &package.source)?;
+                    if !package.files.is_empty() {
+                        if !same_upload_inventory(&files, &package.files) {
+                            return Err(Error::Conflict);
+                        }
+                        files = package.files.clone();
+                    }
                     package.files = files;
                 }
             }
@@ -3238,11 +3241,7 @@ async fn start_ingest(
                         if package.source.kind == ImportSourceKind::Inbox {
                             let (path, current_files) =
                                 resolve_inbox_package(&state, &package.source)?;
-                            if serde_json::to_value(&current_files)
-                                .map_err(|e| Error::Invalid(e.to_string()))?
-                                != serde_json::to_value(&package.files)
-                                    .map_err(|e| Error::Invalid(e.to_string()))?
-                            {
+                            if !same_upload_inventory(&current_files, &package.files) {
                                 return Err(Error::Conflict);
                             }
                             inbox_paths.push((package.position, path));
@@ -3753,15 +3752,20 @@ fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
                     continue;
                 }
             };
+            let by_name = current
+                .iter()
+                .map(|file| (file.name.as_str(), file))
+                .collect::<std::collections::BTreeMap<_, _>>();
             if current.len() != import.files.len()
-                || current.iter().zip(&import.files).any(|(source, declared)| {
-                    source.name != declared.name
-                        || source.bytes != declared.bytes
-                        || source
-                            .sha256
-                            .as_ref()
-                            .zip(declared.digest.as_ref())
-                            .is_some_and(|(source, declared)| source != &declared.hex)
+                || import.files.iter().any(|declared| {
+                    by_name.get(declared.name.as_str()).is_none_or(|source| {
+                        source.bytes != declared.bytes
+                            || source
+                                .sha256
+                                .as_ref()
+                                .zip(declared.digest.as_ref())
+                                .is_some_and(|(source, declared)| source != &declared.hex)
+                    })
                 })
             {
                 state.service.report_guided_staging_failure(import.id, "Inbox inventory changed after acceptance; restore the original package or discard and preview it again.")?;
@@ -3935,6 +3939,7 @@ fn compatibility_upload(user_id: UserId, import: ImportView) -> Result<Upload> {
             .files
             .into_iter()
             .map(|file| UploadFile {
+                visibility: Default::default(),
                 name: file.name,
                 bytes: file.bytes,
                 sha256: file.digest.map(|digest| digest.hex),
@@ -4895,4 +4900,39 @@ async fn update_collection_list(
         })
         .await?,
     ))
+}
+
+#[utoipa::path(put, path = "/api/v1/items/{item}/captures/{capture}/purchase", params(("item" = ItemId, Path), ("capture" = CaptureId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::UpdateDigitalPurchase, responses((status = 200, body = collector_app::PresentedCapture), (status = 400), (status = 403), (status = 404), (status = 409)))]
+async fn update_digital_purchase(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((item, capture)): Path<(ItemId, CaptureId)>,
+    Json(command): Json<collector_app::UpdateDigitalPurchase>,
+) -> ApiResult<Json<collector_app::PresentedCapture>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .update_digital_purchase(&actor, item, capture, command, &context)
+        })
+        .await?,
+    ))
+}
+
+fn same_upload_inventory(
+    actual: &[collector_app::UploadFile],
+    reviewed: &[collector_app::UploadFile],
+) -> bool {
+    let by_name = actual
+        .iter()
+        .map(|file| (file.name.as_str(), file))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    actual.len() == reviewed.len()
+        && reviewed.iter().all(|file| {
+            by_name
+                .get(file.name.as_str())
+                .is_some_and(|actual| actual.bytes == file.bytes && actual.sha256 == file.sha256)
+        })
 }

@@ -109,20 +109,55 @@ pub enum MusicTrackAvailabilityState {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MusicTrackAvailability {
+    #[serde(default)]
+    pub album_selection: MusicAlbumSelection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_position: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_format: Option<MusicAudioFormat>,
     pub capture_id: CaptureId,
     pub source_label: String,
     pub disc_position: Option<u16>,
     pub source_representation_id: RepresentationId,
     pub track_position: u16,
-    /// Exact coordinate in the source's integer stereo PCM timeline.
+    /// Coordinate in the source PCM timeline at sample_rate(), with native channels.
     pub start_frame: PcmFrame,
-    /// Exact track-local integer stereo PCM frame count.
+    /// Decoded track-local frames; MP3 gapless knowledge is separate in audio_format.
     pub frame_count: PcmFrame,
     pub title: String,
-    pub profile: ConversionProfile,
+    pub profile: Option<ConversionProfile>,
     pub state: MusicTrackAvailabilityState,
     /// Current actor, module, source and encoder permit explicit preparation.
     pub can_prepare: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicAlbumSelection {
+    #[default]
+    Included,
+    Excluded,
+    NeedsReview,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MusicAudioFormat {
+    pub codec: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: Option<u32>,
+    pub delay_frames: Option<u32>,
+    pub padding_frames: Option<u32>,
+}
+impl MusicTrackAvailability {
+    pub fn sample_rate(&self) -> u32 {
+        self.audio_format
+            .as_ref()
+            .map_or(44_100, |format| format.sample_rate)
+    }
+    pub fn primary_playback(&self) -> bool {
+        self.profile.is_none() || self.profile == Some(ConversionProfile::Flac)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]

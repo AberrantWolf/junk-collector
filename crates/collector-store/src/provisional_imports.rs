@@ -438,8 +438,8 @@ impl Store {
             }
             insert_import(tx, record)?;
             tx.execute(
-                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,clean_reimport,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
-                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),intent.clean_reimport.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
+                "INSERT INTO private.guided_ingest_intents(purchase,import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,clean_reimport,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
+                params![intent.purchase.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),intent.clean_reimport.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
             )
             .map_err(storage)?;
             tx.execute(
@@ -737,14 +737,15 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context,purchase FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?,row.get::<_, Option<String>>(18)?)),
             )
             .optional()
             .map_err(storage)?
             .map(|row| {
                 Ok(GuidedIngestIntent {
+            purchase: row.18.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
                     import_id: id,
                     bulk_context: row.17.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
                     user_id: row.0.parse().map_err(storage)?,
@@ -1266,6 +1267,7 @@ impl Store {
                 ));
             }
             files.push(StoredFile {
+                visibility: declared.visibility,
                 name: declared.name.clone(),
                 bytes,
                 digest,
@@ -1290,6 +1292,9 @@ impl Store {
             }
         }
         let capture = Capture {
+            purchase: self
+                .guided_ingest_intent(id)?
+                .and_then(|intent| intent.purchase),
             id: record.view.capture_id,
             collection_id: record.view.collection_id,
             revision: Revision(1),
@@ -1298,7 +1303,11 @@ impl Store {
             representations: vec![Representation {
                 id: record.view.representation_id,
                 role: RepresentationRole::PreservationMaster,
-                format: "original-package".into(),
+                format: collector_app::import_preservation_format(
+                    &self.collection(record.view.collection_id)?.binding,
+                    &record.view.files,
+                )
+                .into(),
                 files: files.clone(),
                 source: None,
                 profile: None,

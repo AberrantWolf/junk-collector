@@ -1055,3 +1055,19 @@ pub fn resolve_metadata(
     }
     item.metadata.candidates = candidates;
 }
+
+/// Common intake projection of an owner-validated operation result. Module data
+/// remains in the exact result envelope; this projection never rewrites it.
+#[derive(serde::Deserialize)]
+pub struct ImportAnalysisSummary {
+    #[serde(default)]
+    pub candidates: Vec<ImportAnalysisCandidate>,
+    #[serde(default)]
+    pub limitations: Vec<String>,
+}
+#[derive(serde::Deserialize)]
+pub struct ImportAnalysisCandidate {
+    pub key: String,
+    pub label: String,
+    pub observation: collector_core::RawJson,
+}

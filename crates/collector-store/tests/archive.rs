@@ -730,6 +730,7 @@ fn ready_upload(
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "payload.bin".into(),
                 bytes: ByteLength(bytes.len() as u64),
                 sha256: Some(Digest::sha256(bytes).hex),
@@ -1298,6 +1299,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -1305,6 +1307,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
                         package_name: "unfinished replacement".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(1),
                         sha256: None,
@@ -1317,6 +1320,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: pending_plan,
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -1391,6 +1395,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
                     package_name: "replacement".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "disc.bin".into(),
                     bytes: ByteLength(1),
                     sha256: None,
@@ -3100,6 +3105,7 @@ fn private_migration_pins_the_existing_first_row_default_once() {
 fn standalone_unidentified_capture_round_trips_without_fabricated_links() {
     let (_root, store, actor, service, collection) = setup();
     let capture = Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -3309,6 +3315,7 @@ fn upload_retries_preserve_bytes_and_evidence_detects_changes() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(bytes.len() as u64),
                 sha256: Some(Digest::sha256(bytes).hex),
@@ -3394,6 +3401,7 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
                     saved.id,
                     saved.revision,
                     vec![UploadFile {
+                        visibility: Default::default(),
                         name: name.into(),
                         bytes: ByteLength(1),
                         sha256: None
@@ -3405,6 +3413,7 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
     }
     let mut edited = saved;
     edited.captures.push(Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: edited.collection_id,
         revision: Revision(1),
@@ -3623,6 +3632,7 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
         &service,
         &actor,
         Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: collection.id,
             revision: Revision(0),
@@ -4135,6 +4145,7 @@ fn failed_background_import_is_reported_and_retains_source_chunks() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4169,6 +4180,7 @@ fn durable_job_rows_store_typed_state_without_losing_upload_identity() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4417,6 +4429,7 @@ fn queued_and_running_upload_cancellation_retain_source_material() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "running.bin".into(),
                 bytes: ByteLength(7),
                 sha256: None,
@@ -4630,6 +4643,7 @@ fn integrity_verification_runs_as_a_real_durable_job() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4679,6 +4693,7 @@ fn reclaimed_integrity_job_does_not_publish_twice() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4749,11 +4764,13 @@ fn integrity_job_observes_cancellation_between_files() {
             saved.revision,
             vec![
                 UploadFile {
+                    visibility: Default::default(),
                     name: "one.bin".into(),
                     bytes: ByteLength(3),
                     sha256: None,
                 },
                 UploadFile {
+                    visibility: Default::default(),
                     name: "two.bin".into(),
                     bytes: ByteLength(3),
                     sha256: None,
@@ -4867,6 +4884,7 @@ fn failed_integrity_job_retries_with_the_same_identity_and_attempt_history() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "retry-integrity.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4912,6 +4930,7 @@ fn review_capture_update_survives_reindex() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4947,6 +4966,7 @@ fn review_cannot_move_another_users_capture() {
         &service,
         &owner,
         Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: private_collection.id,
             revision: Revision(0),
@@ -5054,6 +5074,7 @@ fn review_capture_links_must_form_chain_when_middle_links_omitted() {
     });
     save_inventory(&service, &actor, second, Revision(0)).unwrap();
     let capture = Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -5386,6 +5407,7 @@ fn focused_inventory_commands_preserve_history_and_are_idempotent() {
         &service,
         &actor,
         Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: collection.id,
             revision: Revision(0),
@@ -5569,6 +5591,7 @@ fn component_order_and_references_are_protected_by_focused_commands() {
         .unwrap()
         .id;
     let capture = Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -5871,6 +5894,7 @@ fn subprocess_command_receipt_worker() {
             effects
                 .save_capture(
                     Capture {
+                        purchase: None,
                         id: CaptureId::new(),
                         collection_id: collection,
                         revision: Revision(0),
@@ -5890,6 +5914,7 @@ fn subprocess_command_receipt_worker() {
                     item_id,
                     Revision(1),
                     vec![UploadFile {
+                        visibility: Default::default(),
                         name: "another.bin".into(),
                         bytes: ByteLength(3),
                         sha256: None,
@@ -5987,6 +6012,7 @@ fn sigkill_receipt_effect_gap_replays_every_mutation_family() {
                     saved.id,
                     Revision(1),
                     vec![UploadFile {
+                        visibility: Default::default(),
                         name: "raw.bin".into(),
                         bytes: ByteLength(3),
                         sha256: None,
@@ -6116,6 +6142,7 @@ fn successful_command_replay_is_not_revalidated_against_later_revisions() {
     let saved = store.save(item(collection.id), Revision(0)).unwrap();
     let upload_key = command();
     let files = vec![UploadFile {
+        visibility: Default::default(),
         name: "raw.bin".into(),
         bytes: ByteLength(3),
         sha256: None,
@@ -6149,6 +6176,7 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
                 package_name: "disc-one".into(),
             },
             files: vec![ImportDeclaredFile {
+                visibility: Default::default(),
                 name: "track01.bin".into(),
                 bytes: ByteLength(4),
                 received_bytes: ByteLength(0),
@@ -6228,6 +6256,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: Some(1),
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6237,6 +6266,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
                     files: names
                         .into_iter()
                         .map(|name| UploadFile {
+                            visibility: Default::default(),
                             name: name.into(),
                             bytes: ByteLength(1),
                             sha256: None,
@@ -6259,6 +6289,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6299,6 +6330,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6306,6 +6338,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
                         package_name: "fixture.rom".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "fixture.rom".into(),
                         bytes: ByteLength(rom.len() as u64),
                         sha256: None,
@@ -6318,6 +6351,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6360,6 +6394,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
+        purchase: None,
         anchor_file_index: None,
         source: ImportSourceSummary {
             kind: ImportSourceKind::Browser,
@@ -6368,11 +6403,13 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         },
         files: vec![
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.cue".into(),
                 bytes: ByteLength(cue.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(pcm.len() as u64),
                 sha256: None,
@@ -6396,6 +6433,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: stale,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6412,6 +6450,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6426,6 +6465,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6440,6 +6480,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest_with_preflight(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6655,6 +6696,7 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
     let packages = ["Disc A", "Disc B"]
         .into_iter()
         .map(|name| IngestPackageSelection {
+            purchase: None,
             anchor_file_index: None,
             source: ImportSourceSummary {
                 kind: ImportSourceKind::Browser,
@@ -6663,11 +6705,13 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
             },
             files: vec![
                 UploadFile {
+                    visibility: Default::default(),
                     name: "disc.cue".into(),
                     bytes: ByteLength(cue.len() as u64),
                     sha256: None,
                 },
                 UploadFile {
+                    visibility: Default::default(),
                     name: "disc.bin".into(),
                     bytes: ByteLength(pcm.len() as u64),
                     sha256: None,
@@ -6688,6 +6732,7 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6761,6 +6806,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6769,11 +6815,13 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -6791,6 +6839,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6806,6 +6855,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
         Err(Error::Conflict)
     ));
     let accepted_command = StartIngestCommand {
+        purchase: None,
         clean_reimport: None,
         plan,
         analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6888,6 +6938,7 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6896,11 +6947,13 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(2352 * 10),
                             sha256: None,
@@ -6911,6 +6964,7 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
         )
         .unwrap();
     let request = StartIngestCommand {
+        purchase: None,
         clean_reimport: None,
         plan,
         analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -6947,6 +7001,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6955,11 +7010,13 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -6973,6 +7030,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -7023,6 +7081,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7031,11 +7090,13 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -7049,6 +7110,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7116,6 +7178,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
     let toc = b"TRACK AUDIO\nFILE \"disc.bin\" 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
+        purchase: None,
         anchor_file_index: Some(0),
         source: ImportSourceSummary {
             kind: ImportSourceKind::Browser,
@@ -7124,16 +7187,19 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         },
         files: vec![
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.cue".into(),
                 bytes: ByteLength(cue.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(pcm.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.toc".into(),
                 bytes: ByteLength(toc.len() as u64),
                 sha256: None,
@@ -7154,6 +7220,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: unavailable,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7181,6 +7248,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7271,6 +7339,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7279,11 +7348,13 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -7297,6 +7368,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7417,6 +7489,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7425,11 +7498,13 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -7443,6 +7518,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7644,6 +7720,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7653,6 +7730,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
                     files: files
                         .iter()
                         .map(|(name, bytes)| UploadFile {
+                            visibility: Default::default(),
                             name: (*name).into(),
                             bytes: ByteLength(bytes.len() as u64),
                             sha256: None,
@@ -7666,6 +7744,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7711,6 +7790,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7718,6 +7798,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
                         package_name: "mistake.bin".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "mistake.bin".into(),
                         bytes: ByteLength(4),
                         sha256: None,
@@ -7730,6 +7811,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7794,6 +7876,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7801,6 +7884,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
                         package_name: "paused.bin".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "paused.bin".into(),
                         bytes: ByteLength(8),
                         sha256: None,
@@ -7813,6 +7897,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7950,6 +8035,7 @@ fn import_validation_rejects_unsafe_or_incoherent_staging_state() {
 
     let mut collision = provisional_import(user, collection);
     collision.view.files.push(ImportDeclaredFile {
+        visibility: Default::default(),
         name: "TRACK01.BIN".into(),
         bytes: ByteLength(4),
         received_bytes: ByteLength(0),
@@ -8017,6 +8103,7 @@ fn durable_import_allows_published_unidentified_unattached_capture_identity() {
 fn browser_and_inbox_sources_converge_on_the_same_durable_staging_state() {
     let (root, store, actor, service, collection) = setup();
     let declared = vec![UploadFile {
+        visibility: Default::default(),
         name: "disc/track01.bin".into(),
         bytes: ByteLength(4),
         sha256: None,
@@ -8107,6 +8194,7 @@ fn zero_byte_import_files_are_complete_without_a_synthetic_chunk() {
                     package_name: "empty-file".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "empty.bin".into(),
                     bytes: ByteLength(0),
                     sha256: None,
@@ -8132,6 +8220,7 @@ fn zero_byte_import_files_are_complete_without_a_synthetic_chunk() {
                     package_name: "bad-empty-file".into(),
                 },
                 files: vec![UploadFile {
+            visibility: Default::default(),
                     name: "empty.bin".into(),
                     bytes: ByteLength(0),
                     sha256: Some(Digest::sha256(b"not empty").hex),
@@ -8155,6 +8244,7 @@ fn browser_import_resumes_from_durable_offsets_after_restart() {
         package_name: "restart-disc".into(),
     };
     let files = vec![UploadFile {
+        visibility: Default::default(),
         name: "track.bin".into(),
         bytes: ByteLength(4),
         sha256: Some(Digest::sha256(b"data").hex),
@@ -8281,6 +8371,7 @@ fn stopped_backup_restore_preserves_archive_accounts_authority_loans_and_pending
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "master.bin".into(),
                 bytes: ByteLength(original.len() as u64),
                 sha256: Some(Digest::sha256(original).hex),
@@ -8306,6 +8397,7 @@ fn stopped_backup_restore_preserves_archive_accounts_authority_loans_and_pending
                     package_name: "restore-pending".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "pending.bin".into(),
                     bytes: ByteLength(4),
                     sha256: Some(Digest::sha256(b"data").hex),
@@ -8528,6 +8620,7 @@ fn staged_import(
                     package_name: package.into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "disc.bin".into(),
                     bytes: ByteLength(4),
                     sha256: None,
@@ -8934,6 +9027,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                     package_name: "synthetic-game".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "game.bin".into(),
                     bytes: ByteLength(4),
                     sha256: None,
@@ -9194,11 +9288,13 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
                 },
                 files: vec![
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.cue".into(),
                         bytes: ByteLength(cue.len() as u64),
                         sha256: None,
                     },
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(pcm.len() as u64),
                         sha256: None,
@@ -9777,6 +9873,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
                     files: redumper_files
                         .iter()
                         .map(|(name, bytes)| UploadFile {
+                            visibility: Default::default(),
                             name: (*name).into(),
                             bytes: ByteLength(bytes.len() as u64),
                             sha256: None,
@@ -10275,7 +10372,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
         updated_at: chrono::Utc::now(),
     };
     assert!(matches!(
-        store.publish_metadata_authority(TransactionId::new(), invalid_authority),
+        store.publish_metadata_authority(TransactionId::new(), invalid_authority, None),
         Err(Error::Invalid(_))
     ));
 
@@ -10347,7 +10444,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
         updated_at: chrono::Utc::now(),
     };
     store
-        .publish_metadata_authority(TransactionId::new(), authority)
+        .publish_metadata_authority(TransactionId::new(), authority, None)
         .unwrap();
     AdministrationPort::reindex(&*store).unwrap();
     let db = rusqlite::Connection::open(_root.path().join("state/catalog.sqlite")).unwrap();
@@ -10416,6 +10513,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
         observation: RawJson::from_json(r#"{"provider_extra":[2,1]}"#).unwrap(),
     };
     let refresh = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(0),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -10444,6 +10542,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(1),
                 observation: MetadataRefreshObservation {
                     id: ObservationId::new(),
@@ -10505,6 +10604,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
 
     let outage_context = command();
     let outage = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(3),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -10528,6 +10628,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
         "a selected historical candidate survives a provider outage"
     );
     let changed_replay = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(3),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -10991,6 +11092,7 @@ fn metadata_refresh_receipt_recovers_after_revision_commit_before_projection() {
     let service = CollectionService::new(faulted.clone(), Arc::new(Registry::builtins()));
     let context = command();
     let request = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(0),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -11782,6 +11884,7 @@ fn historical_domain_authority_rebuilds_without_rewriting_original_records() {
                 display: None,
                 updated_at: chrono::Utc::now(),
             },
+            None,
         )
         .unwrap();
     let path = files_named(&root.path().join("archive"), "record.v4.json").remove(0);
@@ -12047,6 +12150,7 @@ fn ct3_item_owner_and_schema_are_application_policy() {
                     package_name: "manual-and-soundtrack-package".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "manual-and-soundtrack.bin".into(),
                     bytes: ByteLength(1),
                     sha256: Some(Digest::sha256(b"x").hex),
@@ -12141,6 +12245,7 @@ fn ct3_capture_publication_rechecks_policy_after_staging() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -12207,6 +12312,7 @@ fn ct3_legacy_upload_can_be_cancelled_without_its_owner_module() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -12330,11 +12436,13 @@ fn derivative_import_sectors(
                 },
                 files: vec![
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.cue".into(),
                         bytes: ByteLength(cue.len() as u64),
                         sha256: None,
                     },
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(pcm.len() as u64),
                         sha256: None,
@@ -13955,6 +14063,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(0),
                 observation: observation.clone(),
             },
@@ -13965,7 +14074,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
     forged.revision = Revision(2);
     forged.display.as_mut().unwrap().title.value = "Forged display".into();
     assert!(matches!(
-        store.publish_metadata_authority(TransactionId::new(), forged),
+        store.publish_metadata_authority(TransactionId::new(), forged, None),
         Err(Error::Invalid(_))
     ));
     let mut changed = observation.clone();
@@ -13975,6 +14084,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(1),
                 observation: changed
             },
@@ -13998,7 +14108,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
     let mut stale = first;
     stale.revision = Revision(2);
     assert!(matches!(
-        store.publish_metadata_authority(TransactionId::new(), stale),
+        store.publish_metadata_authority(TransactionId::new(), stale, None),
         Err(Error::Conflict)
     ));
     let refreshed = service
@@ -14006,6 +14116,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(1),
                 observation,
             },
@@ -14053,6 +14164,7 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
     let original = candidate.identity.clone();
     let old_candidate = candidate.clone();
     let refresh = |expected_revision, candidate| RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(expected_revision),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -14162,6 +14274,7 @@ fn folder_discovery_is_authorized_disjoint_and_validates_paths() {
         ]
         .into_iter()
         .map(|name| UploadFile {
+            visibility: Default::default(),
             name: name.into(),
             bytes: ByteLength(32),
             sha256: None,
@@ -14394,6 +14507,7 @@ fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "tiny.wav".into(),
                 bytes: ByteLength(wav.len() as u64),
                 sha256: None,
@@ -14679,6 +14793,7 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -14687,11 +14802,13 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
@@ -14705,6 +14822,7 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -15163,6 +15281,7 @@ fn fx05_plan(
             PlanIngestCommand {
                 collection_id: collection,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
@@ -15196,6 +15315,7 @@ fn fx05_original(
         actor,
         collection,
         vec![UploadFile {
+            visibility: Default::default(),
             name: "disc.bin".into(),
             bytes: ByteLength(4),
             sha256: None,
@@ -15205,6 +15325,7 @@ fn fx05_original(
         .start_ingest(
             actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -15255,6 +15376,7 @@ fn clean_reimport_reuses_validated_originals_preserves_authority_and_survives_re
             .files
             .iter()
             .map(|file| UploadFile {
+                visibility: Default::default(),
                 name: file.name.clone(),
                 bytes: file.bytes,
                 sha256: Some(file.digest.hex.clone()),
@@ -15262,6 +15384,7 @@ fn clean_reimport_reuses_validated_originals_preserves_authority_and_survives_re
             .collect(),
     );
     let request = StartIngestCommand {
+        purchase: None,
         clean_reimport: Some(collector_app::CleanReimportOptions {
             replace_captures: vec![old.id],
             retained_representation: Some(representation.id),
@@ -15368,6 +15491,7 @@ fn clean_reimport_failed_replacement_keeps_original_and_explicit_reset_is_portab
         &actor,
         collection.id,
         vec![UploadFile {
+            visibility: Default::default(),
             name: "replacement.bin".into(),
             bytes: ByteLength(4),
             sha256: Some(Digest::sha256(b"good").hex),
@@ -15377,6 +15501,7 @@ fn clean_reimport_failed_replacement_keeps_original_and_explicit_reset_is_portab
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: Some(collector_app::CleanReimportOptions {
                     replace_captures: vec![old],
                     retained_representation: None,
@@ -15444,11 +15569,13 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         collection.id,
         vec![
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(pcm.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.cue".into(),
                 bytes: ByteLength(cue.len() as u64),
                 sha256: None,
@@ -15459,6 +15586,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -15512,6 +15640,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         rep.files
             .iter()
             .map(|file| UploadFile {
+                visibility: Default::default(),
                 name: file.name.clone(),
                 bytes: file.bytes,
                 sha256: Some(file.digest.hex.clone()),
@@ -15522,6 +15651,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: Some(collector_app::CleanReimportOptions {
                     replace_captures: vec![old.id],
                     retained_representation: Some(rep.id),
@@ -15585,6 +15715,7 @@ fn fx05_retained_command(
     let capture = &item.captures[0];
     let representation = &capture.representations[0];
     StartIngestCommand {
+        purchase: None,
         plan: fx05_plan(
             service,
             actor,
@@ -15593,6 +15724,7 @@ fn fx05_retained_command(
                 .files
                 .iter()
                 .map(|file| UploadFile {
+                    visibility: Default::default(),
                     name: file.name.clone(),
                     bytes: file.bytes,
                     sha256: Some(file.digest.hex.clone()),
@@ -16753,6 +16885,7 @@ fn album_group_commit_preserves_distinct_inventory_and_guarded_undo() {
             right.id,
             right.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "original.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -16995,12 +17128,14 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
     let packages = (0..70)
         .map(|position| IntakePackage {
             package: IngestPackageSelection {
+                purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
                     label: None,
                     package_name: format!("Disc {position}"),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "original.bin".into(),
                     bytes: ByteLength(0),
                     sha256: None,
@@ -17365,6 +17500,7 @@ fn bulk_discovery_preserves_nested_members_and_paginates_more_than_one_guided_pa
     for position in 0..130 {
         for suffix in ["disc.cue", "tracks/audio.bin"] {
             files.push(UploadFile {
+                visibility: Default::default(),
                 name: format!("Albums/{position:04}/{suffix}"),
                 bytes: ByteLength(0),
                 sha256: None,
@@ -17372,6 +17508,7 @@ fn bulk_discovery_preserves_nested_members_and_paginates_more_than_one_guided_pa
         }
     }
     files.push(UploadFile {
+        visibility: Default::default(),
         name: "Albums/readme.txt".into(),
         bytes: ByteLength(10),
         sha256: None,
@@ -17435,12 +17572,14 @@ fn interrupted_intake_manifest_cannot_start_a_partial_batch() {
         .unwrap();
     let package = IntakePackage {
         package: IngestPackageSelection {
+            purchase: None,
             source: ImportSourceSummary {
                 kind: ImportSourceKind::Browser,
                 label: None,
                 package_name: "Unknown original".into(),
             },
             files: vec![UploadFile {
+                visibility: Default::default(),
                 name: "original.bin".into(),
                 bytes: ByteLength(0),
                 sha256: None,
@@ -17873,12 +18012,14 @@ fn bulk_generated_thousands_query_admission_and_restart_measurements() {
         let packages = (offset..(offset + 64).min(count))
             .map(|position| IntakePackage {
                 package: IngestPackageSelection {
+                    purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
                         package_name: format!("Generated package {position:06}"),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: format!("Originals/{position:06}/disc.bin"),
                         bytes: ByteLength(0),
                         sha256: None,
@@ -18102,12 +18243,14 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
     let packages = (0..2)
         .map(|i| IntakePackage {
             package: IngestPackageSelection {
+                purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
                     label: None,
                     package_name: format!("Pending {i}"),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "original.bin".into(),
                     bytes: ByteLength(0),
                     sha256: None,
@@ -20947,6 +21090,7 @@ fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -20954,6 +21098,7 @@ fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual
                         package_name: "disc.bin".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(3),
                         sha256: None,
@@ -20966,6 +21111,7 @@ fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -22303,4 +22449,725 @@ fn provider_cover_restoration_recovers_before_and_after_revision_commit() {
             image
         );
     }
+}
+
+#[test]
+fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
+    let (root, store, actor, service, collection) = setup();
+    let flac = include_bytes!("fixtures/digital-audio/01.flac").as_slice();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let receipt = b"private order 1234".as_slice();
+    let package = IngestPackageSelection {
+        purchase: Some(DigitalPurchase {
+            store: Some("Fixture store".into()),
+            order_reference: Some("private order".into()),
+            ..Default::default()
+        }),
+        source: ImportSourceSummary {
+            kind: ImportSourceKind::Browser,
+            label: None,
+            package_name: "Purchase".into(),
+        },
+        anchor_file_index: None,
+        files: [
+            ("01.flac", flac, Visibility::Shared),
+            ("02.mp3", mp3, Visibility::Shared),
+            ("receipt.txt", receipt, Visibility::Curators),
+        ]
+        .into_iter()
+        .map(|(name, data, visibility)| UploadFile {
+            name: name.into(),
+            bytes: ByteLength(data.len() as u64),
+            sha256: None,
+            visibility: Some(visibility),
+        })
+        .collect(),
+    };
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![package],
+            },
+        )
+        .unwrap();
+    assert!(plan.packages[0].analysis_available);
+    assert!(!plan.packages[0].preparation_available);
+    let key = command();
+    let submitted = StartIngestCommand {
+        purchase: None,
+        clean_reimport: None,
+        plan,
+        analysis: collector_app::IngestAnalysisPolicy::Automatic,
+        enrichment: IngestEnrichmentPolicy::Automatic,
+        prepare_music: false,
+        destination: None,
+    };
+    let accepted = service
+        .start_ingest(&actor, submitted.clone(), &key)
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    for (index, data) in [flac, mp3, receipt].into_iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(&actor, id, index, 0, data)
+            .unwrap();
+    }
+    provider_drain(&service);
+    service.resume_guided_ingests().unwrap();
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
+    let item = detail.summary.target_item_id.unwrap();
+    let raw = store.item(item).unwrap();
+    assert!(raw.specimens.is_empty());
+    let capture = &raw.captures[0];
+    assert_eq!(
+        capture.purchase.as_ref().unwrap().store.as_deref(),
+        Some("Fixture store")
+    );
+    assert_eq!(capture.representations.len(), 1);
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    assert_eq!(rows.len(), 2, "{detail:?}");
+    assert!(rows.iter().all(|r| r.profile.is_none() && !r.can_prepare));
+    assert_eq!(rows[0].sample_rate(), 96_000);
+    assert_eq!(rows[0].frame_count.0, 24_000);
+    assert_eq!(rows[0].title, "FLAC original");
+    assert_eq!(rows[1].title, "MP3 original");
+    let album = service.album_playback_snapshot(&actor, item, None).unwrap();
+    assert_eq!(album.tracks.len(), 2);
+    for (index, data) in [flac, mp3].into_iter().enumerate() {
+        let mut resource = service
+            .representation(&actor, item, capture.representations[0].id, index)
+            .unwrap();
+        let mut bytes = Vec::new();
+        resource.reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, data);
+    }
+    assert_eq!(
+        service.item_presented(&actor, item).unwrap().title,
+        "Purchased album"
+    );
+    let search = service
+        .music_search(
+            &actor,
+            collection.id,
+            collector_app::MusicSearchQuery {
+                search: Some("MP3 original".into()),
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(search.items.len(), 1);
+    assert_eq!(search.items[0].sources.len(), 1);
+    let viewer_id = store
+        .create_user("purchase-viewer", "long purchase viewer password", false)
+        .unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let presented = serde_json::to_value(service.item_presented(&viewer, item).unwrap()).unwrap();
+    assert!(!presented.to_string().contains("private order"));
+    assert!(!presented.to_string().contains("receipt.txt"));
+    assert!(matches!(
+        service.representation(&viewer, item, capture.representations[0].id, 2),
+        Err(Error::Forbidden)
+    ));
+    assert_eq!(
+        service
+            .start_ingest(&actor, submitted, &key)
+            .unwrap()
+            .imports[0]
+            .import_id,
+        id
+    );
+
+    // Album ordering and printed numbers are editable; saved targets retain the
+    // immutable source positions even when the album order changes.
+    use collector_app::{
+        CollectionListChange, CollectionListPort, CreateCollectionList, UpdateCollectionList,
+    };
+    let source = capture.representations[0].id;
+    let mut list = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                name: "Purchased playlist".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    for _ in 0..2 {
+        list = service
+            .update_collection_list(
+                &actor,
+                collection.id,
+                list.id,
+                UpdateCollectionList {
+                    expected_revision: list.revision,
+                    change: CollectionListChange::Append {
+                        item_id: item,
+                        source_representation_id: None,
+                        track_position: None,
+                    },
+                },
+                &command(),
+            )
+            .unwrap();
+    }
+    let targets = store.collection_list(list.id).unwrap().entries;
+    assert_eq!(targets.len(), 4);
+    let review = service.metadata_review(&actor, item).unwrap();
+    service.update_metadata_authority(&actor,item,UpdateMetadataAuthorityCommand {
+        expected_revision:review.revision,
+        change:MetadataAuthorityChange::SetDomainOverrides { overrides:ModuleData {
+            module:ModuleId("org.junk.music".into()),schema_version:1,
+            payload:RawJson::from_value(serde_json::json!({"artist":"My artist","track_overrides":[
+                {"source_representation_id":source,"track_position":1,"title":"私のタイトル","disc_position":2,"display_position":9},
+                {"source_representation_id":source,"track_position":2,"title":null,"disc_position":1,"display_position":1}
+            ]}))
+        }}
+    },&command()).unwrap();
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks[0]
+            .track_position,
+        2
+    );
+    assert_eq!(
+        serde_json::to_value(store.collection_list(list.id).unwrap().entries).unwrap(),
+        serde_json::to_value(&targets).unwrap()
+    );
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .iter()
+            .find(|row| row.track_position == 1)
+            .unwrap()
+            .title,
+        "私のタイトル"
+    );
+    assert!(matches!(
+        service.update_digital_purchase(
+            &viewer,
+            item,
+            capture.id,
+            collector_app::UpdateDigitalPurchase {
+                expected_revision: capture.revision,
+                purchase: None
+            },
+            &command()
+        ),
+        Err(Error::Forbidden)
+    ));
+    // The ordinary stopped-server backup includes portable private purchase and
+    // visibility facts, metadata authority, playlists and original bytes.
+    let config = root.path().join("collector.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "archive = {:?}\nstate = {:?}\n",
+            root.path().join("archive"),
+            root.path().join("state")
+        ),
+    )
+    .unwrap();
+    let backup = root.path().join("digital-backup");
+    store.backup(&backup, &config).unwrap();
+    drop(service);
+    drop(store);
+    for scope in [
+        collector_app::RestoreScope::Full,
+        collector_app::RestoreScope::ArchiveOnly,
+    ] {
+        let restore = root
+            .path()
+            .join(if matches!(scope, collector_app::RestoreScope::Full) {
+                "full-digital"
+            } else {
+                "archive-digital"
+            });
+        std::fs::create_dir(&restore).unwrap();
+        let archive = restore.join("archive");
+        let state = restore.join("state");
+        collector_store::restore_backup(
+            &backup,
+            &archive,
+            &state,
+            &restore.join("collector.toml"),
+            format!("archive = {archive:?}\nstate = {state:?}\n").as_bytes(),
+            scope,
+        )
+        .unwrap();
+        let rebuilt = Arc::new(Store::open(archive, state).unwrap());
+        let recovered = CollectionService::new(rebuilt.clone(), Arc::new(Registry::builtins()));
+        let restored_actor = if scope == collector_app::RestoreScope::ArchiveOnly {
+            let user_id = rebuilt
+                .create_user("restored-owner", "long restored purchase password", true)
+                .unwrap();
+            collector_app::LocalOwnershipRecoveryService::new(rebuilt.clone())
+                .recover_owner(collection.id, "restored-owner")
+                .unwrap();
+            Principal {
+                user_id,
+                administrator: true,
+                device_id: None,
+            }
+        } else {
+            actor.clone()
+        };
+        let retained = rebuilt.item(item).unwrap();
+        assert_eq!(
+            serde_json::to_value(&retained.captures[0].purchase).unwrap(),
+            serde_json::to_value(&capture.purchase).unwrap()
+        );
+        assert_eq!(
+            retained.captures[0].representations[0].files[2].visibility,
+            Visibility::Curators
+        );
+        assert_eq!(
+            serde_json::to_value(rebuilt.collection_list(list.id).unwrap().entries).unwrap(),
+            serde_json::to_value(&targets).unwrap()
+        );
+        assert_eq!(
+            recovered
+                .recorded_music_track_availability(&restored_actor, item)
+                .unwrap()
+                .iter()
+                .find(|r| r.track_position == 1)
+                .unwrap()
+                .title,
+            "私のタイトル"
+        );
+        let mut bytes = Vec::new();
+        recovered
+            .representation(&restored_actor, item, source, 0)
+            .unwrap()
+            .reader
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, flac);
+    }
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        service
+            .music_search(
+                &actor,
+                collection.id,
+                collector_app::MusicSearchQuery {
+                    search: Some("MP3 original".into()),
+                    cursor: None,
+                    limit: None
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    drop(service);
+    drop(store);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks
+            .len(),
+        2
+    );
+}
+
+fn admit_digital_test_package(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    names: &[&str],
+    bytes: &[&[u8]],
+) -> collector_app::IngestDetail {
+    admit_digital_test_package_with_visibility(service, actor, collection, names, bytes, None)
+}
+fn admit_digital_test_package_with_visibility(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    names: &[&str],
+    bytes: &[&[u8]],
+    visibility: Option<Visibility>,
+) -> collector_app::IngestDetail {
+    let plan = service
+        .plan_ingest(
+            actor,
+            PlanIngestCommand {
+                collection_id: collection,
+                packages: vec![IngestPackageSelection {
+                    purchase: Some(DigitalPurchase {
+                        store: Some("Independent purchase".into()),
+                        ..Default::default()
+                    }),
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "File purchase".into(),
+                    },
+                    anchor_file_index: None,
+                    files: names
+                        .iter()
+                        .zip(bytes)
+                        .map(|(name, data)| UploadFile {
+                            name: (*name).into(),
+                            bytes: ByteLength(data.len() as u64),
+                            sha256: None,
+                            visibility,
+                        })
+                        .collect(),
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::Automatic,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = accepted.imports[0].import_id;
+    for (index, data) in bytes.iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(actor, import, index, 0, data)
+            .unwrap();
+    }
+    provider_drain(service);
+    service.resume_guided_ingests().unwrap();
+    service.ingest_detail(actor, import).unwrap()
+}
+#[test]
+fn alternate_encodings_require_explicit_album_selection_without_retargeting_tracks() {
+    let (_root, store, actor, service, collection) = setup();
+    let detail = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["01.flac", "01.mp3", "booklet.pdf"],
+        &[
+            include_bytes!("fixtures/digital-audio/01.flac"),
+            include_bytes!("fixtures/digital-audio/02.mp3"),
+            b"original companion",
+        ],
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let raw = store.item(item).unwrap();
+    let source = raw.captures[0].representations[0].id;
+    assert_eq!(
+        raw.captures[0].representations[0].files[2].visibility,
+        Visibility::Curators
+    );
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter()
+            .all(|row| row.album_selection == collector_app::MusicAlbumSelection::NeedsReview)
+    );
+    assert!(service.album_playback_snapshot(&actor, item, None).is_err());
+    let review = service.metadata_review(&actor, item).unwrap();
+    service.update_metadata_authority(&actor,item,UpdateMetadataAuthorityCommand {
+        expected_revision:review.revision,change:MetadataAuthorityChange::SetDomainOverrides {overrides:ModuleData {
+            module:ModuleId("org.junk.music".into()),schema_version:1,payload:RawJson::from_value(serde_json::json!({"track_overrides":[
+                {"source_representation_id":source,"track_position":1,"title":null,"disc_position":null,"display_position":null,"album_selected":true},
+                {"source_representation_id":source,"track_position":2,"title":null,"disc_position":null,"display_position":null,"album_selected":false}
+            ]}))
+        }}
+    },&command()).unwrap();
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks
+            .len(),
+        1
+    );
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        2
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks[0]
+            .track_position,
+        1
+    );
+    // Matching printed slots require review for same-codec originals too; codec
+    // inequality is not proof that two files are the same intended album track.
+    let same_codec = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["01.flac", "alternate.flac"],
+        &[
+            include_bytes!("fixtures/digital-audio/01.flac"),
+            include_bytes!("fixtures/digital-audio/01.flac"),
+        ],
+    );
+    assert!(
+        service
+            .album_playback_snapshot(&actor, same_codec.summary.target_item_id.unwrap(), None)
+            .is_err()
+    );
+}
+#[test]
+fn malformed_purchase_audio_never_advertises_ready_playback() {
+    let (_root, _store, actor, service, collection) = setup();
+    for (name, data) in [
+        (
+            "mislabelled.mp3",
+            include_bytes!("fixtures/digital-audio/01.flac").as_slice(),
+        ),
+        (
+            "truncated.mp3",
+            &include_bytes!("fixtures/digital-audio/02.mp3")[..2000],
+        ),
+    ] {
+        let detail = admit_digital_test_package(&service, &actor, collection.id, &[name], &[data]);
+        assert_eq!(
+            detail.import.phase,
+            ImportPhase::Published,
+            "preservation remains useful: {detail:?}"
+        );
+        assert_eq!(
+            detail.summary.outcome,
+            collector_app::IngestStepState::Failed,
+            "{detail:?}"
+        );
+        assert!(detail.summary.target_item_id.is_none_or(|item| {
+            service
+                .recorded_music_track_availability(&actor, item)
+                .unwrap()
+                .is_empty()
+        }));
+        assert!(
+            detail
+                .steps
+                .iter()
+                .any(|step| step.state == collector_app::IngestStepState::Failed),
+            "{detail:?}"
+        );
+    }
+}
+
+#[test]
+fn embedded_purchase_cover_is_an_asset_without_blocking_on_unsupported_companions() {
+    let (_root, store, actor, service, collection) = setup();
+    let detail = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["embedded.flac", "unsupported.aac"],
+        &[
+            include_bytes!("fixtures/digital-audio/embedded.flac"),
+            b"preserved unsupported companion",
+        ],
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let shown = service.item_presented(&actor, item).unwrap();
+    let artwork = shown
+        .primary_artwork
+        .expect("embedded cover published through normal Asset pipeline");
+    assert_eq!(shown.title, "Purchased album");
+    let mut bytes = Vec::new();
+    service
+        .asset_resource(&actor, collection.id, artwork, false)
+        .unwrap()
+        .reader
+        .read_to_end(&mut bytes)
+        .unwrap();
+    assert_eq!(bytes, include_bytes!("fixtures/digital-audio/cover.png"));
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store.item(item).unwrap().captures[0].representations[0].files[1].visibility,
+        Visibility::Curators
+    );
+}
+
+#[test]
+fn private_purchase_audio_does_not_publish_its_embedded_tags_or_artwork() {
+    let (_root, store, actor, service, collection) = setup();
+    let detail = admit_digital_test_package_with_visibility(
+        &service,
+        &actor,
+        collection.id,
+        &["hidden.flac"],
+        &[include_bytes!("fixtures/digital-audio/embedded.flac")],
+        Some(Visibility::Curators),
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let shown = service.item_presented(&actor, item).unwrap();
+    assert_ne!(shown.title, "Purchased album");
+    assert!(shown.primary_artwork.is_none());
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        1
+    );
+    let viewer = Principal {
+        user_id: store
+            .create_user("private-audio-viewer", "long private audio password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    store
+        .grant(collection.id, viewer.user_id, Role::Viewer)
+        .unwrap();
+    assert!(
+        service
+            .recorded_music_track_availability(&viewer, item)
+            .unwrap()
+            .is_empty()
+    );
+    let raw = store.item(item).unwrap();
+    assert_eq!(
+        raw.captures[0].representations[0].files[0].visibility,
+        Visibility::Curators
+    );
+}
+
+#[test]
+fn purchase_privacy_defaults_do_not_share_receipt_photos_and_review_can_share_booklets() {
+    let (_root, _store, actor, service, collection) = setup();
+    let selected = IngestPackageSelection {
+        purchase: None,
+        source: ImportSourceSummary {
+            kind: ImportSourceKind::Browser,
+            label: None,
+            package_name: "Purchase".into(),
+        },
+        anchor_file_index: None,
+        files: [
+            ("01.flac", None),
+            ("cover.png", None),
+            ("receipt.jpg", None),
+            ("booklet.pdf", Some(Visibility::Shared)),
+        ]
+        .into_iter()
+        .map(|(name, visibility)| UploadFile {
+            name: name.into(),
+            bytes: ByteLength(1),
+            sha256: None,
+            visibility,
+        })
+        .collect(),
+    };
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![selected],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        plan.packages[0]
+            .files
+            .iter()
+            .map(|f| f.visibility.unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            Visibility::Shared,
+            Visibility::Shared,
+            Visibility::Curators,
+            Visibility::Shared
+        ]
+    );
+}
+
+#[test]
+fn mp3_single_and_multidisc_purchase_have_distinct_items_and_native_order() {
+    let (_root, store, actor, service, collection) = setup();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let single =
+        admit_digital_test_package(&service, &actor, collection.id, &["single.mp3"], &[mp3]);
+    let album = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["Disc 2/01.flac", "Disc 1/02.mp3"],
+        &[include_bytes!("fixtures/digital-audio/disc-two.flac"), mp3],
+    );
+    let single = single.summary.target_item_id.unwrap();
+    let album = album.summary.target_item_id.unwrap();
+    assert_ne!(single, album);
+    assert!(store.item(single).unwrap().specimens.is_empty());
+    assert!(store.item(album).unwrap().specimens.is_empty());
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, single, None)
+            .unwrap()
+            .tracks
+            .len(),
+        1
+    );
+    let tracks = service
+        .album_playback_snapshot(&actor, album, None)
+        .unwrap()
+        .tracks;
+    assert_eq!(
+        tracks
+            .iter()
+            .map(|r| (r.track_position, r.disc_position, r.sample_rate()))
+            .collect::<Vec<_>>(),
+        vec![(2, Some(1), 44100), (1, Some(2), 96000)]
+    );
+    assert_eq!(
+        store.item(album).unwrap().captures[0]
+            .association
+            .specimen_id,
+        None
+    );
 }

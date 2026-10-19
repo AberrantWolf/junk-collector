@@ -17,6 +17,31 @@ This repository is an executable architecture/server foundation, not the complet
 Use the [consolidated backlog](remaining-work.md) for all remaining work and
 [release requirements](release-requirements.md) for the revised home-lab gate.
 Older dated entries below describe their state at the time, not the current queue.
+Completed records retain their historical milestone labels; the 2026-10-19 queue
+renumbering is documented in remaining work. Active remaining-work references use
+its current IDs.
+
+## Digital FLAC/MP3 purchases — delivered 2026-10-19
+
+[HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)
+has coordinated Collector, junk-libs and Trash Amp implementations. Digital
+acquisition and per-file visibility are portable; file sources have immutable
+native-format track manifests, descriptive tags/artwork and direct original
+playback without encoders or manufactured physical copies. Web intake/review,
+search, queues, playlists and source-scoped track edits use the same contracts as
+native streaming, download and retained offline metadata/artwork/playback.
+Private companions default to curators, and private audio cannot publish tags/art.
+Alternate encodings require explicit album inclusion choices.
+
+See the [supported matrix and retention/compatibility policy](digital-purchases.md)
+and [dated checks](validation/digital-purchases-2026-10-19.md). Real Chrome journeys,
+independent codec/tag vectors, restore/rebuild and native TLS/device-callback
+qualification are recorded there. The actual native GUI passed browse/search,
+artwork, both original formats, seek/next/queue, downloads, connection removal and
+server-stopped offline reopen/playback. HL-02 is delivered. Authorized coordinated
+publication replaces local Cargo patches with exact pushed sibling revisions,
+recorded in manifests and lockfiles; no sibling checkout is required.
+Further codecs, DRM and album-image splitting remain deferred.
 
 ## HL-08 Library return after nested work — 2026-10-18
 
@@ -28,7 +53,7 @@ fallback. A real-server Chrome regression reproduces the previous modal reopenin
 and covers both navigation intents, including same-document restoration after the
 modal unmounts and the identity of the restored work. Self-review found no further
 production-code defect. See the
-[dated validation](validation/library-work-return-2026-10-18.md). Other HL-08
+[dated validation](validation/library-work-return-2026-10-18.md). Other HL-09
 conveniences, game-disc listening and performance follow-ups remain open.
 
 ## HL-03 stopped-server backup and restore — 2026-10-18
@@ -52,7 +77,7 @@ both findings, including normal access after local recovery. External inbox/DAT/
 [operator runbook](local-alpha-installation.md#stopped-server-backup) and
 [dated validation](validation/backup-restore-2026-10-18.md). No live archive was
 backed up, restored or converted. Online backup, scheduling, export/deltas and a
-dashboard remain outside this delivery. Linux deployment qualification remains HL-04.
+dashboard remain outside this delivery. Linux deployment qualification remains HL-05.
 
 ## HL-01 cover reuse review repairs — 2026-10-18
 
@@ -121,7 +146,7 @@ duplicate-payload conversion; general record deletion remains unimplemented. See
 Listening to CD audio tracks preserved with games through the normal music
 interface and Trash Amp is requested future work, not an implemented capability.
 Preparation currently requires a music collection and does not support mixed-mode
-audio extraction. [HL-08](remaining-work.md#game-disc-audio-in-music-listening-and-trash-amp)
+audio extraction. [HL-09](remaining-work.md#game-disc-audio-in-music-listening-and-trash-amp)
 owns the complete cross-module preparation, discovery, playlist and native/offline
 delivery; no duplicate music import or proprietary game-audio decoding is required
 by that initial scope.
@@ -158,7 +183,7 @@ Album management → Check audio with AccurateRip; per-disc shortcuts focus that
 original. The existing processing workflow owns snapshot acquisition and check
 submission. Readers see results without write controls. See the
 [dated validation](validation.md#accuraterip-browsing-shortcut--2026-10-09).
-Real owned-disc/live AccurateRip qualification remains outstanding in HL-05.
+Real owned-disc/live AccurateRip qualification remains outstanding in HL-06.
 
 ## AccurateRip response selection repair — 2026-10-09
 
@@ -171,7 +196,7 @@ ID, repairs a stale saved choice, and loads older snapshot pages. Missing matche
 show fetch guidance. Multiple-anchor packages keep explicit choices and the strict
 worker check. No checksum algorithm, saved evidence or originals changed. See
 [validation](validation.md#accuraterip-response-selection-repair--2026-10-09).
-This does not complete HL-05 real owned-disc/live-provider qualification.
+This does not complete HL-06 real owned-disc/live-provider qualification.
 
 Follow-up recovery fix: empty response selections retain the source chooser and
 show one actionable prerequisite instead of a UUID parse failure. Scan plans expose
@@ -1231,4 +1256,4 @@ reindex and archive-only recovery. Unknown or unresolved inputs are skipped;
 corruption fails closed. See [conversion](snapshot-duplicate-conversion.md) and
 [delivery validation](validation/concurrent-processing.md). No live archive was
 converted. Full-source validation is retained; disk contention and hashing redesign
-remain separate work. This does not qualify live-provider or real-disc HL-05 checks.
+remain separate work. This does not qualify live-provider or real-disc HL-06 checks.

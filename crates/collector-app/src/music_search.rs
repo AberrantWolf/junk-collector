@@ -150,7 +150,7 @@ impl CollectionService {
             let sources = rows
                 .iter()
                 .filter(|row| {
-                    row.profile == ConversionProfile::Flac
+                    row.primary_playback()
                         && row.track_position == song.track_position
                         && song
                             .disc_position
@@ -160,7 +160,10 @@ impl CollectionService {
                 .collect::<Vec<_>>();
             if song.duration_ms.is_none() {
                 song.duration_ms = sources.first().and_then(|row| {
-                    u64::try_from(u128::from(row.frame_count.0) * 1000 / 44100).ok()
+                    u64::try_from(
+                        u128::from(row.frame_count.0) * 1000 / u128::from(row.sample_rate()),
+                    )
+                    .ok()
                 });
             }
             hits.push(MusicSearchHit {
@@ -203,7 +206,7 @@ impl CollectionService {
                 .find(|v| {
                     v.source_representation_id == source_representation_id
                         && v.track_position == track_position
-                        && v.profile == ConversionProfile::Flac
+                        && v.primary_playback()
                 })
                 .ok_or(Error::Conflict)?;
             tracks.push(row.clone());

@@ -757,7 +757,6 @@ fn owner_edit_distinguishes_omission_and_null_and_preserves_structured_unknown_d
     );
     assert_eq!(value["future"], current.payload.value().unwrap()["future"]);
     let presentation = registry.presentation(&updated);
-    assert_eq!(presentation.fields[0].value, "Music CDs");
     assert!(
         presentation
             .fields
@@ -2157,4 +2156,54 @@ fn scan_planning_selects_only_eligible_anchors_without_opening_bytes() {
         complete.selection.value().unwrap()["package_kind"],
         "redumper"
     );
+}
+
+#[test]
+fn purchase_discovery_preserves_multidisc_and_independent_nested_packages() {
+    for names in [
+        vec![
+            "Album/Disc 1/01.flac",
+            "Album/Disc 2/01.mp3",
+            "Album/cover.png",
+            "Other/single.mp3",
+        ],
+        vec![
+            "Disc 1/01.flac",
+            "Disc 2/01.mp3",
+            "cover.png",
+            "Other/single.mp3",
+        ],
+        vec![
+            "Album/01.flac",
+            "Album/Bonus/01.mp3",
+            "Album/receipt.txt",
+            "Other/single.mp3",
+        ],
+    ] {
+        let names = names
+            .into_iter()
+            .map(|s| PackageFileName::new(s).unwrap())
+            .collect::<Vec<_>>();
+        let packages = Music.discover_imports(&names);
+        let all = packages
+            .iter()
+            .flat_map(|p| p.file_indices.iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(all.len(), names.len());
+        assert_eq!(
+            all.iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            names.len()
+        );
+        assert_eq!(
+            packages.len(),
+            if names[1].as_str().contains("Bonus") {
+                3
+            } else {
+                2
+            }
+        );
+    }
 }

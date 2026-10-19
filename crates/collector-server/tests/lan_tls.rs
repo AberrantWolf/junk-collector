@@ -143,6 +143,7 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
             item.id,
             item.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "original.bin".into(),
                 bytes: ByteLength(data.len() as u64),
                 sha256: None,

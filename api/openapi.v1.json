@@ -6306,6 +6306,72 @@
         }
       }
     },
+    "/api/v1/items/{item}/captures/{capture}/purchase": {
+      "put": {
+        "operationId": "update_digital_purchase",
+        "parameters": [
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "capture",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDigitalPurchase"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{item}/client-playback": {
       "get": {
         "operationId": "client_album_playback",
@@ -8869,6 +8935,16 @@
           "id": {
             "$ref": "#/components/schemas/CaptureId"
           },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
+          },
           "representations": {
             "type": "array",
             "items": {
@@ -10198,6 +10274,47 @@
           }
         }
       },
+      "DigitalPurchase": {
+        "type": "object",
+        "description": "Acquisition facts belong to the purchased package, independently of physical copies.",
+        "properties": {
+          "cost": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Money"
+              }
+            ]
+          },
+          "date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "order_reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "store": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "DiscardIngestCommand": {
         "type": "object",
         "required": [
@@ -11238,6 +11355,9 @@
           },
           "received_bytes": {
             "$ref": "#/components/schemas/ByteLength"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
           }
         },
         "additionalProperties": false
@@ -11706,6 +11826,16 @@
               "$ref": "#/components/schemas/UploadFile"
             }
           },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
+          },
           "source": {
             "$ref": "#/components/schemas/ImportSourceSummary"
           }
@@ -11817,6 +11947,16 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
             ]
           },
           "source": {
@@ -14368,6 +14508,14 @@
           }
         }
       },
+      "MusicAlbumSelection": {
+        "type": "string",
+        "enum": [
+          "included",
+          "excluded",
+          "needs_review"
+        ]
+      },
       "MusicAlbumSourcePlan": {
         "type": "object",
         "required": [
@@ -14405,6 +14553,53 @@
             "$ref": "#/components/schemas/RepresentationId"
           },
           "track_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MusicAudioFormat": {
+        "type": "object",
+        "required": [
+          "codec",
+          "sample_rate",
+          "channels"
+        ],
+        "properties": {
+          "bits_per_sample": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "channels": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "codec": {
+            "type": "string"
+          },
+          "delay_frames": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "padding_frames": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "sample_rate": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
@@ -14770,11 +14965,23 @@
           "start_frame",
           "frame_count",
           "title",
-          "profile",
           "state",
           "can_prepare"
         ],
         "properties": {
+          "album_selection": {
+            "$ref": "#/components/schemas/MusicAlbumSelection"
+          },
+          "audio_format": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MusicAudioFormat"
+              }
+            ]
+          },
           "can_prepare": {
             "type": "boolean",
             "description": "Current actor, module, source and encoder permit explicit preparation."
@@ -14790,12 +14997,27 @@
             "format": "int32",
             "minimum": 0
           },
+          "display_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
           "frame_count": {
             "$ref": "#/components/schemas/PcmFrame",
-            "description": "Exact track-local integer stereo PCM frame count."
+            "description": "Decoded track-local frames; MP3 gapless knowledge is separate in audio_format."
           },
           "profile": {
-            "$ref": "#/components/schemas/ConversionProfile"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConversionProfile"
+              }
+            ]
           },
           "source_label": {
             "type": "string"
@@ -14805,7 +15027,7 @@
           },
           "start_frame": {
             "$ref": "#/components/schemas/PcmFrame",
-            "description": "Exact coordinate in the source's integer stereo PCM timeline."
+            "description": "Coordinate in the source PCM timeline at sample_rate(), with native channels."
           },
           "state": {
             "$ref": "#/components/schemas/MusicTrackAvailabilityState"
@@ -15750,6 +15972,16 @@
                     "null"
                   ]
                 },
+                "purchase": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DigitalPurchase"
+                    }
+                  ]
+                },
                 "source": {
                   "$ref": "#/components/schemas/ImportSourceSummary"
                 }
@@ -16391,6 +16623,7 @@
               "type": "object",
               "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
               "required": [
+                "digital_audio",
                 "workflow_generation",
                 "id",
                 "collection_id",
@@ -16442,6 +16675,9 @@
                   "$ref": "#/components/schemas/ContentPermissions"
                 },
                 "deleted": {
+                  "type": "boolean"
+                },
+                "digital_audio": {
                   "type": "boolean"
                 },
                 "domain": {
@@ -17323,10 +17559,20 @@
           "id": {
             "$ref": "#/components/schemas/CaptureId"
           },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
+          },
           "representations": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Representation"
+              "$ref": "#/components/schemas/PresentedRepresentation"
             }
           },
           "revision": {
@@ -17440,10 +17686,39 @@
           }
         }
       },
+      "PresentedFile": {
+        "type": "object",
+        "required": [
+          "index",
+          "visibility",
+          "name",
+          "bytes",
+          "digest"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
+          }
+        }
+      },
       "PresentedItem": {
         "type": "object",
         "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
         "required": [
+          "digital_audio",
           "workflow_generation",
           "id",
           "collection_id",
@@ -17495,6 +17770,9 @@
             "$ref": "#/components/schemas/ContentPermissions"
           },
           "deleted": {
+            "type": "boolean"
+          },
+          "digital_audio": {
             "type": "boolean"
           },
           "domain": {
@@ -17626,6 +17904,52 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "PresentedRepresentation": {
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "format",
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PresentedFile"
+            }
+          },
+          "format": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "profile": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConversionProfile"
+              }
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/RepresentationRole"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepresentationId"
+              }
+            ]
           }
         }
       },
@@ -18745,6 +19069,16 @@
           },
           "prepare_music": {
             "type": "boolean"
+          },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -18853,6 +19187,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
           }
         }
       },
@@ -18904,6 +19241,28 @@
           },
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateDigitalPurchase": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -19008,6 +19367,16 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "visibility": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Visibility"
+              }
             ]
           }
         },

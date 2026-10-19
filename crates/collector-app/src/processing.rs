@@ -784,6 +784,7 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         &self,
         transaction: collector_core::TransactionId,
         record: MetadataAuthorityRecord,
+        context: Option<crate::ItemEffectContext>,
     ) -> Result<()>;
     fn metadata_authority(
         &self,

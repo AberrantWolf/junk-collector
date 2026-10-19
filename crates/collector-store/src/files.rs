@@ -667,6 +667,7 @@ impl Store {
                 ));
             }
             files.push(StoredFile {
+                visibility: file.visibility.unwrap_or(Visibility::Shared),
                 name: file.name.clone(),
                 bytes: length,
                 digest,
@@ -682,6 +683,7 @@ impl Store {
             Some(capture) => capture,
             None => {
                 let capture = Capture {
+                    purchase: None,
                     id: upload.capture_id,
                     collection_id: item.collection_id,
                     revision: Revision(1),
@@ -1325,11 +1327,13 @@ impl Store {
             visibility,
             media_type: media_type.into(),
             file: StoredFile {
+                visibility: Default::default(),
                 name: original_name,
                 bytes: ByteLength(bytes.len() as u64),
                 digest,
             },
             thumbnail: Some(StoredFile {
+                visibility: Default::default(),
                 name: "thumbnail.png".into(),
                 bytes: ByteLength(thumbnail.len() as u64),
                 digest: Digest::sha256(&thumbnail),
@@ -1718,6 +1722,7 @@ impl Store {
                     .to_owned();
                 safe_name(&name)?;
                 out.push(UploadFile {
+                    visibility: Default::default(),
                     name,
                     bytes: ByteLength(metadata.len()),
                     sha256: None,

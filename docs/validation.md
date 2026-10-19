@@ -1,5 +1,12 @@
 # Validation recorded for the foundation
 
+## Digital purchases — 2026-10-19
+
+See [HL-02 implementation and acceptance evidence](validation/digital-purchases-2026-10-19.md).
+HL-02 is delivered. Independent format vectors, privacy/recovery checks, real
+Chrome and actual Trash Amp online/download/offline GUI journeys passed. Broader
+LAN/device qualification remains in the consolidated queue.
+
 ## Automatic standard-game identification — 2026-10-10
 
 [Delivery validation](validation/game-identification-2026-10-10.md) records shared
