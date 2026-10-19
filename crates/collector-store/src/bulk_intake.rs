@@ -420,12 +420,12 @@ impl BulkIntakePort for Store {
             return Err(Error::Invalid("The package manifest is incomplete. Resume saving the reviewed packages before starting this import.".into()));
         }
         let conflicting_group: Option<String> = tx.query_row(
-            "SELECT json_extract(record,'$.destination.key') FROM private.intake_members WHERE intake_id=? AND json_extract(record,'$.destination.destination')='album_group' GROUP BY json_extract(record,'$.destination.key') HAVING min(json_extract(record,'$.destination.title'))<>max(json_extract(record,'$.destination.title')) LIMIT 1",
+            "SELECT json_extract(record,'$.destination.key') FROM private.intake_members WHERE intake_id=? AND json_extract(record,'$.destination.destination')='album_group' GROUP BY json_extract(record,'$.destination.key') HAVING count(DISTINCT coalesce(json_extract(record,'$.destination.title'),''))>1 LIMIT 1",
             [id.to_string()], |row| row.get(0),
         ).optional().map_err(storage)?;
         if let Some(group) = conflicting_group {
             return Err(Error::Invalid(format!(
-                "Album group {group} has conflicting titles. Give every package in that group the same album title before starting."
+                "Album group {group} has conflicting titles. Use automatic titles for every package in that group, or give them the same manual title before starting."
             )));
         }
         record.session.state = IntakeState::Accepted;

@@ -27,7 +27,8 @@
     "test:navigation": "node tests/navigation.mjs",
     "test:certificate": "node tests/certificate.mjs",
     "test:game-catalog": "node tests/game-catalog-upload.mjs",
-    "test:purchases": "node tests/digital-purchases.mjs"
+    "test:purchases": "node tests/digital-purchases.mjs",
+    "test:intake-review": "node tests/intake-review.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

@@ -26,6 +26,7 @@ pub use collection_types::*;
 mod derivatives;
 pub use derivatives::*;
 mod guided_ingest;
+pub use guided_ingest::is_intake_housekeeping;
 mod item_lifecycle;
 pub use item_lifecycle::prepare_clean_reimport;
 mod library_care;

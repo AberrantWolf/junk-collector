@@ -21,6 +21,24 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Multi-disc inbox review — HL-07A, 2026-10-19
+
+Batch import review now exposes CUE/Redumper anchor selection through shared
+readiness, preserving file visibility and destination choices during replanning.
+Album group labels are independent of optional manual titles. Physical-copy labels
+are explicitly reviewed: matching labels within an album/intake identify one copy,
+different labels identify separate copies. Numeric per-disc defaults are removed.
+Known `.DS_Store` files and `#recycle`/`@eaDir` directory subtrees are excluded from
+new inbox/browser intake. Unknown hidden files remain originals, and recovery of
+previously accepted inventories retains declared housekeeping files.
+
+Real Chrome inbox workflows cover automatic title/artwork, manual-title authority,
+one-copy and separate-copy grouping, retained file privacy and exact original
+downloads, draft reload and server restart. Existing grouped-publication failure/
+retry and manual-inventory fences remain covered. See [dated acceptance](validation/intake-review-2026-10-19.md).
+The operator's permanent NAS acceptance remains HL-05; optional source cleanup
+remains unimplemented under HL-09.
+
 ## Digital FLAC/MP3 purchases — delivered 2026-10-19
 
 [HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)

@@ -222,3 +222,13 @@
 .adding-mode{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.adding-mode button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}.guided-ingest summary{cursor:pointer}.guided-ingest details>summary{font-weight:600}.ingest-history progress{width:100%;grid-column:1 / -1;accent-color:var(--green)}
 .guided-ingest label:has(input[type="checkbox"]){display:flex;align-items:center;gap:10px}.guided-ingest input[type="checkbox"]{width:auto;margin:0;flex:none}
 .destination-chooser{border:1px solid var(--line,#ddd);border-radius:10px;padding:1rem;margin:1rem 0}.destination-chooser>p{margin:.35rem 0 .7rem}.destination-results{display:grid;gap:.4rem;max-height:22rem;overflow:auto;margin:.7rem 0}.destination-results button{display:flex;align-items:center;text-align:left;gap:.75rem;width:100%;padding:.5rem}.destination-results img,.destination-placeholder{width:3.2rem;height:3.2rem;object-fit:cover;flex:none;border-radius:.25rem}.destination-placeholder{display:grid;place-items:center;background:#eee}.destination-results button span:last-child{display:grid;gap:.2rem}.destination-results small{color:var(--muted,#666)}
+
+/* Batch review keeps package details above the independent grouping choices. */
+.intake-review-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;overflow-wrap:anywhere}
+.intake-review-row>.row-text{grid-column:1/-1}
+.intake-review-row label,.intake-review-row input,.intake-review-row select{min-width:0;max-width:100%}
+.intake-review-row input[type="checkbox"],.intake-actions input[type="checkbox"]{width:auto;flex:none}
+.intake-review-row .row-text label:has(input[type="checkbox"]),.intake-actions>label{display:flex;align-items:start;gap:.6rem}
+.intake-actions{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+.intake-actions>label{margin:0}
+@media(max-width:700px){.intake-review-row{grid-template-columns:minmax(0,1fr)}.intake-review-row>label{margin:0}.intake-actions{align-items:start;flex-direction:column}}

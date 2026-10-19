@@ -1697,13 +1697,40 @@ impl Store {
     }
     /// Inventory a server-admin configured inbox directory. Reject symlinks and special files.
     pub fn inventory_directory(source: &Path) -> Result<Vec<UploadFile>> {
-        fn walk(root: &Path, path: &Path, out: &mut Vec<UploadFile>, depth: usize) -> Result<()> {
+        Self::inventory_directory_retaining(source, &[])
+    }
+
+    /// Existing accepted inventories retain their exact housekeeping originals on recovery.
+    pub fn inventory_directory_retaining(
+        source: &Path,
+        retained: &[String],
+    ) -> Result<Vec<UploadFile>> {
+        fn walk(
+            root: &Path,
+            path: &Path,
+            out: &mut Vec<UploadFile>,
+            depth: usize,
+            retained: &[String],
+        ) -> Result<()> {
             if depth > 32 || out.len() > 4096 {
                 return Err(Error::Invalid(
                     "package is too deeply nested or contains too many files".into(),
                 ));
             }
             let metadata = fs::symlink_metadata(path).map_err(storage)?;
+            let relative = path
+                .strip_prefix(root)
+                .map_err(storage)?
+                .to_str()
+                .ok_or_else(|| Error::Invalid("package names must be UTF-8".into()))?;
+            if collector_app::is_intake_housekeeping(relative, metadata.is_dir())
+                && !retained.iter().any(|name| {
+                    name == relative
+                        || (metadata.is_dir() && name.starts_with(&format!("{relative}/")))
+                })
+            {
+                return Ok(());
+            }
             if metadata.file_type().is_symlink() {
                 return Err(Error::Invalid(
                     "inbox packages cannot contain symlinks".into(),
@@ -1711,7 +1738,13 @@ impl Store {
             }
             if metadata.is_dir() {
                 for entry in fs::read_dir(path).map_err(storage)? {
-                    walk(root, &entry.map_err(storage)?.path(), out, depth + 1)?;
+                    walk(
+                        root,
+                        &entry.map_err(storage)?.path(),
+                        out,
+                        depth + 1,
+                        retained,
+                    )?;
                 }
             } else if metadata.is_file() {
                 let name = path
@@ -1735,7 +1768,7 @@ impl Store {
             Ok(())
         }
         let mut files = Vec::new();
-        walk(source, source, &mut files, 0)?;
+        walk(source, source, &mut files, 0, retained)?;
         files.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(files)
     }

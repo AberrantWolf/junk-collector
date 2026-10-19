@@ -134,6 +134,18 @@ The publication path applies this rule on first execution and ordinary retry,
 including old failed imports after restart; no data conversion, credential reset,
 new Import identity or blanket expected-revision bypass is introduced.
 
+HL-07A import review (2026-10-19): intake album group keys identify destinations
+independently of optional manual title authority. Matching explicitly reviewed
+copy labels within one album/intake share one deterministic physical copy; different
+labels create distinct copies. Nullable titles retain existing recorded manual
+titles; no stored inventory is regrouped. Shared module readiness replans selected
+CUE/Redumper anchors without changing the reviewed inventory or destination.
+Application-owned new-intake housekeeping policy excludes only `.DS_Store` files
+and `#recycle`/`@eaDir` directory subtrees. Inbox discovery, browser discovery and
+staging use that policy; adapters retain declared housekeeping members for recovery
+of older accepted inventories. Unknown hidden files and saved archive records remain
+unchanged. See [acceptance](validation/intake-review-2026-10-19.md).
+
 ## Collection lists
 
 Collection-owned lists are portable revisioned archive entities, independent of

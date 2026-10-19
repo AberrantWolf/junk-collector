@@ -12,8 +12,8 @@ have been removed; completed work is described by status and dated validation.
 
 Queue updated 2026-10-19 after native digital-album delivery, live NAS use and
 issue triage. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
-qualification remains open; the next code delivery is HL-07A's concrete import
-review repairs. NAS operations/recovery belong to HL-05A/B; Docker publication
+qualification remains open; HL-07A's import-review repairs are delivered. The next
+independent code delivery is HL-07B's direct playback controls. NAS operations/recovery belong to HL-05A/B; Docker publication
 and release usability belong to HL-07A–D. Keep the existing milestone numbers.
 The earlier insertion assigned
 digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
@@ -71,7 +71,7 @@ queue. Dated reports and workarounds remain in the
 | NAS SFTP and SSH key exchange | HL-05 operator follow-up | Host administration; not a Collector release blocker |
 | Grouped-disc revision conflict and repeated failed retry | Completed repair below | Keep regression coverage; remaining deployment acceptance stays HL-05 |
 
-Recommended sequence: HL-07A first; HL-05A/B and HL-07B/C can then proceed as
+HL-07A is delivered. HL-05A/B and HL-07B/C can proceed as
 independent complete deliveries. HL-07D publishes after the applicable acceptance
 checks and update/recovery procedure are ready. Continue HL-04/HL-06 hardware and
 format qualification when the required devices/reference material are available.
@@ -397,7 +397,14 @@ mandatory. **Owner:** integrated release review.
 
 #### HL-07A — Repair multi-disc inbox import review
 
-**State:** next code delivery; concrete live-use defects, not a reopening of all BL2.
+**State:** delivered 2026-10-19. Shared anchor replanning, independent automatic/manual
+album titles, explicit physical-copy choices and narrow housekeeping exclusion are
+implemented through discovery, review and staging. Real Chrome acceptance covers
+automatic artwork/title, separate copies, exact original downloads, privacy, draft
+reload, restart and mobile/keyboard review; Rust regressions preserve failed retry,
+reindex and older accepted inventories. See [dated acceptance](validation/intake-review-2026-10-19.md).
+No live NAS data was changed; deployment qualification remains HL-05 and source
+cleanup remains HL-09. The completed delivery contract follows for reference.
 **Owner:** application intake/grouping policy, module readiness, filesystem adapters
 and web review, with the existing [bulk delivery contract](bulk-library-plan.md).
 Deliver one complete inbox → review → grouped import → automatic metadata workflow:
@@ -813,21 +820,19 @@ implemented; provider-access restoration or automated scraping is not an open ta
 HL-01 retention/CAA simplification, HL-02 FLAC/MP3 purchases and HL-03 stopped-server
 backup/restore tooling are delivered. Do not restart those completed scopes.
 The grouped-disc publication repair is also implemented and operator-reported as
-working on the NAS. Next complete HL-07A's import-review repairs. HL-04 device
-qualification and HL-05A/B deployment/recovery work remain independently available;
-preserve the existing milestone numbers.
+working on the NAS. HL-07A is delivered with [local acceptance](validation/intake-review-2026-10-19.md).
+Next complete HL-07B's direct album/track playback actions, followed by HL-07C's
+bounded setup/release wording cleanup. HL-04 device qualification and HL-05A/B
+deployment/recovery remain independently available when the actual hosts are
+accessible. HL-07D publication follows its deployment/update acceptance dependencies.
+Preserve milestone numbers and do not reopen completed scopes.
 
-> Complete HL-07A — Repair multi-disc inbox import review from this queue.
-> Read architecture, current status, release requirements and the bulk intake
-> delivery contract first. Deliver anchor selection, grouping without forced
-> manual titles, understandable physical-copy choices/defaults and narrow
-> housekeeping exclusion through shared planning, actual staging and the real UI.
-> Preserve raw originals, manual authority, unknown files, durable retry ownership
-> and the grouped-disc publication repair. Exercise the complete two-disc workflow
-> and its failure/restart cases, then update status, delivery evidence and this
-> queue together. Do not absorb optional inbox deletion, new format mechanisms,
-> Docker publication or unrelated native-client work. Do not commit or spawn
-> agents without an explicit user request.
+> Complete HL-07B — Direct album and track playback actions. Reuse the persistent
+> player, authorized availability and queue. Explicit playback replaces the personal
+> queue and starts immediately; album order follows numeric disc/track positions.
+> Preserve alternate-source review, unavailable-audio guidance and explicit encoding.
+> Exercise prepared CD and digital originals through the actual UI, then self-review,
+> update status/delivery evidence/this queue and commit before proceeding.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

@@ -12134,7 +12134,6 @@
             "type": "object",
             "required": [
               "key",
-              "title",
               "copy_key",
               "destination"
             ],
@@ -12152,7 +12151,10 @@
                 "type": "string"
               },
               "title": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           },

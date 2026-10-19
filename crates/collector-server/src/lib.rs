@@ -3656,6 +3656,7 @@ fn paged_inbox_packages(
             continue;
         };
         if !metadata.is_dir()
+            || collector_app::is_intake_housekeeping(&name, true)
             || metadata.file_type().is_symlink()
             || name.is_empty()
             || name.contains(['/', '\\'])
@@ -3691,6 +3692,7 @@ fn direct_inbox_packages(root: &std::path::Path) -> Result<Vec<String>> {
             continue;
         };
         if metadata.is_dir()
+            && !collector_app::is_intake_housekeeping(&name, true)
             && !metadata.file_type().is_symlink()
             && !name.is_empty()
             && !name.contains(['/', '\\'])
@@ -3707,6 +3709,14 @@ fn resolve_inbox_package(
     state: &AppState,
     source: &ImportSourceSummary,
 ) -> Result<(std::path::PathBuf, Vec<UploadFile>)> {
+    resolve_inbox_package_retaining(state, source, None)
+}
+
+fn resolve_inbox_package_retaining(
+    state: &AppState,
+    source: &ImportSourceSummary,
+    retained: Option<&[String]>,
+) -> Result<(std::path::PathBuf, Vec<UploadFile>)> {
     let label = source
         .label
         .as_ref()
@@ -3714,6 +3724,7 @@ fn resolve_inbox_package(
     if source.package_name.is_empty()
         || source.package_name.contains(['/', '\\'])
         || matches!(source.package_name.as_str(), "." | "..")
+        || (retained.is_none() && collector_app::is_intake_housekeeping(&source.package_name, true))
     {
         return Err(Error::Invalid(
             "select a direct inbox package directory".into(),
@@ -3731,7 +3742,7 @@ fn resolve_inbox_package(
     {
         return Err(Error::Forbidden);
     }
-    let files = Store::inventory_directory(&path)?;
+    let files = Store::inventory_directory_retaining(&path, retained.unwrap_or_default())?;
     Ok((path, files))
 }
 
@@ -3744,7 +3755,16 @@ fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
         }
         after = imports.last().map(|value| value.id);
         for import in imports {
-            let (path, current) = match resolve_inbox_package(state, &import.source) {
+            let retained = import
+                .files
+                .iter()
+                .map(|file| file.name.clone())
+                .collect::<Vec<_>>();
+            let (path, current) = match resolve_inbox_package_retaining(
+                state,
+                &import.source,
+                Some(&retained),
+            ) {
                 Ok(value) => value,
                 Err(error) => {
                     state.service.report_guided_staging_failure(import.id, "Configured inbox package is unavailable; restore the source or discard this import.")?;
@@ -3855,6 +3875,7 @@ async fn stage_inbox_import(
     if input.package.is_empty()
         || input.package.contains(['/', '\\'])
         || matches!(input.package.as_str(), "." | "..")
+        || collector_app::is_intake_housekeeping(&input.package, true)
     {
         return Err(Error::Invalid("select a direct inbox package directory".into()).into());
     }
@@ -4724,6 +4745,7 @@ async fn import_inbox(
     if input.package.is_empty()
         || input.package.contains(['/', '\\'])
         || matches!(input.package.as_str(), "." | "..")
+        || collector_app::is_intake_housekeeping(&input.package, true)
     {
         return Err(Error::Invalid("select a direct inbox package directory".into()).into());
     }

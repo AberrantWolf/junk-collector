@@ -3397,7 +3397,7 @@ export interface components {
             /** @enum {string} */
             destination: "album_group";
             key: string;
-            title: string;
+            title?: string | null;
         } | {
             copy_key: string;
             /** @enum {string} */

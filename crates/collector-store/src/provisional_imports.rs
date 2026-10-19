@@ -583,8 +583,14 @@ impl ProvisionalImportPort for Store {
             return Err(Error::Invalid("inbox package changed while staging".into()));
         }
         let root = fs::canonicalize(source).map_err(storage)?;
-        let initial_inventory = Self::inventory_directory(&root)?;
         let mut record = self.import_record(id)?;
+        let retained = record
+            .view
+            .files
+            .iter()
+            .map(|file| file.name.clone())
+            .collect::<Vec<_>>();
+        let initial_inventory = Self::inventory_directory_retaining(&root, &retained)?;
         if record.view.phase == ImportPhase::Analyzing
             && record
                 .view
@@ -646,7 +652,7 @@ impl ProvisionalImportPort for Store {
                 return Err(Error::Invalid("inbox package changed while staging".into()));
             }
         }
-        let final_inventory = Self::inventory_directory(&root)?;
+        let final_inventory = Self::inventory_directory_retaining(&root, &retained)?;
         if final_inventory.len() != initial_inventory.len()
             || final_inventory
                 .iter()

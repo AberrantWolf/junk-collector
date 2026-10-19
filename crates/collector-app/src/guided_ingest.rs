@@ -36,6 +36,15 @@ fn safe_package_title(name: &str) -> Result<String> {
     }
 }
 
+/// Narrow policy for new intake only. Unknown and other hidden files are originals.
+/// Adapters pass `directory` when deciding whether to descend into a directory.
+pub fn is_intake_housekeeping(name: &str, directory: bool) -> bool {
+    let parts = name.split('/').collect::<Vec<_>>();
+    parts.iter().enumerate().any(|(index, part)| {
+        matches!(*part, "#recycle" | "@eaDir") && (directory || index + 1 < parts.len())
+    }) || (!directory && parts.last() == Some(&".DS_Store"))
+}
+
 fn validate_plan_files(files: &[UploadFile]) -> Result<()> {
     validate_intake_files(files, 10_000)
 }
@@ -167,10 +176,13 @@ impl CollectionService {
     pub fn discover_ingest(
         &self,
         actor: &Principal,
-        command: DiscoverIngestCommand,
+        mut command: DiscoverIngestCommand,
     ) -> Result<DiscoveredIngestPlan> {
         let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
         validate_plan_files(&command.files)?;
+        command
+            .files
+            .retain(|file| !is_intake_housekeeping(&file.name, false));
         let names = command
             .files
             .iter()
@@ -237,6 +249,33 @@ impl CollectionService {
         let mut packages = Vec::with_capacity(command.packages.len());
         for (position, package) in command.packages.iter().enumerate() {
             let mut package = package.clone();
+            validate_plan_files(&package.files)?;
+            if let Some(selected) = package.anchor_file_index {
+                let selected_name = package
+                    .files
+                    .get(selected)
+                    .ok_or_else(|| Error::Invalid("Invalid anchor file index".into()))?
+                    .name
+                    .clone();
+                package
+                    .files
+                    .retain(|file| !is_intake_housekeeping(&file.name, false));
+                package.anchor_file_index = Some(
+                    package
+                        .files
+                        .iter()
+                        .position(|file| file.name == selected_name)
+                        .ok_or_else(|| {
+                            Error::Invalid(
+                                "A housekeeping file cannot be an analysis anchor".into(),
+                            )
+                        })?,
+                );
+            } else {
+                package
+                    .files
+                    .retain(|file| !is_intake_housekeeping(&file.name, false));
+            }
             let digital = eligibility.owner.0 == "org.junk.music"
                 && collector_modules::music::files::is_file_package(
                     &package

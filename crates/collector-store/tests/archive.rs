@@ -4097,6 +4097,141 @@ fn configured_inbox_staging_runs_through_the_durable_worker() {
     );
     assert_eq!(store.evidence(saved.id).unwrap().len(), 1);
 }
+#[test]
+fn intake_housekeeping_is_narrow_and_existing_accepted_files_remain_stageable() {
+    let (root, store, actor, service, collection) = setup();
+    let source = root.path().join("inbox/housekeeping");
+    let preserved = [
+        "disc.cue",
+        "disc.bin",
+        ".hidden-notes",
+        "notes/@eaDir",
+        "#recycle.txt",
+    ];
+    let ignored = [
+        ".DS_Store",
+        "nested/.DS_Store",
+        "@eaDir/disc.bin/SYNO@EAStream",
+        "#recycle/old/disc.cue",
+    ];
+    for name in preserved.iter().chain(ignored.iter()) {
+        let path = source.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, name.as_bytes()).unwrap();
+    }
+    let files = Store::inventory_directory(&source).unwrap();
+    assert_eq!(files.len(), preserved.len());
+    for name in preserved {
+        assert!(files.iter().any(|file| file.name == name));
+    }
+    let retained = ignored
+        .iter()
+        .map(|name| name.to_string())
+        .collect::<Vec<_>>();
+    let legacy = Store::inventory_directory_retaining(&source, &retained).unwrap();
+    assert_eq!(legacy.len(), preserved.len() + ignored.len());
+    // Frozen imports from before this policy still stage every declared original.
+    let import = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Inbox,
+                    label: Some("Shelf".into()),
+                    package_name: "housekeeping".into(),
+                },
+                files: legacy,
+                association: Default::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .enqueue_inbox_import_staging(&actor, import.id, source.to_str().unwrap(), &command())
+        .unwrap();
+    assert!(service.run_next_job("legacy-housekeeping").unwrap());
+    let staged = store.import_record(import.id).unwrap();
+    for file in staged.view.files {
+        assert_eq!(file.digest, Some(Digest::sha256(file.name.as_bytes())));
+    }
+    assert_eq!(
+        std::fs::read(source.join(".hidden-notes")).unwrap(),
+        b".hidden-notes"
+    );
+}
+
+#[test]
+fn browser_intake_filters_housekeeping_before_discovery_and_remaps_explicit_anchors() {
+    let (_root, _store, actor, service, collection) = setup();
+    let names = [
+        "Album/.DS_Store",
+        "Album/disc.cue",
+        "Album/disc.bin",
+        "Album/@eaDir/disc.cue",
+        "Album/#recycle/disc.cue",
+        "Album/.unknown",
+    ];
+    let files = names
+        .iter()
+        .map(|name| UploadFile {
+            visibility: Default::default(),
+            name: (*name).into(),
+            bytes: ByteLength(0),
+            sha256: None,
+        })
+        .collect::<Vec<_>>();
+    let discovery = service
+        .discover_bulk_intake(
+            &actor,
+            collector_app::DiscoverIngestCommand {
+                collection_id: collection.id,
+                files: files.clone(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(discovery.package_count, 1);
+    let page = service
+        .intake_discovery_page(&actor, discovery.id, None, None)
+        .unwrap();
+    assert_eq!(page.packages.items[0].files.len(), 3);
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Album".into(),
+                    },
+                    files,
+                    anchor_file_index: Some(1),
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        plan.packages[0]
+            .anchors
+            .iter()
+            .find(|anchor| anchor.selected)
+            .unwrap()
+            .file_index,
+        0
+    );
+    assert!(
+        plan.packages[0]
+            .files
+            .iter()
+            .any(|file| file.name == "Album/.unknown")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn inbox_symlinks_are_rejected() {
@@ -17108,17 +17243,17 @@ fn album_group_publication_faults_recover_all_members_or_none() {
 
 #[test]
 fn grouped_disc_publication_survives_sibling_evidence_revision() {
-    grouped_disc_publication_case(false, false);
+    grouped_disc_publication_case(false, false, true);
 }
 
 #[test]
 fn grouped_disc_failed_publication_retries_after_restart_without_duplicate_copies() {
-    grouped_disc_publication_case(true, false);
+    grouped_disc_publication_case(true, false, true);
 }
 
 #[test]
 fn grouped_disc_publication_keeps_manual_inventory_revision_conflicts() {
-    grouped_disc_publication_case(true, true);
+    grouped_disc_publication_case(true, true, true);
 }
 
 #[test]
@@ -17152,7 +17287,12 @@ fn grouped_publication_revision_policy_rejects_unrelated_evidence_and_metadata_c
     assert!(!allowed(&current, &after, &owns));
 }
 
-fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool) {
+#[test]
+fn grouped_discs_keep_automatic_title_authority_through_failed_retry_and_reindex() {
+    grouped_disc_publication_case(true, false, false);
+}
+
+fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool, manual_title: bool) {
     use collector_app::{
         AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
     };
@@ -17189,7 +17329,7 @@ fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool) {
             },
             destination: IntakeDestination::AlbumGroup {
                 key: "album".into(),
-                title: "Album".into(),
+                title: manual_title.then(|| "Album".into()),
                 copy_key: "my copy".into(),
             },
         })
@@ -17305,6 +17445,18 @@ fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool) {
             Some("Keep this curator's inventory note")
         );
     }
+    let authority = store
+        .metadata_authority(collection.id, target)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        authority
+            .authority
+            .field_overrides
+            .iter()
+            .any(|field| field.field == MetadataField::Title),
+        manual_title
+    );
     for capture in item.captures {
         assert_eq!(
             capture.representations[0].files[0].digest,
@@ -17340,6 +17492,78 @@ fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool) {
             Some("Keep this curator's inventory note")
         );
     }
+}
+
+#[test]
+fn intake_group_rejects_mixed_automatic_and_manual_title_authority_before_admission() {
+    use collector_app::{
+        AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: 2,
+                expected_files: 2,
+                automatic_metadata: true,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let packages = (0..2)
+        .map(|position| IntakePackage {
+            package: IngestPackageSelection {
+                purchase: None,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: format!("Disc {position}"),
+                },
+                files: vec![UploadFile {
+                    visibility: None,
+                    name: "disc.bin".into(),
+                    bytes: ByteLength(0),
+                    sha256: None,
+                }],
+                anchor_file_index: None,
+            },
+            destination: IntakeDestination::AlbumGroup {
+                key: "Album".into(),
+                title: (position == 1).then(|| "Manual title".into()),
+                copy_key: "Purchased copy A".into(),
+            },
+        })
+        .collect();
+    let session = service
+        .append_intake_with_preflight(
+            &actor,
+            session.id,
+            AppendIntake {
+                expected_revision: session.revision,
+                packages,
+            },
+            &command(),
+            |_| Ok(()),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision
+            },
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        store.job_record(session.id, actor.user_id),
+        Err(Error::NotFound)
+    ));
 }
 
 #[test]
@@ -17381,7 +17605,7 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
             destination: if position < 2 {
                 IntakeDestination::AlbumGroup {
                     key: "two-disc-album".into(),
-                    title: "A confirmed album".into(),
+                    title: Some("A confirmed album".into()),
                     copy_key: "one set".into(),
                 }
             } else {

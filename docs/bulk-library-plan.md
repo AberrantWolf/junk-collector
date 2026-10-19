@@ -119,5 +119,15 @@ same-intake sibling evidence advance with unchanged Item inventory/metadata and
 unchanged prior references, under the archive writer. Existing failed imports use
 the same path on retry after restart. Manual changes remain conflicts and originals
 and physical-copy identities remain stable. See [repair validation](validation/grouped-disc-publication-2026-10-19.md)
-for local tests and the still-pending live NAS recovery. Other evening UI/inbox
+for local tests and the operator-reported successful NAS recovery. Other evening UI/inbox
 findings remain in the consolidated remaining-work queue.
+
+### BL2 import review — HL-07A, 2026-10-19
+
+Batch review exposes shared CUE/Redumper anchor readiness and preserves reviewed
+file visibility, group and copy choices while replanning. Group labels no longer
+set manual title authority. Optional explicit titles apply to the complete group;
+reviewed matching physical-copy labels mean one purchased copy, distinct labels
+mean separate copies. Known new-intake Synology/macOS housekeeping is excluded at
+chooser, planning and staging; unknown files and older accepted inventories survive.
+See [validation](validation/intake-review-2026-10-19.md). Source cleanup stays HL-09.
