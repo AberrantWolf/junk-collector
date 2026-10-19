@@ -10,10 +10,11 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-Queue updated 2026-10-19 after native digital-album delivery, live NAS use and
-issue triage. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
-qualification remains open; HL-07A's import-review repairs are delivered. The next
-independent code delivery is HL-07C's bounded setup/release wording cleanup. NAS operations/recovery belong to HL-05A/B; Docker publication
+Queue updated 2026-10-20 after HL-07A/B/C import review, direct playback and
+release/setup wording acceptance. The 2026-10-19 native delivery and live-use triage
+remain recorded below. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
+qualification remains open; HL-07A/B/C are delivered. Continue with
+HL-05A/B deployment and practical recovery acceptance before HL-07D publication. NAS operations/recovery belong to HL-05A/B; Docker publication
 and release usability belong to HL-07A–D. Keep the existing milestone numbers.
 The earlier insertion assigned
 digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
@@ -71,8 +72,8 @@ queue. Dated reports and workarounds remain in the
 | NAS SFTP and SSH key exchange | HL-05 operator follow-up | Host administration; not a Collector release blocker |
 | Grouped-disc revision conflict and repeated failed retry | Completed repair below | Keep regression coverage; remaining deployment acceptance stays HL-05 |
 
-HL-07A is delivered. HL-05A/B and HL-07B/C can proceed as
-independent complete deliveries. HL-07D publishes after the applicable acceptance
+HL-07A is delivered. HL-07B/C are also delivered; HL-05A/B remain
+independent complete deployment/recovery deliveries. HL-07D publishes after the applicable acceptance
 checks and update/recovery procedure are ready. Continue HL-04/HL-06 hardware and
 format qualification when the required devices/reference material are available.
 Do not wait for optional HL-09 cleanup or unrelated host administration to deliver
@@ -460,8 +461,13 @@ This adds access to working playback; it does not rebuild the player or reopen H
 
 #### HL-07C — Clear release and setup wording
 
-**State:** requested 2026-10-19; scoped copy cleanup. **Owner:** CLI/web presentation
-and documentation; coordinate the executable setup flow with HL-05A.
+**State:** delivered 2026-10-20. CLI startup/doctor, enrollment, certificate help,
+README and operator instructions now describe actual web/Trash Amp controls and
+precise saved-file/protection/reset guarantees. Historical evidence and technical
+identifiers are unchanged. Single/multi-account pairing, trusted-PEM download/TLS,
+mobile help, full browser smoke and repository gates passed. See [dated acceptance](validation/release-wording-2026-10-20.md).
+**Owner:** CLI/web presentation and documentation; executable NAS setup acceptance
+remains HL-05A. The completed delivery contract follows for reference.
 
 Remove obsolete Phono-specific setup/doctor/startup advice for the retired client.
 Use "not affected", "won't be overwritten", or a precise equivalent when explaining
@@ -827,18 +833,22 @@ backup/restore tooling are delivered. Do not restart those completed scopes.
 The grouped-disc publication repair is also implemented and operator-reported as
 working on the NAS. HL-07A is delivered with [local acceptance](validation/intake-review-2026-10-19.md).
 HL-07B is delivered with [local acceptance](validation/direct-playback-2026-10-19.md).
-Next complete HL-07C's bounded setup/release wording cleanup. HL-04 device qualification and HL-05A/B
+HL-07C is delivered with [local acceptance](validation/release-wording-2026-10-20.md).
+Next qualify HL-05A's reproducible NAS/Portainer install/update path and HL-05B's
+practical consistent-snapshot/incremental recovery procedure. HL-04 device qualification and HL-05A/B
 deployment/recovery remain independently available when the actual hosts are
 accessible. HL-07D publication follows its deployment/update acceptance dependencies.
 Preserve milestone numbers and do not reopen completed scopes.
 
-> Complete HL-07C — Clear release and setup wording. Remove obsolete Phono
-> instructions from startup/doctor output, enrollment and certificate help. Describe
-> the actual web/Trash Amp connection controls and distinguish browser trust from
-> native enrollment. Use precise protection wording for existing settings/manual
-> choices and saved/kept for stored files. Preserve technical policy/identifiers and
-> dated historical evidence. Check served UI, CLI and operator instructions, update
-> status/evidence/this queue and self-review/commit before proceeding.
+> Complete HL-05A — Reproducible NAS and Portainer operations. Inspect the actual
+> host and deployment read-only first. Repair the shipped fresh-install/config-copy,
+> bind-directory, supplemental-group/provider readiness and image-alignment guidance,
+> then qualify the complete installation/update/recovery workflow using isolated
+> temporary data. Preserve the live installation, accounts, credentials, configuration,
+> originals and pending work. Do not remove unrelated Portainer/tunnel services.
+> Coordinate HL-05B's actual snapshot/independent-backup eligibility; do not claim
+> full-copy tooling supplies scalable routine updates. Update status/evidence/queue,
+> self-review and commit complete deliveries before HL-07D publication.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

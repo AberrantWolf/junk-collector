@@ -75,7 +75,7 @@ Edit `collector.toml`:
    This also enables imports/curation; account and collection permissions still
    apply. For a browse/listen-only hostname, leave both exposure flags false and
    provide a separate private management route to create/manage collections.
-3. Optionally uncomment `[providers]` and provide a real MusicBrainz contact.
+3. Optionally uncomment `[providers]` and provide a monitored MusicBrainz contact address. A MusicBrainz account is not required.
    Metadata acquisition is otherwise unavailable; preservation still works.
 
 Configure the proxy/tunnel route:
@@ -176,7 +176,7 @@ the configured HTTPS origin and sign in as `owner`. If collection creation is
 absent, check that the origin reaches a management-enabled router/exposure.
 
 Initialization never overwrites existing config or recursively changes archive
-ownership. Setup preserves existing accounts and TLS and must run while stopped.
+ownership. Setup does not overwrite existing accounts or TLS and must run while stopped.
 Ordinary `up -d collector` never creates or resets credentials. Changes to `.env`
 host/IP values do not rewrite retained config or certificates; the actual config
 is `COLLECTOR_DATA/config/collector.toml`. The archive and complete private state

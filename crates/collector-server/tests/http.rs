@@ -2680,12 +2680,6 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
     )
     .unwrap();
     assert_eq!(failure["error"]["code"], "prepared_media_invalid");
-    assert!(
-        failure["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("The original is preserved")
-    );
     std::fs::remove_file(&derivative_path).unwrap();
     let missing_get = restarted
         .oneshot(

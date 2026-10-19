@@ -837,7 +837,7 @@ The browser owns the transient Blob download and cleans it up with the panel.
 Neither the browser nor native UI decides server trust from downloaded material
 alone. Local operators can obtain the certificate through the private loopback
 management interface or the server's printed filesystem location, then establish
-trust explicitly in Phono or macOS. The server reports a local HTTPS listener
+trust explicitly in Trash Amp or macOS. The server reports a local HTTPS listener
 address separately from advertised names, which do not create DNS. No OS trust
 change, certificate replacement or validation bypass is automatic.
 

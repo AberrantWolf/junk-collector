@@ -215,7 +215,7 @@ fn instructions(config: &Config, path: &std::path::Path) {
     );
     if config.tls_names.iter().any(|name| name == "localhost") {
         println!(
-            "Local Phono HTTPS: https://localhost:{} (same computer only; the certificate must be trusted)",
+            "Local client HTTPS: https://localhost:{} (same computer only; the certificate must be trusted)",
             config.lan_bind.port()
         );
     }
@@ -231,16 +231,19 @@ fn instructions(config: &Config, path: &std::path::Path) {
         if file.take(65_537).read_to_end(&mut bytes).is_ok() && bytes.len() <= 65_536 {
             let location = std::path::absolute(&certificate).unwrap_or(certificate);
             println!("Public certificate: {}", location.display());
-            println!("Phono PEM-file SHA-256: {}", Digest::sha256(&bytes).hex);
+            println!(
+                "Certificate PEM-file SHA-256: {}",
+                Digest::sha256(&bytes).hex
+            );
             println!(
                 "Certificate download and help: sign in at {} → Administration → Server settings → HTTPS certificate.",
                 local_origin(config)
             );
             println!(
-                "For a self-signed certificate on macOS: import cert.pem into Keychain Access (login keychain), open its Trust settings, set Secure Sockets Layer (SSL) to Always Trust, close and authenticate, then restart Phono/browser."
+                "For a self-signed certificate on macOS: import cert.pem into Keychain Access (login keychain), open its Trust settings, set Secure Sockets Layer (SSL) to Always Trust, close and authenticate, then restart Trash Amp and your browser."
             );
             println!(
-                "Phono-only alternative: Add server → owner-provided certificate → import this public PEM, compare the PEM-file SHA-256 above, and confirm trust. This does not establish browser trust; local browser approval can use {}/pair with the approval code.",
+                "Trash Amp: Settings → Servers; enter the Collector server URL. For an owner-provided certificate, independently compare the PEM-file SHA-256 above, then enter its path in Owner-provided trust file and choose Connect / Reconnect. Leave the trust file empty for system-trusted HTTPS. This does not establish browser trust; local browser approval can use {}/pair with the approval code.",
                 local_origin(config)
             );
             println!(
@@ -556,7 +559,7 @@ async fn main() -> Result<()> {
             );
         } else {
             println!(
-                "Server identity, credentials and TLS were preserved. Retire the original instance; never run both copies."
+                "Server identity, credentials and TLS were restored from the backup. Retire the original instance; never run both copies."
             );
         }
         for field in ["inboxes", "dat_sources", "encoders"] {
@@ -627,7 +630,7 @@ async fn main() -> Result<()> {
     if let Command::RecoverAccount { state, username } = &cli.command {
         let state = account_storage(&cli.config, state.as_deref())?;
         println!(
-            "Recovering username {username:?} from {}. Browser sessions, apps, pending approvals, recovery codes and passkeys will be revoked. Roles and enabled status are preserved.",
+            "Recovering username {username:?} from {}. Browser sessions, apps, pending approvals, recovery codes and passkeys will be revoked. Roles and enabled status are not affected.",
             std::path::absolute(&state)?.display()
         );
         Store::local_recover(

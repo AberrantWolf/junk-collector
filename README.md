@@ -2,7 +2,7 @@
 
 Junk Collector is a self-hosted archive for video games, music CDs, and supported digital music purchases: inventory, original dumps, artwork, metadata, and verification evidence in one place.
 
-The web app supports collections with or without attached dumps, guided imports, optional metadata and artwork acquisition, game DAT matching, AccurateRip checks, and playback of prepared CD tracks. Each collection has one type—games or music CDs. Original files are retained alongside derived files and recorded evidence.
+The web app supports collections with or without attached dumps, guided imports, optional metadata and artwork acquisition, game DAT matching, AccurateRip checks, playback of prepared CD tracks, and direct playback of supported FLAC/MP3 purchases. Each collection has one type: games or music. Original files are kept alongside derived files and recorded evidence.
 
 ## Alpha release
 
@@ -63,7 +63,7 @@ See [P06 measurements and recovery checks](docs/validation/p06-indexing.md).
 `setup` prompts for a password of at least 12 characters and creates:
 
 - `collector.toml`, the server configuration;
-- `.collector/archive`, containing preserved files and collection records;
+- `.collector/archive`, containing saved files and collection records;
 - `.collector/state`, containing databases, accounts, TLS identity, jobs, and temporary work;
 - the initial administrator account, named `owner` by default.
 
@@ -82,24 +82,53 @@ Run the server as an ordinary user with access to its storage and configured inb
 
 ## Add your first collection
 
-1. Sign in at a management-enabled address and choose **Create collection** or **Administration**. Choose **Games** or **Music CDs** and give the collection a name.
-2. Open the collection and choose **Add / import → Dump folder**. Select a folder containing complete dumps; subfolders are scanned for packages. Unrecognized files are listed separately and are not uploaded. To track an item without files, choose **Enter inventory manually**.
-3. Review the package count. **Package details and import options** shows missing companions or unsupported operations and lets you change an ambiguous analysis anchor. Metadata and artwork gathering is enabled by default.
-4. For supported CDs, optionally select **Prepare supported music as FLAC after preservation**. Choose **Import … packages**. Each package gets its own saved entry automatically; no title or separate inventory save is required.
-5. Keep the page open while uploading. Progress shows bytes sent and bytes saved on the server. After uploads finish, server processing continues even if you close the page. If interrupted, reopen an import and select the same folder to resume. You can also choose individual files or configured inbox packages, then **Preview import → Start import**.
-6. Open the item to inspect its files, metadata, artwork, and evidence. Use **Edit / attach files** to correct metadata, manage physical copies and loans, add images, or attach another capture.
+1. Sign in at a management-enabled address and choose **Create collection** or **Administration**. Choose the games or music collection type and give it a name.
+2. Open **Imports**, choose the collection, and select **Browser folder / files** or **Server inbox**. Choose folders for package discovery, individual files for one package, or inbox directories followed by **Review packages**. Unassigned files are listed separately.
+3. Review **Files and analysis** for each package. Choose the CUE or Redumper analysis anchor when several are present and review which files are shared. Group discs with the same **Album group** label; leave the manual title empty for automatic metadata. Matching **Physical copy label** values within an album mean one purchased copy; different values mean separate copies. Copy labels are not disc numbers. Known Synology/macOS housekeeping is excluded; other unknown and hidden files stay in the package.
+4. Automatic metadata and artwork are enabled by default when available. **Prepare FLAC after import** is optional for supported CDs. FLAC/MP3 purchases play directly and do not create physical copies. Choose **Start import**.
+5. Keep the page open until browser uploading finishes. Processing continues afterward. If interrupted, reopen the saved batch and reselect its original folder or package files to resume.
+6. Open the item to inspect files, metadata, artwork and evidence. Use **Edit / attach files** to correct metadata, manage copies and loans, add images or attach another capture. To record inventory without files, use **Add / import** and its manual-entry option.
 
-Folder intake accepts up to 10,000 files and 64 detected packages at a time; select smaller subfolders for larger archives.
+The Imports workspace supports up to 10,000 packages and 100,000 files per intake,
+with bounded package and manifest pages. Keep complete package boundaries when
+splitting larger folders.
 
 When attaching an imported disc to an existing album, its unused automatic placeholder is removed from browsing. Entries with other captures, physical inventory, wishlists, artwork, or manual information are kept. Archived files and history are retained.
 
 Keep complete dump packages together: BIN/CUE sets need their referenced BIN files, and supported redumper CD packages need their TOC, SCRAM, STATE, and SUBCODE companions. Preservation and identification are separate: a package can be retained even when it cannot be identified or verified. The preview and recorded results explain what analysis is available.
 
-### Play a music CD
+### Play music
 
-With the [FLAC encoder configured](#audio-encoders), open the CD's editor and choose **Music preparation → Prepare selected album**. Select the intended disc sources when necessary. You can also prepare individual tracks or an available Opus profile.
+Supported FLAC/MP3 purchases play directly after import. For CDs, configure the
+[FLAC encoder](#audio-encoders), open **Prepare audio**, select albums, preview the
+FLAC preparation and start it. Individual tracks and configured Opus profiles are
+also available in the editor's music preparation view. Preparation is explicit
+background work; prepared files are saved automatically.
 
-Preparation runs as durable background work. Prepared tracks are saved automatically—**Save inventory is not required**. Once available, close the editor and use the **Disc player** in the item details, or download a track. Viewers can play prepared tracks. Closing the item details stops browser playback; browser codec support determines which formats play directly.
+Open an album and choose **Play album**, **Play original** for one import, or a
+track's **Play** button. Play replaces the personal queue and starts immediately;
+**Add album to queue** appends instead. Album playback follows disc/track order.
+Unavailable audio and ambiguous originals need review before whole-album playback;
+available individual tracks remain usable. Viewers can play authorized audio.
+Closing details or navigating between tasks leaves the persistent player running.
+Browser codec support determines which existing formats play directly; downloads
+remain available.
+
+### Connect Trash Amp
+
+In Trash Amp, open **Settings → Servers**, enter the **Collector server URL**, and
+choose **Connect / Reconnect**. For ordinary system-trusted HTTPS, leave
+**Owner-provided trust file** empty. For a self-signed server, obtain its public
+PEM or pairing JSON through a trusted owner channel; independently compare the
+PEM-file SHA-256 with server startup output before entering its path in that field.
+Never transfer the private TLS key or bypass certificate validation.
+
+Use the displayed browser approval link/code and sign in with the intended account.
+The app receives separate revocable access. Trusting a certificate in Trash Amp
+does not establish browser trust; same-computer approval can use the printed local
+management `/pair` address. Remote browser approval requires its own trusted HTTPS
+origin. Names in configuration do not create DNS records. See Administration →
+Server settings → HTTPS certificate for download and trust instructions.
 
 ## Configuration reference
 

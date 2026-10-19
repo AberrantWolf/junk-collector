@@ -99,7 +99,7 @@ try{
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
  // Exercise the actual approval page with the browser's logged-in account.
  const pairBase=localSetup?'http://localhost:19842':`https://localhost:${port}`;
- const pairingStart=await page.request.post(`${pairBase}/api/v1/enrollments/start`,{data:{device_name:'Phono browser journey'}});
+ const pairingStart=await page.request.post(`${pairBase}/api/v1/enrollments/start`,{data:{device_name:'Trash Amp browser journey'}});
  assert.equal(pairingStart.status(),200);
  const enrollment=await pairingStart.json();
  await page.goto(`${pairBase}${enrollment.verification_url}`);
@@ -982,7 +982,7 @@ try{
  if(hasFlac){assert.equal(await guided.getByLabel('Prepare FLAC tracks after import').isDisabled(),false);await guided.getByLabel('Prepare FLAC tracks after import').check();}
  let releaseGuided;const guidedHeld=new Promise(resolve=>{releaseGuided=resolve;});
  await page.route('**/api/v1/imports/*/files/*',async route=>{await guidedHeld;await route.continue();},{times:1});
- await guided.getByRole('button',{name:'Preserve 1 package',exact:true}).click();
+ await guided.getByRole('button',{name:'Save 1 package',exact:true}).click();
  await guided.getByRole('progressbar',{name:'Uploading files',exact:true}).waitFor();
  assert.equal(await guided.getByRole('form',{name:'Resume guided package'}).count(),0);
  releaseGuided();
@@ -1055,7 +1055,7 @@ try{
  await folderImport.getByText('Package details and import options',{exact:true}).click();
  await folderImport.getByLabel('Find metadata and artwork automatically').uncheck();
  await folderForm.screenshot({path:path.join(root,'web/test-results/folder-import.png')});
- await folderImport.getByRole('button',{name:'Preserve 2 packages',exact:true}).click();
+ await folderImport.getByRole('button',{name:'Save 2 packages',exact:true}).click();
  await page.getByRole('region',{name:'Import original files'}).getByText('Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Close curator'}).click();
  const {sourceItem,targetItem}=await page.evaluate(async()=>{

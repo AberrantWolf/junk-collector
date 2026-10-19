@@ -36,7 +36,7 @@ try{
  // Long enough to keep playing while reimport and availability polling complete.
  const pcm=Buffer.alloc(44100*4*90);const wav=Buffer.alloc(44+pcm.length);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(2,22);wav.writeUInt32LE(44100,24);wav.writeUInt32LE(44100*4,28);wav.writeUInt16LE(4,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(pcm.length,40);
  const packageFiles=[{name:'original.wav',mimeType:'audio/wav',buffer:wav}];
- await editor.getByText('Choose individual files instead').click();await editor.getByLabel('Files',{exact:true}).setInputFiles(packageFiles);await editor.getByRole('button',{name:'Preview import'}).click();await editor.getByText('1 dump packages found.',{exact:false}).waitFor();await editor.getByLabel('Save originals only').check();await editor.getByRole('button',{name:'Preserve 1 package'}).click();
+ await editor.getByText('Choose individual files instead').click();await editor.getByLabel('Files',{exact:true}).setInputFiles(packageFiles);await editor.getByRole('button',{name:'Preview import'}).click();await editor.getByText('1 dump packages found.',{exact:false}).waitFor();await editor.getByLabel('Save originals only').check();await editor.getByRole('button',{name:'Save 1 package'}).click();
  const readItem=()=>page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
  const waitItem=async predicate=>{for(let attempt=0;attempt<150;attempt++){const value=await readItem();if(predicate(value))return value;await page.waitForTimeout(200);}throw new Error('Item did not reach expected state: '+JSON.stringify(await readItem()));};
  await waitItem(item=>item.captures.length===1);

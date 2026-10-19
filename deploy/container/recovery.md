@@ -14,7 +14,7 @@ Retain the current data and `.env` for diagnosis. Edit `.env` to set
 `COLLECTOR_IMAGE` to the earlier image and `COLLECTOR_DATA` to a **new, empty**
 absolute directory, e.g. `/volume1/junk-collector-recovered`. Do not start the
 service yet, and do not run the default initializer or setup: restore supplies the configuration
-and preserved account/TLS identity. The old instance must remain stopped even
+and account/TLS identity restored from the backup. The old instance must remain stopped even
 if it lives on another host. Local locks cannot enforce that across hosts or
 when old paths are hidden by different mounts.
 

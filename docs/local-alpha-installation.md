@@ -18,7 +18,11 @@ Configure the browser-facing HTTPS origin and exposure before initial setup.
 External proxies/tunnels reach the public listener; private management remains on
 explicit private ingress. Run `setup` once, then `doctor`, then `serve`. The setup
 password is read through a no-echo prompt or standard input, never a command flag.
-Optional provider/encoder failures must not prevent basic original preservation.
+Optional provider/encoder failures must not prevent saving original files.
+MusicBrainz metadata requests need a monitored contact address in provider
+configuration; a MusicBrainz account is not required. Setup does not overwrite
+existing accounts or TLS, and initialization does not overwrite existing config.
+Update the actual configuration deliberately while stopped.
 
 Before a bulk intake, create a collection, import one complete supported package,
 download its originals and compare their digests with the sources. If using music
@@ -75,7 +79,7 @@ quiescence; only commands acquiring both locks do that.
 ## Restore drill into empty roots
 
 Keep the original server stopped throughout restoration and validation. Full
-restore preserves the same ServerId, accounts, grants, sessions, pending Jobs,
+restore recovers the same ServerId, accounts, grants, sessions, pending Jobs,
 upload scratch and TLS private key. **Retire the original instance before starting
 the restored one. Never run both copies, even on different ports.** Restore locks
 available original roots on this host and refuses a live original. Local locks

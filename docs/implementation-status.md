@@ -21,6 +21,17 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Release/setup wording — HL-07C, 2026-10-20
+
+Current startup/doctor, enrollment and certificate help describe web/Trash Amp
+with its actual Settings → Servers URL/trust-file/Connect controls. Browser trust
+and native approval remain separate. UI and operator instructions use saved/kept
+for stored files and precise protection/reset wording for existing accounts, TLS,
+manual choices and collection history. README intake/listening instructions match
+the Imports/Prepare audio pages and persistent player. Technical storage/state
+identifiers and dated Phono evidence are unchanged. See [dated acceptance](validation/release-wording-2026-10-20.md).
+Fresh NAS installation/update readiness and scalable recovery remain HL-05A/B.
+
 ## Direct web playback — HL-07B, 2026-10-19
 
 Album and preparation views expose Play album, per-import Play original and

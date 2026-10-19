@@ -44,13 +44,13 @@ export default function Curation({initialAnalysis,initialCollectionId,initialSec
   setBusy(true);setFeedback(undefined);try{
    if(!canEdit)throw new Error('Content editing is unavailable for this collection or item.');
    for(const field of descriptor?.fields||[]){if(field.kind.type==='integer'&&domainPatch[field.key]!==undefined&&domainPatch[field.key]!==null&&!Number.isSafeInteger(domainPatch[field.key]))throw new Error(`${field.label} must be a safely representable whole number.`);}
-   if(!descriptor)throw new Error('The selected collection type is unavailable. Preserved content remains read-only.');
+   if(!descriptor)throw new Error('The selected collection type is unavailable. Saved content remains read-only.');
    const edit:SaveItemEditCommand={collection_id:item?.collection_id||collection,title,subtitle,identity_link:item?.identity_link||{kind:'none'},domain_edit:{module:descriptor.id,fields:domainPatch as never},identity:item?.identity||'unidentified',translations:item?.translations||[],identifiers:item?.identifiers||[],wishlist};
    const saved=await api<Item>(`/items/${item?.id||crypto.randomUUID()}`,{method:'PUT',body:JSON.stringify({edit,expected_revision:item?.revision||0})});adoptedItemId.current=saved.id;setItem(editableItem(saved));setFieldValues(scalarValues(saved));setDomainPatch({});if(!item&&guidedDraft)setSection('files');onSaved(saved);setFeedback({kind:'success',text:'Entry saved. You can now attach artwork or original files.'});
   }catch(error){fail(error);}finally{setBusy(false);}
  }
  function inventorySaved(saved:Item){setItem(editableItem(saved));onSaved(saved);setFeedback({kind:'success',text:'Physical inventory updated.'});}
- function capturePublished(saved:Item){setItem(editableItem(saved));onSaved(saved);setFeedback({kind:'success',text:saved.domain.module==='org.junk.music'?'Original files preserved. Open Music for available tracks and preparation; automatic disc lookup appears in Work & history when a supported CD identity is available.':'Originals saved. Package operations are available in Advanced evidence.'});}
+ function capturePublished(saved:Item){setItem(editableItem(saved));onSaved(saved);setFeedback({kind:'success',text:saved.domain.module==='org.junk.music'?'Original files saved. Open Music for available tracks and preparation; automatic disc lookup appears in Work & history when a supported CD identity is available.':'Originals saved. Package operations are available in Advanced evidence.'});}
  function assetsSaved(saved:Item){setItem(editableItem(saved));onSaved(saved);setFeedback({kind:'success',text:'Artwork and photos updated.'});}
  function metadataChanged(saved:Item){setItem(editableItem(saved));onSaved(saved);}
  function guidedPublished(published:Item,replacedItemId?:string){

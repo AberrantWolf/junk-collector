@@ -23,7 +23,7 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
   try{const response=await fetch(musicTrackUrl(track),{headers:{Range:'bytes=0-0'},credentials:'same-origin',signal:controller.signal,cache:'no-store'});
    if(controller.signal.aborted||token!==generation.current||audio.current!==element||active.current!==track.id)return;
    if(response.status===409){const body:unknown=await response.json();if(controller.signal.aborted||token!==generation.current||audio.current!==element||active.current!==track.id)return;
-    if(body&&typeof body==='object'&&'error' in body){const detail=(body as {error?:{code?:string}}).error;if(detail?.code==='prepared_media_invalid'){setError('This prepared audio file is missing, unreadable, or has changed. The original is preserved; ask a curator to repair this prepared track.');return;}}}
+    if(body&&typeof body==='object'&&'error' in body){const detail=(body as {error?:{code?:string}}).error;if(detail?.code==='prepared_media_invalid'){setError('This prepared audio file is missing, unreadable, or has changed. The original is saved; ask a curator to repair this prepared track.');return;}}}
    if([401,403,404].includes(response.status)){release();setError('Access to this queued album is no longer available.');if(response.status===401)expired.current();}
   }catch{ /* Keep the playback error when diagnosis is unavailable. */ }
  }

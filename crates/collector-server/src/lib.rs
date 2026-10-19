@@ -430,7 +430,7 @@ impl IntoResponse for ApiError {
             Error::PreparedMediaInvalid => (
                 StatusCode::CONFLICT,
                 "prepared_media_invalid",
-                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is preserved; ask a curator to repair this prepared track.".into(),
+                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is saved; ask a curator to repair this prepared track.".into(),
             ),
         };
         (

@@ -109,7 +109,7 @@ try{
  const brokenId=new URL(page.url()).searchParams.get('item');let broken;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,brokenId);broken=members[0]?.import?.target_item_id;return members[0]?.import?.phase==='published'?members[0].import.outcome:'waiting_for_preservation';},{timeout:60000}).toBe('failed');
  await page.goto(`${origin}/?collection=${collection}&item=${broken}`);
- await page.getByText(/Purchased files are preserved, but playable audio analysis is not complete/).waitFor();
+ await page.getByText(/playable audio analysis is not complete/).waitFor();
  assert.equal(await page.getByText('Inspect CD structure',{exact:true}).count(),0);
  // Alternate encodings remain an explicit album choice; track Play stays usable.
  await copyFile(path.join(fixture,'02.mp3'),path.join(fixture,'01.mp3'));
