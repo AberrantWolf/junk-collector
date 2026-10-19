@@ -74,3 +74,103 @@ Source basenames share prefix `dump_260919_134632_disk7`:
 This establishes byte-preserving round trips, not catalog or CD audio verification.
 Interrupted active work, permission failures, host reboot,
 actual power-loss/storage failure, abuse/load checks and public ingress remain open.
+
+## Evening live installation — Portainer and Cloudflare Tunnel
+
+Continuation recorded 2026-10-19, through 22:22 JST. Earlier test-installation
+results above remain historical; these observations concern a fresh permanent
+installation. Evidence is operator-provided output/screenshots and source
+inspection, not independent remote administration of the NAS.
+
+- Operator built source checkout `9fcf42e` for `linux/amd64`, tagged
+  `junk-collector:9fcf42e`, transferred and loaded it on the NAS. The new immutable
+  image ID has not been collected. Modern `scp` failed because the SSH SFTP
+  subsystem was unavailable; `scp -O` was the transfer workaround. The separate
+  post-quantum key-exchange warning is not the SFTP failure. NAS administration
+  follow-up is tracked in the consolidated remaining-work queue.
+- Permanent roots are `/volume1/junk-collector/{config,archive,state,backups}`.
+  DSM rejected initialization until the operator created the bind source
+  directory. Initialization and owner setup then completed. The initial doctor
+  output still advertised localhost with public management disabled; the cause
+  of the unsuccessful proxy-config application is unresolved. Explicitly writing
+  the retained config corrected it without rerunning account setup.
+- Portainer manages the `junk-collector` stack. Collector runs UID/GID 10001,
+  host networking, read-only root, dropped capabilities and temporary `/tmp`.
+  Configuration is mounted read-only. Startup output confirms public HTTP
+  `127.0.0.1:9841`, private HTTP `127.0.0.1:9842`, direct TLS
+  `127.0.0.1:9843`, and available FLAC/Opus encoders.
+- A dedicated `cloudflare/cloudflared:2026.9.1` host-network connector runs in
+  that stack with its token held in Portainer configuration. The existing
+  bridge-network connector and other service routes were left in place. The
+  new tunnel connects `https://collector.awkwardexplorer.com` to the public
+  loopback HTTP listener on 9841. Authentication/allowed origins use that HTTPS
+  origin; public administration is explicitly enabled (also enabling curation).
+  Operator reported working browser access. This does not complete the broader
+  authentication, exposure, caching, abuse, upload or passkey qualification.
+- The SMB inbox share `/volume1/junk-collector-inbox` is mounted at `/inbox`,
+  configured as inbox `cds`. The initial share ACL allowed only administrators;
+  Collector listing failed with permission denied. Operator created DSM group
+  `collector-inbox-readers` (GID 65538); the stack adds this supplemental group.
+  Operator requested read/write access and was instructed to grant share RW and
+  use `:rw`. Container output confirms GID 65538 and successful directory listing;
+  actual write/delete ability has not been tested. Current imports retain inbox
+  sources; no automatic cleanup is implemented or exercised.
+- Inbox review includes Synology/macOS housekeeping (`#recycle`, `@eaDir`,
+  `.DS_Store`). Octopath packages initially included both CUE/BIN and Redumper
+  descriptions; batch review reported multiple anchors but source inspection
+  confirmed it omits the selector available in guided ingest. After the operator
+  removed the alternate CUE/BIN view from the presented package inventory,
+  all three packages (two Octopath discs and SQ Relax Vol. 2) showed analysis
+  and FLAC availability. No import completion or audio/catalog verification is
+  established by this preview.
+- Source inspection confirms the batch album group/title field sets a manual
+  title. Operator wants the two Octopath discs grouped with an automatic title.
+  Importing the first disc then attaching the second to its resolved album was
+  suggested, but this workflow has not yet been exercised in this installation.
+- MusicBrainz was initially unconfigured. Operator supplied a monitored contact
+  and received instructions to append the provider user agent and restart only
+  Collector. No successful live provider response, accepted metadata/artwork,
+  preparation or playback is recorded yet. Startup/doctor still print obsolete
+  Phono-specific instructions despite that retired target.
+
+Open fixes and requests live only in the
+[remaining-work queue](../remaining-work.md#placement-of-the-2026-10-19-live-use-findings),
+triaged to HL-05 deployment/recovery, HL-07 release usability/packaging and HL-09
+optional inbox cleanup. The chronological evidence here does not assign work.
+New-installation import/download equality, playback, restart persistence,
+stopped-server backup/restore and Internet-ingress checks remain outstanding;
+earlier test-instance results must not be attributed to this new installation.
+
+### Grouped-disc failure — 22:30–22:33 JST
+
+The operator subsequently reported Octopath disc 2 failing with `revision conflict`.
+Its progress screenshot shows staging/identification completed, Save originals
+failed, and metadata/artwork/preparation waiting. Retry this step returned the
+same conflict. The operator was instructed to retain that existing import and
+sources. A local grouped-publication regression reproduced a sibling Evidence
+revision invalidating the frozen album revision; its source repair and local
+acceptance are recorded in [repair validation](grouped-disc-publication-2026-10-19.md).
+The NAS has not yet been updated to that repair, and actual recovery is pending.
+
+### Update preparation and backup scaling — through 23:06 JST
+
+- At 23:02 JST the operator reported that the normal Mac terminal command block
+  (`cargo test --workspace` followed, on success, by the amd64 Docker build)
+  succeeded. No detailed test transcript/counts were supplied, so this is an
+  operator report distinct from the restricted assistant-runtime results.
+- At 23:03 JST the operator confirmed exporting, transferring with `scp -O`, and
+  loading `junk-collector:grouped-fix-20261019` on the NAS. Its immutable image ID
+  has not been collected. The running Portainer service has not been reported
+  switched to this tag.
+- Stopping Collector, backing up to
+  `/data/backups/before-grouped-fix-20261019`, and running `validate-backup` were
+  instructed. The operator raised the scaling concern before providing results;
+  stopped/running state and backup completion/validation are unconfirmed. Do not
+  assume this backup exists or this installation has completed its first backup.
+- The operator expects 1,000+ albums and hundreds of game dumps, and rejects full
+  archive duplication as a routine requirement for every Portainer update. The
+  existing backup/validation commands copy and hash the full inventory. Short
+  stopped-server NAS snapshots plus incremental independent backups were proposed,
+  not configured or tested. Actual Btrfs/DSM eligibility, consistency across roots,
+  retention, restore and independent destination remain unqualified. The request
+  and acceptance criteria are recorded in HL-05 of the consolidated queue.

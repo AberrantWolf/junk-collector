@@ -1177,6 +1177,88 @@ impl Store {
         }
     }
 
+    /// Called under the archive writer before new publication. Frozen archive
+    /// records also allow an older failed import to resume through ordinary retry.
+    fn grouped_publication_revision_can_advance(
+        &self,
+        record: &ImportRecord,
+        expected: Revision,
+        current: &Item,
+        job: JobId,
+        claim_token: &str,
+    ) -> Result<bool> {
+        let Some(intent) = self.guided_ingest_intent(record.view.id)? else {
+            return Ok(false);
+        };
+        let Some(context) = intent.bulk_context else {
+            return Ok(false);
+        };
+        if intent.cancelled || intent.target_item_id != current.id {
+            return Ok(false);
+        }
+        let path = self.item_path(current.id)?;
+        let revisions = if path.join("revisions").exists() {
+            path.join("revisions")
+        } else {
+            path.parent()
+                .ok_or_else(|| Error::Storage("Item archive path has no parent".into()))?
+                .join(current.id.to_string())
+                .join("revisions")
+        };
+        let (previous, before) = migration_v3::read_item(
+            &revisions.join(format!("{:020}", expected.0)),
+            current.collection_id,
+        )?;
+        let (latest, after) = migration_v3::read_item(
+            &revisions.join(format!("{:020}", current.revision.0)),
+            current.collection_id,
+        )?;
+        let before: std::collections::BTreeMap<_, _> = before
+            .into_iter()
+            .map(|reference| (reference.id, reference.sha256))
+            .collect();
+        let after: std::collections::BTreeMap<_, _> = after
+            .into_iter()
+            .map(|reference| (reference.id, reference.sha256))
+            .collect();
+        let mut siblings = std::collections::BTreeSet::new();
+        let added = after.keys().filter(|id| !before.contains_key(id));
+        if added.clone().count() > collector_app::INTAKE_PACKAGE_LIMIT as usize {
+            return Ok(false);
+        }
+        for id in added {
+            self.ensure_job_continues(job, Some(claim_token))?;
+            let owns: bool = lock(&self.db)?
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM private.imports p
+                 JOIN private.guided_ingest_intents g ON g.import_id=p.id
+                 JOIN captures c ON c.id=p.capture_id
+                 WHERE p.id=?1 AND p.id<>?2 AND g.user_id=?3 AND g.target_item_id=?4
+                   AND json_extract(g.bulk_context,'$.intake_id')=?5
+                   AND c.item_id=?4)",
+                    params![
+                        id.to_string(),
+                        record.view.id.to_string(),
+                        intent.user_id.to_string(),
+                        current.id.to_string(),
+                        context.intake_id.to_string()
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if owns {
+                siblings.insert(*id);
+            }
+        }
+        collector_app::grouped_publication_revision_is_evidence_only(
+            &previous.into_item(vec![], vec![]),
+            &latest.into_item(vec![], vec![]),
+            &before,
+            &after,
+            &siblings,
+        )
+    }
+
     fn publish_import_inner(
         &self,
         id: ImportId,
@@ -1224,6 +1306,13 @@ impl Store {
                 .reimport
                 .as_ref()
                 .is_some_and(|pending| pending.import_id == id && !pending.completed)
+            && !self.grouped_publication_revision_can_advance(
+                &record,
+                expected,
+                &self.item(item_id)?,
+                job,
+                claim_token,
+            )?
         {
             if record.view.phase != ImportPhase::AwaitingReview {
                 record.view.phase = ImportPhase::AwaitingReview;

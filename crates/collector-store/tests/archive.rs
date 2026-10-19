@@ -17107,6 +17107,242 @@ fn album_group_publication_faults_recover_all_members_or_none() {
 }
 
 #[test]
+fn grouped_disc_publication_survives_sibling_evidence_revision() {
+    grouped_disc_publication_case(false, false);
+}
+
+#[test]
+fn grouped_disc_failed_publication_retries_after_restart_without_duplicate_copies() {
+    grouped_disc_publication_case(true, false);
+}
+
+#[test]
+fn grouped_disc_publication_keeps_manual_inventory_revision_conflicts() {
+    grouped_disc_publication_case(true, true);
+}
+
+#[test]
+fn grouped_publication_revision_policy_rejects_unrelated_evidence_and_metadata_changes() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let previous = item(CollectionId::new());
+    let mut current = previous.clone();
+    current.revision = Revision(previous.revision.0 + 1);
+    let old = EvidenceId::new();
+    let sibling = EvidenceId::new();
+    let before = BTreeMap::from([(old, Digest::sha256(b"old evidence").hex)]);
+    let mut after = before.clone();
+    after.insert(sibling, Digest::sha256(b"sibling evidence").hex);
+    let owns = BTreeSet::from([sibling]);
+    let allowed =
+        |current: &Item, after: &BTreeMap<EvidenceId, String>, owns: &BTreeSet<EvidenceId>| {
+            collector_app::grouped_publication_revision_is_evidence_only(
+                &previous, current, &before, after, owns,
+            )
+            .unwrap()
+        };
+    assert!(allowed(&current, &after, &owns));
+    assert!(!allowed(&current, &after, &BTreeSet::new()));
+    let mut changed_reference = after.clone();
+    changed_reference.insert(old, Digest::sha256(b"changed old evidence").hex);
+    assert!(!allowed(&current, &changed_reference, &owns));
+    current.title = "Curator's title".into();
+    assert!(!allowed(&current, &after, &owns));
+    current.title = previous.title.clone();
+    current.domain.payload = RawJson::from_json(r#"{"unknown_future_field":"keep me"}"#).unwrap();
+    assert!(!allowed(&current, &after, &owns));
+}
+
+fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool) {
+    use collector_app::{
+        AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
+    };
+    let (root, store, actor, service, collection) = setup();
+    let session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: 2,
+                expected_files: 2,
+                automatic_metadata: false,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let packages = (0..2)
+        .map(|position| IntakePackage {
+            package: IngestPackageSelection {
+                purchase: None,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: format!("Disc {position}"),
+                },
+                files: vec![UploadFile {
+                    visibility: Default::default(),
+                    name: "original.dat".into(),
+                    bytes: ByteLength(1),
+                    sha256: None,
+                }],
+                anchor_file_index: None,
+            },
+            destination: IntakeDestination::AlbumGroup {
+                key: "album".into(),
+                title: "Album".into(),
+                copy_key: "my copy".into(),
+            },
+        })
+        .collect();
+    let session = service
+        .append_intake_with_preflight(
+            &actor,
+            session.id,
+            AppendIntake {
+                expected_revision: session.revision,
+                packages,
+            },
+            &command(),
+            |_| Ok(()),
+        )
+        .unwrap();
+    service
+        .start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("grouped-admission").unwrap());
+    let members = service
+        .intake_members(&actor, session.id, None, 32)
+        .unwrap()
+        .items;
+    for member in &members {
+        let id = member.import_id.unwrap();
+        service
+            .stage_provisional_import_chunk(&actor, id, 0, 0, &[member.position as u8])
+            .unwrap();
+    }
+    // Both preservation Jobs now hold the same reviewed album revision. Publish
+    // one before allowing the other to observe its sibling's Evidence reference.
+    assert!(service.run_next_job("first-grouped-publication").unwrap());
+    let target = store
+        .guided_ingest_intent(members[0].import_id.unwrap())
+        .unwrap()
+        .unwrap()
+        .target_item_id;
+    assert_eq!(store.item(target).unwrap().captures.len(), 1);
+    if manual_edit {
+        let mut item = store.item(target).unwrap();
+        let revision = item.revision;
+        item.specimens[0].private_notes = Some("Keep this curator's inventory note".into());
+        store.save(item, revision).unwrap();
+    }
+    let (store, service) = if restart_failed {
+        // Model an already failed old-build Job without changing its frozen
+        // Import or staged bytes, then use the same retry API as the web button.
+        let claim = store.claim_job("old-build-conflict", 30).unwrap().unwrap();
+        assert_eq!(claim.kind, "import_publication");
+        store
+            .fail_job(claim.id, &claim.claim_token, "revision conflict")
+            .unwrap();
+        let failed = members
+            .iter()
+            .find_map(|member| {
+                let id = member.import_id.unwrap();
+                let jobs = store.import_job_records(id, actor.user_id).unwrap();
+                jobs.iter().any(|job| job.id == claim.id).then_some(id)
+            })
+            .unwrap();
+        drop(service);
+        drop(store);
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        service
+            .retry_ingest(
+                &actor,
+                failed,
+                collector_app::RetryIngestCommand {
+                    job_id: Some(claim.id),
+                },
+                &command(),
+            )
+            .unwrap();
+        (store, service)
+    } else {
+        (store, service)
+    };
+    for _ in 0..16 {
+        if !service.run_next_job("grouped-publication").unwrap() {
+            break;
+        }
+    }
+    for member in &members {
+        let detail = service
+            .ingest_detail(&actor, member.import_id.unwrap())
+            .unwrap();
+        if manual_edit && detail.import.phase != ImportPhase::Published {
+            assert!(
+                detail.steps.iter().any(|step| step.step == "preservation"
+                    && step.message.as_deref() == Some("revision conflict")),
+                "{detail:?}"
+            );
+        } else {
+            assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
+        }
+    }
+    let item = store.item(target).unwrap();
+    assert_eq!(item.captures.len(), if manual_edit { 1 } else { 2 });
+    assert_eq!(item.specimens.len(), 1);
+    if manual_edit {
+        assert_eq!(
+            item.specimens[0].private_notes.as_deref(),
+            Some("Keep this curator's inventory note")
+        );
+    }
+    for capture in item.captures {
+        assert_eq!(
+            capture.representations[0].files[0].digest,
+            Digest::sha256(&[members
+                .iter()
+                .position(|member| store
+                    .import_record(member.import_id.unwrap())
+                    .unwrap()
+                    .view
+                    .capture_id
+                    == capture.id)
+                .unwrap() as u8])
+        );
+    }
+    let mut originals = files_named(&root.path().join("archive"), "original.dat")
+        .into_iter()
+        .map(|path| std::fs::read(path).unwrap())
+        .collect::<Vec<_>>();
+    originals.sort();
+    if manual_edit {
+        assert_eq!(originals.len(), 1);
+        assert!(originals[0] == [0] || originals[0] == [1]);
+    } else {
+        assert_eq!(originals, vec![vec![0], vec![1]]);
+    }
+    store.reindex().unwrap();
+    let rebuilt = store.item(target).unwrap();
+    assert_eq!(rebuilt.captures.len(), if manual_edit { 1 } else { 2 });
+    assert_eq!(rebuilt.specimens.len(), 1);
+    if manual_edit {
+        assert_eq!(
+            rebuilt.specimens[0].private_notes.as_deref(),
+            Some("Keep this curator's inventory note")
+        );
+    }
+}
+
+#[test]
 fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
     use collector_app::{
         AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,

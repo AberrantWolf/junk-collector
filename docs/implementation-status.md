@@ -271,7 +271,42 @@ with restored-original SHA-256 comparisons. The default SIGTERM defect is correc
 in source; SIGINT remains the workaround for the older tested image. The
 [Compose install/update package](../deploy/container/README.md) and versioned
 image/bundle release workflow are implemented; publication and actual DSM
-acceptance of the new package remain open.
+pull-based update qualification remain incomplete. Automatically built, publicly
+pullable amd64/arm64 images with version/digest references and documented moving
+release channels are now an explicit release requirement (2026-10-19), tracked
+under HL-07; users must not need to build/export/transfer images themselves.
+Actual DSM acceptance of the new package remains open. Evening operator continuation established
+a running Portainer-managed amd64 installation, a dedicated host-network Cloudflare
+connector and working browser access through the configured public HTTPS hostname.
+The SMB inbox initially denied UID 10001; supplemental DSM group access corrected
+directory listing. Three raw-CD packages pass import preview; subsequent retry
+recovery/playback reports are recorded below, while complete grouping, enrichment
+and new-installation recovery acceptance remain pending.
+The grouped-disc Save originals conflict has a source repair: publication can
+advance a stale expected revision only across proven same-intake sibling Evidence
+additions with unchanged inventory/metadata and prior references. Local tests cover
+publication, persisted failure/restart/web-API retry, original bytes and manual-edit
+conflicts. The operator reports successful normal-terminal workspace tests and
+amd64 image build, plus transfer/load on the NAS; detailed logs and image ID have
+not been collected. The operator subsequently provided successful backup/validation
+output (401 files) and reported that the fix worked after the instructed Portainer
+update and existing-import retry at 23:13 JST, followed by working playback at
+23:15 JST. Final inventory grouping, metadata/artwork, explicit seek and
+original-byte comparisons remain pending. The current
+full-copy backup CLI remains available, but a scalable
+routine-update process using qualified consistent NAS snapshots and incremental
+independent backups is not delivered. The user explicitly requested addressing
+this before full-archive copies become an update burden at collection scale;
+actual NAS snapshot support and restore behavior remain to be checked.
+See [repair validation](validation/grouped-disc-publication-2026-10-19.md).
+Batch review lacks its multiple-anchor selector and couples album grouping to a
+manual title; housekeeping filtering and requested successful-import inbox cleanup
+are not delivered. The [work ledger](remaining-work.md#placement-of-the-2026-10-19-live-use-findings)
+now assigns import-review repairs to HL-07A, direct Play actions to HL-07B,
+wording to HL-07C, public Docker release automation to HL-07D, deployment/recovery
+to HL-05A/B, and optional inbox cleanup to HL-09. HL-07A is the next code delivery;
+the completed grouped-publication repair is not reopened. Observations remain in
+the dated NAS record below.
 Packaging changes and available checks are recorded in
 [container packaging validation](validation/container-packaging-2026-10-19.md).
 The operator guide now uses generic storage/host examples and leads with an

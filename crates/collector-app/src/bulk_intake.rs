@@ -3,6 +3,46 @@
 use crate::*;
 use std::collections::BTreeSet;
 
+/// A sibling disc can append preservation evidence without changing the reviewed
+/// album inventory. Only references proven to belong to this intake may advance
+/// its publication fence; manual inventory/metadata changes still conflict.
+pub fn grouped_publication_revision_is_evidence_only(
+    previous: &Item,
+    current: &Item,
+    previous_evidence: &std::collections::BTreeMap<EvidenceId, String>,
+    current_evidence: &std::collections::BTreeMap<EvidenceId, String>,
+    sibling_evidence: &BTreeSet<EvidenceId>,
+) -> Result<bool> {
+    if previous.id != current.id
+        || previous.collection_id != current.collection_id
+        || previous.revision >= current.revision
+        || current.deleted
+        || current_evidence.len() <= previous_evidence.len()
+        || previous_evidence
+            .iter()
+            .any(|(id, digest)| current_evidence.get(id) != Some(digest))
+        || current_evidence
+            .keys()
+            .any(|id| !previous_evidence.contains_key(id) && !sibling_evidence.contains(id))
+    {
+        return Ok(false);
+    }
+    let mut current = current.clone();
+    let mut previous = previous.clone();
+    // Captures and Assets have independent revision fences. The caller supplies
+    // archive Item records, without those hydrated compatibility projections.
+    current.captures.clear();
+    current.assets.clear();
+    previous.captures.clear();
+    previous.assets.clear();
+    current.revision = previous.revision;
+    current.updated_at = previous.updated_at;
+    Ok(
+        serde_json::to_value(previous).map_err(|error| Error::Storage(error.to_string()))?
+            == serde_json::to_value(current).map_err(|error| Error::Storage(error.to_string()))?,
+    )
+}
+
 pub const INTAKE_PACKAGE_LIMIT: u32 = 10_000;
 pub const INTAKE_FILE_LIMIT: u32 = 100_000;
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]

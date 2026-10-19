@@ -124,6 +124,16 @@ recovery reuse existing worker/publication policies. This section records the
 implemented BL1–BL3 contract; local acceptance is recorded in
 [bulk validation](validation/bulk-library.md).
 
+Grouped-disc publication revision recovery (2026-10-19): under the archive writer,
+the adapter validates the frozen/current Item archive records and resolves added
+Evidence references to committed sibling imports from the same user, intake and
+destination. Application policy permits an evidence-only revision advance when
+the reviewed inventory/metadata and existing references are unchanged. Manual
+inventory/domain/metadata changes and unrelated evidence retain the conflict.
+The publication path applies this rule on first execution and ordinary retry,
+including old failed imports after restart; no data conversion, credential reset,
+new Import identity or blanket expected-revision bypass is introduced.
+
 ## Collection lists
 
 Collection-owned lists are portable revisioned archive entities, independent of

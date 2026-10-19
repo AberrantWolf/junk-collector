@@ -109,3 +109,15 @@ Asset and authority change. Explicit image selection can restore an archived cov
 with preserved payloads, visibility, alternative text and tombstone history;
 automatic refresh cannot restore it. [Repair validation](validation/retention-review-2026-10-18.md)
 covers both reported defects and the effect's conflict/recovery guarantees.
+
+### BL2 grouped-disc publication repair — 2026-10-19
+
+The live NAS workflow exposed sibling imports freezing one album revision, then
+conflicting after the first preservation appended its Evidence reference. Retrying
+the failed Job reused the stale expectation. Publication now accepts only a proven
+same-intake sibling evidence advance with unchanged Item inventory/metadata and
+unchanged prior references, under the archive writer. Existing failed imports use
+the same path on retry after restart. Manual changes remain conflicts and originals
+and physical-copy identities remain stable. See [repair validation](validation/grouped-disc-publication-2026-10-19.md)
+for local tests and the still-pending live NAS recovery. Other evening UI/inbox
+findings remain in the consolidated remaining-work queue.

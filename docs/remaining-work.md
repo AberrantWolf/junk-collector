@@ -10,9 +10,12 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-Queue updated 2026-10-19 after native digital-album delivery and publication:
-HL-01, HL-02 and HL-03 are delivered; HL-04 is the next available qualification
-assignment. Keep the existing milestone numbers. The earlier insertion assigned
+Queue updated 2026-10-19 after native digital-album delivery, live NAS use and
+issue triage. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
+qualification remains open; the next code delivery is HL-07A's concrete import
+review repairs. NAS operations/recovery belong to HL-05A/B; Docker publication
+and release usability belong to HL-07A–D. Keep the existing milestone numbers.
+The earlier insertion assigned
 digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
 HL-04–HL-13 to HL-05–HL-14. Dated completed records retain their original labels.
 
@@ -49,6 +52,45 @@ roots or silently absorb optional features. Update this queue, the owning child
 ledger, status and dated validation together. No commits or agents without an
 explicit assignment. Apply repository gates at implementation boundaries; prose-only
 changes need architecture/link/coverage checks.
+
+## Placement of the 2026-10-19 live-use findings
+
+This routes the new findings to their owning entries below; it is not a second
+queue. Dated reports and workarounds remain in the
+[NAS record](validation/synology-deployment-2026-10-19.md).
+
+| Finding / requested outcome | Owning entry | Priority / disposition |
+| --- | --- | --- |
+| Missing anchor selector; grouping forces manual title; physical-copy label/defaults; NAS/macOS housekeeping in intake | HL-07A | Next complete import-review repair delivery; release readiness |
+| Direct album and individual-track Play buttons | HL-07B | Bounded web listening usability delivery |
+| Clear protection wording and removal of obsolete Phono instructions | HL-07C | Release copy/setup consistency |
+| Fresh-install config, bind directories, inbox groups, provider readiness, Portainer/CLI image drift and orphan guidance | HL-05A | Reproducible installation/update operations |
+| Routine updates without full archive duplication; consistent snapshots and incremental independent backups | HL-05B | Practical recovery at collection scale |
+| Automated public amd64/arm64 images, version/channel tags and tested pull updates | HL-07D | Explicit release gate |
+| Optional cleanup of successfully imported inbox packages | HL-09 | Separate requested convenience with safe deletion/retry acceptance |
+| NAS SFTP and SSH key exchange | HL-05 operator follow-up | Host administration; not a Collector release blocker |
+| Grouped-disc revision conflict and repeated failed retry | Completed repair below | Keep regression coverage; remaining deployment acceptance stays HL-05 |
+
+Recommended sequence: HL-07A first; HL-05A/B and HL-07B/C can then proceed as
+independent complete deliveries. HL-07D publishes after the applicable acceptance
+checks and update/recovery procedure are ready. Continue HL-04/HL-06 hardware and
+format qualification when the required devices/reference material are available.
+Do not wait for optional HL-09 cleanup or unrelated host administration to deliver
+the core repair/release path.
+
+## Completed live-use repair — grouped-disc publication, 2026-10-19
+
+Disc 2 could fail Save originals after disc 1 added an Evidence reference and
+advanced their shared album revision; retry reused the stale expectation.
+The application-owned evidence-only revision rule and writer-fenced publication
+repair are implemented, with regression tests for new publication, old failed
+imports after restart/retry, original bytes/reindex, manual edits and unrelated
+evidence rejection. The operator supplied verified backup/validation output
+(401 files), reported successful retry after the image update at 23:13 JST,
+and working playback at 23:15 JST. See [repair evidence](validation/grouped-disc-publication-2026-10-19.md).
+Do not schedule the repair again or treat its recovery as still unimplemented.
+Remaining final inventory/metadata/seek/original-download/restore checks are part of
+HL-05's deployment acceptance, not a reopened implementation assignment.
 
 ## Completed requested delivery — automatic standard games, 2026-10-10
 
@@ -210,12 +252,14 @@ mechanisms remain useful; do not remove working services just to retire a client
 
 **State:** Linux ARM64 Docker Desktop runtime/persistence passed locally;
 [Synology x86-64 import/download, recreated-container persistence and full backup/restore](validation/synology-deployment-2026-10-19.md)
-passed on the actual NAS. The found SIGTERM defect is corrected in source;
-the Compose install/update package and release workflow are prepared for validation
-and publication. The general install guide includes a proxy/tunnel config example;
-qualify the selected external HTTPS ingress and new image/package on the actual host.
-Remaining interrupted-work/failure and public ingress
-qualification stays open. **Maps:** R02/R03
+passed on the earlier test installation. The permanent Portainer/Cloudflare setup
+now has operator-reported browser access, grouped-import retry recovery and playback,
+plus captured successful full backup/validation output. The SIGTERM source fix,
+Compose package and release workflow exist; actual public image publication remains
+HL-07D. Remaining current-installation recovery, interrupted-work/failure and
+public-ingress qualification stays open. Reuse the dated evidence without treating
+the earlier test install as acceptance of every permanent-installation path.
+**Maps:** R02/R03
 practical deployment, S01–S03 external qualification. **Owner:** release/server
 adapters and focused security review.
 
@@ -248,6 +292,68 @@ certification is HL-14.
 access and withstand the bounded failure/abuse matrix. Public qualification is a
 gate for supported public use, not for a LAN-only release. A commercial deployment
 matrix, automatic route switching and every browser/platform are unnecessary.
+
+#### HL-05A — Reproducible NAS and Portainer operations
+
+**State:** open follow-up from the live installation. **Owner:** process/container
+adapters and operator documentation. Qualify one complete fresh-install and update
+path, including the optional provider and SMB inbox setup actually used:
+
+- Create bind source directories before initialization; DSM rejected a missing
+  source. Resolve or explain the failed proxy-config copy step: initial setup
+  still advertised localhost with administration disabled, while explicitly
+  writing the actual configuration corrected it. Configuration correction must
+  not reset accounts.
+- Document inbox share permissions and supplemental container groups, distinguishing
+  host file access from the bind mount's read/write setting. Read/write permission
+  does not implement source cleanup; that requested feature belongs to HL-09.
+- Keep the Portainer runtime image and SSH maintenance-tool image aligned across
+  updates. Explain why the CLI-only Compose file calls the Portainer-managed
+  tunnel connector an orphan, and do not advise removing that connector. Preserve
+  existing bridge-network tunnel routes when composing the host-local connector.
+- Make MusicBrainz contact configuration and actual provider readiness explicit
+  before promising automatic metadata/artwork. A monitored contact is required,
+  not a MusicBrainz account. Qualify doctor/readiness, import and the expected
+  unavailable-provider behavior. Coordinate wording with HL-07C.
+
+**Acceptance:** a fresh installation and later pull/update follow the instructions
+without ad hoc config repairs, missing mount paths or UID/group failures. Accounts,
+configuration, originals and pending imports are not overwritten. Complete the
+remaining actual-host checks: final disc/copy inventory, metadata/artwork, explicit
+seek, original download comparisons, restart persistence and a restored-instance
+drill. Working access/playback alone is not full Internet qualification.
+
+#### HL-05B — Scalable update backups and recovery
+
+**State:** requested 2026-10-19; current full-copy backup/validation works, scalable
+routine operation is unqualified. **Owner:** deployment/recovery integration over
+the existing application backup contract.
+
+Make routine updates practical for 1,000+ albums and hundreds of game dumps.
+Do not mandate copying or rehashing all unchanged masters before every Portainer
+image update. First qualify an operational approach using existing NAS/tools:
+short stopped-server snapshots of archive, complete private state (including
+unfinished imports), and configuration as one consistent recovery point, plus
+incremental backups to independent storage. Check actual Btrfs/DSM eligibility
+and shared-folder boundaries; neither support nor existing backup jobs are assumed.
+Same-NAS snapshots support rollback but do not replace independent backups.
+Keep periodic independent integrity validation.
+
+Per-build notes must distinguish ordinary application changes from storage-format/
+conversion changes; image-only rollback is not safe after incompatible writes.
+Demonstrate a consistent full restore and interrupted-update recovery before
+documenting this procedure as accepted. Prefer a runbook/tool integration over
+inventing a backup subsystem. This does not reopen HL-03's accepted full-backup
+CLI or implement HL-10 portable export/deltas. HL-07D's public update instructions
+depend on a practical recovery policy for the deployment they advertise.
+
+#### NAS administration follow-up — not a product release gate
+
+Investigate supported DSM updates/settings to enable SFTP on the DS1522+
+(`fatchocobo.local`). Modern `scp` failed with `subsystem request failed on
+channel 0`; `scp -O` successfully transferred the images. Assess missing
+post-quantum SSH key exchange separately from SFTP availability. This operator
+task does not block Collector deployment or require a Collector code change.
 
 ### HL-06 — Qualify advertised preservation, verification and audio support
 
@@ -289,6 +395,94 @@ or whole-disc audio verification. Expand formats only in response to actual use.
 checks only for the platforms/capabilities advertised; safe backup/recovery remains
 mandatory. **Owner:** integrated release review.
 
+#### HL-07A — Repair multi-disc inbox import review
+
+**State:** next code delivery; concrete live-use defects, not a reopening of all BL2.
+**Owner:** application intake/grouping policy, module readiness, filesystem adapters
+and web review, with the existing [bulk delivery contract](bulk-library-plan.md).
+Deliver one complete inbox → review → grouped import → automatic metadata workflow:
+
+- Expose the existing guided flow's CUE/Redumper anchor selection in batch review.
+  Replan through the shared readiness implementation without losing file visibility,
+  grouping or other choices. Choosing an anchor must not require removing either
+  package view; moving generated CUE/BIN files was only the operator workaround,
+  not the required user workflow. No new permanent-storage requirement for
+  redundant derivatives is introduced.
+- Separate album group identity from manual title authority. Two discs can belong
+  to one album while its title stays automatic; an explicitly entered manual title
+  remains authoritative. Do not require importing one disc first just to avoid
+  a forced title override.
+- Replace/explain "Physical set" as a physical-copy grouping choice, not a disc
+  number. Matching labels within an album/intake mean one purchased copy; distinct
+  labels mean separately owned copies. Remove unexplained per-package numeric
+  defaults in favor of reviewed inventory intent. Album group, physical copy and
+  disc positions stay distinct; do not silently regroup existing inventory.
+- Ignore only known new-intake housekeeping: `#recycle` and `@eaDir` directories
+  and nested contents, `.DS_Store`, and Synology metadata streams under `@eaDir`.
+  Apply the same narrow policy to inbox chooser, preview and actual staging.
+  Meaningful hidden/unknown files still round-trip. Do not delete source files or
+  prune already-saved archive records.
+
+**Acceptance:** real web UI imports a two-disc CUE/BIN + Redumper package set as
+one album/one explicitly chosen physical copy with automatic title/artwork when a
+matching provider result exists. Verify separate duplicate copies, explicit manual
+title authority, partial failure/retry/restart, unchanged raw originals and unknown
+files, and housekeeping-free new intake. Keep the grouped-publication conflict
+regressions; do not manufacture metadata success when no provider match is found.
+Cleanup of source directories is outside this delivery.
+
+#### HL-07B — Direct album and track playback actions
+
+**State:** requested 2026-10-19; new entry-point controls are not implemented.
+**Owner:** web presentation over existing authorized listening/queue services.
+
+Provide clear **Play album** and individual-track **Play** buttons where albums
+and tracks are presented. Album play uses numeric disc/track order; track play
+starts the selected track. Reuse the persistent player and queue for prepared CD
+audio and supported digital originals. Explain unavailable/unprepared audio and
+require explicit source choice for ambiguous alternate encodings/imports. Play
+must not silently start encoding. Make queue replacement/continuation behavior
+clear. Exercise multi-disc album play and individual tracks through the real web
+UI, including seeking, next-track behavior, unavailable audio and permissions.
+This adds access to working playback; it does not rebuild the player or reopen HL-02.
+
+#### HL-07C — Clear release and setup wording
+
+**State:** requested 2026-10-19; scoped copy cleanup. **Owner:** CLI/web presentation
+and documentation; coordinate the executable setup flow with HL-05A.
+
+Remove obsolete Phono-specific setup/doctor/startup advice for the retired client.
+Use "not affected", "won't be overwritten", or a precise equivalent when explaining
+protection of existing configuration, credentials, manual choices or other data.
+Use "kept" or "saved" for stored files. Match wording to the actual guarantee;
+do not promise that every setting is unaffected by every update. Technical
+retention policies and stored identifiers do not require renaming. Verify served
+UI, CLI output and instructions agree with current web/Trash Amp behavior.
+
+#### HL-07D — Automated pullable Docker releases
+
+**State:** workflow scaffold exists; public publication/update qualification is open.
+**Owner:** release CI/container packaging with HL-05 deployment acceptance.
+
+Release packaging requirement added 2026-10-19: users must be able to install and
+update by pulling published Docker images, without building source or exporting,
+transferring and loading image archives. Complete and exercise the existing
+`.github/workflows/container-release.yml` rather than introducing a second build
+pipeline. It already gates release-triggered GHCR builds on checks, performs a
+container smoke test, targets linux/amd64 and linux/arm64, and prepares the install
+bundle; actual registry publication remains unqualified. Add a documented moving
+release/channel tag for convenient updates (`latest` for stable releases, with
+prereleases kept on an explicitly named channel), alongside version tags and
+recorded digests for reproducible recovery. Verify anonymous pulls, both platform
+manifests, release version/source labels, and a real Portainer pull/redeploy update
+that preserves configuration, credentials, originals and unfinished work. Document
+the registry image, channel choice and update/rollback procedure, coordinated with
+HL-05's scalable backup work. Published and tested pull-based installation/update
+is required before calling the product released; an unexercised workflow file or
+a source tag alone does not meet this requirement.
+
+#### Final release acceptance
+
 Publish a capability/evidence checklist for the chosen web/Trash Amp scope,
 installation/upgrade/backup instructions and explicit unsupported behavior. Run
 repository gates, rebuild embedded assets, exercise actual setup/import/metadata/
@@ -303,8 +497,9 @@ do not silently modify sibling projects to clear unrelated warnings.
 **Done when:** every claimed capability links to tests or actual manual evidence,
 residual defects have scoped entries, and any supported API/storage/upgrade promise
 is explicitly declared under [pre-release evolution](decisions/pre-release-evolution.md).
-An experimental source tag is not full acceptance. Prebuilt binary/image publishing
-is useful packaging, not proof of runtime qualification. Phono Junk, a separate
+An experimental source tag is not full acceptance. Published Docker images and
+pull-based update acceptance are required packaging, not proof of all runtime
+qualification. Phono Junk, a separate
 Collector Slint app, 100k-item benchmark, TLS rotation and legacy migration are not universal gates.
 
 ## 3. Useful follow-ups, selected by actual home-lab need
@@ -335,6 +530,22 @@ C07, duplicate a player or require C02 failover before single-route downloads.
 
 **State:** optional scoped work; most earlier web gaps are completed. **Maps:** U04,
 D05/D07 listening extensions, D06 follow-ups, FX-04 history bound, P06/R02 practical scale.
+
+#### Optional cleanup after successful inbox import
+
+**State:** requested 2026-10-19; not implemented. **Owner:** application intake
+completion/ownership policy and filesystem adapter, with explicit web controls.
+
+Offer opt-in cleanup of successfully imported inbox packages. Read/write access
+alone does not implement cleanup. Require durable successful preservation, explicit
+definition of cleanup timing relative to optional metadata/preparation, frozen
+source identity and change checks, and visible outcomes. Changed or in-use sources,
+partial failure, cancellation and retry/restart must not delete the wrong files or
+lose recovery inputs. Test the real workflow and failure paths with small offline
+packages before offering it on a live inbox. Do not infer safe deletion from a
+completed generic Job or introduce general archive pruning. Coordinate HL-01's
+existing reference/replay safety principles without reopening its completed audit.
+The basic import-review repair HL-07A must work without this feature.
 
 #### Collection convenience and performance follow-ups
 
@@ -601,20 +812,22 @@ implemented; provider-access restoration or automated scraping is not an open ta
 
 HL-01 retention/CAA simplification, HL-02 FLAC/MP3 purchases and HL-03 stopped-server
 backup/restore tooling are delivered. Do not restart those completed scopes.
-HL-04 web/Trash Amp LAN qualification is next when its actual devices are available;
-HL-05 intended Linux/NAS/public installation qualification remains independently
-available when its host is present. Preserve the existing milestone numbers.
+The grouped-disc publication repair is also implemented and operator-reported as
+working on the NAS. Next complete HL-07A's import-review repairs. HL-04 device
+qualification and HL-05A/B deployment/recovery work remain independently available;
+preserve the existing milestone numbers.
 
-> Complete the remaining HL-04 web and Trash Amp LAN qualification from this queue.
-> Read architecture, current status, release requirements and affected sibling
-> instructions first. Reuse the passing HL-02 codec, web, native GUI and offline
-> evidence and pinned sibling revisions; retain CD and digital-original workflows
-> while focusing on the still-unqualified actual-device, trust, interruption and
-> revocation cases listed under HL-04. Report unavailable hardware honestly without
-> claiming those cases passed or reopening completed feature scopes. Put fixes in
-> their owning layers, preserve existing data and recovery guarantees, and update
-> status, this queue and dated validation together. Do not commit or spawn agents
-> without an explicit user request.
+> Complete HL-07A — Repair multi-disc inbox import review from this queue.
+> Read architecture, current status, release requirements and the bulk intake
+> delivery contract first. Deliver anchor selection, grouping without forced
+> manual titles, understandable physical-copy choices/defaults and narrow
+> housekeeping exclusion through shared planning, actual staging and the real UI.
+> Preserve raw originals, manual authority, unknown files, durable retry ownership
+> and the grouped-disc publication repair. Exercise the complete two-disc workflow
+> and its failure/restart cases, then update status, delivery evidence and this
+> queue together. Do not absorb optional inbox deletion, new format mechanisms,
+> Docker publication or unrelated native-client work. Do not commit or spawn
+> agents without an explicit user request.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

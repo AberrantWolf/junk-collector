@@ -25,6 +25,14 @@ See [the accepted scope policy](decisions/home-lab-scope.md).
   intended Linux binary/container and storage layout. The HL-03 CLI and tested
   [operator runbook](local-alpha-installation.md#stopped-server-backup) provide the
   stopped-server workflow; actual Linux deployment qualification remains open.
+- Publish automatically built Docker images that users can anonymously pull for
+  installation and updates without local compilation or image archive transfer
+  (user requirement, 2026-10-19). Exercise the existing release workflow for amd64
+  and arm64, versioned images/digests and documented moving release channels;
+  stable `latest` must not advance to a prerelease. Qualify a Portainer pull/update
+  with existing configuration, accounts, originals and pending work. Coordinate
+  scalable backup and storage-format-specific recovery instructions. Workflow
+  scaffolding alone is not release acceptance; HL-07 owns completion.
 - For supported public access, qualify trusted HTTPS, listener/page/API exposure,
   roles, Origin/session controls, recovery/revocation, credential redaction and
   bounded untrusted work on the intended ingress. Keep focused security review;
