@@ -1,5 +1,9 @@
 # Recover a previous container installation
 
+For Btrfs local points or GNU tar increments, use the separate
+[snapshot/incremental recovery procedure](snapshot-recovery.md). The commands below
+consume Collector's sealed full-backup format.
+
 Use the full backup made before updating and the exact image used to create it.
 Restore archive, state and configuration together into a fresh data directory;
 do not just downgrade an image against upgraded state.

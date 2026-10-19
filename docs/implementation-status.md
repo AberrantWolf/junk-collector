@@ -21,6 +21,23 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Scalable update recovery — HL-05B, 2026-10-20
+
+The actual DSM Collector root is an eligible single Btrfs subvolume. A qualified
+[operations path](../deploy/container/snapshot-recovery.md) captures all cold roots
+without copying/hashing masters, then exports GNU tar baseline/increments while
+the service runs. A narrow adapter binds tar's cutoff to snapshot time, retaining
+writes made between capture and export. Full CLI backup remains unchanged.
+
+Isolated actual-host acceptance passed SIGKILL/restart and whole-point old-image
+rollback with a pending upload, a NAS→Mac→NAS independent chain, complete cold
+file/permission comparisons and recovered account/session/TLS/original/audio checks.
+Chrome playback/seek/downloads passed before and after restore. The 32 MiB unchanged
+payload was excluded from the 3.28 MB increment; the baseline was 34.51 MB.
+See [dated evidence](validation/snapshot-recovery-2026-10-20.md). Permanent destination/adoption
+is not configured. Generic/DSM Btrfs incremental receive through the isolated bind
+mount failed and is not accepted; public pull/redeploy and power-loss remain open.
+
 ## Reproducible NAS operations — HL-05A, 2026-10-20
 
 Fresh-install proxy configuration uses guarded, byte-checked atomic stdin transfer.
@@ -38,7 +55,8 @@ restore. Configured provider acquisition completed; absent configuration left a
 visible metadata failure without blocking originals/audio. See [dated evidence](validation/nas-operations-2026-10-20.md).
 The live Portainer installation and tunnels were inspected only. Permanent-installation
 inventory/enrichment acceptance, public ingress, system-browser trust, power-loss
-behavior and HL-05B's scalable independent recovery remain open. Public registry
+behavior remain open; HL-05B's isolated snapshot/incremental path is now qualified
+separately above, with permanent destination/adoption still pending. Public registry
 pull/update acceptance remains HL-07D.
 
 ## Release/setup wording — HL-07C, 2026-10-20

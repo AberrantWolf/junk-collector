@@ -13,6 +13,10 @@ configuration validation and provider-contact readiness. The optional inbox Comp
 override supplies the same read-only bind and supplemental group to server and CLI;
 filesystem ACLs remain a host mechanism. Actual Synology update/resume/restore and
 remote-browser checks are recorded in [NAS operations acceptance](validation/nas-operations-2026-10-20.md).
+HL-05B uses an operator stopped-server Btrfs point over those roots, then standard
+GNU tar exports to independent storage. The deployment adapter binds the tar working
+cutoff to snapshot time; application backup/storage formats and domain services are
+unchanged. See [qualified recovery and limits](validation/snapshot-recovery-2026-10-20.md).
 
 **Current direction (2026-10-09):** [remaining work](remaining-work.md)
 is the only remaining-work queue. Older assignment/order and gap statements below

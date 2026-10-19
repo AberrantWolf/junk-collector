@@ -20,6 +20,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libssl-dev
       - run: python3 scripts/check_architecture.py
+      - run: python3 -B scripts/check_container_tools.py
       - run: npm --prefix web ci
       - run: npm --prefix web run check
       - run: npm --prefix web run build

@@ -33,7 +33,13 @@ def main():
     parser.add_argument("--browser-host", help="Private DNS name used by an external qualification browser")
     parser.add_argument("--private-ip", help="Explicit private IPv4 bind for the isolated browser fixture")
     parser.add_argument("--browser-handoff", type=Path, help="Write private fixture details and wait for FILE.done before restore")
+    parser.add_argument("--snapshot-tool-image", help="Disposable Btrfs/GNU-tar tools image; requires a Btrfs data parent")
+    parser.add_argument("--snapshot-handoff", type=Path, help="Private independent-storage roundtrip handoff (snapshot mode)")
     args = parser.parse_args()
+    if bool(args.snapshot_tool_image) != bool(args.snapshot_handoff):
+        parser.error("Snapshot qualification requires both tools image and independent-storage handoff")
+    if args.snapshot_tool_image and not args.update_from:
+        parser.error("Snapshot qualification requires two distinct update images")
     if not 1024 <= args.port_base <= 65532:
         parser.error("Choose four consecutive non-privileged ports")
     if bool(args.browser_host) != bool(args.private_ip):
@@ -48,9 +54,14 @@ def main():
     origin = f"http://localhost:{args.port_base + 1}"
     user_agent = args.provider_user_agent_file.read_text().strip() if args.provider_user_agent_file else None
     with tempfile.TemporaryDirectory(prefix="collector-compose-", dir=args.data_parent) as temporary:
+        snapshots = None
         original_root = Path(temporary)
+        if args.snapshot_tool_image:
+            from snapshot_qualification import SnapshotQualification
+            snapshots = SnapshotQualification(original_root, args.snapshot_tool_image, args.snapshot_handoff)
+            original_root = snapshots.create()
         env = dict(os.environ, COLLECTOR_IMAGE=args.update_from or args.image,
-                   COLLECTOR_DATA=temporary, COLLECTOR_HOST="localhost",
+                   COLLECTOR_DATA=str(original_root), COLLECTOR_HOST="localhost",
                    COLLECTOR_PRIVATE_IP="127.0.0.1")
         command = ["docker", "compose", "-p", f"collector-smoke-{os.getpid()}", "-f", str(compose)]
         cue = b'FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n'
@@ -239,6 +250,8 @@ def main():
             server_id = request("/identity", cookie=cookie)["server_id"]
             assert current_image() == image_id(initial_image)
             owner = request("/me", cookie=cookie)["user_id"]
+            if snapshots:
+                snapshots.seed_unknown()
             collection = request("/admin/collections", dict(name="NAS qualification", module="org.junk.music"), cookie)["id"]
             source = dict(kind="browser", label=None, package_name="Pending upload")
             planned = plan(cookie, collection, source, [dict(name=name, bytes=len(content)) for name, content in originals.items()])
@@ -248,12 +261,37 @@ def main():
             partial = max(1, len(data)//2)
             request(f"/imports/{pending}/files/0?offset=0", data[:partial], cookie, "PUT")
             stop()
-            run("run", "--rm", "cli", "backup", "--destination", "/data/backups/before-update", capture_output=True)
-            run("run", "--rm", "cli", "validate-backup", "--backup", "/data/backups/before-update", capture_output=True)
+            if snapshots:
+                snapshots.capture("before-update")
+            else:
+                run("run", "--rm", "cli", "backup", "--destination", "/data/backups/before-update", capture_output=True)
+                run("run", "--rm", "cli", "validate-backup", "--backup", "/data/backups/before-update", capture_output=True)
             env["COLLECTOR_IMAGE"] = args.image
             run("up", "-d", "--force-recreate", "collector", capture_output=True)
             ready()
             assert current_image() == candidate_image_id
+            if snapshots:
+                # Export the immutable recovery point after service availability returns.
+                snapshots.run("sh", "-c", "printf 'after!' > /fixture/live/state/.qualification-cutoff")
+                snapshots.export("before-update")
+                run("kill", "-s", "SIGKILL", "collector", capture_output=True)
+                run("up", "-d", "collector", capture_output=True)
+                ready()
+                assert request(f"/ingests/{pending}", cookie=original_cookie)["import"]["files"][0]["received_bytes"] == partial
+                stop()
+                env["COLLECTOR_DATA"] = str(snapshots.rollback())
+                env["COLLECTOR_IMAGE"] = initial_image
+                run("up", "-d", "--force-recreate", "collector", capture_output=True)
+                ready()
+                assert current_image() == image_id(initial_image)
+                assert request("/identity", cookie=original_cookie)["server_id"] == server_id
+                assert request("/me", cookie=original_cookie)["user_id"] == owner
+                assert request(f"/ingests/{pending}", cookie=original_cookie)["import"]["files"][0]["received_bytes"] == partial
+                stop()
+                env["COLLECTOR_DATA"] = str(original_root)
+                env["COLLECTOR_IMAGE"] = args.image
+                run("up", "-d", "--force-recreate", "collector", capture_output=True)
+                ready()
             assert request("/me", cookie=original_cookie)["user_id"] == owner
             cookie = login()
             assert request("/me", cookie=cookie)["user_id"] == owner
@@ -307,15 +345,25 @@ def main():
                 album_id = item_id
             browser_handoff(album_id)
             stop()
-            run("run", "--rm", "cli", "backup", "--destination", "/data/backups/qualified", capture_output=True)
-            run("run", "--rm", "cli", "validate-backup", "--backup", "/data/backups/qualified", capture_output=True)
-            # The candidate cannot replace config after accounts exist, including after update.
-            protected = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"invalid replacement", capture_output=True, timeout=120)
-            assert protected.returncode != 0 and read_file("/data/config/collector.toml") == saved_config
-            root_tool("install", "-d", "-m", "0700", "-o", "10001", "-g", "10001", "/data/recovered")
-            env["COLLECTOR_DATA"] = str(original_root / "recovered")
-            root_tool("install", "-d", "-m", "0700", "-o", "10001", "-g", "10001", "/data/config", "/data/archive", "/data/state", "/data/backups")
-            run("run", "--rm", "-v", f"{temporary}/backups/qualified:/backup:ro", "cli", "restore", "--backup", "/backup", "--archive", "/data/archive", "--state", "/data/state", capture_output=True)
+            if snapshots:
+                snapshots.capture("after-update")
+                # The live instance can serve while backup exports/transport run.
+                run("up", "-d", "collector", capture_output=True)
+                ready()
+                snapshots.export("after-update", "before-update")
+                snapshots.independent_roundtrip(candidate_image_id, server_id)
+                stop()
+                env["COLLECTOR_DATA"] = str(snapshots.restore())
+            else:
+                run("run", "--rm", "cli", "backup", "--destination", "/data/backups/qualified", capture_output=True)
+                run("run", "--rm", "cli", "validate-backup", "--backup", "/data/backups/qualified", capture_output=True)
+                # The candidate cannot replace config after accounts exist, including after update.
+                protected = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"invalid replacement", capture_output=True, timeout=120)
+                assert protected.returncode != 0 and read_file("/data/config/collector.toml") == saved_config
+                root_tool("install", "-d", "-m", "0700", "-o", "10001", "-g", "10001", "/data/recovered")
+                env["COLLECTOR_DATA"] = str(original_root / "recovered")
+                root_tool("install", "-d", "-m", "0700", "-o", "10001", "-g", "10001", "/data/config", "/data/archive", "/data/state", "/data/backups")
+                run("run", "--rm", "-v", f"{original_root}/backups/qualified:/backup:ro", "cli", "restore", "--backup", "/backup", "--archive", "/data/archive", "--state", "/data/state", capture_output=True)
             run("run", "--rm", "cli", "doctor", capture_output=True)
             run("up", "-d", "--force-recreate", "collector", capture_output=True)
             ready()
@@ -337,10 +385,12 @@ def main():
             transition = "distinct-image update" if args.update_from else "container recreation"
             print(f"Compose initialize/config/group access/setup/partial-upload {transition}/SIGTERM/FLAC/backup/restore passed", flush=True)
         finally:
-            env["COLLECTOR_DATA"] = temporary
+            env["COLLECTOR_DATA"] = str(original_root)
             subprocess.run(command + ["down", "-t", "5"], env=env, timeout=30, capture_output=True)
             # Only this generated fixture tree, never an operator installation.
             subprocess.run(command + ["run", "--rm", "--entrypoint", "chown", "initialize", "-R", f"{os.getuid()}:{os.getgid()}", "/data"], env=env, check=True, timeout=60, capture_output=True)
+            if snapshots:
+                snapshots.cleanup()
             for target in handoff_files:
                 target.unlink(missing_ok=True)
                 Path(str(target)+".done").unlink(missing_ok=True)

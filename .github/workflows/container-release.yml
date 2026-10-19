@@ -79,7 +79,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           mkdir -p /tmp/collector-bundle/junk-collector-container
-          cp deploy/container/compose.yaml deploy/container/compose.inbox.yaml deploy/container/.env.example deploy/container/collector.proxy.toml.example deploy/container/README.md deploy/container/recovery.md /tmp/collector-bundle/junk-collector-container/
+          cp deploy/container/compose.yaml deploy/container/compose.inbox.yaml deploy/container/.env.example deploy/container/collector.proxy.toml.example deploy/container/README.md deploy/container/recovery.md deploy/container/snapshot-recovery.md deploy/container/freeze-tar-time.py /tmp/collector-bundle/junk-collector-container/
           python3 - <<'PY'
           import os
           from pathlib import Path

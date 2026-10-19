@@ -290,7 +290,12 @@ Portainer definition.
 
 ## Update
 
-Read the target build's storage/upgrade notes. Use an explicit version/digest or
+Read the target build's storage/upgrade notes. For an eligible Btrfs installation,
+use the [consistent snapshot/incremental recovery procedure](snapshot-recovery.md)
+for routine updates, with periodic independent integrity validation. This avoids
+copying/rehashing unchanged masters before every update. The full-copy fallback
+below is for other installations or deliberately chosen full recovery points.
+Use an explicit version/digest or
 a distinct local build tag, not automatic latest-tag updates. Save `.env` and
 record the current image before changing it:
 
@@ -340,7 +345,8 @@ The repository includes the Dockerfile and a release workflow for versioned
 amd64/arm64 images plus this installation bundle. Registry publication has not yet
 been exercised. The older NAS qualification passed original-byte round trips,
 container recreation and full backup/restore. The revised Compose package and
-proxy/tunnel setup still require runtime and actual-ingress acceptance. Current
+proxy/tunnel package passed isolated actual-host runtime acceptance; actual public
+ingress still requires its separate checks. Current
 status and dated evidence live in the repository's implementation/validation docs;
 this guide describes the installation process, not a security certification.
 
@@ -350,5 +356,6 @@ The isolated DS1522+ install/distinct-image update/partial-upload resume/FLAC/fu
 restore path and remote Chrome playback/seek/download checks passed on 2026-10-20.
 See [evidence and limits](../../docs/validation/nas-operations-2026-10-20.md) and
 `scripts/check_container.py` in the source tree. Production Portainer/tunnels were
-inspected only. Public registry pulls and scalable routine recovery remain separate
-release work; the full-copy procedure above is the qualified fallback.
+inspected only. The [Btrfs/incremental path](snapshot-recovery.md) also passed isolated
+NAS/Mac restore qualification. Permanent destination/adoption and public registry
+pulls remain separate work; the full-copy procedure above remains a fallback.

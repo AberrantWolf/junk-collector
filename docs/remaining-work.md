@@ -11,10 +11,10 @@ have been removed; completed work is described by status and dated validation.
 [release requirements](release-requirements.md) records the revised delivery gate.
 
 Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
-actual-host isolated install/update/restore qualification. The 2026-10-19 native delivery and live-use triage
+actual-host isolated install/update/restore and HL-05B snapshot/incremental recovery qualification. The 2026-10-19 native delivery and live-use triage
 remain recorded below. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
 qualification remains open; HL-07A/B/C are delivered. Continue with
-HL-05B practical scalable recovery before HL-07D publication. NAS operations/recovery belong to HL-05A/B; Docker publication
+HL-07D release preparation and publication after applicable deployment/recovery gates. NAS operations/recovery belong to HL-05A/B; Docker publication
 and release usability belong to HL-07A–D. Keep the existing milestone numbers.
 The earlier insertion assigned
 digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
@@ -72,8 +72,8 @@ queue. Dated reports and workarounds remain in the
 | NAS SFTP and SSH key exchange | HL-05 operator follow-up | Host administration; not a Collector release blocker |
 | Grouped-disc revision conflict and repeated failed retry | Completed repair below | Keep regression coverage; remaining deployment acceptance stays HL-05 |
 
-HL-07A/B/C and HL-05A are delivered. HL-05B remains the independent
-scalable-recovery delivery. HL-07D publishes after the applicable acceptance
+HL-07A/B/C and HL-05A/B's isolated operations/recovery deliveries are accepted.
+Permanent backup destination/adoption is still an operator choice. HL-07D publishes after the applicable acceptance
 checks and update/recovery procedure are ready. Continue HL-04/HL-06 hardware and
 format qualification when the required devices/reference material are available.
 Do not wait for optional HL-09 cleanup or unrelated host administration to deliver
@@ -335,9 +335,19 @@ drill. Working access/playback alone is not full Internet qualification.
 
 #### HL-05B — Scalable update backups and recovery
 
-**State:** requested 2026-10-19; current full-copy backup/validation works, scalable
-routine operation is unqualified. **Owner:** deployment/recovery integration over
-the existing application backup contract.
+**State:** isolated operations path qualified 2026-10-20; production destination/
+adoption remains open. The actual Collector root is one Btrfs subvolume without
+nested roots. Short whole-root cold snapshots plus GNU tar baseline/increments,
+with a snapshot-time cutoff adapter, passed actual NAS→Mac→NAS independent restore,
+complete cold file/permission comparison, SIGKILL/restart, old-image whole-point
+rollback/pending-upload resume and remote Chrome playback/seek/downloads. The
+unchanged 32 MiB payload was omitted from the 3.28 MB increment. See
+[operator procedure](../deploy/container/snapshot-recovery.md) and [dated acceptance](validation/snapshot-recovery-2026-10-20.md).
+No permanent destination, schedule, DSM package or production change was configured.
+Btrfs incremental receive failed in the isolated mount and is not an accepted route.
+**Owner:** deployment/recovery integration over the existing application backup
+contract. The completed qualification contract follows; production adoption remains
+part of this entry until the operator selects its destination.
 
 Make routine updates practical for 1,000+ albums and hundreds of game dumps.
 Do not mandate copying or rehashing all unchanged masters before every Portainer
@@ -844,22 +854,18 @@ working on the NAS. HL-07A is delivered with [local acceptance](validation/intak
 HL-07B is delivered with [local acceptance](validation/direct-playback-2026-10-19.md).
 HL-07C is delivered with [local acceptance](validation/release-wording-2026-10-20.md).
 HL-05A is delivered with [actual-host isolated acceptance](validation/nas-operations-2026-10-20.md).
-Next qualify HL-05B's practical consistent-snapshot/incremental recovery procedure. HL-04 device qualification and parent HL-05 permanent-installation/public-ingress
-acceptance remain available when the actual hosts/devices are accessible. HL-07D publication follows its deployment/update acceptance dependencies.
-Preserve milestone numbers and do not reopen completed scopes.
+HL-05B's isolated path is also qualified with [independent recovery acceptance](validation/snapshot-recovery-2026-10-20.md).
+Its permanent destination/adoption remains pending; do not silently configure one.
+HL-04 device and parent HL-05 permanent-installation/public-ingress qualification
+remain available when the actual hosts/devices are accessible. HL-07D publication
+must retain its applicable recovery and deployment dependencies.
 
-> Complete HL-05B — Practical scalable update recovery. Establish actual Btrfs/DSM
-> snapshot/shared-folder eligibility and an operator-selected independent destination.
-> Qualify a short consistent stopped-server recovery point over archive, complete
-> private state and config, incremental independent backup, interrupted-update
-> recovery and full restore using isolated data. Do not change the live layout,
-> install DSM packages or configure a permanent backup destination by assumption.
-> The host is Btrfs, but Snapshot Replication/Hyper Backup were not installed during
-> HL-05A and the Collector root's eligible shared-folder boundary is not established.
-> A destination choice is pending. Continue independent release preparation while
-> external choices remain unresolved; do not claim full-copy tooling is scalable
-> routine recovery. Update status/evidence/queue, self-review and commit deliveries
-> before HL-07D publication.
+> Continue HL-07D's independent release preparation: complete moving stable/prerelease
+> channels, exact version/source/digest records, both architecture manifest checks and
+> honest install/update notes in the existing workflow. Public publication and an
+> actual pull/redeploy are not qualified by a workflow file or locally loaded image.
+> Before production adoption/public release, retain the selected consistent recovery
+> policy and resolve HL-05B's permanent independent destination.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout
