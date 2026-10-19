@@ -10,10 +10,11 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-Queue updated 2026-10-19: HL-02 now owns digital purchases. Completed HL-01 and
-HL-03 keep their IDs; unfinished former HL-02 is HL-04, and former HL-04–HL-13
-are HL-05–HL-14. Dated completed delivery/validation records retain their original
-milestone labels; current assignments and references below use the new numbering.
+Queue updated 2026-10-19 after native digital-album delivery and publication:
+HL-01, HL-02 and HL-03 are delivered; HL-04 is the next available qualification
+assignment. Keep the existing milestone numbers. The earlier insertion assigned
+digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
+HL-04–HL-13 to HL-05–HL-14. Dated completed records retain their original labels.
 
 ## Prioritization and execution
 
@@ -61,8 +62,10 @@ catalog workflow. No second remaining-work queue is created.
 New format/normalization algorithms, arbitrary custom systems/conventions, game
 artwork providers and provenance compaction remain deferred under existing scope
 and HL-01/HL-06/HL-09. The finite matrix does not claim all conceivable standards.
-Collector pins pushed shared-library revision
-`83177af57ca36a5b284298020fea9d5e8fb0c415`; local Cargo patches are removed.
+That delivery originally pinned shared-library revision
+`83177af57ca36a5b284298020fea9d5e8fb0c415`. HL-02 subsequently advanced the exact
+published dependency pins; manifests/lockfiles and its dated validation record
+are current. No local Cargo patches or sibling checkouts are required.
 
 ## 1. Finish the usable installation and protect the collection
 
@@ -105,219 +108,35 @@ live archive is implied. See [scope and retention](decisions/home-lab-scope.md).
 
 ### HL-02 — Complete FLAC and MP3 digital purchase support
 
-**State:** delivered across Collector, junk-libs and Trash Amp, 2026-10-19.
-Independent format vectors, recovery/privacy checks, real Chrome and actual native
-online/download/offline journeys passed. See the [implementation record](digital-purchases.md)
-and [dated acceptance evidence](validation/digital-purchases-2026-10-19.md).
-The sequence and acceptance matrix below are retained as the completed contract.
-Authorized coordinated publication replaces local patches with exact pushed sibling
-revisions; manifests and lockfiles record the dependency identities.
-**Outcome:** import a purchased album, multi-disc download or single from FLAC/MP3
-files, retain the exact originals and purchase facts, review metadata/artwork,
-then browse/search, play, queue, add to collection playlists and explicitly
-retain/play offline in Trash Amp. Use existing music collections and workflows.
-**Owner:** core owns portable acquisition/source identities; Music owns file-track
-interpretation and metadata; application services own intake, resolution,
-availability, preparation and authorization; adapters own storage, tools and I/O;
-web and Trash Amp consume shared contracts. Narrow `junk-libs` crates own codec,
-tag, artwork extraction and audio-reader mechanisms.
-**Dependencies:** implement the source/contract and shared-reader changes below as
-part of this delivery. Reuse delivered HL-01 retention and HL-03 backup/recovery.
-HL-04/HL-06 supply qualification patterns, not deferred acceptance for this feature;
-HL-08 owns unrelated broader native reliability. No physical-disc hardware,
-AccurateRip service, new provider or general export is a prerequisite.
+**State:** delivered and published across Collector, junk-libs and Trash Amp,
+2026-10-19. No implementation or acceptance work remains in this milestone.
+See the [supported matrix and implementation record](digital-purchases.md),
+[current status](implementation-status.md#digital-flacmp3-purchases--delivered-2026-10-19)
+and [dated acceptance and publication checks](validation/digital-purchases-2026-10-19.md).
 
-#### Scope and supported inputs
+The delivery preserves exact DRM-free FLAC/MP3 originals, including high-resolution
+FLAC, mono/stereo MPEG-1/2/2.5 MP3 and mixed/multi-disc packages. Digital acquisition
+creates no physical copy; purchase facts and reviewed file visibility survive
+recovery. Source-bound tags/artwork, manual track edits, explicit alternate-encoding
+selection and immutable file identities feed normal browse/search, direct original
+playback, queues and repeated playlist occurrences without an encoder/provider.
+Trash Amp streams, seeks, downloads and retains artwork/text/search/playback offline.
 
-- Start with DRM-free, one-file-per-track FLAC and MP3 purchases: an album folder,
-  disc subfolders, a standalone single or a reviewed selection of files. Mixed
-  FLAC/MP3 packages and alternate purchased encodings must remain distinguishable;
-  never concatenate duplicate encodings or silently merge purchases. Review
-  grouping, disc/track order and destination before publication. Folder names,
-  filenames and tags are suggestions, not authoritative release identity.
-- FLAC support includes native mono/stereo and high-resolution integer audio,
-  including 16/24-bit files at 44.1, 48, 88.2, 96, 176.4 and 192 kHz. MP3 support
-  includes MPEG-1/2/2.5 Layer III mono/stereo, CBR/VBR, missing seek headers and
-  available encoder delay/end-padding metadata. Record these mandatory variants
-  and any additional supported rates/depths/channels in the implementation matrix;
-  exercise each advertised variant with independent files. Preserve native audio
-  properties; never route purchased files through a forced CDDA conversion.
-  Other valid variants remain preservable with typed unsupported playback reasons.
-- Preserve every reviewed package member byte-for-byte, including original tags,
-  covers and booklets. Unsupported companions do not block supported tracks;
-  malformed audio must be reported and cannot be presented as successfully analyzed.
-  A preservation-only choice remains possible. Generic PDF preview/receipt upload
-  is not a prerequisite: companions can remain original files with authorized
-  downloads. Receipt/order data must follow the private policy below.
-- AAC/ALAC/Opus and other original codecs, DRM decryption, storefront integrations,
-  archive extraction and continuous album-image/CUE splitting are later scope.
-  Existing CD import/playback remains supported. This milestone must complete
-  FLAC and MP3 end to end before broadening the codec list; later codec work stays
-  under the existing broader-codec follow-up, without a second work queue.
+Independent codec/tag/malformed-input vectors, privacy and recovery regressions,
+real Chrome and actual macOS GUI/device-callback journeys passed. The native GUI
+also passed connection removal and server-stopped offline reopen/playback/seek.
+All three repositories are pushed on `codex/hl02-digital-purchases`; exact sibling
+revision pins and lockfiles replace local Cargo patches. An isolated native source
+export passed its gates without the unrelated staged release work or sibling
+checkout fixtures; full affected workspace, lint and browser checks passed again.
 
-#### Current integration points
-
-| Boundary | Existing implementation to extend |
-| --- | --- |
-| Portable records and identity | `collector-core` acquisition/Representation records, processing formats/recipes and list targets; purchase/file visibility belongs in the archive model, not only SQLite |
-| Music interpretation | [music module](../crates/collector-modules/src/music.rs), its metadata types and shared junk-libs readers; separate file layouts from CD-specific analysis |
-| Intake and resolution | [guided intake](../crates/collector-app/src/guided_ingest.rs), [bulk intake](../crates/collector-app/src/bulk_intake.rs), album grouping and metadata services; retain one publication/enrichment workflow |
-| Availability and listening | [derivatives](../crates/collector-app/src/derivatives.rs), [album preparation](../crates/collector-app/src/album_preparation.rs), [music search](../crates/collector-app/src/music_search.rs) and [lists](../crates/collector-app/src/collection_lists.rs); remove CDDA/FLAC-profile assumptions only where these block file sources |
-| Persistence and transport | Store import/processing/music/list projections and original media access; `collector-api-types`, `collector-client`, server routes, generated OpenAPI/browser types and native cache consumers |
-| Actual clients | Existing web import/metadata/music/player/list views and sibling Trash Amp Collector adapter, decoder and offline cache; preserve standalone playback |
-
-#### Implementation sequence within this milestone
-
-1. **Settle portable acquisition and source contracts first.** Extend acquisition
-   modeling to represent a digital purchase associated with an Item and its
-   acquired Capture(s), independently of physical Specimens. Optional facts are
-   store/source URL, date, price/currency and private order/reference notes. Keep
-   acquisition separate from catalog release identity, import time and codec.
-   A purchased MP3 is a `PreservationMaster`; role never asserts lossless audio or
-   an authentic studio master. Record observed codec/lossy status separately;
-   earlier encoding history stays unknown unless supported by retained evidence.
-   Digital guided imports create no physical copy/carrier, including bulk intake,
-   retry and placeholder cleanup. Attaching to an existing Item preserves its
-   physical inventory. Do not infer that old copy records were digital or remove
-   them automatically. Reuse receipt/revision and archive publication mechanisms;
-   no new entitlement, billing or generic acquisition-workflow engine.
-2. **Add file-track analysis through shared readers.** Extend Music's source layout
-   beyond `CdPackageSelection`/`CdPcmReader` assumptions. Persist an immutable ordered
-   track manifest bound to the complete committed source fingerprint, mapping each
-   unique source track position to its package-file identity and native audio
-   properties. Disc number, printed track number and title are separate display
-   metadata; duplicate/missing tag numbers cannot collide in playlists. Metadata
-   edits/reordering must never make an existing source coordinate address another
-   file. General audio coordinates carry their format/time base, optional exact
-   decoded length and delay/padding knowledge; do not invent CD sectors, offsets,
-   disc IDs or exact MP3 frame counts from estimates. Shared parsing/decoding works
-   through authorized bounded readers, with limits and cancellation inside tag,
-   artwork, frame traversal and decode loops. Reuse intake's 10,000-package /
-   100,000-file limits and artwork's 20-MiB image / 1-MiB preview ceilings; define
-   explicit tag-byte/field-count/text and decoded-image pixel bounds before allocation.
-   Limit skips/unknown blocks without loading declared payloads into memory. Full
-   decode/validation runs in Jobs; discovery, preview, browsing, polling and admission
-   use recorded observations.
-3. **Integrate intake, metadata and artwork across layers.** Extend module discovery
-   and readiness to recognize file packages without CUE/TOC anchors, validate actual
-   formats after staging, and offer reviewed album/single grouping and track order.
-   Keep browser uploads/configured inboxes on the signed-plan, resumable transport,
-   guided/bulk intent and shared publication pipeline. Server services own subsequent
-   work. Extract bounded FLAC comments/pictures and MP3 ID3 metadata/artwork into
-   source-bound candidates/Assets; document supported tag versions, text decoding
-   and conflicting/missing-field behavior. Include ID3v1 and ID3v2.2/2.3/2.4,
-   Unicode text, unsynchronization and embedded-picture variants in that matrix;
-   malformed/unsupported tag content stays explicit without inventing field values.
-   Track candidates include artist/title,
-   album/album artist, disc/track number, date and embedded release/recording IDs
-   where present. Manual authority survives refresh, provider outage and reindex;
-   explicit accepted grouping/order survives refreshed tag/provider suggestions.
-   Reuse the metadata-resolution/acquisition registry for optional MusicBrainz/CAA
-   enrichment. Embedded IDs are descriptive claims; text searches and tag agreement
-   cannot gain computed-disc-ID authority or silently merge editions. No provider
-   access is needed for useful tagged-file browsing and playback.
-4. **Resolve direct originals and optional derivatives through one media pipeline.**
-   Generalize availability/read DTOs so a playable original does not require a
-   conversion recipe or pretend `ConversionProfile::Flac`. Expose actual codec,
-   container, native format, timing knowledge, original/derived role and typed
-   availability/preparation reasons. Original FLAC/MP3 should be immediately playable
-   after required analysis/publication, without an encoder or duplicate audio copy.
-   Reuse authorized opaque readers, Range/ETag behavior and current byte-validation
-   policy; never add payload hashing to catalog queries. Preparation remains explicit
-   and capability-dependent. Where preparation accepts file sources, its inputs,
-   recipes and validation must preserve supported native lossless PCM; version any
-   changed recipe encoding while retaining existing immutable recipes and bytes.
-   Adding new conversion profiles or requiring conversion of playable originals is
-   outside the mandatory direct-play path. Do not present MP3-to-FLAC as a
-   quality upgrade or lossless-source recovery; avoid redundant preparation when the
-   original is usable. Existing optional Opus can remain explicitly unqualified;
-   adding an encoder/profile is not necessary to play these originals.
-5. **Complete shared library, playlist and client behavior.** Update availability,
-   music search, album coverage/grouping/preparation, list expansion and shared
-   `collector-api-types`/`collector-client` consumers together. Use recorded immutable
-   source track positions for both CD and purchased-file tracks; playlists preserve
-   intentional repeats and unavailable historical sources after replacement/removal.
-   Fix FLAC-only search preferences and cache keys that currently require a conversion
-   profile: original multi-file packages require exact file identity as well as
-   server/representation/content identity. Web shows album/single titles, artists,
-   artwork and source formats in normal Library/search/list/queue views, with direct
-   play and useful per-client unsupported-format guidance. Digital sources do not
-   show missing-CD or pending-AccurateRip warnings. Trash Amp streams, seeks, queues,
-   downloads/resumes and decodes FLAC/MP3 using the same transport/source identities;
-   retained metadata/artwork enables Internet-disconnected browse/search/playback.
-   Inspect sibling instructions/consumers and implement/check necessary shared and
-   Trash Amp changes separately; do not import old application orchestration.
-6. **Fence privacy, lifecycle and recovery at existing boundaries.** Freeze package
-   membership, purchase inputs, destination revision and requested follow-up work
-   with receipts before mutable configuration resolution. Persist reviewed file
-   visibility in the portable package model and enforce it on original reads as
-   well as metadata/Asset routes. Commit acquisition/source records with the
-   ordinary publication/recovery boundary; retry cannot create a
-   second purchase, Item, Capture or physical copy. Existing parent/child claims,
-   generation fences, durable ownership and paginated reconciliation cover cancellation,
-   replacement, removal and shared preparation. Keep terminal/partial failures visible.
-   Define purchase-field and companion visibility before exposing DTOs: store/date/price,
-   order identifiers, receipts and private notes are curator-only; Viewers receive
-   only permitted descriptive metadata, shared artwork and playable/downloadable
-   content. Private facts must not be copied into public tags or provider queries.
-   If an audio file itself is explicitly classified private, restrict the whole
-   original rather than silently stripping tags from preserved bytes. A raw-package
-   download must not bypass private-companion filtering; reject a package route
-   that cannot enforce it. Retain private purchase facts portably under authorized
-   backup/reindex without exporting them in viewer/offline
-   manifests. Both pages and backing APIs honor collection roles, cross-collection
-   denial and listener exposure. No automatic forwarding of private facts to providers.
-7. **Accept the complete workflow and record its actual limits.** Run the matrix
-   below through real services, worker/publication paths, web UI and Trash Amp.
-   Update architecture, status, this queue and dated validation together; regenerate
-   OpenAPI/browser types and shared consumer fixtures for changed contracts. Run
-   the repository gates listed in AGENTS.md, rebuild Rust after embedded web assets,
-   run real Chrome smoke journeys and affected `junk-libs`/Trash Amp gates. No
-   format is complete merely because preservation or a decoder unit test passes.
-
-#### Acceptance and failure matrix
-
-- A tagged FLAC album with sidecar/embedded art and booklet, a multi-disc download,
-  an MP3 single and a mixed-format purchase complete folder/upload and configured
-  inbox intake, reviewed grouping/destination, immediate Library/search refresh,
-  actual play/seek/track transitions, queue, repeated playlist occurrences and
-  Trash Amp streaming/download/offline artwork/text browse/search/playback. Include
-  high-resolution FLAC, mono, non-ASCII tags and files with absent/conflicting tags.
-  No fake physical copy, CD identity, unnecessary preparation or provider dependency.
-- Independent FLAC PCM vectors verify native rate, depth, channels and frame counts;
-  independently produced MP3 vectors cover supported versions, CBR/VBR, seek with
-  and without seek tables, short tracks, delay/padding and unknown timing. Exercise
-  audible/recorded output and boundary behavior on the named clients. Missing
-  gapless data stays explicit; a successful decode is not sample-accurate/gapless
-  qualification. Hash/length integrity, structural/decode validity, derivative PCM
-  equality and descriptive release matching remain separately labeled. No AccurateRip
-  or catalog/audio verification is fabricated for digital purchases.
-- Oversized/hostile tags or pictures, malformed/truncated audio, misleading suffixes,
-  duplicate names/track numbers, mixed supported/unsupported files and cancellation
-  during reads/decode/final validation fail within bounded resources. No truncated
-  input is padded or silently accepted as complete. Missing tools/network retain
-  usable originals; obsolete work cannot publish success.
-- Retry with advancing timestamps, browser reload/reopen, upload resume, interruption
-  before/after publication, restart beyond the first unfinished page, shared-owner
-  cancellation and source replacement preserve one admitted purchase and correct
-  outcomes. Metadata/order edits do not retarget saved playlists. Removal/restore,
-  later manual edits and stale destination/source revisions follow existing fences.
-- Viewer/Curator, cross-collection and listener-exposure tests cover purchase facts,
-  original/companion downloads, artwork and media; grant/device revocation interrupts
-  actual online use. Two users/servers and two files in the same Representation
-  cannot collide in cache or playback identity. Retained authorized offline files
-  remain usable under the existing non-DRM policy.
-- Full backup/restore and archive-only rebuild recover exact originals, acquisitions,
-  private visibility, stable track/list targets, accepted metadata/artwork and
-  unknown records. Existing CD albums, physical inventory, immutable recipes and
-  shared-library consumers pass affected regressions. Existing stored data receives
-  an explicit safe conversion or actionable read-only/error policy if required;
-  no speculative checkpoint compatibility wrappers or silent resets.
-
-**Done when:** all mandatory FLAC/MP3 paths above pass with dated evidence naming
-codec variants, clients and limits. Missing hardware/client evidence remains open,
-never replaced by a mock or postponed to another milestone to declare completion.
-Further codecs are independently selectable later; they do not dilute this delivery.
+**Remaining scope elsewhere:** HL-04 owns actual second-device LAN/trust/failure
+qualification; HL-08 owns the broader native reliability matrix; HL-06 owns
+outstanding advertised-format/audio oracles. AAC/ALAC/Opus originals and other
+codecs, storefront/archive intake, DRM and album-image/CUE splitting remain deferred
+under HL-13. MP3 decode/timing support does not certify sample-accurate gapless or
+bit-perfect output, and descriptive tags never assert CD/catalog verification.
+Do not reopen the accepted FLAC/MP3 workflow as a dependency of those follow-ups.
 
 ### HL-03 — Make stopped-server backup and restore dependable to operate
 
@@ -351,6 +170,11 @@ HL-10. Do not reopen this tooling delivery as a new remaining task.
 ### HL-04 — Complete web and Trash Amp LAN qualification
 
 **State:** web and Trash Amp workflows implemented; external acceptance incomplete.
+HL-02 already qualifies actual Chrome and macOS FLAC/MP3 playback/seek/transitions,
+queues, native explicit downloads, connection removal and offline reopen with
+artwork/text/search. Reuse its [named-client evidence](validation/digital-purchases-2026-10-19.md);
+it does not establish system-trusted enrollment, a second LAN device or failure
+behavior beyond the cases actually tested.
 **Maps:** remaining relevant LA3 and C01/C04/C07 checks. **Owner:** application,
 transport and Trash Amp presentation; fixes belong in their owning layers.
 
@@ -362,13 +186,14 @@ and sibling `docs/collector-connection.md`. Finish:
   multiple servers/accounts, cancelled or interrupted enrollment and switching
   during playback or uncertain edits. Reassess old native matrix cases against
   the actual Trash Amp implementation before adding new requirements.
-- Real output/track transitions, seek/queue controls and device-loss behavior;
-  stalled/malformed/changed ranges, denied trust and grant/device revocation
-  during actual reads/playback. Native playlist command loss/restart recovery
-  should demonstrate the real durable-command path, not reproduce Phono tests.
+- Exercise playback/transitions, seek and queue continuity across output-device
+  loss, stalled/malformed/changed ranges, denied trust and grant/device revocation
+  during actual reads. Keep the passing ordinary CD and FLAC/MP3 paths as the
+  baseline. Native playlist command loss/restart recovery should demonstrate the
+  real durable-command path, not reproduce Phono tests.
 - An actual second LAN device with browser-trusted HTTPS: Viewer browse/artwork
-  and FLAC playback, permitted Curator writes, denied Viewer writes and grant/
-  active-session revocation. Use Trash Amp on a second Mac only for claims about
+  and supported FLAC/MP3 playback, permitted Curator writes, denied Viewer writes
+  and grant/active-session revocation. Use Trash Amp on a second Mac only for claims about
   that native platform; a web-device gate need not require a Mac. Verify supported
   native downloads and Internet-disconnected LAN use on their actual client.
 
@@ -423,6 +248,11 @@ matrix, automatic route switching and every browser/platform are unnecessary.
 **State:** implementation and independent synthetic vectors exist; coverage gaps
 remain. **Maps:** D02/D04/D05/D07 and R03 real oracles. **Owner:** shared libraries
 for mechanisms, modules for semantics, application/adapters for work and evidence.
+The initial FLAC/MP3 original-file matrix, bounded tag/picture parsing, native
+rates/timing/seek and named-client playback are accepted under
+[HL-02](#hl-02--complete-flac-and-mp3-digital-purchase-support). Retain those vectors
+as regressions; do not repeat that delivery or infer broader fidelity/gapless,
+CD/AccurateRip or unsupported-codec coverage from it.
 
 Maintain a per-operation supported/unsupported/externally-unqualified matrix.
 Use owned or legally supplied independent references for the formats actually
@@ -449,13 +279,16 @@ or whole-disc audio verification. Expand formats only in response to actual use.
 
 **State:** source alpha exists; no supported home-lab release baseline declared.
 **Maps:** bounded R03, release-toolchain maintenance and independent UI review.
-**Dependencies:** HL-02–HL-06 only for the platforms/capabilities advertised; safe
-backup/recovery remains mandatory. **Owner:** integrated release review.
+**Dependencies:** accepted HL-01–HL-03 capabilities plus remaining HL-04–HL-06
+checks only for the platforms/capabilities advertised; safe backup/recovery remains
+mandatory. **Owner:** integrated release review.
 
 Publish a capability/evidence checklist for the chosen web/Trash Amp scope,
 installation/upgrade/backup instructions and explicit unsupported behavior. Run
 repository gates, rebuild embedded assets, exercise actual setup/import/metadata/
-prepare/listen/list editing and targeted keyboard/mobile/accessibility review.
+listen/list editing and targeted keyboard/mobile/accessibility review. Include CD
+preparation and direct FLAC/MP3 originals in the chosen scope; playable digital
+originals must not require preparation. Reuse unaffected HL-02 acceptance evidence.
 Check current stable Rust with [the maintenance procedure](release-toolchain.md)
 before each release; the October upgrade is done, not a recurring feature ticket.
 Track affected sibling lint findings only when touching or qualifying those crates;
@@ -472,17 +305,22 @@ Collector Slint app, 100k-item benchmark, TLS rotation and legacy migration are 
 
 ### HL-08 — Finish Trash Amp reliability and offline acceptance
 
-**State:** adapter, native Slint browsing/list editing, FLAC streaming and explicit
-downloads are implemented; acceptance remains partial. **Maps:** C01/C03–C05/C07.
+**State:** adapter, native Slint browsing/list editing, CD-derived FLAC and direct
+FLAC/MP3 streaming/downloads are implemented. HL-02 passed the actual native GUI
+purchase journey, both formats through the real audio callback, and offline
+artwork/text/search/playback/seek after connection removal and server shutdown.
+The broader reliability matrix remains partial. **Maps:** C01/C03–C05/C07.
 **Owner:** Trash Amp adapter/presentation over shared client/audio services.
 
-Inspect sibling `docs/collector-connection.md` before assigning work. Qualify
-output capture/fidelity, device loss, stalled/changed ranges and revocation,
-rapid server/account switching, two-account live authorization isolation and
-comprehensive download failure/restart UI journeys. Check durable snapshots,
-artwork/text offline browse/search, pinning/eviction, budget behavior and immutable
-cache identity against C05; record exact missing behavior before implementing it.
-The existing 10 GiB download budget and 128 MiB artwork cache are not proof that
+Inspect sibling `docs/collector-connection.md` and the
+[HL-02 evidence](validation/digital-purchases-2026-10-19.md) before assigning work.
+Reuse the passing ordinary streaming/download/offline paths and immutable cache
+identity regressions. Remaining qualification covers output capture/fidelity,
+device loss, stalled/changed ranges and revocation, rapid server/account switching,
+two-account live authorization isolation and comprehensive download failure/restart
+UI journeys. Assess pinning/eviction and budget exhaustion against C05 and the
+actual implementation; record missing behavior before implementing it. The
+existing 10 GiB download budget and 128 MiB artwork cache are not proof that
 all older C05 requirements pass. Preserve standalone local playback and retained
 offline files; revocation cannot recall disconnected copies. No need to rebuild
 C07, duplicate a player or require C02 failover before single-route downloads.
@@ -501,9 +339,11 @@ covered by the [browser regression and validation record](validation/library-wor
 Self-review strengthened restoration coverage after the modal unmounts; it passes.
 This closes the defect observed in the 2026-10-09 AccurateRip shortcut journey.
 
-- Add document attachments when manuals/receipts are needed, using existing Asset
-  visibility/publication with bounded validation and honest download/preview types.
-  Image Covers/Photos/Scans already work. Do not imply arbitrary documents work now.
+- Add general document Assets/attachments and previews when manuals/receipts need
+  their own presentation, using existing visibility/publication and bounded
+  validation. HL-02 already preserves purchase companions, including booklets and
+  receipts, as reviewed original files with authorized downloads. That does not
+  implement a general document Asset/preview surface. Image Covers/Photos/Scans work.
 - Add a game metadata/artwork provider only for an identified collection need,
   with provider terms/access established, bounded acquisition, meaningful source
   attribution and manual authority preserved under HL-01 retention policy. Manual
@@ -679,8 +519,13 @@ This is distinct from HL-11 personal activity sync.
 
 Also retained: SwiftUI iOS/UniFFI, PriceCharting exchange after API/permission research,
 runtime plugin isolation, archive replication, cross-collection deduplication, video,
-emulators, ripping hardware, broader codecs/DSP, smart/personal lists and general
-post-edit splitting. No hidden dependencies on these for the home-lab server.
+emulators, ripping hardware, smart/personal lists and general post-edit splitting.
+Further digital-album scope belongs here: AAC/ALAC/Opus and other originals,
+storefront integrations, archive extraction, DRM handling, continuous album-image/
+CUE splitting and broader DSP. The delivered FLAC/MP3 source/availability pipeline
+is the starting point; each selected addition needs a bounded complete workflow
+and independent format/client evidence. No hidden dependencies on these for the
+home-lab server.
 
 ### HL-14 — Advanced hardening and large-deployment qualification
 
@@ -721,7 +566,7 @@ record that requirement and implement/qualify it for that deployment.
 | R02/R03 and release requirements | HL-05/06/07 practical release; HL-09 representative performance; HL-14 extreme matrix |
 | U04 documents, D06 extra providers, FX-04 scale bounds, C06 | HL-09/11; optional measured demand |
 | Shared listening and follow-on scope in old plans/status | HL-13; HL-09/11 where appropriate |
-| Digital FLAC/MP3 purchase support requested 2026-10-19 | HL-02 complete intake, acquisition, metadata/artwork, web/list and Trash Amp online/offline delivery |
+| Digital FLAC/MP3 purchase support requested 2026-10-19 | HL-02 delivered and published; reuse acceptance in HL-04/06/08; additional original codecs/intake/splitting remain HL-13 |
 | Obsolete wave queues and music-first proposal | Removed; relevant unfinished scope and advanced design are consolidated here |
 | Reviews, foundation/reuse/security decisions, UX review, validation ledgers and release notes | Technical/evidence references; HL-01 reassesses validity, complexity and retention; no independent assignment order |
 
@@ -748,7 +593,8 @@ available when its host is present. Preserve the existing milestone numbers.
 > Complete the remaining HL-04 web and Trash Amp LAN qualification from this queue.
 > Read architecture, current status, release requirements and affected sibling
 > instructions first. Reuse the passing HL-02 codec, web, native GUI and offline
-> evidence; focus on the still-unqualified actual-device, trust, interruption and
+> evidence and pinned sibling revisions; retain CD and digital-original workflows
+> while focusing on the still-unqualified actual-device, trust, interruption and
 > revocation cases listed under HL-04. Report unavailable hardware honestly without
 > claiming those cases passed or reopening completed feature scopes. Put fixes in
 > their owning layers, preserve existing data and recovery guarantees, and update

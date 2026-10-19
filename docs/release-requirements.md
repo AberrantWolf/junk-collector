@@ -57,8 +57,9 @@ independent vectors, actual Chrome and native GUI playback/seek/download/offline
 acceptance on the named clients. Additional codecs, DRM and album-image splitting
 are outside its first delivery.
 Raw-disc guided imports retain their physical-copy default; digital intake must
-explicitly follow the new acquisition policy. HL-02 contains the implementation
-sequence and acceptance matrix; it remains the sole queue entry for this outcome.
+explicitly follow the new acquisition policy. HL-02 records the completed delivery;
+the linked implementation and dated validation records define its supported
+contract and acceptance evidence. Follow-up scope stays in the consolidated queue.
 
 ## Broader product target reference
 
