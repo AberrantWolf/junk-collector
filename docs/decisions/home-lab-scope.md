@@ -70,3 +70,31 @@ Backups must work, advertised evidence must be honest, and actual supported
 clients must be exercised. A separate native inventory application, Phono delivery,
 legacy importer for users without legacy data, full deployment matrix and indefinite
 provider lookup history do not block a useful home-lab release.
+
+## Local recovery and optional media backups — clarified 2026-10-20
+
+The user clarified that a multi-terabyte media library should not imply automated
+full-library backups, a paid cloud account or a separately selected independent
+backup destination. None is a release or ordinary-update prerequisite. Provide a
+predictable local backup area and practical consistent update rollback. The packaged
+container already initializes `${COLLECTOR_DATA}/backups`; the CLI still requires an
+explicit fresh destination and does not run a scheduled backup automatically.
+
+Keep complete local recovery points for updates, using a consistent stopped-server
+Btrfs snapshot where eligible or an explicitly chosen full backup. Independent media
+copies remain optional operator policy using existing storage/tools. Local points
+support rollback; they do not protect against loss of their storage device. Preserve
+actual recovery and integrity guarantees without mandating duplication of unchanged
+masters before every image update.
+
+The implemented full-backup command includes originals; there is no database-only
+or lightweight catalog backup mode. Such a future mode would need the archive-owned
+inventory/manual metadata/evidence and relevant assets plus complete required private
+state/config, not just a copy of SQLite files. Do not label a rebuildable index or
+private database alone as a restorable catalog.
+
+A backup-age reminder is a reasonable optional follow-up, not implemented or a
+release gate. Base any future reminder on known successful, validated recovery
+points; an attempted/failed backup must not reset it, and externally managed backups
+must not be presented as observed. This clarification changes operating scope, not
+stored data, the accepted full-backup format or dated qualification results.

@@ -291,11 +291,30 @@ The standalone Compose commands below apply to installations actually managed by
 those complete files; do not use them to overwrite an incomplete copy of a live
 Portainer definition.
 
+## Local backup area and optional media copies
+
+Initialization creates `${COLLECTOR_DATA}/backups` on the host, available as
+`/data/backups` to the one-shot CLI. With the inspected NAS layout this is
+`/volume1/junk-collector/backups`. Use a fresh named child for each explicit backup.
+The CLI still requires `--destination`; this directory does not imply an automatic
+backup job.
+
+The current full-backup command copies **all originals** as well as catalog/private
+state/config. A lightweight database/catalog-only mode is not implemented, and
+SQLite alone would omit archive-owned inventory, manual metadata and evidence.
+For ordinary updates on eligible Btrfs, use local consistent snapshots rather than
+copying terabytes of unchanged media. Snapshot points live outside the data root,
+as documented in the recovery procedure. Full-media copies to other disks/NAS/cloud
+are optional operator choices; no paid cloud service or separate destination is
+required to install/update Collector. Local points provide rollback, not protection
+against loss of that storage device. Backup-age reminders remain a possible follow-up.
+
 ## Update
 
 Read the target build's storage/upgrade notes. For an eligible Btrfs installation,
 use the [consistent snapshot/incremental recovery procedure](snapshot-recovery.md)
-for routine updates, with periodic independent integrity validation. This avoids
+for routine local rollback. Optional independent exports and integrity checks can
+follow the operator's media-backup policy. This avoids
 copying/rehashing unchanged masters before every update. The full-copy fallback
 below is for other installations or deliberately chosen full recovery points.
 Use an explicit version/digest or
@@ -311,7 +330,8 @@ docker compose run --rm cli validate-backup --backup /data/backups/before-update
 ```
 
 Choose a fresh backup name. Stop if any command fails. Backups contain credentials
-and TLS keys; copy important backups to independent storage.
+and TLS keys; keep them private. Copying media backups to independent storage is
+optional and protects against risks a local rollback point cannot cover.
 
 Change `COLLECTOR_IMAGE` in `.env` to the selected build. Pull a published image,
 or build/load a new local image using that tag; then:
@@ -360,5 +380,5 @@ restore path and remote Chrome playback/seek/download checks passed on 2026-10-2
 See [evidence and limits](../../docs/validation/nas-operations-2026-10-20.md) and
 `scripts/check_container.py` in the source tree. Production Portainer/tunnels were
 inspected only. The [Btrfs/incremental path](snapshot-recovery.md) also passed isolated
-NAS/Mac restore qualification. Permanent destination/adoption and public registry
-pulls remain separate work; the full-copy procedure above remains a fallback.
+NAS/Mac restore qualification. Independent media-backup storage is optional; public
+registry pulls remain separate work. The full-copy procedure above remains a fallback.

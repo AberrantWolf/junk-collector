@@ -66,14 +66,15 @@ queue. Dated reports and workarounds remain in the
 | Direct album and individual-track Play buttons | HL-07B | Bounded web listening usability delivery |
 | Clear protection wording and removal of obsolete Phono instructions | HL-07C | Release copy/setup consistency |
 | Fresh-install config, bind directories, inbox groups, provider readiness, Portainer/CLI image drift and orphan guidance | HL-05A | Reproducible installation/update operations |
-| Routine updates without full archive duplication; consistent snapshots and incremental independent backups | HL-05B | Practical recovery at collection scale |
+| Routine updates without full archive duplication; local consistent snapshots and optional independent exports | HL-05B | Practical local recovery; external media copies optional |
 | Automated public amd64/arm64 images, version/channel tags and tested pull updates | HL-07D | Explicit release gate |
 | Optional cleanup of successfully imported inbox packages | HL-09 | Separate requested convenience with safe deletion/retry acceptance |
 | NAS SFTP and SSH key exchange | HL-05 operator follow-up | Host administration; not a Collector release blocker |
 | Grouped-disc revision conflict and repeated failed retry | Completed repair below | Keep regression coverage; remaining deployment acceptance stays HL-05 |
 
 HL-07A/B/C and HL-05A/B's isolated operations/recovery deliveries are accepted.
-Permanent backup destination/adoption is still an operator choice. HL-07D publishes after the applicable acceptance
+Independent media backups are optional operator policy, not a publication prerequisite
+under the 2026-10-20 scope clarification. HL-07D publishes after the applicable acceptance
 checks and update/recovery procedure are ready. Continue HL-04/HL-06 hardware and
 format qualification when the required devices/reference material are available.
 Do not wait for optional HL-09 cleanup or unrelated host administration to deliver
@@ -335,37 +336,43 @@ drill. Working access/playback alone is not full Internet qualification.
 
 #### HL-05B — Scalable update backups and recovery
 
-**State:** isolated operations path qualified 2026-10-20; production destination/
-adoption remains open. The actual Collector root is one Btrfs subvolume without
-nested roots. Short whole-root cold snapshots plus GNU tar baseline/increments,
-with a snapshot-time cutoff adapter, passed actual NAS→Mac→NAS independent restore,
+**State:** isolated operations path qualified 2026-10-20; no independent-destination
+selection is required to continue release work. The actual Collector root is one
+Btrfs subvolume without nested roots. Short whole-root cold snapshots and the
+optional GNU tar baseline/increment path passed actual NAS→Mac→NAS restore,
 complete cold file/permission comparison, SIGKILL/restart, old-image whole-point
-rollback/pending-upload resume and remote Chrome playback/seek/downloads. The
-unchanged 32 MiB payload was omitted from the 3.28 MB increment. See
+rollback/pending-upload resume and remote Chrome playback/seek/downloads. See
 [operator procedure](../deploy/container/snapshot-recovery.md) and [dated acceptance](validation/snapshot-recovery-2026-10-20.md).
-No permanent destination, schedule, DSM package or production change was configured.
-Btrfs incremental receive failed in the isolated mount and is not an accepted route.
+No production configuration or backup schedule was changed. Btrfs incremental receive
+failed in the isolated mount and is not an accepted route.
 **Owner:** deployment/recovery integration over the existing application backup
-contract. The completed qualification contract follows; production adoption remains
-part of this entry until the operator selects its destination.
+contract.
 
-Make routine updates practical for 1,000+ albums and hundreds of game dumps.
-Do not mandate copying or rehashing all unchanged masters before every Portainer
-image update. First qualify an operational approach using existing NAS/tools:
-short stopped-server snapshots of archive, complete private state (including
-unfinished imports), and configuration as one consistent recovery point, plus
-incremental backups to independent storage. Check actual Btrfs/DSM eligibility
-and shared-folder boundaries; neither support nor existing backup jobs are assumed.
-Same-NAS snapshots support rollback but do not replace independent backups.
-Keep periodic independent integrity validation.
+Apply the [clarified local recovery scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20):
+make updates practical for 1,000+ albums without copying/rehashing all unchanged
+masters. Use a complete consistent local point over archive, required private
+state/scratch and config; Btrfs eligibility and boundaries are qualified on the
+actual host. The packaged local backup area is `${COLLECTOR_DATA}/backups`.
+The existing explicit full-backup command includes media; it is not a small
+catalog/database backup or a scheduled job. Independent exports/copies remain
+optional using existing tools/storage. Neither cloud payment nor selecting a
+second storage destination blocks publication or ordinary updates.
 
-Per-build notes must distinguish ordinary application changes from storage-format/
-conversion changes; image-only rollback is not safe after incompatible writes.
-Demonstrate a consistent full restore and interrupted-update recovery before
-documenting this procedure as accepted. Prefer a runbook/tool integration over
-inventing a backup subsystem. This does not reopen HL-03's accepted full-backup
-CLI or implement HL-10 portable export/deltas. HL-07D's public update instructions
-depend on a practical recovery policy for the deployment they advertise.
+Keep per-build storage/upgrade notes and the old image with its complete recovery
+point. Image-only rollback is unsafe after incompatible writes. Full restore and
+interrupted-update recovery remain required evidence; their accepted tooling and
+qualification are not reopened. Local points cover rollback, not loss of the
+storage device. This does not implement HL-10 portable export/deltas.
+
+**Optional follow-up, not a release gate:** an operator-facing backup-age reminder
+may use known validated completion dates, preserve failure/unknown status, and allow
+for externally managed backups without claiming to observe them. It is not
+implemented. Reminder reads must not trigger media hashing or a full archive scan
+during browsing/polling.
+A future lightweight catalog/settings backup needs a separate bounded restore
+contract covering archive-owned metadata/evidence/assets and required private state;
+copying SQLite alone is insufficient. No new backup subsystem or scheduler is assigned
+by this clarification.
 
 #### NAS administration follow-up — not a product release gate
 
@@ -865,7 +872,8 @@ HL-07B is delivered with [local acceptance](validation/direct-playback-2026-10-1
 HL-07C is delivered with [local acceptance](validation/release-wording-2026-10-20.md).
 HL-05A is delivered with [actual-host isolated acceptance](validation/nas-operations-2026-10-20.md).
 HL-05B's isolated path is also qualified with [independent recovery acceptance](validation/snapshot-recovery-2026-10-20.md).
-Its permanent destination/adoption remains pending; do not silently configure one.
+Independent media copies are optional; no destination choice blocks this queue.
+The packaged local backup area and consistent rollback policy are documented.
 HL-04 device and parent HL-05 permanent-installation/public-ingress qualification
 remain available when the actual hosts/devices are accessible. HL-07D publication
 must retain its applicable recovery and deployment dependencies.
@@ -874,8 +882,9 @@ must retain its applicable recovery and deployment dependencies.
 > channel/digest/bundle implementation is delivered; do not call the product released
 > until the existing workflow actually builds/publishes, both platforms pull anonymously,
 > recorded labels/digests match, and an isolated Portainer pull/redeploy retains config,
-> accounts, originals and pending work. Keep the selected consistent recovery policy;
-> resolve HL-05B's permanent independent destination/adoption before production changes.
+> accounts, originals and pending work. Retain a complete consistent local recovery
+> point and its old image before changes. Independent media-backup storage, a cloud
+> account and backup-age reminders are not release prerequisites.
 > Remaining trusted-device/public-ingress/format qualifications apply only to advertised
 > scope. No production or publication change has been made by the preparation commits.
 

@@ -28,11 +28,17 @@ Before a bulk intake, create a collection, import one complete supported package
 download its originals and compare their digests with the sources. If using music
 preparation, play a prepared track and check seeking. Restart and sign in again.
 Make a complete backup and test a restore into separate empty roots before relying
-on the installation as the only operational catalog. Keep source originals and an
-independent backup. These checks establish the exercised behavior; they do not
+on the installation as the only operational catalog. Keep source originals; choose
+any independent media copies according to the [clarified backup scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20). These checks establish the exercised behavior; they do not
 prove catalog/audio accuracy, power-loss safety, or complete Internet security.
 
 ## Stopped-server backup
+
+The packaged container initializes a local `${COLLECTOR_DATA}/backups` area;
+its CLI uses explicit fresh children under `/data/backups`. Native installations
+choose an explicit destination outside archive/state. These are manual full backups,
+including media. No automatic full-library backup, cloud account or independent
+storage destination is required. See the [container local backup guidance](../deploy/container/README.md#local-backup-area-and-optional-media-copies).
 
 The backup unit is the complete archive root, complete state root, and configuration
 file. The state root includes `private.sqlite`, the rebuildable `catalog.sqlite`,

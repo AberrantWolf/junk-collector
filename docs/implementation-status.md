@@ -21,6 +21,19 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Backup operating scope — clarified 2026-10-20
+
+The packaged container initializes `${COLLECTOR_DATA}/backups` (on the inspected NAS,
+`/volume1/junk-collector/backups`). Backups remain explicit commands with a fresh
+named destination; the implemented full backup includes media. No automatic media
+backup schedule, cloud account, independent destination or lightweight database-only
+backup is required for release. Local consistent points provide practical update
+rollback; optional independent copies retain their qualified runbook.
+The [accepted scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
+removes the earlier destination-selection blocker. A small catalog/settings backup
+would need more than SQLite alone; that mode and optional backup-age reminders are
+not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
+
 ## Container release preparation — HL-07D, 2026-10-20
 
 The workspace is prepared as `0.1.0-alpha.2`, with draft storage/update notes.
@@ -48,8 +61,9 @@ rollback with a pending upload, a NAS→Mac→NAS independent chain, complete co
 file/permission comparisons and recovered account/session/TLS/original/audio checks.
 Chrome playback/seek/downloads passed before and after restore. The 32 MiB unchanged
 payload was excluded from the 3.28 MB increment; the baseline was 34.51 MB.
-See [dated evidence](validation/snapshot-recovery-2026-10-20.md). Permanent destination/adoption
-is not configured. Generic/DSM Btrfs incremental receive through the isolated bind
+See [dated evidence](validation/snapshot-recovery-2026-10-20.md). No production recovery
+configuration was changed. Independent copies are optional under the clarified
+operating scope; destination selection does not block release. Generic/DSM Btrfs incremental receive through the isolated bind
 mount failed and is not accepted; public pull/redeploy and power-loss remain open.
 
 ## Reproducible NAS operations — HL-05A, 2026-10-20
@@ -70,8 +84,8 @@ visible metadata failure without blocking originals/audio. See [dated evidence](
 The live Portainer installation and tunnels were inspected only. Permanent-installation
 inventory/enrichment acceptance, public ingress, system-browser trust, power-loss
 behavior remain open; HL-05B's isolated snapshot/incremental path is now qualified
-separately above, with permanent destination/adoption still pending. Public registry
-pull/update acceptance remains HL-07D.
+separately above. Choosing optional independent media-backup storage is not a
+release prerequisite. Public registry pull/update acceptance remains HL-07D.
 
 ## Release/setup wording — HL-07C, 2026-10-20
 

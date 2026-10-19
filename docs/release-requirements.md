@@ -25,6 +25,10 @@ See [the accepted scope policy](decisions/home-lab-scope.md).
   intended Linux binary/container and storage layout. The HL-03 CLI and tested
   [operator runbook](local-alpha-installation.md#stopped-server-backup) provide the
   stopped-server workflow; actual Linux deployment qualification remains open.
+  The [clarified backup scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
+  requires practical local recovery, not automatic full-media backups, cloud storage
+  or a separately chosen independent destination. External copies and backup-age
+  reminders are optional; the current explicit full backup includes media.
 - Publish automatically built Docker images that users can anonymously pull for
   installation and updates without local compilation or image archive transfer
   (user requirement, 2026-10-19). Exercise the existing release workflow for amd64

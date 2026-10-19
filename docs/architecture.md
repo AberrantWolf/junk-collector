@@ -13,10 +13,14 @@ configuration validation and provider-contact readiness. The optional inbox Comp
 override supplies the same read-only bind and supplemental group to server and CLI;
 filesystem ACLs remain a host mechanism. Actual Synology update/resume/restore and
 remote-browser checks are recorded in [NAS operations acceptance](validation/nas-operations-2026-10-20.md).
-HL-05B uses an operator stopped-server Btrfs point over those roots, then standard
-GNU tar exports to independent storage. The deployment adapter binds the tar working
+HL-05B uses an operator stopped-server Btrfs point over those roots; standard
+GNU tar exports to other storage are optional. The deployment adapter binds the tar working
 cutoff to snapshot time; application backup/storage formats and domain services are
 unchanged. See [qualified recovery and limits](validation/snapshot-recovery-2026-10-20.md).
+The [2026-10-20 backup-scope clarification](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
+keeps local rollback practical and external media copies optional. `${COLLECTOR_DATA}/backups`
+is the packaged local area; full backup remains explicit and includes media. No
+scheduler, lightweight catalog-only mode or backup-age UI is implemented.
 
 Release planning/OCI verification/bundle assembly (HL-07D preparation, 2026-10-20)
 live in `scripts/container_release.py` and the existing workflow, outside application

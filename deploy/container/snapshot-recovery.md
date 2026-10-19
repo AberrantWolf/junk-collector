@@ -1,4 +1,4 @@
-# Consistent snapshots and incremental independent backups
+# Local recovery snapshots and optional incremental exports
 
 This is an optional Btrfs operations path over the existing stopped-server recovery
 contract. It is separate from Collector's sealed full-backup format: do not pass a
@@ -6,8 +6,12 @@ tar increment to `validate-backup` or `restore --backup`. The full-copy
 [backup/update](README.md#update) and [restore](recovery.md) remain available.
 Qualification status and exact limits are recorded in
 [the actual-host recovery report](../../docs/validation/snapshot-recovery-2026-10-20.md).
-Permanent destination selection/adoption is still an operator task; these commands
-do not configure a schedule or change a live installation automatically.
+Use the local snapshot section for update rollback. The export/independent-copy
+sections are optional for operators who choose to back up media elsewhere; no cloud
+account or independent destination is required. These commands do not configure a
+schedule or change a live installation automatically. The packaged local full-backup
+area is `${COLLECTOR_DATA}/backups`; full backups include media and require an explicit
+fresh child destination. Snapshot points belong outside the live data root.
 
 ## Eligibility and policy
 
@@ -34,17 +38,17 @@ paths and optional external tools need their separately recorded recovery policy
 saved originals must already be in the archive. Keep snapshots/exports **outside**
 the live data root on the same Btrfs filesystem, with private administrator access.
 
-Use local read-only snapshots for quick rollback. Keep an independent full baseline
-and every required incremental parent on another physical storage system. A same-NAS
-snapshot/export cannot protect against loss of that NAS. Reserve space, retain the
-last accepted recovery chain, and periodically perform a full restore and integrity
-check. GNU tar's incremental selection uses metadata, not proof of unchanged bytes;
+Use local read-only snapshots for quick rollback. If choosing independent media
+backups, keep a full baseline and every required incremental parent on the selected
+other storage. A same-NAS snapshot/export cannot protect against loss of that NAS.
+Reserve space, retain the last accepted recovery point/chain, and test restoration
+and integrity according to the selected policy. GNU tar's incremental selection uses metadata, not proof of unchanged bytes;
 clock rollback or unreliable/preserved timestamps require a fresh full baseline.
 
 Record the exact old image ID/registry digest, config layout, ServerId, checkpoint
 cutoff, parent point and upgrade/storage notes with each point. Ordinary application
 changes may use this short snapshot policy; incompatible storage writes/conversions
-require a validated independent recovery point and the old image before proceeding.
+require a validated complete recovery point and the old image before proceeding.
 Never downgrade only the image against later incompatible data.
 
 ## Short stopped-server checkpoint
@@ -72,7 +76,7 @@ with its retained mounts/config/groups; exporting the immutable snapshot can hap
 while it serves. This step neither copies nor hashes the masters. Capture one
 complete point before each update, even when independent backup export is deferred.
 
-## Full baseline once, then incremental exports
+## Optional: full baseline once, then incremental exports
 
 Use GNU tar from the retained Collector Debian image, rather than macOS/BSD tar.
 `--no-check-device` prevents a different snapshot device number from forcing a full
@@ -122,7 +126,7 @@ notes; rename the two `.part` files to `data.tar` and `state.snar`; compute a
 not unchanged masters. Atomically rename the completed **directory** from
 `$collector_point.part` to `$collector_point` only after all outputs succeed.
 Interrupted directories remain incomplete; retry from the last accepted parent in
-a new working directory. Keep its source snapshot until independent acceptance.
+a new working directory. Keep its source snapshot until the selected export/restore acceptance is complete.
 
 Copy the completed point and all prerequisite parents using an authenticated,
 encrypted transport to the chosen independent destination. Copy into a private
