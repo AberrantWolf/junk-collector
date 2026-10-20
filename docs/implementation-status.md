@@ -34,6 +34,17 @@ removes the earlier destination-selection blocker. A small catalog/settings back
 would need more than SQLite alone; that mode and optional backup-age reminders are
 not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
 
+## Numeric-IP authentication startup — source repaired, 2026-10-20
+
+Numeric-IP HTTPS authentication origins now support startup, password login and
+recovery while explicitly reporting that passkeys require a trusted DNS hostname.
+DNS passkey registration remains available. Setup/doctor/serve share strict origin
+validation before storage writes; features/security guidance uses typed availability.
+Real executable identity/TLS/session continuity and Chrome login/recovery/mobile
+acceptance passed. See [repair evidence](validation/numeric-ip-authentication-2026-10-20.md).
+The published alpha.2 image predates this source repair; no production installation
+or public image was replaced.
+
 ## Physical Safari LAN browser journey — qualified, 2026-10-20
 
 An isolated actual-NAS alpha.2 installation with synthetic FLAC/MP3, artwork and
@@ -48,7 +59,8 @@ passed. The separate temporary-CA test installation and secret handoffs were cle
 with live services unchanged; device profile removal remains an operator action.
 Parent HL-04 remains partial for native/offline/failure qualification. Preparation
 also exposed a numeric-IP authentication-origin startup failure in WebAuthn; using
-a DNS-name origin works. This limitation remains an HL-05A follow-up. See the
+a DNS-name origin works. The source repair is recorded above; the published alpha.2
+image still predates it. See the
 [dated acceptance record](validation/lan-device-preparation-2026-10-20.md).
 
 ## Real-tool audio oracles — HL-06A qualified, 2026-10-20

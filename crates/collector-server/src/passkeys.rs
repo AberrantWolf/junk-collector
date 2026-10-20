@@ -3,6 +3,77 @@ use super::*;
 use std::collections::HashMap;
 use std::time::Duration;
 use webauthn_rs::prelude::*;
+
+#[derive(Clone, Copy, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UnavailableReason {
+    NotConfigured,
+    DnsNameRequired,
+}
+impl UnavailableReason {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::NotConfigured => {
+                "Passkeys are not configured. Configure authentication_origin with a trusted HTTPS DNS hostname to enable them."
+            }
+            Self::DnsNameRequired => {
+                "Passkeys require a trusted HTTPS DNS hostname; numeric IP addresses support password sign-in and recovery."
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum Configuration {
+    Disabled(UnavailableReason),
+    Enabled(Arc<Passkeys>),
+}
+impl Configuration {
+    pub fn from_origin(origin: Option<&str>) -> collector_core::Result<Self> {
+        let Some(origin) = origin else {
+            return Ok(Self::Disabled(UnavailableReason::NotConfigured));
+        };
+        let url = authentication_url(origin)?;
+        if url.domain().is_none() {
+            return Ok(Self::Disabled(UnavailableReason::DnsNameRequired));
+        }
+        Ok(Self::Enabled(Arc::new(Passkeys::new(origin)?)))
+    }
+    pub fn get(&self) -> Option<&Passkeys> {
+        match self {
+            Self::Enabled(value) => Some(value),
+            Self::Disabled(_) => None,
+        }
+    }
+    fn require(&self) -> collector_core::Result<&Passkeys> {
+        match self {
+            Self::Enabled(value) => Ok(value),
+            Self::Disabled(reason) => Err(Error::Unavailable(reason.message().into())),
+        }
+    }
+    pub fn unavailable_reason(&self) -> Option<UnavailableReason> {
+        match self {
+            Self::Enabled(_) => None,
+            Self::Disabled(reason) => Some(*reason),
+        }
+    }
+}
+
+fn authentication_url(origin: &str) -> collector_core::Result<Url> {
+    let url = Url::parse(origin)
+        .map_err(|_| Error::Invalid("authentication_origin must be an HTTPS origin".into()))?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(Error::Invalid("authentication_origin must be an HTTPS origin without credentials, path, query or fragment".into()));
+    }
+    Ok(url)
+}
 pub struct Passkeys {
     webauthn: Webauthn,
     pending: Mutex<HashMap<String, Pending>>,
@@ -18,10 +89,10 @@ struct Pending {
 }
 impl Passkeys {
     pub fn new(origin: &str) -> collector_core::Result<Self> {
-        let origin = Url::parse(origin).map_err(|e| Error::Invalid(e.to_string()))?;
-        if origin.scheme() != "https" {
+        let origin = authentication_url(origin)?;
+        if origin.domain().is_none() {
             return Err(Error::Invalid(
-                "passkey authentication origin must use HTTPS".into(),
+                UnavailableReason::DnsNameRequired.message().into(),
             ));
         }
         let rp = origin
@@ -113,9 +184,7 @@ pub(crate) async fn register_start(
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     let actor = authenticated(&state, &headers)?;
-    let passkeys = state.passkeys.as_ref().ok_or(Error::Unavailable(
-        "configure authentication_origin to enable passkeys".into(),
-    ))?;
+    let passkeys = state.passkeys.require()?;
     state.service.require_recent_authentication(&actor)?;
     let username = state.service.username(&actor.principal)?;
     let exclude = keys(&state.service, actor.principal.user_id)?
@@ -149,7 +218,7 @@ pub(crate) async fn register_finish(
     Json(input): Json<Registration>,
 ) -> ApiResult<StatusCode> {
     let actor = authenticated(&state, &headers)?;
-    let passkeys = state.passkeys.as_ref().ok_or(Error::Unauthenticated)?;
+    let passkeys = state.passkeys.get().ok_or(Error::Unauthenticated)?;
     let pending = passkeys.take(&input.ceremony_id)?;
     if pending.user != actor.principal.user_id {
         return Err(Error::Unauthenticated.into());
@@ -184,10 +253,7 @@ pub(crate) async fn login_start(
     state
         .rate_limits
         .check_authentication(&input.username, peer)?;
-    let passkeys = state
-        .passkeys
-        .as_ref()
-        .ok_or(Error::Unavailable("passkeys are not configured".into()))?;
+    let passkeys = state.passkeys.require()?;
     let user = state
         .service
         .user_by_name_for_authentication(&input.username)?;
@@ -208,7 +274,7 @@ pub(crate) async fn login_finish(
     headers: HeaderMap,
     Json(input): Json<Authentication>,
 ) -> ApiResult<Response> {
-    let passkeys = state.passkeys.as_ref().ok_or(Error::Unauthenticated)?;
+    let passkeys = state.passkeys.get().ok_or(Error::Unauthenticated)?;
     let pending = passkeys.take(&input.ceremony_id)?;
     let Ceremony::Authenticate(ceremony, verified_keys) = pending.ceremony else {
         return Err(Error::Unauthenticated.into());

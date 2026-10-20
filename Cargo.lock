@@ -629,6 +629,7 @@ dependencies = [
  "hex",
  "http",
  "rcgen",
+ "reqwest",
  "rpassword",
  "rustls",
  "serde",

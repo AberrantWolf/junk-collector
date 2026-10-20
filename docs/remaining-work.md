@@ -312,12 +312,13 @@ matrix, automatic route switching and every browser/platform are unnecessary.
 
 #### HL-05A — Reproducible NAS and Portainer operations
 
-**Observed follow-up, 2026-10-20:** the documented numeric-IP authentication origin
-completed setup but caused published alpha.2 to fail WebAuthn initialization before
-binding listeners. A DNS-name origin works. Repair the configuration/startup contract
-and capability/guidance with actual startup coverage; do not claim that numeric-IP
-installation works based on the accepted hostname deployment. See the
-[actual isolated failure](validation/lan-device-preparation-2026-10-20.md#newly-observed-numeric-ip-startup-failure).
+**Numeric-IP repair, 2026-10-20:** source now starts with HTTPS IP authentication
+origins using password/recovery, reports typed passkey hostname requirements, and
+validates malformed origins before setup/startup writes. Actual executable TLS/
+identity/session continuity and Chrome login/guidance/recovery passed; see
+[repair acceptance](validation/numeric-ip-authentication-2026-10-20.md). Published
+alpha.2 still predates this repair; retain the dated
+[original failure](validation/lan-device-preparation-2026-10-20.md#newly-observed-numeric-ip-startup-failure).
 
 **State:** delivered 2026-10-20 for the isolated actual-host operations path.
 Guarded config transfer, DSM bind-root creation, inbox supplemental groups,

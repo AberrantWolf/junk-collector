@@ -129,6 +129,13 @@ private IPv4 address. Reserve that address in DHCP. The initializer generates
 management at `https://COLLECTOR_HOST:9844` and browsing/listening at
 `https://COLLECTOR_HOST:9843`; management remains disabled on the latter.
 
+Numeric-IP HTTPS addresses support password sign-in and recovery codes. Passkeys
+require a stable DNS hostname with trusted HTTPS; setup/doctor and Account & security
+explain this limit. Changing the authentication origin does not reset accounts or
+delete passkeys, but existing passkeys stay bound to their original DNS identity.
+Review certificate names and exact `allowed_origins` when changing addresses.
+Malformed authentication origins fail before setup creates account/TLS state.
+
 Names in config do not create DNS or mDNS records. Setup generates a certificate
 for these names, which browsers will not automatically trust. Obtain the public
 certificate after startup through a trusted administrator session:

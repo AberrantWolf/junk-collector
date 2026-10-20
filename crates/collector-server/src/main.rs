@@ -672,6 +672,24 @@ async fn main() -> Result<()> {
     {
         bail!("private_tls_bind must name an explicit interface address, not a wildcard");
     }
+    let mut passkeys = if matches!(
+        cli.command,
+        Command::Setup { .. } | Command::Doctor | Command::Serve
+    ) {
+        let configuration = collector_server::passkeys::Configuration::from_origin(
+            config.authentication_origin.as_deref(),
+        )?;
+        if let Some(reason) = configuration.unavailable_reason() {
+            println!("{}", reason.message());
+        } else {
+            println!(
+                "Passkeys configured. Browser trust and the exact authentication origin remain required."
+            );
+        }
+        Some(configuration)
+    } else {
+        None
+    };
     if matches!(cli.command, Command::Doctor) {
         println!("Configuration: {}", cli.config.display());
         if !cli.config.exists() {
@@ -936,9 +954,9 @@ async fn main() -> Result<()> {
             );
             state.multi_user = config.multi_user;
             state.allowed_origins = Arc::new(config.allowed_origins.clone());
-            if let Some(origin) = &config.authentication_origin {
-                state.passkeys = Some(Arc::new(collector_server::passkeys::Passkeys::new(origin)?));
-            }
+            state.passkeys = passkeys
+                .take()
+                .expect("serve validates passkey configuration before opening storage");
             let _job_runtime = collector_server::start_job_workers(state.clone());
             let public = router(state.clone());
             let lan = router(state.clone());

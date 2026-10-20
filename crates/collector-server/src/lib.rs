@@ -70,7 +70,7 @@ pub struct AppState {
     pub inboxes: Arc<std::collections::BTreeMap<String, std::path::PathBuf>>,
     pub catalog_sources: Arc<Vec<CatalogSourceView>>,
     pub allowed_origins: Arc<Vec<String>>,
-    pub passkeys: Option<Arc<passkeys::Passkeys>>,
+    pub passkeys: passkeys::Configuration,
     pub rate_limits: Arc<RateLimits>,
     artwork_preview_slots: Arc<tokio::sync::Semaphore>,
     catalog_upload_slots: Arc<tokio::sync::Semaphore>,
@@ -96,7 +96,7 @@ impl AppState {
             rate_limits: Arc::new(RateLimits::default()),
             artwork_preview_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             catalog_upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
-            passkeys: None,
+            passkeys: passkeys::Configuration::Disabled(passkeys::UnavailableReason::NotConfigured),
         }
     }
 }
@@ -923,6 +923,7 @@ pub struct FeaturesResponse {
     pub curation: bool,
     pub administration: bool,
     pub passkeys: bool,
+    pub passkeys_unavailable_reason: Option<passkeys::UnavailableReason>,
 }
 
 #[utoipa::path(get, path = "/api/v1/identity", responses((status = 200, body = IdentityResponse)))]
@@ -945,7 +946,8 @@ async fn features(State(state): State<AppState>) -> ApiResult<Json<FeaturesRespo
         administration: state
             .exposure
             .allows(state.ingress, Surface::Administration),
-        passkeys: state.passkeys.is_some(),
+        passkeys: state.passkeys.get().is_some(),
+        passkeys_unavailable_reason: state.passkeys.unavailable_reason(),
     }))
 }
 #[derive(Deserialize, utoipa::ToSchema)]

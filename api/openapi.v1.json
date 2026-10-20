@@ -10757,6 +10757,16 @@
           },
           "passkeys": {
             "type": "boolean"
+          },
+          "passkeys_unavailable_reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UnavailableReason"
+              }
+            ]
           }
         }
       },
@@ -19198,6 +19208,13 @@
       "TransactionId": {
         "type": "string",
         "format": "uuid"
+      },
+      "UnavailableReason": {
+        "type": "string",
+        "enum": [
+          "not_configured",
+          "dns_name_required"
+        ]
       },
       "UpdateAssetCommand": {
         "type": "object",

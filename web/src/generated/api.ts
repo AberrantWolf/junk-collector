@@ -3074,6 +3074,7 @@ export interface components {
             default_username?: string | null;
             multi_user: boolean;
             passkeys: boolean;
+            passkeys_unavailable_reason?: null | components["schemas"]["UnavailableReason"];
         };
         GameCatalogIdentification: {
             byte_domain: string;
@@ -5040,6 +5041,8 @@ export interface components {
         };
         /** Format: uuid */
         TransactionId: string;
+        /** @enum {string} */
+        UnavailableReason: "not_configured" | "dns_name_required";
         UpdateAssetCommand: {
             alt_text: string;
             visibility: components["schemas"]["Visibility"];

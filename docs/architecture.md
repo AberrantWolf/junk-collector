@@ -750,6 +750,15 @@ Artwork is stored as an original image plus a bounded PNG thumbnail. Image decod
 
 ## HTTP exposure and trust
 
+Authentication-origin configuration is validated by the server's WebAuthn adapter
+before setup/doctor/serve opens storage. HTTPS DNS origins enable passkeys; HTTPS
+numeric IP origins keep password/recovery available and report typed
+`dns_name_required` passkey unavailability. An absent origin reports `not_configured`.
+Malformed/non-HTTPS origins fail rather than silently changing login policy. One
+configuration enum owns both the live verifier and its unavailable reason; the
+features API and security panel consume that state. TLS validation, exact Origin
+allowlisting, listener composition and stored credentials are unchanged.
+
 Three surfaces: client, curation, administration. Public curation and administration default off. Public administration implies curation exposure; roles remain mandatory. Routers omit disabled pages, JavaScript management entrypoints and mutation APIs. The public listener stays public regardless of `Forwarded` or `X-Forwarded-For`.
 
 The process exposes two loopback HTTP origins for separate public/private proxies and one direct LAN TLS client listener. An optional `private_tls_bind` adds direct private management HTTPS on an explicitly named interface; wildcard private TLS binds are rejected. Connect a public tunnel only to the public origin. A private proxy or Tailscale Serve connects to the private origin. LAN TLS is public-surface by default; local connectivity alone never upgrades it to administration. Allowlisted browser origins are exact and configured, not derived from proxy headers.

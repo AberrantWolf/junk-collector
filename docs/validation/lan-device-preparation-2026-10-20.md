@@ -120,3 +120,8 @@ Changing the authentication origin to the DNS name allowed startup and the above
 preflight. This is a reproducible limitation of the currently documented numeric-IP
 installation route, not a Safari trust failure. Repair the startup/setup contract
 and validate its user-visible capability/guidance before claiming that route works.
+
+The subsequent [source repair](numeric-ip-authentication-2026-10-20.md) now supports
+IP HTTPS password/recovery with explicit passkey unavailability and validates
+configuration before writes. The alpha.2 runtime tested in this historical record
+still predates that repair.
