@@ -37,6 +37,7 @@ def main():
     parser.add_argument("--snapshot-handoff", type=Path, help="Private independent-storage roundtrip handoff (snapshot mode)")
     parser.add_argument("--portainer-image", help="Run service deploy/update through a disposable Portainer instance")
     parser.add_argument("--portainer-keep-companion", action="store_true", help="Check service-targeted updates preserve an unchanged companion container")
+    parser.add_argument("--preparation-faults", action="store_true", help="Qualify actual encoder cancellation/failure/restart through private browser handoffs")
     args = parser.parse_args()
     if bool(args.snapshot_tool_image) != bool(args.snapshot_handoff):
         parser.error("Snapshot qualification requires both tools image and independent-storage handoff")
@@ -54,6 +55,8 @@ def main():
         parser.error("Browser handoff requires an explicit private HTTPS host/bind")
     if args.private_ip and not ipaddress.IPv4Address(args.private_ip).is_private:
         parser.error("Browser qualification binds only an explicit private IPv4 address")
+    if args.preparation_faults and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
+        parser.error("Encoder failures require a fresh Compose inbox/browser qualification")
     project_root = Path(__file__).resolve().parents[1]
     compose = project_root / "deploy/container/compose.yaml"
     password = secrets.token_hex(24)
@@ -87,6 +90,7 @@ def main():
                                   timeout=120, **kwargs)
 
         portainer = None
+        faults = None
 
         def up(recreate=False):
             if portainer:
@@ -183,16 +187,18 @@ def main():
 
         handoff_files = []
 
-        def browser_handoff(album_id, restored=False):
+        def browser_handoff(album_id, restored=False, scenario=None, **extra):
             if not args.browser_handoff:
                 return
             target = args.browser_handoff
+            if scenario:
+                target = target.with_name(target.stem + "-" + scenario + target.suffix)
             if restored:
                 target = target.with_name(target.stem + "-restored" + target.suffix)
             descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             handoff_files.append(target)
             with os.fdopen(descriptor, "w") as output:
-                json.dump(dict(origin=browser_origin, private_ip=args.private_ip, username="owner", password=password, collection_id=collection, item_id=album_id, certificate_pem=read_file("/data/state/tls/cert.pem").decode(), server_id=server_id, originals={name:dict(bytes=len(content), sha256=hashlib.sha256(content).hexdigest()) for name,content in originals.items()}), output)
+                json.dump(dict(scenario=scenario, **extra, origin=browser_origin, private_ip=args.private_ip, username="owner", password=password, collection_id=collection, item_id=album_id, certificate_pem=read_file("/data/state/tls/cert.pem").decode(), server_id=server_id, originals={name:dict(bytes=len(content), sha256=hashlib.sha256(content).hexdigest()) for name,content in originals.items()}), output)
             print(f"Temporary browser fixture ready: {target}; waiting for its .done marker", flush=True)
             deadline = time.monotonic() + 600
             marker = Path(str(target) + ".done")
@@ -246,6 +252,10 @@ def main():
                 root_tool("chmod", "-R", "g+rX,o-rwx", "/data/inbox-fixture")
             if user_agent:
                 config += "\n[providers]\nmusicbrainz_user_agent = " + json.dumps(user_agent) + "\n"
+            if args.preparation_faults:
+                from preparation_failure_qualification import PreparationFailureQualification
+                faults = PreparationFailureQualification(run)
+                config = faults.configure(config)
             # Fresh config transport comes from the candidate, before the old-image account exists.
             env["COLLECTOR_IMAGE"] = args.image
             run("run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli", input=config.encode(), capture_output=True)
@@ -263,6 +273,8 @@ def main():
             assert guarded.returncode != 0 and read_file("/data/config/collector.toml") == copied
             assert read_file("/data/state/unknown-private-fixture") == b""
             root_tool("rm", "/data/state/unknown-private-fixture")
+            if faults:
+                faults.install()
             env["COLLECTOR_IMAGE"] = initial_image
             run("run", "--rm", "-T", "cli", "setup", input=(password + "\n").encode(), capture_output=True)
             run("run", "--rm", "cli", "doctor", capture_output=True)
@@ -381,6 +393,16 @@ def main():
                 assert status == 206 and len(content) == 12 and headers["accept-ranges"] == "bytes"
             else:
                 album_id = item_id
+            if faults:
+                def seed(label):
+                    planned = plan(cookie, collection, dict(kind="browser", label=None, package_name=label),
+                                   [dict(name=name, bytes=len(content)) for name, content in originals.items()])
+                    imported = start(cookie, planned)
+                    for index, file in enumerate(planned["packages"][0]["files"]):
+                        request(f"/imports/{imported}/files/{index}?offset=0", originals[file["name"]], cookie, "PUT")
+                    return wait_import(cookie, imported)["summary"]["target_item_id"]
+                verify = lambda session, item: verify_originals(session, item, originals)
+                faults.exercise(cookie, seed, request, verify, stop, up, ready, browser_handoff)
             browser_handoff(album_id)
             stop()
             if snapshots:
@@ -419,6 +441,8 @@ def main():
                 restored_audio = next(row for row in restored_rows if row["state"]["status"] == "available")
                 status, _, content = request(f"/items/{album_id}/representations/{restored_audio['state']['representation_id']}/{restored_audio['state']['file_index']}", cookie=cookie, raw=True)
                 assert status == 200 and hashlib.sha256(content).hexdigest() == restored_audio["state"]["digest"]["hex"]
+            if faults:
+                faults.verify_restored(cookie, request, lambda session, item: verify_originals(session, item, originals))
             browser_handoff(album_id, restored=True)
             stop()
             transition = "distinct-image update" if args.update_from else "container recreation"

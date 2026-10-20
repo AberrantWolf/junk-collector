@@ -12,7 +12,8 @@ have been removed; completed work is described by status and dated validation.
 
 Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
 actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
-qualification and HL-07D public alpha.2/Portainer acceptance. The 2026-10-19 native
+qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
+preparation failure/recovery acceptance. The 2026-10-19 native
 delivery and live-use triage remain recorded below. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
 qualification remains open; HL-07A/B/C are delivered. HL-07D public alpha.2 image/
 pull/update acceptance is delivered; continue the remaining advertised-device,
@@ -260,7 +261,9 @@ passed on the earlier test installation. The permanent Portainer/Cloudflare setu
 now has operator-reported browser access, grouped-import retry recovery and playback,
 plus captured successful full backup/validation output. The SIGTERM source fix,
 Compose package and release workflow exist; public image publication and isolated
-Portainer pull/update acceptance are now delivered under HL-07D. Remaining current-installation recovery, interrupted-work/failure and
+Portainer pull/update acceptance are delivered under HL-07D. HL-05C additionally
+qualifies isolated active-encoding cancel/failure/crash/full recovery with real
+browser controls. Remaining current-installation, storage-failure/abuse and
 public-ingress qualification stays open. Reuse the dated evidence without treating
 the earlier test install as acceptance of every permanent-installation path.
 **Maps:** R02/R03
@@ -375,6 +378,22 @@ A future lightweight catalog/settings backup needs a separate bounded restore
 contract covering archive-owned metadata/evidence/assets and required private state;
 copying SQLite alone is insufficient. No new backup subsystem or scheduler is assigned
 by this clarification.
+
+#### HL-05C — Actual NAS preparation interruption and recovery
+
+**State:** qualified 2026-10-20 on the published alpha.2 image. Actual encoding
+cancellation/reaping, failure after real FLAC output, and SIGKILL/restart passed.
+Cancellation stayed terminal across restart and fenced generic retry; explicit UI
+retry and crash recovery preserved original Job identity/creation time and published
+one playable output. Original bytes, recovered batch/audio identities and session/
+config/TLS survived full backup/restore; actual Chrome cancel/retry/play/seek/download/
+mobile journeys passed. Live Collector/Portainer/tunnels matched their baseline;
+fixture cleanup passed. See [acceptance](validation/nas-preparation-recovery-2026-10-20.md).
+**Owner:** existing application Job/recipe policy, process/storage adapters and web
+recovery controls. Qualification uses controlled external-tool faults in generated
+roots; no runtime image or production configuration was changed. Parent HL-05's
+public ingress, permission/storage-full/abuse and arbitrary commit/power-loss cases
+remain separate. Do not reopen accepted HL-05A/B/Docker publication as dependencies.
 
 #### NAS administration follow-up — not a product release gate
 
@@ -881,8 +900,8 @@ HL-05B's isolated path is also qualified with [independent recovery acceptance](
 Independent media copies are optional; no destination choice blocks this queue.
 The packaged local backup area and consistent rollback policy are documented.
 HL-04 device and parent HL-05 permanent-installation/public-ingress qualification
-remain available when the actual hosts/devices are accessible. HL-07D is delivered
-with [public-image Portainer acceptance](validation/container-publication-2026-10-20.md).
+remain available when the actual hosts/devices are accessible. HL-05C active preparation recovery is also qualified; see its dated record above.
+HL-07D is delivered with [public-image Portainer acceptance](validation/container-publication-2026-10-20.md).
 
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access

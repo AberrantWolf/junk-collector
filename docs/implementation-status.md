@@ -34,6 +34,20 @@ removes the earlier destination-selection blocker. A small catalog/settings back
 would need more than SQLite alone; that mode and optional backup-age reminders are
 not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
 
+## NAS preparation recovery — HL-05C qualified, 2026-10-20
+
+The published alpha.2 image passed real NAS cancellation during encoder execution,
+failure after real FLAC output, and SIGKILL/restart of active encoding. Cancelled/
+failed work published no audio; cancellation persisted across restart and generic
+retry was fenced. Explicit web retry and crash recovery produced one playable
+output while preserving originals and Job identity. Full restore retained those
+batch outcomes/audio identities, account/session/config/TLS; real Chrome playback,
+seek/download/mobile checks passed. Live services matched their baseline and test
+resources were cleaned. See [bounded acceptance and reproduction](validation/nas-preparation-recovery-2026-10-20.md).
+This qualifies existing runtime behavior using fixture controls, not a new runtime
+image. Parent HL-05 public ingress, storage failure/abuse and physical-device/trust
+qualification remain open.
+
 ## Published Docker alpha.2 — HL-07D delivered, 2026-10-20
 
 The signed `v0.1.0-alpha.2` source tag and GitHub prerelease now supply public
@@ -75,7 +89,8 @@ payload was excluded from the 3.28 MB increment; the baseline was 34.51 MB.
 See [dated evidence](validation/snapshot-recovery-2026-10-20.md). No production recovery
 configuration was changed. Independent copies are optional under the clarified
 operating scope; destination selection does not block release. Generic/DSM Btrfs incremental receive through the isolated bind
-mount failed and is not accepted; public pull/redeploy and power-loss remain open.
+mount failed and is not accepted. Public pull/redeploy is accepted under HL-07D;
+power-loss remains open.
 
 ## Reproducible NAS operations — HL-05A, 2026-10-20
 

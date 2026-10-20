@@ -43,6 +43,13 @@ results. Service-targeted updates retain an unchanged networkless companion; a
 Collector-only stack separately exercises forced re-pull/redeploy. Only generated
 fixture resources are cleaned up; the operator Portainer is not accessed.
 
+NAS preparation-failure qualification (HL-05C) reuses the same generated Compose
+journey. A fixture-only encoder wrapper controls real subprocess blocking or
+failure after output; Chrome uses ordinary cancellation/retry controls. No production
+API or conversion policy is added. Application Job ownership/claim fencing and
+adapter process termination/publication remain responsible for actual recovery;
+see [actual-host acceptance](validation/nas-preparation-recovery-2026-10-20.md).
+
 **Current direction (2026-10-09):** [remaining work](remaining-work.md)
 is the only remaining-work queue. Older assignment/order and gap statements below
 are historical. Proposed contracts require reassessment under
