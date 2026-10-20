@@ -226,6 +226,11 @@ behavior beyond the cases actually tested.
 **Maps:** remaining relevant LA3 and C01/C04/C07 checks. **Owner:** application,
 transport and Trash Amp presentation; fixes belong in their owning layers.
 
+2026-10-20: an actual iPhone/iPad Safari test is being prepared with the operator.
+The isolated NAS sample collection, test Viewer, short-lived CA/profile and named
+HTTPS route passed desktop preflight; physical trust/playback/access/revocation
+results remain pending. See the [dated preparation and limits](validation/lan-device-preparation-2026-10-20.md).
+
 Use [the installation runbook](local-alpha-installation.md), Collector's
 [Trash Amp status](implementation-status.md#trash-amp-client-integration-2026-10-07)
 and sibling `docs/collector-connection.md`. Finish:
@@ -302,6 +307,13 @@ gate for supported public use, not for a LAN-only release. A commercial deployme
 matrix, automatic route switching and every browser/platform are unnecessary.
 
 #### HL-05A — Reproducible NAS and Portainer operations
+
+**Observed follow-up, 2026-10-20:** the documented numeric-IP authentication origin
+completed setup but caused published alpha.2 to fail WebAuthn initialization before
+binding listeners. A DNS-name origin works. Repair the configuration/startup contract
+and capability/guidance with actual startup coverage; do not claim that numeric-IP
+installation works based on the accepted hostname deployment. See the
+[actual isolated failure](validation/lan-device-preparation-2026-10-20.md#newly-observed-numeric-ip-startup-failure).
 
 **State:** delivered 2026-10-20 for the isolated actual-host operations path.
 Guarded config transfer, DSM bind-root creation, inbox supplemental groups,
