@@ -85,6 +85,18 @@ restart journey passed; all 443 workspace tests, strict Clippy and full Chrome s
 passed. This is bounded source acceptance, not public-ingress/load certification or
 a published image. See [HL-05F evidence](validation/rate-limit-retention-2026-10-20.md).
 
+## Actual NAS authentication thresholds — qualified, 2026-10-20
+
+An isolated published-alpha.2 NAS installation passed actual Linux TCP account,
+direct-peer and global login ceilings using distinct loopback source addresses.
+Both listeners share limits; account/forwarded-header rotation cannot bypass the
+peer ceiling. Existing sessions work while login is throttled; restart clears
+transient limits and preserves accounts/sessions. Real Chrome playback/download/
+mobile and full backup/restore passed afterward, with exact originals and identity/
+TLS retained. Cleanup and unchanged live services were verified. This does not
+qualify external clients, public ingress or sustained load, or ship the newer
+limiter memory fix. See [HL-05G acceptance](validation/nas-authentication-limits-2026-10-20.md).
+
 ## Physical Safari LAN browser journey — qualified, 2026-10-20
 
 An isolated actual-NAS alpha.2 installation with synthetic FLAC/MP3, artwork and

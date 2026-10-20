@@ -54,3 +54,8 @@ long-duration load, global limits from multiple real network peers, all enrollme
 ceremonies under load, slow/oversized media or power loss. No new release/image or
 production Collector/Portainer/tunnel was deployed. The earlier native container
 candidate for the numeric-IP/metadata repair predates this additional source change.
+
+Subsequent [HL-05G actual-NAS acceptance](nas-authentication-limits-2026-10-20.md)
+qualifies shipped login thresholds across distinct Linux loopback TCP source
+addresses, both listeners and restart/full restore. External physical clients,
+public proxy behavior and sustained load remain unqualified.

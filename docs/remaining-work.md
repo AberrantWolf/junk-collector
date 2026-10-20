@@ -15,7 +15,7 @@ actual-host isolated install/update/restore, HL-05B snapshot/incremental recover
 qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
 preparation failure/recovery acceptance, HL-06A real-tool audio oracles, the numeric-IP
 startup/storage repair, HL-05E bounded archive ENOSPC recovery and HL-05F bounded
-authentication identity retention.
+authentication identity retention and HL-05G actual-NAS TCP login thresholds.
 The 2026-10-19 native delivery and live-use triage remain recorded below.
 HL-01, HL-02 and HL-03 remain delivered. HL-04's bounded physical Safari browser
 journey passed; native/offline/failure qualification remains open. HL-07A/B/C are delivered. HL-07D public alpha.2 image/
@@ -462,9 +462,24 @@ with spoofed forwarded headers, existing-session continuity and process-restart
 reset passed. All 443 workspace tests, strict Clippy and full Chrome smoke passed.
 See [acceptance](validation/rate-limit-retention-2026-10-20.md).
 **Owner:** existing process-local HTTP abuse adapter. No image/public ingress was
-deployed. Multiple real-peer global-limit/load, broader enrollment/media abuse and
+deployed. External multi-client/proxy load, broader enrollment/media abuse and
 permanent deployment qualification remain under parent HL-05; do not infer them
 from the bounded memory/loopback source acceptance.
+
+#### HL-05G — Actual NAS TCP authentication thresholds
+
+**State:** qualified 2026-10-20 on isolated published alpha.2. Real Linux loopback
+source addresses independently exercised account (10), direct-peer (30) and global
+(100) login ceilings across public/private listeners. Rotating account names and
+forwarded headers did not bypass the peer limit. Existing sessions remained usable;
+restart reset transient limits without changing the account/session. Full backup/
+restore and Chrome playback/seek/exact downloads/persistent player/mobile passed.
+Generated resources were cleaned and live services matched baseline. See
+[acceptance](validation/nas-authentication-limits-2026-10-20.md).
+**Owner:** bounded qualification adapter; no runtime change. Distinct loopback TCP
+addresses are not distinct physical clients or a public proxy/NAT. External ingress,
+enrollment/media abuse, sustained load and physical-device claims remain separate.
+The published image still predates HL-05F's memory-bound source repair.
 
 #### NAS administration follow-up — not a product release gate
 
@@ -987,6 +1002,8 @@ HL-05E's bounded archive ENOSPC/restart/full recovery is qualified; see its
 [capacity-failure record](validation/storage-capacity-recovery-2026-10-20.md).
 HL-05F bounds authentication identity retention and qualifies real loopback
 throttling/restart; see its [source acceptance](validation/rate-limit-retention-2026-10-20.md).
+HL-05G independently qualifies actual-NAS login ceilings from multiple loopback TCP
+sources and full recovery; see its [acceptance](validation/nas-authentication-limits-2026-10-20.md).
 
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access

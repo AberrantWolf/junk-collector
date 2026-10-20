@@ -67,6 +67,14 @@ second empty private volume; cleanup removes both volume/keeper pairs. Shared
 metadata assertions live in `scripts/storage_failure_qualification.py`; the capacity
 and permission adapters supply real filesystem mechanisms without mocking results.
 
+Bounded authentication qualification reuses that fresh Compose installation and
+performs actual HTTP connections with Linux loopback source addresses. It isolates
+account, direct-peer and global login thresholds by varying real peers/accounts;
+forged forwarding headers cannot select a bucket. Normal fixture restarts reset
+transient state between finite cases, and original-session continuity plus the
+ordinary browser/backup/restore journey remain required. This exercises the TCP
+adapter; no application outcome or peer identity is injected into a router.
+
 Real-tool audio qualification (HL-06A) adds a separate fixture oracle adapter,
 `scripts/audio_oracle_qualification.py`, to that generated Compose journey. It
 compares actual FLAC output against independently generated PCM and actual Opus

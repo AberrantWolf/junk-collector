@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--audio-oracles", action="store_true", help="Qualify real FLAC and Opus profiles against independent tool/PCM oracles and browser journeys")
     parser.add_argument("--storage-permissions", action="store_true", help="Qualify generated archive write-permission failure and browser retry/recovery")
     parser.add_argument("--storage-full", action="store_true", help="Qualify ENOSPC in a dedicated bounded 96 MiB tmpfs archive, with real restart/retry/recovery")
+    parser.add_argument("--authentication-limits", action="store_true", help="Qualify actual Linux TCP account/peer/global login limits and restart reset")
     args = parser.parse_args()
     if bool(args.snapshot_tool_image) != bool(args.snapshot_handoff):
         parser.error("Snapshot qualification requires both tools image and independent-storage handoff")
@@ -60,9 +61,9 @@ def main():
         parser.error("Browser handoff requires an explicit private HTTPS host/bind")
     if args.private_ip and not ipaddress.IPv4Address(args.private_ip).is_private:
         parser.error("Browser qualification binds only an explicit private IPv4 address")
-    if sum((args.preparation_faults, args.audio_oracles, args.storage_permissions, args.storage_full)) > 1:
+    if sum((args.preparation_faults, args.audio_oracles, args.storage_permissions, args.storage_full, args.authentication_limits)) > 1:
         parser.error("Choose one bounded qualification journey")
-    if (args.preparation_faults or args.audio_oracles or args.storage_permissions or args.storage_full) and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
+    if (args.preparation_faults or args.audio_oracles or args.storage_permissions or args.storage_full or args.authentication_limits) and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
         parser.error("Fault/audio qualification requires a fresh Compose inbox/browser installation")
     project_root = Path(__file__).resolve().parents[1]
     compose = project_root / "deploy/container/compose.yaml"
@@ -202,15 +203,19 @@ def main():
             from storage_permission_qualification import StoragePermissionQualification
             storage = StoragePermissionQualification(root_tool)
         capacity = None
+        def restart():
+            stop()
+            up()
+            ready()
         if args.storage_full:
             from storage_capacity_qualification import StorageCapacityQualification
-            def restart():
-                stop()
-                up()
-                ready()
             capacity = StorageCapacityQualification(command, env, args.image, root_tool, restart)
             resources.callback(capacity.cleanup)
             storage = capacity
+        authentication = None
+        if args.authentication_limits:
+            from authentication_rate_qualification import AuthenticationRateQualification
+            authentication = AuthenticationRateQualification(origin, f"http://localhost:{args.port_base}", password)
 
         def browser_handoff(album_id, restored=False, scenario=None, **extra):
             if not args.browser_handoff:
@@ -450,6 +455,8 @@ def main():
                     audio.exercise(cookie, seed, request, verify, browser_handoff, pcm, album_id)
             if storage:
                 storage.exercise(cookie, album_id, request, lambda session, item: verify_originals(session, item, originals), browser_handoff)
+            if authentication:
+                authentication.exercise(cookie, request, restart)
             browser_handoff(album_id)
             stop()
             if snapshots:
