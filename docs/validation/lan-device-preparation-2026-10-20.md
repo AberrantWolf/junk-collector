@@ -1,8 +1,9 @@
-# Physical LAN browser preparation — 2026-10-20
+# Physical LAN browser preparation and acceptance — 2026-10-20
 
-**Physical Safari acceptance is pending. This does not close HL-04.** The operator
-has an iPhone/iPad with Safari available. A separate NAS installation is ready for
-that device, with no production account/config/media/ingress changes.
+**Physical Safari trust, playback and Curator editing passed; Viewer/revocation
+observations are in progress. This does not close parent HL-04.** The operator
+used an iPhone 16 Pro, reported iOS 26.6.2, in Safari against a separate NAS
+installation. No production account/config/media/ingress was changed.
 
 ## Prepared fixture and desktop preflight
 
@@ -40,17 +41,42 @@ serves the public certificate until completion or six hours after preparation,
 then stops/removes its Compose installation and generated data. The operator must
 also remove the temporary certificate profile from the device after testing.
 
-## Physical checks still required
+## Physical observations and remaining checks
 
-Install the intended temporary profile through Safari and explicitly enable its
-TLS trust, following Apple's [profile installation](https://support.apple.com/en-us/102400)
-and [manual certificate trust](https://support.apple.com/en-us/102390) instructions.
-Record device/OS version, warning-free trusted connection, artwork, both formats,
-seek and actual output. Then exercise Curator write, Viewer denial, collection-grant
-revocation during listening and active browser-session revocation using this same
-test account. Report observations separately from server/API assertions. Internet-
-disconnected LAN behavior remains pending until actually exercised; existing native
-enrollment/output-device qualification is not covered by a Safari result.
+The operator confirmed the certificate was trusted, the artwork appeared, and both
+FLAC/MP3 tracks played and sought correctly in physical Safari. This used the
+temporary public-root profile and Apple's [profile installation](https://support.apple.com/en-us/102400)
+and [manual certificate trust](https://support.apple.com/en-us/102390) procedure.
+The output device was not separately identified; no native-client claim follows.
+
+After promoting the same non-administrator `phone` account from Viewer to Curator,
+the operator used the real music editor to rename the first track to
+**Safari permission check** and reported persistence after reload. An independent
+owner API read confirmed that exact track title; the MP3 track retained its title.
+All three saved originals still matched their frozen lengths and SHA-256 digests.
+The account was returned to Viewer for the next physical check.
+
+Viewer controls/denial, collection-grant revocation during listening and active
+browser-session revocation still require physical observations. Internet-
+disconnected LAN behavior remains pending until actually exercised; native
+enrollment/output-device qualification is outside this Safari result.
+
+## Independent server permissions and revocation assertions
+
+A separate generated non-administrator account and collection exercised actual
+commands without changing the phone account or its track edit:
+
+- The same valid new-item write returned 403 as Viewer and succeeded as Curator.
+  After demotion, an update returned 403 and the saved title was unchanged.
+- A real original-media range returned 206 and exactly matched the selected bytes
+  before that probe account's collection grant was removed. The existing session
+  then received 403 for item, whole-media and ranged-media reads.
+- Revoking the probe's current browser session returned 401 for subsequent identity
+  and formerly authorized item reads.
+
+All assertions passed with exit status 0 against the actual published runtime.
+These API results do not substitute for the phone's visible denial, playback
+termination or sign-in transition; those are recorded separately when observed.
 
 ## Newly observed numeric-IP startup failure
 

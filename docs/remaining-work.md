@@ -226,10 +226,12 @@ behavior beyond the cases actually tested.
 **Maps:** remaining relevant LA3 and C01/C04/C07 checks. **Owner:** application,
 transport and Trash Amp presentation; fixes belong in their owning layers.
 
-2026-10-20: an actual iPhone/iPad Safari test is being prepared with the operator.
-The isolated NAS sample collection, test Viewer, short-lived CA/profile and named
-HTTPS route passed desktop preflight; physical trust/playback/access/revocation
-results remain pending. See the [dated preparation and limits](validation/lan-device-preparation-2026-10-20.md).
+2026-10-20: physical Safari on the operator's iPhone 16 Pro (reported iOS 26.6.2)
+passed trusted certificate, artwork, FLAC/MP3 playback/seek and persisted Curator
+track editing against the isolated NAS. Independent API Viewer/write, grant/media
+and session denials passed with a separate probe account. Phone Viewer/revocation
+observations are in progress; parent HL-04 remains partial. See the
+[dated acceptance and limits](validation/lan-device-preparation-2026-10-20.md).
 
 Use [the installation runbook](local-alpha-installation.md), Collector's
 [Trash Amp status](implementation-status.md#trash-amp-client-integration-2026-10-07)

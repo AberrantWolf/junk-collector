@@ -34,12 +34,15 @@ removes the earlier destination-selection blocker. A small catalog/settings back
 would need more than SQLite alone; that mode and optional backup-age reminders are
 not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
 
-## Physical Safari LAN acceptance — pending, 2026-10-20
+## Physical Safari LAN acceptance — partial, 2026-10-20
 
 An isolated actual-NAS alpha.2 installation with synthetic FLAC/MP3, artwork and
 a test Viewer passed named TLS/CA/ServerId validation and real Chrome preflight.
-The operator has an iPhone/iPad available; physical Safari trust, output, role and
-revocation observations remain pending. The test uses a separate temporary CA and
+The operator's iPhone 16 Pro (reported iOS 26.6.2) passed physical Safari trust,
+artwork, FLAC/MP3 playback/seek and persisted Curator track editing. Independent API
+Viewer writes, revoked grant/media reads and revoked sessions were denied as expected
+using a separate probe account. Phone Viewer/revocation observations remain in
+progress. The test uses a separate temporary CA and
 generated data, with timed teardown; production services are unchanged. Preparation
 also exposed a numeric-IP authentication-origin startup failure in WebAuthn; using
 a DNS-name origin works. This limitation remains an HL-05A follow-up. See the
