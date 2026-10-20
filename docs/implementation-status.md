@@ -96,7 +96,8 @@ The live Portainer installation and tunnels were inspected only. Permanent-insta
 inventory/enrichment acceptance, public ingress, system-browser trust, power-loss
 behavior remain open; HL-05B's isolated snapshot/incremental path is now qualified
 separately above. Choosing optional independent media-backup storage is not a
-release prerequisite. Public registry pull/update acceptance remains HL-07D.
+release prerequisite. Public registry pull/update acceptance is now qualified
+under [HL-07D](validation/container-publication-2026-10-20.md).
 
 ## Release/setup wording — HL-07C, 2026-10-20
 

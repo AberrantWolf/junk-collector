@@ -259,8 +259,8 @@ mechanisms remain useful; do not remove working services just to retire a client
 passed on the earlier test installation. The permanent Portainer/Cloudflare setup
 now has operator-reported browser access, grouped-import retry recovery and playback,
 plus captured successful full backup/validation output. The SIGTERM source fix,
-Compose package and release workflow exist; actual public image publication remains
-HL-07D. Remaining current-installation recovery, interrupted-work/failure and
+Compose package and release workflow exist; public image publication and isolated
+Portainer pull/update acceptance are now delivered under HL-07D. Remaining current-installation recovery, interrupted-work/failure and
 public-ingress qualification stays open. Reuse the dated evidence without treating
 the earlier test install as acceptance of every permanent-installation path.
 **Maps:** R02/R03
@@ -307,8 +307,8 @@ account/session/config/TLS persistence, inbox import and explicit FLAC, exact or
 downloads, clean SIGTERM and full restore. Remote Chrome passed playback/seek/downloads
 before and after restore. See [dated acceptance and limits](validation/nas-operations-2026-10-20.md).
 The permanent installation/tunnels were not changed. Its final inventory/enrichment
-checks and public-ingress qualification remain under parent HL-05; registry pull
-acceptance remains HL-07D. HL-05B still owns practical scalable recovery.
+checks and public-ingress qualification remain under parent HL-05. Registry pull
+acceptance is delivered under HL-07D; HL-05B owns the qualified scalable recovery path.
 **Owner:** process/container adapters and operator documentation.
 Completed delivery contract:
 
@@ -530,9 +530,9 @@ transferring and loading image archives. Complete and exercise the existing
 `.github/workflows/container-release.yml` rather than introducing a second build
 pipeline. It already gates release-triggered GHCR builds on checks, performs a
 container smoke test, targets linux/amd64 and linux/arm64, and prepares the install
-bundle; actual registry publication remains unqualified. Add a documented moving
-release/channel tag for convenient updates (`latest` for stable releases, with
-prereleases kept on an explicitly named channel), alongside version tags and
+bundle. The fulfilled contract includes a documented moving release/channel tag
+for convenient updates (`latest` for stable releases, with prereleases kept on an
+explicitly named channel), alongside version tags and
 recorded digests for reproducible recovery. Verify anonymous pulls, both platform
 manifests, release version/source labels, and a real Portainer pull/redeploy update
 that preserves configuration, credentials, originals and unfinished work. Document
