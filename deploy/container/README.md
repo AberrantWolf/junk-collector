@@ -53,7 +53,7 @@ Set these values in `.env`:
 Keep the data directory outside the source checkout and installation bundle.
 SQLite/private state must live on the Docker host's own filesystem, not an SMB/NFS
 client mount. Allow room for retained originals, prepared audio, resumable uploads,
-and complete backups. Important backups also belong on independent storage.
+and complete backups. Optional independent copies protect against loss of the host's storage.
 
 The Compose package uses Linux host networking to retain separate loopback HTTP
 listeners. Docker Desktop host-networking behavior is not this deployment target.
@@ -252,7 +252,7 @@ Create a collection, import one complete supported package, download its origina
 and compare them with the sources. Restart the service and confirm login and item
 access. For music preparation, prepare a supported source and check real playback
 and seeking. Complete a backup/restore drill before treating the installation as
-an operational catalog. Keep source originals and an independent backup.
+an operational catalog. Keep source originals and follow your media-backup policy.
 
 These checks establish the workflows exercised through the chosen ingress, not
 complete Internet security or power-loss certification. If an operation is
@@ -282,10 +282,21 @@ or other storage-opening command. Set `.env`'s `COLLECTOR_IMAGE` accordingly; fo
 locally loaded image the exact `sha256:...` image ID also avoids mutable-tag drift.
 Do not open live data using a newer/older CLI merely because its tag looks familiar.
 
-For an update, stop only Collector through Portainer, make the selected consistent
-recovery point with the old CLI, then change the Collector image in Portainer and
-the CLI `.env` together. Pull/redeploy only the intended service with its existing
-mount/group settings. Compare the resulting image IDs again. Do not reset accounts,
+For an update, open Collector in Portainer's **Containers** view and choose **Stop**.
+Make the selected consistent recovery point with the old CLI, then pull the selected
+public image through **Images**. Record its digest. Change the Collector image in
+the retained stack definition and the CLI `.env` together, keeping its mounts/groups.
+
+For a stack that also contains a connector or another service, keep the other
+services' resolved images and configuration unchanged, and update the stack with
+whole-stack forced re-pull/redeployment disabled. The changed image replaces
+Collector; services with unchanged configuration and images retain their containers.
+The explicit image pull above supplies the new image even when the retained
+definition uses the default pull policy. A Collector-only stack can use
+**Re-pull image and redeploy** for a deliberate moving-tag update; that operation
+forces redeployment across its stack.
+
+Compare the resulting server/CLI image IDs again. Do not reset accounts,
 replace retained config from the sample or remove a tunnel to clear an orphan warning.
 The standalone Compose commands below apply to installations actually managed by
 those complete files; do not use them to overwrite an incomplete copy of a live

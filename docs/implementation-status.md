@@ -34,7 +34,7 @@ removes the earlier destination-selection blocker. A small catalog/settings back
 would need more than SQLite alone; that mode and optional backup-age reminders are
 not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
 
-## Container release preparation — HL-07D, 2026-10-20
+## Container publication in progress — HL-07D, 2026-10-20
 
 The workspace is prepared as `0.1.0-alpha.2`, with draft storage/update notes.
 The existing workflow separates prerelease `preview` and stable `latest`, verifies
@@ -44,9 +44,15 @@ manifest. Older release runs cannot downgrade a channel. Manual dispatch verifie
 an unpublished OCI export and retains local-build instructions.
 Policy/bundle tests, actual multiarch verifier-fixture export/copy/config checks and
 Actionlint passed; see [dated preparation evidence](validation/container-release-preparation-2026-10-20.md).
-**HL-07D remains open:** no tag/release/image was published and the full workflow,
-anonymous public Collector pulls and Portainer pull/redeploy are unexercised.
-The [alpha.2 notes](releases/v0.1.0-alpha.2.md) are explicitly prepared, not published.
+The signed `v0.1.0-alpha.2` source tag and GitHub prerelease are published. Release
+CI passed all source gates and the native container install/update/restore smoke;
+the multi-platform image build is running. The disposable Portainer lifecycle
+adapter passed actual NAS local-image preflight, including an unchanged companion,
+saved originals, resumed upload and full restore.
+**HL-07D remains open:** public image/anonymous pull/channel/bundle checks and
+published-image Portainer/browser acceptance are pending. See the
+[current publication record](validation/container-publication-2026-10-20.md) and
+[alpha.2 notes](releases/v0.1.0-alpha.2.md).
 
 ## Scalable update recovery — HL-05B, 2026-10-20
 

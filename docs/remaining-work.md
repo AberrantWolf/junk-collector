@@ -505,17 +505,20 @@ UI, CLI output and instructions agree with current web/Trash Amp behavior.
 
 #### HL-07D — Automated pullable Docker releases
 
-**State:** complete source preparation delivered 2026-10-20; public publication/
-update qualification remains open. The existing workflow implements disjoint
+**State:** source tag and GitHub prerelease published 2026-10-20; image publication/
+update qualification is in progress. The existing workflow implements disjoint
 `preview`/stable `latest`, version/source/digest checks, both-architecture and anonymous
 pull gates, non-downgrading channel promotion and digest-pinned complete bundles.
 The workspace is prepared as alpha.2 with honest storage/update notes. Policy tests,
 a real local multiarch OCI verifier fixture and Actionlint passed. See
 [preparation evidence](validation/container-release-preparation-2026-10-20.md) and
-[prepared notes](releases/v0.1.0-alpha.2.md). No alpha.2 tag/release/image was published.
-Do not repeat the source implementation; execute the GitHub workflow, anonymous
-Collector pulls/manifest checks and actual Portainer pull/redeploy after the applicable
-adoption/recovery/advertised-platform gates are resolved.
+[alpha.2 notes](releases/v0.1.0-alpha.2.md). Release source checks and native container
+smoke passed; multi-platform compilation is running. Disposable Portainer NAS
+preflight passed with retained local images, including unchanged companion, saved
+originals, upload resume and full restore. See [current publication evidence](validation/container-publication-2026-10-20.md).
+Continue anonymous public Collector pulls/manifest/channel/bundle checks and actual
+published-image Portainer install/update/browser/restore acceptance. Local-image
+preflight and a source tag alone do not complete this delivery.
 **Owner:** release CI/container packaging with HL-05 deployment acceptance.
 
 Release packaging requirement added 2026-10-19: users must be able to install and

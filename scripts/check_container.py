@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--browser-handoff", type=Path, help="Write private fixture details and wait for FILE.done before restore")
     parser.add_argument("--snapshot-tool-image", help="Disposable Btrfs/GNU-tar tools image; requires a Btrfs data parent")
     parser.add_argument("--snapshot-handoff", type=Path, help="Private independent-storage roundtrip handoff (snapshot mode)")
+    parser.add_argument("--portainer-image", help="Run service deploy/update through a disposable Portainer instance")
+    parser.add_argument("--portainer-keep-companion", action="store_true", help="Check service-targeted updates preserve an unchanged companion container")
     args = parser.parse_args()
     if bool(args.snapshot_tool_image) != bool(args.snapshot_handoff):
         parser.error("Snapshot qualification requires both tools image and independent-storage handoff")
@@ -42,6 +44,10 @@ def main():
         parser.error("Snapshot qualification requires two distinct update images")
     if not 1024 <= args.port_base <= 65532:
         parser.error("Choose four consecutive non-privileged ports")
+    if args.portainer_image and (args.port_base > 65531 or args.snapshot_tool_image):
+        parser.error("Portainer requires a fifth port and uses the full-backup recovery journey")
+    if args.portainer_keep_companion and not args.portainer_image:
+        parser.error("Companion retention qualification requires Portainer")
     if bool(args.browser_host) != bool(args.private_ip):
         parser.error("Use --browser-host and --private-ip together")
     if args.browser_handoff and not args.browser_host:
@@ -63,7 +69,7 @@ def main():
         env = dict(os.environ, COLLECTOR_IMAGE=args.update_from or args.image,
                    COLLECTOR_DATA=str(original_root), COLLECTOR_HOST="localhost",
                    COLLECTOR_PRIVATE_IP="127.0.0.1")
-        command = ["docker", "compose", "-p", f"collector-smoke-{os.getpid()}", "-f", str(compose)]
+        command = ["docker", "compose", "-p", f"collector-smoke-{os.getpid()}-{secrets.token_hex(4)}", "-f", str(compose)]
         cue = b'FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n'
         pcm = b'\0' * (2352 * 225)
         originals = {"disc.cue": cue, "disc.bin": pcm, ".unknown": b"Keep this hidden collection note"}
@@ -79,6 +85,14 @@ def main():
         def run(*arguments, **kwargs):
             return subprocess.run(command + list(arguments), env=env, check=True,
                                   timeout=120, **kwargs)
+
+        portainer = None
+
+        def up(recreate=False):
+            if portainer:
+                portainer.deploy()
+            else:
+                run("up", "-d", *(("--force-recreate",) if recreate else ()), "collector", capture_output=True)
 
         def root_tool(tool, *arguments):
             return run("run", "--rm", "--entrypoint", tool, "initialize", *arguments,
@@ -125,7 +139,10 @@ def main():
 
         def stop():
             started = time.monotonic()
-            run("stop", "-t", "10", "collector", capture_output=True)
+            if portainer:
+                portainer.stop()
+            else:
+                run("stop", "-t", "10", "collector", capture_output=True)
             identifier = run("ps", "-aq", "collector", capture_output=True, text=True).stdout.strip()
             state = subprocess.check_output(["docker", "inspect", "--format", "{{json .State}}", identifier], text=True)
             assert json.loads(state)["ExitCode"] == 0, state
@@ -188,15 +205,25 @@ def main():
         def image_id(reference):
             return subprocess.check_output(["docker", "image", "inspect", "--format", "{{.Id}}", reference], text=True).strip()
 
+        def container_id():
+            return run("ps", "-aq", "collector", capture_output=True, text=True).stdout.strip()
+
         def current_image():
-            container = run("ps", "-aq", "collector", capture_output=True, text=True).stdout.strip()
+            container = container_id()
             return subprocess.check_output(["docker", "inspect", "--format", "{{.Image}}", container], text=True).strip()
 
         initial_image = env["COLLECTOR_IMAGE"]
-        candidate_image_id = image_id(args.image)
-        if args.update_from:
-            assert image_id(initial_image) != candidate_image_id, "Update qualification needs two distinct images"
         try:
+            if args.portainer_image:
+                from portainer_qualification import PortainerQualification
+                portainer = PortainerQualification(args.portainer_image, command, env, args.port_base + 4,
+                                                   args.portainer_keep_companion, args.image)
+                portainer.start()
+                if args.image.startswith("ghcr.io/"):
+                    portainer.pull(args.image)
+            candidate_image_id = image_id(args.image)
+            if args.update_from:
+                assert image_id(initial_image) != candidate_image_id, "Update qualification needs two distinct images"
             run("run", "--rm", "initialize", capture_output=True)
             initial = read_file("/data/config/collector.toml")
             run("run", "--rm", "initialize", capture_output=True)
@@ -243,16 +270,25 @@ def main():
             certificate = hashlib.sha256(read_file("/data/state/tls/cert.pem")).hexdigest()
             for tool in ("flac", "opusenc"):
                 run("run", "--rm", "--entrypoint", tool, "cli", "--version", capture_output=True)
-            run("up", "-d", "collector", capture_output=True)
+            up()
             ready()
             cookie = login()
             original_cookie = cookie
             server_id = request("/identity", cookie=cookie)["server_id"]
             assert current_image() == image_id(initial_image)
+            initial_container = container_id()
             owner = request("/me", cookie=cookie)["user_id"]
             if snapshots:
                 snapshots.seed_unknown()
             collection = request("/admin/collections", dict(name="NAS qualification", module="org.junk.music"), cookie)["id"]
+            # Preserve committed originals as well as unfinished work across the image change.
+            saved_plan = plan(cookie, collection, dict(kind="browser", label=None, package_name="Saved originals"),
+                              [dict(name=name, bytes=len(content)) for name, content in originals.items()])
+            saved_import = start(cookie, saved_plan)
+            for index, file in enumerate(saved_plan["packages"][0]["files"]):
+                request(f"/imports/{saved_import}/files/{index}?offset=0", originals[file["name"]], cookie, "PUT")
+            saved_item = wait_import(cookie, saved_import)["summary"]["target_item_id"]
+            verify_originals(cookie, saved_item, originals)
             source = dict(kind="browser", label=None, package_name="Pending upload")
             planned = plan(cookie, collection, source, [dict(name=name, bytes=len(content)) for name, content in originals.items()])
             pending = start(cookie, planned)
@@ -267,21 +303,22 @@ def main():
                 run("run", "--rm", "cli", "backup", "--destination", "/data/backups/before-update", capture_output=True)
                 run("run", "--rm", "cli", "validate-backup", "--backup", "/data/backups/before-update", capture_output=True)
             env["COLLECTOR_IMAGE"] = args.image
-            run("up", "-d", "--force-recreate", "collector", capture_output=True)
+            up(recreate=True)
             ready()
             assert current_image() == candidate_image_id
+            assert container_id() != initial_container, "Update/recreation retained the old container"
             if snapshots:
                 # Export the immutable recovery point after service availability returns.
                 snapshots.run("sh", "-c", "printf 'after!' > /fixture/live/state/.qualification-cutoff")
                 snapshots.export("before-update")
                 run("kill", "-s", "SIGKILL", "collector", capture_output=True)
-                run("up", "-d", "collector", capture_output=True)
+                up()
                 ready()
                 assert request(f"/ingests/{pending}", cookie=original_cookie)["import"]["files"][0]["received_bytes"] == partial
                 stop()
                 env["COLLECTOR_DATA"] = str(snapshots.rollback())
                 env["COLLECTOR_IMAGE"] = initial_image
-                run("up", "-d", "--force-recreate", "collector", capture_output=True)
+                up(recreate=True)
                 ready()
                 assert current_image() == image_id(initial_image)
                 assert request("/identity", cookie=original_cookie)["server_id"] == server_id
@@ -290,7 +327,7 @@ def main():
                 stop()
                 env["COLLECTOR_DATA"] = str(original_root)
                 env["COLLECTOR_IMAGE"] = args.image
-                run("up", "-d", "--force-recreate", "collector", capture_output=True)
+                up(recreate=True)
                 ready()
             assert request("/me", cookie=original_cookie)["user_id"] == owner
             cookie = login()
@@ -298,6 +335,7 @@ def main():
             assert request("/identity", cookie=cookie)["server_id"] == server_id
             assert read_file("/data/config/collector.toml") == saved_config
             assert certificate == hashlib.sha256(read_file("/data/state/tls/cert.pem")).hexdigest()
+            verify_originals(cookie, saved_item, originals)
             detail = request(f"/ingests/{pending}", cookie=cookie)
             assert detail["import"]["files"][0]["received_bytes"] == partial
             for index, file in enumerate(detail["import"]["files"]):
@@ -348,7 +386,7 @@ def main():
             if snapshots:
                 snapshots.capture("after-update")
                 # The live instance can serve while backup exports/transport run.
-                run("up", "-d", "collector", capture_output=True)
+                up()
                 ready()
                 snapshots.export("after-update", "before-update")
                 snapshots.independent_roundtrip(candidate_image_id, server_id)
@@ -365,7 +403,7 @@ def main():
                 root_tool("install", "-d", "-m", "0700", "-o", "10001", "-g", "10001", "/data/config", "/data/archive", "/data/state", "/data/backups")
                 run("run", "--rm", "-v", f"{original_root}/backups/qualified:/backup:ro", "cli", "restore", "--backup", "/backup", "--archive", "/data/archive", "--state", "/data/state", capture_output=True)
             run("run", "--rm", "cli", "doctor", capture_output=True)
-            run("up", "-d", "--force-recreate", "collector", capture_output=True)
+            up(recreate=True)
             ready()
             assert current_image() == candidate_image_id
             assert request("/me", cookie=original_cookie)["user_id"] == owner
@@ -374,6 +412,7 @@ def main():
             assert request("/identity", cookie=cookie)["server_id"] == server_id
             verify_originals(cookie, item_id, originals)
             verify_originals(cookie, album_id, originals)
+            verify_originals(cookie, saved_item, originals)
             assert certificate == hashlib.sha256(read_file("/data/state/tls/cert.pem")).hexdigest()
             if args.inbox:
                 restored_rows = request(f"/items/{album_id}/music-tracks", cookie=cookie)
@@ -383,17 +422,22 @@ def main():
             browser_handoff(album_id, restored=True)
             stop()
             transition = "distinct-image update" if args.update_from else "container recreation"
-            print(f"Compose initialize/config/group access/setup/partial-upload {transition}/SIGTERM/FLAC/backup/restore passed", flush=True)
+            lifecycle = "Portainer" if portainer else "Compose"
+            print(f"{lifecycle} initialize/config/group access/setup/partial-upload {transition}/SIGTERM/FLAC/backup/restore passed", flush=True)
         finally:
-            env["COLLECTOR_DATA"] = str(original_root)
-            subprocess.run(command + ["down", "-t", "5"], env=env, timeout=30, capture_output=True)
-            # Only this generated fixture tree, never an operator installation.
-            subprocess.run(command + ["run", "--rm", "--entrypoint", "chown", "initialize", "-R", f"{os.getuid()}:{os.getgid()}", "/data"], env=env, check=True, timeout=60, capture_output=True)
-            if snapshots:
-                snapshots.cleanup()
-            for target in handoff_files:
-                target.unlink(missing_ok=True)
-                Path(str(target)+".done").unlink(missing_ok=True)
+            try:
+                if portainer:
+                    portainer.cleanup()
+            finally:
+                env["COLLECTOR_DATA"] = str(original_root)
+                subprocess.run(command + ["down", "-t", "5"], env=env, timeout=30, capture_output=True)
+                # Only this generated fixture tree, never an operator installation.
+                subprocess.run(command + ["run", "--rm", "--entrypoint", "chown", "initialize", "-R", f"{os.getuid()}:{os.getgid()}", "/data"], env=env, check=True, timeout=60, capture_output=True)
+                if snapshots:
+                    snapshots.cleanup()
+                for target in handoff_files:
+                    target.unlink(missing_ok=True)
+                    Path(str(target)+".done").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

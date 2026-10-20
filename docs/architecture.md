@@ -27,6 +27,13 @@ live in `scripts/container_release.py` and the existing workflow, outside applic
 and domain services. Public version verification precedes `preview`/stable `latest`
 promotion; bundles pin the verified manifest digest. Local OCI verification is
 separate from actual registry/pull deployment acceptance, which remains open.
+The disposable `scripts/portainer_qualification.py` lifecycle adapter reuses the
+container recovery journey without application changes. It renders the shipped
+Compose service, initializes a separate loopback Portainer database using a temporary
+password file, pulls through its Docker gateway and checks asynchronous deployment
+results. Service-targeted updates retain an unchanged networkless companion; a
+Collector-only stack separately exercises forced re-pull/redeploy. Only generated
+fixture resources are cleaned up; the operator Portainer is not accessed.
 
 **Current direction (2026-10-09):** [remaining work](remaining-work.md)
 is the only remaining-work queue. Older assignment/order and gap statements below

@@ -6,14 +6,14 @@ The web app supports collections with or without attached dumps, guided imports,
 
 ## Alpha release
 
-The latest tagged source release is `v0.1.0-alpha.1`; the current checkout includes
-later development. Builds are suitable for evaluating supported workflows and
+The latest tagged source prerelease is `v0.1.0-alpha.2`; its multi-platform Docker
+publication and pull/update acceptance are in progress. Builds are suitable for evaluating supported workflows and
 backed-up personal use as an experimental alpha. Keep source originals and back up
 the complete archive, private state, and configuration before updates. Storage
 formats and interfaces may change; a stable upgrade contract and completed
 Internet-deployment security qualification are not claimed.
 
-See the [tagged release notes](docs/releases/v0.1.0-alpha.1.md) for that release,
+See the [tagged release notes](docs/releases/v0.1.0-alpha.2.md) for that release,
 and [current implementation status](docs/implementation-status.md) for newer
 features and remaining limits. Prebuilt registry images are not yet published.
 
