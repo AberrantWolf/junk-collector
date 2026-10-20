@@ -34,18 +34,20 @@ removes the earlier destination-selection blocker. A small catalog/settings back
 would need more than SQLite alone; that mode and optional backup-age reminders are
 not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
 
-## Numeric-IP authentication startup — source repaired, 2026-10-20
+## Numeric-IP authentication startup — repaired and NAS-qualified, 2026-10-20
 
 Numeric-IP HTTPS authentication origins now support startup, password login and
 recovery while explicitly reporting that passkeys require a trusted DNS hostname.
 DNS passkey registration remains available. Setup/doctor/serve share strict origin
 validation before storage writes; features/security guidance uses typed availability.
 Real executable identity/TLS/session continuity and Chrome login/recovery/mobile
-acceptance passed. See [repair evidence](validation/numeric-ip-authentication-2026-10-20.md).
+acceptance passed. An unpublished native candidate also passed numeric-IP HTTPS
+startup/login and full browser/recovery acceptance on the actual NAS. See
+[repair evidence](validation/numeric-ip-authentication-2026-10-20.md).
 The published alpha.2 image predates this source repair; no production installation
 or public image was replaced.
 
-## Metadata save after storage permission loss — source repaired, 2026-10-20
+## Metadata save after storage permission loss — repaired and NAS-qualified, 2026-10-20
 
 An isolated NAS permission-loss test exposed a failed manual-save reservation that
 could conflict with a later successful retry and block restart/cold backup. Source
@@ -56,8 +58,11 @@ No archive format/schema changed. Rebuilt-server Chrome failed-save/retry, exact
 originals, playback and full backup/restore passed with session/identity/TLS/manual
 authority continuity; all 440 workspace tests and strict Clippy passed. See
 [repair and acceptance scope](validation/storage-permission-recovery-2026-10-20.md).
-Actual NAS acceptance of a candidate containing this repair remains pending; the
-published alpha.2 image predates it. Parent HL-05 remains partial.
+An unpublished native candidate passed actual-NAS Btrfs permission loss, browser
+retry without an intervening restart, cold backup and full restore, also using a
+numeric-IP HTTPS origin. Identity/session/TLS/manual authority and exact originals
+survived; fixture cleanup and unchanged live services were verified. The published
+alpha.2 image predates these fixes. Parent HL-05 remains partial.
 
 ## Bounded archive ENOSPC recovery — qualified, 2026-10-20
 

@@ -82,8 +82,55 @@ session expiry, inventory/roles, grouped/bulk import, concurrent preparation,
 playback/revocation, collection lists, artwork and mobile journeys.
 
 The public alpha.2 image predates this repair and the numeric-IP startup repair.
-The two failed NAS runs above are defect evidence, not repaired-image acceptance.
-No release tag, registry channel, live Collector/Portainer/tunnel, OS trust or real
-media library was changed. Actual NAS acceptance of a new source candidate remains
-pending. Storage-full, arbitrary power loss, public ingress and physical-client
-failure cases remain outside this bounded permission-loss test.
+The two failed NAS runs above remain defect evidence; the subsequent repaired
+candidate acceptance follows. No release tag, registry channel, live
+Collector/Portainer/tunnel, OS trust or real media library was changed.
+Storage-full, arbitrary power loss, public ingress and physical-client failure
+cases remain outside this bounded permission-loss test.
+
+## Actual-NAS candidate acceptance
+
+The nonpublishing [native workflow run](https://github.com/AberrantWolf/junk-collector/actions/runs/39431537120)
+passed source gates, AMD64 and ARM64 native builds/container smoke, and combined
+OCI platform/label verification. Its source is frozen at
+`f2efdfadc1183c9d76eae1cb2639a78ddf223153`, including both the numeric-IP and metadata
+recovery repairs. No release retry tag was supplied and nothing was pushed to a
+registry or promoted to a channel.
+
+The selected AMD64 OCI export was checked against its recorded native index,
+every content-addressed blob, actual platform and source labels, then converted to
+a Docker-load archive without changing its image config:
+
+```text
+native index: sha256:d5c7c0cb1ed8e4deb301cbcfaead3bf60d8c54bf80235b6ab069d615b393ef10
+manifest:     sha256:fa6b014019e66a9cb327479eed3d0b0dee2e1e06c12eb8654517bcab60d36564
+image ID:     sha256:88bf2f48fcef65a4642b855bcc1466c2d6d2ab20653b8c943ebedcccf304541f
+```
+
+The NAS loaded that exact image ID with matching `amd64` and source revision.
+Its package version label remains `0.1.0-alpha.2`; this is an unpublished test
+candidate from newer source, not the released alpha.2 digest.
+
+On Synology DS1522+ / Btrfs / Docker 24.0.2 / Compose 2.20.1 / Python 3.8.15,
+the complete `--storage-permissions` journey passed with exit status 0. This run
+used a **numeric-IP HTTPS authentication/browser origin**. Setup/doctor/startup,
+password login and typed `dns_name_required` passkey unavailability passed. Chrome
+155.0.8059.85 independently validated the actual certificate/IP/ServerId before
+using an isolated TLS test context.
+
+Removing generated archive write bits caused a visible failed browser save while
+committed metadata and exact originals stayed unchanged. Restoring each original
+mode allowed successful browser retry without restarting first. Unlike the released
+image's two failures, the following clean stop, cold backup, validation and full
+restore now succeeded. The manual title/authority, old session, owner, ServerId,
+configuration/TLS, available FLAC and exact CUE/BIN/hidden originals survived.
+Actual playback/seek/download, persistent-player and 390px layout checks passed
+while read-only, after retry, before backup and after restore. Clean stops took
+0.22–0.23s. The failed-save screenshot was visually inspected.
+
+Generated containers, data, private handoffs, transfer directory and candidate image
+were cleaned. Live Collector, Portainer and both tunnels matched their pre-test IDs,
+image IDs, start times and running state before and after cleanup. No phone test
+or system trust was required. This completes HL-05D's bounded candidate acceptance;
+parent HL-05 remains partial for its separately named deployment/failure cases.
+The later rate-limit retention source repair is outside this candidate's revision.

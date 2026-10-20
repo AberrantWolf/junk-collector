@@ -47,3 +47,13 @@ the full real-browser smoke passed. The smoke includes actual virtual-WebAuthn
 registration/login at a DNS origin, playback/revocation, imports and lists. The Rust
 server was rebuilt after embedding the changed security assets. Both new test
 harnesses bound startup/teardown; the browser fixture was cleaned.
+
+## Subsequent native-container/NAS acceptance
+
+The unpublished native candidate from
+`f2efdfadc1183c9d76eae1cb2639a78ddf223153` passed both architecture builds/smokes and
+OCI verification, then the actual Synology NAS startup/login/browser/full restore
+journey at a numeric-IP HTTPS origin. Typed passkey unavailability, real Chrome
+playback and exact originals passed; live services were unchanged and the fixture
+was cleaned. See [candidate identity and full evidence](storage-permission-recovery-2026-10-20.md#actual-nas-candidate-acceptance).
+The published alpha.2 image remains unchanged and still predates this fix.

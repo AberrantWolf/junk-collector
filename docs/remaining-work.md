@@ -275,7 +275,8 @@ Compose package and release workflow exist; public image publication and isolate
 Portainer pull/update acceptance are delivered under HL-07D. HL-05C additionally
 qualifies isolated active-encoding cancel/failure/crash/full recovery with real
 browser controls. HL-05E adds bounded tmpfs archive ENOSPC/restart/full recovery;
-HL-05D's permission-loss source repair still awaits actual-NAS candidate acceptance.
+HL-05D's permission-loss repair and numeric-IP startup now pass actual-NAS candidate
+acceptance.
 Remaining current-installation, broader storage-failure/abuse and
 public-ingress qualification stays open. Reuse the dated evidence without treating
 the earlier test install as acceptance of every permanent-installation path.
@@ -418,19 +419,20 @@ remain separate. Do not reopen accepted HL-05A/B/Docker publication as dependenc
 
 #### HL-05D — Storage permission failure and metadata recovery
 
-**State:** source repair and rebuilt-server Chrome/full recovery accepted
-2026-10-20; actual NAS candidate acceptance
-pending. Two isolated published-alpha.2 runs found that a failed metadata save on
+**State:** source repair and actual NAS candidate/full recovery accepted
+2026-10-20. Two isolated published-alpha.2 runs found that a failed metadata save on
 a read-only archive, followed by a successful retry, could block restart/cold backup
 with a stale command-marker digest mismatch. Original bytes remained intact.
 The storage adapter now releases proven absent reservations under the writer lock
 and resolves older losing metadata reservations only with an independently attested
 winner. Unexplained corruption still rejects recovery. See [dated repair evidence](validation/storage-permission-recovery-2026-10-20.md).
 **Owner:** existing storage command/publication adapter and qualification harness.
-Finish the bounded read-only archive/browser retry/full restore journey on an
-isolated actual-NAS candidate containing the repair. Do not treat the two defect
-reproductions as repaired-image acceptance or update the permanent installation.
-Storage-full, public ingress/abuse and power-loss claims remain separate.
+The unpublished native candidate passed read-only Btrfs archive, real browser retry
+without an intervening restart, cold backup and full restore at a numeric-IP HTTPS
+origin. Exact originals and session/identity/TLS/manual title survived. Generated
+resources were cleaned and live services matched baseline. Public alpha.2 remains
+unchanged and predates the repair. Broader storage failures, public ingress/abuse
+and power-loss claims remain separate.
 
 #### HL-05E — Bounded archive capacity failure and recovery
 
@@ -962,7 +964,7 @@ remain available when the actual hosts/devices are accessible. HL-05C active pre
 HL-07D is delivered with [public-image Portainer acceptance](validation/container-publication-2026-10-20.md).
 HL-06A's real-tool FLAC/Opus profiles are qualified with
 [independent audio acceptance](validation/audio-oracles-2026-10-20.md).
-HL-05D's source repair is ready for isolated NAS candidate qualification; see its
+HL-05D's repaired candidate passed numeric-IP startup and actual NAS recovery; see its
 [permission-failure record](validation/storage-permission-recovery-2026-10-20.md).
 HL-05E's bounded archive ENOSPC/restart/full recovery is qualified; see its
 [capacity-failure record](validation/storage-capacity-recovery-2026-10-20.md).

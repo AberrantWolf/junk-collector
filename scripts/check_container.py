@@ -323,6 +323,11 @@ def main():
             ready()
             cookie = login()
             original_cookie = cookie
+            if args.browser_host == args.private_ip and args.browser_host:
+                features = request("/features", cookie=cookie)
+                assert features["passkeys"] is False
+                assert features["passkeys_unavailable_reason"] == "dns_name_required"
+                print("Numeric-IP authentication startup/password login and typed DNS-required passkey guidance passed", flush=True)
             server_id = request("/identity", cookie=cookie)["server_id"]
             assert current_image() == image_id(initial_image)
             initial_container = container_id()
