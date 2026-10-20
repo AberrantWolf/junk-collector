@@ -34,26 +34,30 @@ removes the earlier destination-selection blocker. A small catalog/settings back
 would need more than SQLite alone; that mode and optional backup-age reminders are
 not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
 
-## Container publication in progress — HL-07D, 2026-10-20
+## Published Docker alpha.2 — HL-07D delivered, 2026-10-20
 
-The workspace is prepared as `0.1.0-alpha.2`, with draft storage/update notes.
-The existing workflow separates prerelease `preview` and stable `latest`, verifies
-both architectures and source labels, records exact digests, gates anonymous pulls
-before channel promotion, and pins self-contained installation bundles to that
-manifest. Older release runs cannot downgrade a channel. Manual dispatch verifies
-an unpublished OCI export and retains local-build instructions.
-Policy/bundle tests, actual multiarch verifier-fixture export/copy/config checks and
-Actionlint passed; see [dated preparation evidence](validation/container-release-preparation-2026-10-20.md).
-The signed `v0.1.0-alpha.2` source tag and GitHub prerelease are published. Release
-CI passed all source gates and the native container install/update/restore smoke;
-the native AMD64/ARM64 image retry is in progress after replacing the slow QEMU
-build. The frozen source tag is unchanged. The disposable Portainer lifecycle
-adapter passed actual NAS local-image preflight, including an unchanged companion,
-saved originals, resumed upload and full restore.
-**HL-07D remains open:** public image/anonymous pull/channel/bundle checks and
-published-image Portainer/browser acceptance are pending. See the
-[current publication record](validation/container-publication-2026-10-20.md) and
-[alpha.2 notes](releases/v0.1.0-alpha.2.md).
+The signed `v0.1.0-alpha.2` source tag and GitHub prerelease now supply public
+AMD64/ARM64 images and a digest-pinned installation bundle. Version and `preview`
+resolve to `sha256:f86f46d2c8870f8d647fc9225ce2cfe7c4319521a29c89897b419abb77629433`; stable `latest` is absent.
+Native platform builds and actual native recovery smokes, all source gates,
+anonymous all-layer/platform/source-label checks and both-platform Docker pulls
+passed. The existing workflow now uses native runners after prolonged QEMU release
+optimization; explicit retries freeze an existing published tag's source. Normal
+empty-input manual dispatch remains nonpublishing. Channel promotion cannot
+supersede a newer release in its channel.
+
+Actual disposable Portainer 2.45 NAS acceptance passed a distinct-image old→public
+version update while retaining an unchanged companion, and fresh digest install/
+forced re-pull/redeploy/full restore. Saved original bytes, accounts/session,
+ServerId, config/TLS and unfinished upload survived. Real Chrome playback/seek/
+download/mobile checks passed after update and restore; independent native ARM64
+startup/HTTPS/clean shutdown passed. All test resources/private handoffs were
+cleaned; live Collector, Portainer and both tunnel identities/start times matched
+the baseline. See [publication acceptance](validation/container-publication-2026-10-20.md)
+and [alpha.2 notes](releases/v0.1.0-alpha.2.md). The dated
+[preparation record](validation/container-release-preparation-2026-10-20.md) stays historical.
+Direct alpha.1 upgrades, system-trusted second-device/public-ingress/remaining
+format qualification remain outside this packaging delivery.
 
 ## Scalable update recovery — HL-05B, 2026-10-20
 

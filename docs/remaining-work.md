@@ -11,10 +11,13 @@ have been removed; completed work is described by status and dated validation.
 [release requirements](release-requirements.md) records the revised delivery gate.
 
 Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
-actual-host isolated install/update/restore and HL-05B snapshot/incremental recovery qualification. The 2026-10-19 native delivery and live-use triage
-remain recorded below. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
-qualification remains open; HL-07A/B/C are delivered. Continue with
-HL-07D release preparation and publication after applicable deployment/recovery gates. NAS operations/recovery belong to HL-05A/B; Docker publication
+actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
+qualification and HL-07D public alpha.2/Portainer acceptance. The 2026-10-19 native
+delivery and live-use triage remain recorded below. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
+qualification remains open; HL-07A/B/C are delivered. HL-07D public alpha.2 image/
+pull/update acceptance is delivered; continue the remaining advertised-device,
+format and permanent-ingress qualification when its required hosts/reference
+material are available. NAS operations/recovery belong to HL-05A/B; Docker publication
 and release usability belong to HL-07A–D. Keep the existing milestone numbers.
 The earlier insertion assigned
 digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
@@ -74,8 +77,7 @@ queue. Dated reports and workarounds remain in the
 
 HL-07A/B/C and HL-05A/B's isolated operations/recovery deliveries are accepted.
 Independent media backups are optional operator policy, not a publication prerequisite
-under the 2026-10-20 scope clarification. HL-07D publishes after the applicable acceptance
-checks and update/recovery procedure are ready. Continue HL-04/HL-06 hardware and
+under the 2026-10-20 scope clarification. HL-07D publication and isolated public-image update/recovery acceptance are delivered. Continue HL-04/HL-06 hardware and
 format qualification when the required devices/reference material are available.
 Do not wait for optional HL-09 cleanup or unrelated host administration to deliver
 the core repair/release path.
@@ -416,7 +418,8 @@ or whole-disc audio verification. Expand formats only in response to actual use.
 
 ### HL-07 — Release and maintenance acceptance
 
-**State:** source alpha exists; no supported home-lab release baseline declared.
+**State:** public experimental alpha.2 is published; no supported home-lab release
+baseline is declared.
 **Maps:** bounded R03, release-toolchain maintenance and independent UI review.
 **Dependencies:** accepted HL-01–HL-03 capabilities plus remaining HL-04–HL-06
 checks only for the platforms/capabilities advertised; safe backup/recovery remains
@@ -505,21 +508,20 @@ UI, CLI output and instructions agree with current web/Trash Amp behavior.
 
 #### HL-07D — Automated pullable Docker releases
 
-**State:** source tag and GitHub prerelease published 2026-10-20; image publication/
-update qualification is in progress. The existing workflow implements disjoint
-`preview`/stable `latest`, version/source/digest checks, both-architecture and anonymous
-pull gates, non-downgrading channel promotion and digest-pinned complete bundles.
-The workspace is prepared as alpha.2 with honest storage/update notes. Policy tests,
-a real local multiarch OCI verifier fixture and Actionlint passed. See
-[preparation evidence](validation/container-release-preparation-2026-10-20.md) and
-[alpha.2 notes](releases/v0.1.0-alpha.2.md). Release source checks and native container
-smoke passed; the slow QEMU run was cancelled for a native AMD64/ARM64 retry
-without moving the signed source tag. Disposable Portainer NAS
-preflight passed with retained local images, including unchanged companion, saved
-originals, upload resume and full restore. See [current publication evidence](validation/container-publication-2026-10-20.md).
-Continue anonymous public Collector pulls/manifest/channel/bundle checks and actual
-published-image Portainer install/update/browser/restore acceptance. Local-image
-preflight and a source tag alone do not complete this delivery.
+**State:** delivered 2026-10-20. Signed alpha.2 source, public AMD64/ARM64 version
+and `preview` images, anonymous both-platform/source/digest checks and digest-pinned
+installation assets are published. Native builders replace the slow QEMU build;
+normal manual builds remain nonpublishing, and an explicit existing-release retry
+freezes the tagged source. Actual disposable NAS Portainer old→public update,
+unchanged companion, fresh digest install/forced re-pull, pending upload, original
+bytes/session/config/TLS/full restore and remote Chrome passed. Live Collector,
+Portainer and both tunnels matched their original IDs/images/start times; fixture
+cleanup passed. See [publication acceptance](validation/container-publication-2026-10-20.md)
+and [alpha.2 notes](releases/v0.1.0-alpha.2.md). Earlier
+[preparation evidence](validation/container-release-preparation-2026-10-20.md) remains dated.
+Do not reopen packaging implementation or these accepted isolated drills. This is
+an experimental alpha; parent HL-07's remaining advertised-capability qualification
+is not implied complete.
 **Owner:** release CI/container packaging with HL-05 deployment acceptance.
 
 Release packaging requirement added 2026-10-19: users must be able to install and
@@ -879,18 +881,17 @@ HL-05B's isolated path is also qualified with [independent recovery acceptance](
 Independent media copies are optional; no destination choice blocks this queue.
 The packaged local backup area and consistent rollback policy are documented.
 HL-04 device and parent HL-05 permanent-installation/public-ingress qualification
-remain available when the actual hosts/devices are accessible. HL-07D publication
-must retain its applicable recovery and deployment dependencies.
+remain available when the actual hosts/devices are accessible. HL-07D is delivered
+with [public-image Portainer acceptance](validation/container-publication-2026-10-20.md).
 
-> Complete HL-07D publication acceptance from the prepared alpha.2 source. Source
-> channel/digest/bundle implementation is delivered; do not call the product released
-> until the existing workflow actually builds/publishes, both platforms pull anonymously,
-> recorded labels/digests match, and an isolated Portainer pull/redeploy retains config,
-> accounts, originals and pending work. Retain a complete consistent local recovery
-> point and its old image before changes. Independent media-backup storage, a cloud
-> account and backup-age reminders are not release prerequisites.
-> Remaining trusted-device/public-ingress/format qualifications apply only to advertised
-> scope. No production or publication change has been made by the preparation commits.
+> Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
+> HL-06 owned-format qualification only when their named devices, deployment access
+> or independent reference material are available. Reuse the accepted HL-07D public
+> alpha.2 installation/update/recovery evidence; do not repeat packaging or infer
+> system-trusted second-device/public-ingress acceptance from it. Keep experimental
+> release limits explicit. Independent media copies, paid cloud backup and backup-age
+> reminders remain optional and do not block this queue. Production deployment
+> changes require an actual assignment; the publication drill left live services intact.
 
 Completed bug repair, 2026-10-09: AccurateRip check panels no longer default a
 single-anchor disc to an unrelated collection response. Current recorded layout

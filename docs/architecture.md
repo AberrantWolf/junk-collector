@@ -22,11 +22,12 @@ keeps local rollback practical and external media copies optional. `${COLLECTOR_
 is the packaged local area; full backup remains explicit and includes media. No
 scheduler, lightweight catalog-only mode or backup-age UI is implemented.
 
-Release planning/OCI verification/bundle assembly (HL-07D preparation, 2026-10-20)
+Release planning/OCI verification/bundle assembly (HL-07D, 2026-10-20)
 live in `scripts/container_release.py` and the existing workflow, outside application
 and domain services. Public version verification precedes `preview`/stable `latest`
 promotion; bundles pin the verified manifest digest. Local OCI verification is
-separate from actual registry/pull deployment acceptance, which remains open.
+separate from actual registry/pull deployment acceptance. Public alpha.2 and its
+isolated Portainer/NAS/browser recovery acceptance are now [qualified](validation/container-publication-2026-10-20.md).
 Release builds now use native AMD64/ARM64 runners with architecture-scoped caches
 and real native container smoke checks, then assemble their digest-addressed outputs.
 The source revision is frozen before checks/builds. A manual retry may select an

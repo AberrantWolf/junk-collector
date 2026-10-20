@@ -18,20 +18,22 @@ state which installation paths have actually been exercised.
 Use an explicit image version or digest supplied by a release.
 
 <!-- release-image:start -->
-Registry images have not yet been published; for the current source checkout,
-build from the repository root:
+Published alpha.2 supplies `ghcr.io/aberrantwolf/junk-collector:v0.1.0-alpha.2` for
+linux/amd64 and linux/arm64. Download the installation bundle and image record from
+[the GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-alpha.2).
+The release bundle's `.env.example` pins this verified index:
 
-```sh
-docker build -t junk-collector:local .
-cd deploy/container
+```text
+ghcr.io/aberrantwolf/junk-collector@sha256:f86f46d2c8870f8d647fc9225ce2cfe7c4319521a29c89897b419abb77629433
 ```
 
-If building for a different machine, select its platform with `--platform
-linux/amd64` or `--platform linux/arm64`, save with `docker save -o
-junk-collector-image.tar junk-collector:local`, transfer that archive to the Docker
-host, then load it with `docker load -i junk-collector-image.tar`. The DS1522+ uses
-`linux/amd64`. Published multiarch images remove the need to build or transfer
-images manually. Use a distinct local tag for subsequent builds you want to retain.
+Source compilation or image-archive transfer is unnecessary. When using this
+source directory instead of the bundle, set `.env`'s `COLLECTOR_IMAGE` to that
+reference (the source example retains its local-build placeholder). For deliberate
+moving-channel updates select `ghcr.io/aberrantwolf/junk-collector:preview`; stable releases
+alone use `latest`. Retain the old digest and complete consistent recovery point.
+To build a local development image, run `docker build -t junk-collector:local .`
+from the repository root and explicitly select that local tag.
 <!-- release-image:end -->
 
 Extract the release installation bundle on the server, or use this directory from
@@ -376,8 +378,8 @@ separately only when its contents are no longer needed.
 ## Build and deployment status
 
 The repository includes the Dockerfile and a release workflow for versioned
-amd64/arm64 images plus this installation bundle. Registry publication has not yet
-been exercised. The older NAS qualification passed original-byte round trips,
+amd64/arm64 images plus this installation bundle. Public alpha.2 version/preview
+pulls and digest-pinned assets passed anonymous both-platform/source checks. The older NAS qualification passed original-byte round trips,
 container recreation and full backup/restore. The revised Compose package and
 proxy/tunnel package passed isolated actual-host runtime acceptance; actual public
 ingress still requires its separate checks. Current
@@ -392,4 +394,6 @@ See [evidence and limits](../../docs/validation/nas-operations-2026-10-20.md) an
 `scripts/check_container.py` in the source tree. Production Portainer/tunnels were
 inspected only. The [Btrfs/incremental path](snapshot-recovery.md) also passed isolated
 NAS/Mac restore qualification. Independent media-backup storage is optional; public
-registry pulls remain separate work. The full-copy procedure above remains a fallback.
+registry and disposable Portainer pull/update/fresh-install/restore also passed
+[publication acceptance](../../docs/validation/container-publication-2026-10-20.md).
+The full-copy procedure above remains a fallback.
