@@ -212,11 +212,9 @@ impl RateLimits {
         let now = self.clock.monotonic_millis();
         let mut state = lock_rate(&self.state)?;
         purge(&mut state.global, now, WINDOW_MILLIS);
-        let peer_attempts = state.peers.entry(peer.to_owned()).or_default();
-        purge(peer_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.peers, now, WINDOW_MILLIS);
         let account_key = Digest::sha256(account.trim().as_bytes()).hex;
-        let account_attempts = state.accounts.entry(account_key.clone()).or_default();
-        purge(account_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.accounts, now, WINDOW_MILLIS);
         if state.global.len() >= GLOBAL_LIMIT
             || state
                 .peers
@@ -232,13 +230,13 @@ impl RateLimits {
         state.global.push_back(now);
         state
             .peers
-            .get_mut(peer)
-            .expect("peer bucket exists")
+            .entry(peer.to_owned())
+            .or_default()
             .push_back(now);
         state
             .accounts
-            .get_mut(&account_key)
-            .expect("account bucket exists")
+            .entry(account_key)
+            .or_default()
             .push_back(now);
         Ok(())
     }
@@ -247,11 +245,7 @@ impl RateLimits {
         let now = self.clock.monotonic_millis();
         let mut state = lock_rate(&self.state)?;
         purge(&mut state.enrollment_polls, now, 60_000);
-        purge(
-            state.enrollment_poll_peers.entry(peer.into()).or_default(),
-            now,
-            60_000,
-        );
+        purge_buckets(&mut state.enrollment_poll_peers, now, 60_000);
         if state.enrollment_polls.len() >= 600
             || state
                 .enrollment_poll_peers
@@ -263,8 +257,8 @@ impl RateLimits {
         state.enrollment_polls.push_back(now);
         state
             .enrollment_poll_peers
-            .get_mut(peer)
-            .expect("poll bucket exists")
+            .entry(peer.to_owned())
+            .or_default()
             .push_back(now);
         Ok(())
     }
@@ -276,14 +270,9 @@ impl RateLimits {
         let now = self.clock.monotonic_millis();
         let mut state = lock_rate(&self.state)?;
         purge(&mut state.enrollment_global, now, WINDOW_MILLIS);
-        let peer_attempts = state.enrollment_peers.entry(peer.to_owned()).or_default();
-        purge(peer_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.enrollment_peers, now, WINDOW_MILLIS);
         let account_key = Digest::sha256(account.trim().as_bytes()).hex;
-        let account_attempts = state
-            .enrollment_accounts
-            .entry(account_key.clone())
-            .or_default();
-        purge(account_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.enrollment_accounts, now, WINDOW_MILLIS);
         if state.enrollment_global.len() >= GLOBAL_LIMIT
             || state
                 .enrollment_peers
@@ -299,13 +288,13 @@ impl RateLimits {
         state.enrollment_global.push_back(now);
         state
             .enrollment_peers
-            .get_mut(peer)
-            .expect("peer bucket exists")
+            .entry(peer.to_owned())
+            .or_default()
             .push_back(now);
         state
             .enrollment_accounts
-            .get_mut(&account_key)
-            .expect("account bucket exists")
+            .entry(account_key)
+            .or_default()
             .push_back(now);
         Ok(())
     }
@@ -324,6 +313,13 @@ fn purge(values: &mut VecDeque<u64>, now: u64, window: u64) {
     {
         values.pop_front();
     }
+}
+
+fn purge_buckets(buckets: &mut HashMap<String, VecDeque<u64>>, now: u64, window: u64) {
+    buckets.retain(|_, values| {
+        purge(values, now, window);
+        !values.is_empty()
+    });
 }
 
 #[derive(Clone)]
@@ -2668,8 +2664,135 @@ mod security_tests {
             limits.check_authentication("owner", "192.0.2.2"),
             Err(Error::RateLimited(60))
         ));
+        limits.check_authentication("recent", "192.0.2.3").unwrap();
         clock.0.store(60_000, Ordering::SeqCst);
         limits.check_authentication("owner", "192.0.2.2").unwrap();
+        for _ in 0..9 {
+            limits.check_authentication("recent", "192.0.2.3").unwrap();
+        }
+        assert!(matches!(
+            limits.check_authentication("recent", "192.0.2.4"),
+            Err(Error::RateLimited(60))
+        ));
+    }
+
+    #[test]
+    fn authentication_alias_flood_is_throttled_without_retaining_rejected_identities() {
+        let clock = Arc::new(TestRateClock(AtomicU64::new(0)));
+        let limits = RateLimits::new(clock.clone());
+        for index in 0..30 {
+            limits
+                .check_authentication(&format!("account-{index}"), "busy-peer")
+                .unwrap();
+        }
+        assert!(matches!(
+            limits.check_authentication("another-account", "busy-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 30..100 {
+            limits
+                .check_authentication(&format!("account-{index}"), &format!("peer-{index}"))
+                .unwrap();
+        }
+        for index in 0..1000 {
+            assert!(matches!(
+                limits.check_authentication(
+                    &format!("rejected-account-{index}"),
+                    &format!("rejected-peer-{index}")
+                ),
+                Err(Error::RateLimited(60))
+            ));
+        }
+        {
+            let state = limits.state.lock().unwrap();
+            assert_eq!(state.global.len(), 100);
+            assert_eq!(state.accounts.len(), 100);
+            assert!(state.peers.len() <= 100);
+        }
+        clock.0.store(59_999, Ordering::SeqCst);
+        assert!(matches!(
+            limits.check_authentication("new-account", "new-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        clock.0.store(60_000, Ordering::SeqCst);
+        limits
+            .check_authentication("new-account", "new-peer")
+            .unwrap();
+        let state = limits.state.lock().unwrap();
+        assert_eq!(state.global.len(), 1);
+        assert_eq!(state.accounts.len(), 1);
+        assert_eq!(state.peers.len(), 1);
+    }
+
+    #[test]
+    fn enrollment_and_poll_alias_floods_bound_state_and_reclaim_expired_buckets() {
+        let clock = Arc::new(TestRateClock(AtomicU64::new(0)));
+        let limits = RateLimits::new(clock.clone());
+        for index in 0..8 {
+            limits
+                .check_enrollment("account", &format!("peer-{index}"))
+                .unwrap();
+        }
+        assert!(matches!(
+            limits.check_enrollment("account", "different-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 0..15 {
+            limits
+                .check_enrollment(&format!("account-{index}"), "busy-peer")
+                .unwrap();
+        }
+        assert!(matches!(
+            limits.check_enrollment("another-account", "busy-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 23..50 {
+            limits
+                .check_enrollment(&format!("account-{index}"), &format!("peer-{index}"))
+                .unwrap();
+        }
+        for _ in 0..120 {
+            limits.check_enrollment_poll("busy-poll-peer").unwrap();
+        }
+        assert!(matches!(
+            limits.check_enrollment_poll("busy-poll-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 120..600 {
+            limits
+                .check_enrollment_poll(&format!("poll-peer-{index}"))
+                .unwrap();
+        }
+        for index in 0..1000 {
+            assert!(matches!(
+                limits.check_enrollment(
+                    &format!("rejected-account-{index}"),
+                    &format!("rejected-peer-{index}")
+                ),
+                Err(Error::RateLimited(60))
+            ));
+            assert!(matches!(
+                limits.check_enrollment_poll(&format!("rejected-poll-peer-{index}")),
+                Err(Error::RateLimited(60))
+            ));
+        }
+        {
+            let state = limits.state.lock().unwrap();
+            assert_eq!(state.enrollment_global.len(), 50);
+            assert!(state.enrollment_peers.len() <= 50);
+            assert!(state.enrollment_accounts.len() <= 50);
+            assert_eq!(state.enrollment_polls.len(), 600);
+            assert!(state.enrollment_poll_peers.len() <= 600);
+        }
+        clock.0.store(60_000, Ordering::SeqCst);
+        limits.check_enrollment("new-account", "new-peer").unwrap();
+        limits.check_enrollment_poll("new-poll-peer").unwrap();
+        let state = limits.state.lock().unwrap();
+        assert_eq!(state.enrollment_global.len(), 1);
+        assert_eq!(state.enrollment_peers.len(), 1);
+        assert_eq!(state.enrollment_accounts.len(), 1);
+        assert_eq!(state.enrollment_polls.len(), 1);
+        assert_eq!(state.enrollment_poll_peers.len(), 1);
     }
 
     #[test]

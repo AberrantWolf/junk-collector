@@ -74,6 +74,17 @@ authority and exact originals survived. Generated resources were cleaned and liv
 services matched baseline. This qualifies bounded archive ENOSPC, not full private
 SQLite/Btrfs, lost power or public ingress. See [HL-05E acceptance](validation/storage-capacity-recovery-2026-10-20.md).
 
+## Authentication rate-limit identity retention — source repaired, 2026-10-20
+
+Rejected alias rotation can no longer grow the authentication/enrollment/poll
+identity maps, and expired inactive identities are reclaimed. Retained identities
+are bounded by admitted attempts in the current global window. Existing thresholds,
+hashed account keys, direct TCP peer selection and 429 behavior are preserved.
+Advancing-clock/flood regressions and a real executable/TCP account/peer/header/
+restart journey passed; all 443 workspace tests, strict Clippy and full Chrome smoke
+passed. This is bounded source acceptance, not public-ingress/load certification or
+a published image. See [HL-05F evidence](validation/rate-limit-retention-2026-10-20.md).
+
 ## Physical Safari LAN browser journey — qualified, 2026-10-20
 
 An isolated actual-NAS alpha.2 installation with synthetic FLAC/MP3, artwork and

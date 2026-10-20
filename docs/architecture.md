@@ -789,6 +789,16 @@ allowlisting, listener composition and stored credentials are unchanged.
 
 Three surfaces: client, curation, administration. Public curation and administration default off. Public administration implies curation exposure; roles remain mandatory. Routers omit disabled pages, JavaScript management entrypoints and mutation APIs. The public listener stays public regardless of `Forwarded` or `X-Forwarded-For`.
 
+Authentication/enrollment throttling is a process-local HTTP adapter mechanism.
+Global, direct-peer and hashed-account buckets share a monotonic 60-second window;
+forwarded headers never select a peer. Every check evicts expired empty buckets and
+creates identity buckets only after admission. Rejected alias rotation therefore
+cannot grow retained state: current identities are bounded by the corresponding
+global admitted-attempt limit. Enrollment polling follows the same rule. A process
+restart resets these transient limits, while persisted credentials/sessions retain
+their normal recovery semantics. This is single-process abuse protection, not a
+distributed limiter or permanent account lockout.
+
 The process exposes two loopback HTTP origins for separate public/private proxies and one direct LAN TLS client listener. An optional `private_tls_bind` adds direct private management HTTPS on an explicitly named interface; wildcard private TLS binds are rejected. Connect a public tunnel only to the public origin. A private proxy or Tailscale Serve connects to the private origin. LAN TLS is public-surface by default; local connectivity alone never upgrades it to administration. Allowlisted browser origins are exact and configured, not derived from proxy headers.
 
 Native pairing carries server ID, local certificate and its SHA-256 fingerprint. Trusted enrollment is required; a fingerprint downloaded unauthenticated is not trust. The local client installs only the enrolled certificate as its trust anchor and uses normal certificate/hostname/handshake validation. No accept-invalid-certificate option exists. Certificates must include the configured LAN names/IPs. Public routes use ordinary Web PKI separately. Credentials must never follow cross-origin redirects.

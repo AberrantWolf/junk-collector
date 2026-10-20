@@ -14,7 +14,8 @@ Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
 actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
 qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
 preparation failure/recovery acceptance, HL-06A real-tool audio oracles, the numeric-IP
-startup/source storage repair and HL-05E bounded archive ENOSPC recovery.
+startup/storage repair, HL-05E bounded archive ENOSPC recovery and HL-05F bounded
+authentication identity retention.
 The 2026-10-19 native delivery and live-use triage remain recorded below.
 HL-01, HL-02 and HL-03 remain delivered. HL-04's bounded physical Safari browser
 journey passed; native/offline/failure qualification remains open. HL-07A/B/C are delivered. HL-07D public alpha.2 image/
@@ -448,6 +449,22 @@ volumes/keepers/data/secrets were cleaned and live services matched baseline. Se
 a physically full Btrfs/private SQLite filesystem, inode exhaustion, power loss,
 arbitrary publication interruption or permanent/public deployment. Keep these limits
 and reuse the accepted bounded case instead of repeating it.
+
+#### HL-05F — Bound authentication limiter identity retention
+
+**State:** source accepted 2026-10-20. Authentication/enrollment/poll checks formerly
+inserted identity buckets before rejection and retained inactive identities across
+windows. Rejected alias rotation can no longer grow these maps; expired empty
+buckets are reclaimed and current identities are bounded by globally admitted work.
+Existing account/peer/global thresholds and direct-peer selection stay intact.
+Deterministic-clock flood/window regressions, actual public/private TCP listeners
+with spoofed forwarded headers, existing-session continuity and process-restart
+reset passed. All 443 workspace tests, strict Clippy and full Chrome smoke passed.
+See [acceptance](validation/rate-limit-retention-2026-10-20.md).
+**Owner:** existing process-local HTTP abuse adapter. No image/public ingress was
+deployed. Multiple real-peer global-limit/load, broader enrollment/media abuse and
+permanent deployment qualification remain under parent HL-05; do not infer them
+from the bounded memory/loopback source acceptance.
 
 #### NAS administration follow-up — not a product release gate
 
@@ -968,6 +985,8 @@ HL-05D's repaired candidate passed numeric-IP startup and actual NAS recovery; s
 [permission-failure record](validation/storage-permission-recovery-2026-10-20.md).
 HL-05E's bounded archive ENOSPC/restart/full recovery is qualified; see its
 [capacity-failure record](validation/storage-capacity-recovery-2026-10-20.md).
+HL-05F bounds authentication identity retention and qualifies real loopback
+throttling/restart; see its [source acceptance](validation/rate-limit-retention-2026-10-20.md).
 
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access
