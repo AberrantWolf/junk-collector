@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 import secrets
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -39,6 +40,7 @@ def main():
     parser.add_argument("--portainer-keep-companion", action="store_true", help="Check service-targeted updates preserve an unchanged companion container")
     parser.add_argument("--preparation-faults", action="store_true", help="Qualify actual encoder cancellation/failure/restart through private browser handoffs")
     parser.add_argument("--audio-oracles", action="store_true", help="Qualify real FLAC and Opus profiles against independent tool/PCM oracles and browser journeys")
+    parser.add_argument("--storage-permissions", action="store_true", help="Qualify generated archive write-permission failure and browser retry/recovery")
     args = parser.parse_args()
     if bool(args.snapshot_tool_image) != bool(args.snapshot_handoff):
         parser.error("Snapshot qualification requires both tools image and independent-storage handoff")
@@ -56,10 +58,10 @@ def main():
         parser.error("Browser handoff requires an explicit private HTTPS host/bind")
     if args.private_ip and not ipaddress.IPv4Address(args.private_ip).is_private:
         parser.error("Browser qualification binds only an explicit private IPv4 address")
-    if args.preparation_faults and args.audio_oracles:
+    if sum((args.preparation_faults, args.audio_oracles, args.storage_permissions)) > 1:
         parser.error("Choose one bounded qualification journey")
-    if (args.preparation_faults or args.audio_oracles) and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
-        parser.error("Audio qualification requires a fresh Compose inbox/browser installation")
+    if (args.preparation_faults or args.audio_oracles or args.storage_permissions) and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
+        parser.error("Fault/audio qualification requires a fresh Compose inbox/browser installation")
     project_root = Path(__file__).resolve().parents[1]
     compose = project_root / "deploy/container/compose.yaml"
     password = secrets.token_hex(24)
@@ -193,6 +195,10 @@ def main():
             return item
 
         handoff_files = []
+        storage = None
+        if args.storage_permissions:
+            from storage_permission_qualification import StoragePermissionQualification
+            storage = StoragePermissionQualification(root_tool)
 
         def browser_handoff(album_id, restored=False, scenario=None, **extra):
             if not args.browser_handoff:
@@ -423,6 +429,8 @@ def main():
                     faults.exercise(cookie, seed, request, verify, stop, up, ready, browser_handoff)
                 if audio:
                     audio.exercise(cookie, seed, request, verify, browser_handoff, pcm, album_id)
+            if storage:
+                storage.exercise(cookie, album_id, request, lambda session, item: verify_originals(session, item, originals), browser_handoff)
             browser_handoff(album_id)
             stop()
             if snapshots:
@@ -465,11 +473,20 @@ def main():
                 faults.verify_restored(cookie, request, lambda session, item: verify_originals(session, item, originals))
             if audio:
                 audio.verify_restored(cookie, request, lambda session, item: verify_originals(session, item, originals), pcm, browser_handoff)
+            if storage:
+                storage.verify_restored(cookie, request, lambda session, item: verify_originals(session, item, originals))
             browser_handoff(album_id, restored=True)
             stop()
             transition = "distinct-image update" if args.update_from else "container recreation"
             lifecycle = "Portainer" if portainer else "Compose"
             print(f"{lifecycle} initialize/config/group access/setup/partial-upload {transition}/SIGTERM/FLAC/backup/restore passed", flush=True)
+        except subprocess.CalledProcessError as error:
+            # Commands operate on generated fixtures. Retain bounded diagnostics
+            # before teardown removes their transient failed state.
+            if error.stderr:
+                diagnostic = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr
+                print(diagnostic[-8192:], file=sys.stderr, flush=True)
+            raise
         finally:
             try:
                 if portainer:

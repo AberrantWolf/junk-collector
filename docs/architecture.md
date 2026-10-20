@@ -50,6 +50,13 @@ API or conversion policy is added. Application Job ownership/claim fencing and
 adapter process termination/publication remain responsible for actual recovery;
 see [actual-host acceptance](validation/nas-preparation-recovery-2026-10-20.md).
 
+Archive permission qualification uses the same generated installation and a separate
+`scripts/storage_permission_qualification.py` adapter. It saves exact archive modes,
+removes write permissions only within that fixture, exercises an actual browser
+metadata save/read/playback, restores the modes and retries. Application metadata
+publication and storage recovery own the outcome; no HTTP result or successful
+publication is mocked. This is permission loss, not disk-full or power-loss injection.
+
 Real-tool audio qualification (HL-06A) adds a separate fixture oracle adapter,
 `scripts/audio_oracle_qualification.py`, to that generated Compose journey. It
 compares actual FLAC output against independently generated PCM and actual Opus
@@ -579,6 +586,17 @@ Collection reads cross `CollectionReadPort`, whose methods receive durable ident
 Application mutations carry a validated `CommandContext`. Private SQLite schema 3 claims receipts by `(UserId, API major, operation, Idempotency-Key)` and binds the claim to a SHA-256 digest of the validated typed request, path identities, and operation. Authorization and validation run before a claim. A completed receipt replays its non-secret serialized result across restart; a changed digest or active claim returns a stable conflict; an effect error abandons an unprepared claim; a prepared publication remains recoverable until startup resolves its commit marker. Authentication ceremonies, logout, resumable upload chunks, and internal failure bookkeeping use their own single-use or offset state machines instead. The HTTP and React layers transport keys but never decide replay policy.
 
 Command execution creates an explicit `CommandEffects` scope bound to a typed `CommandReceipt`. The scope shares the Store's locks and connections; it carries no Principal, thread-local state, or ambient authorization. Private mutations complete the response receipt in the effect's SQLite transaction. Filesystem mutations durably prepare the exact response in private `command_outcomes`, bound to a root-relative publication marker and digest before publishing. Startup validates the marker and replays committed results, or releases uncommitted claims, before opening services. Upload bookkeeping and committed artwork scratch cleanup are reconciled after projection rebuild. An operation must use one of these two commit mechanisms; returning an effect and subsequently writing its first durable receipt is not an acceptable adapter implementation.
+
+Failed manual metadata updates can reserve an immutable revision before a filesystem
+error prevents journal creation. Under the archive writer lock, the storage adapter
+releases such an in-progress reservation only when its marker is absent and the
+publication journal directory is empty; uncertain I/O and unfinished journals fail
+closed. This runs during abandonment and before another publisher claims the same
+path. Startup can also resolve a previously retained losing metadata reservation
+when the actual revision, manifest and an independent completed or exactly matching
+pending command attest the winning record. It never replays the winner as the
+failed command's result. Unattested digest changes or inconsistent result envelopes
+still reject recovery without modifying the archive.
 
 Security rules live in `collector-app::security`: account/grant authority snapshots, default-account eligibility, credential revocation sets, and enrollment transitions. Store gathers facts under an immediate SQLite transaction, evaluates that policy, and applies its effects before committing. CAS and serialized snapshot loading are storage mechanisms; last-owner/admin/default and lifecycle decisions are application policy. Grant revision counters survive removal, so recreating access cannot make a stale revision current again.
 

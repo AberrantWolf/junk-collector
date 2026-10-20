@@ -1999,13 +1999,24 @@ impl IdempotencyPort for Store {
         key: &str,
         request_sha256: &str,
     ) -> Result<()> {
-        lock(&self.db)?
-            .execute(
+        let _writer = if operation == "metadata.authority.update" {
+            Some(lock(&self.writer)?)
+        } else {
+            None
+        };
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        // Only provably absent archive effects can be released. Committed or
+        // journal-backed effects retain their receipt for normal crash recovery.
+        if operation == "metadata.authority.update" {
+            commands::release_absent_metadata_outcomes(&tx, &self.archive, None, None)?;
+        }
+        tx.execute(
                 "DELETE FROM private.command_receipts WHERE user_id=? AND api_major=? AND operation=? AND idempotency_key=? AND request_sha256=? AND state='in_progress' AND NOT EXISTS(SELECT 1 FROM private.command_outcomes o WHERE o.user_id=command_receipts.user_id AND o.api_major=command_receipts.api_major AND o.operation=command_receipts.operation AND o.idempotency_key=command_receipts.idempotency_key)",
                 params![user.to_string(), api_major, operation, key, request_sha256],
             )
             .map_err(storage)?;
-        Ok(())
+        tx.commit().map_err(storage)
     }
 }
 

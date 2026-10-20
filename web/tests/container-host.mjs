@@ -22,7 +22,21 @@ try{
  await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  await page.goto(`${fixture.origin}/?collection=${fixture.collection_id}&item=${fixture.item_id}`);
  let cancelledOnly=false,expectedOpusMedia=null;
- if(fixture.scenario){
+ if(fixture.scenario==='readonly-archive'||fixture.scenario==='recovered-archive'){
+  await clickAction(page,'Review metadata');const review=page.getByRole('region',{name:'Metadata review'});
+  await review.getByLabel('Title mode',{exact:true}).selectOption('manual');await review.getByLabel('Displayed title',{exact:true}).fill(fixture.desired_title);
+  const responseEvent=page.waitForResponse(response=>response.url().endsWith(`/items/${fixture.item_id}/metadata`)&&response.request().method()==='PUT');
+  await review.getByRole('button',{name:'Save title',exact:true}).click();const response=await responseEvent;
+  if(fixture.scenario==='readonly-archive'){
+   assert.ok(response.status()>=500,'Archive permission failure did not return an operational error');
+   await expect(review.getByRole('alert')).toBeVisible();
+   await review.getByLabel('Title mode',{exact:true}).selectOption('manual');await expect(review.getByLabel('Displayed title',{exact:true})).toHaveValue(fixture.desired_title);
+   await page.screenshot({path:path.join(scratch,'nas-readonly-save.png'),fullPage:true});
+  }else{
+   assert.equal(response.status(),200);await expect(review.getByText('Metadata choices saved.',{exact:true})).toBeVisible();
+  }
+  await page.goto(`${fixture.origin}/?collection=${fixture.collection_id}&item=${fixture.item_id}`);
+ }else if(fixture.scenario){
   const openPreparation=async()=>{
    await clickAction(page,'Edit / attach files');
    const curator=page.getByRole('dialog',{name:/Edit entry/});

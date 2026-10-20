@@ -413,6 +413,22 @@ roots; no runtime image or production configuration was changed. Parent HL-05's
 public ingress, permission/storage-full/abuse and arbitrary commit/power-loss cases
 remain separate. Do not reopen accepted HL-05A/B/Docker publication as dependencies.
 
+#### HL-05D — Storage permission failure and metadata recovery
+
+**State:** source repair and rebuilt-server Chrome/full recovery accepted
+2026-10-20; actual NAS candidate acceptance
+pending. Two isolated published-alpha.2 runs found that a failed metadata save on
+a read-only archive, followed by a successful retry, could block restart/cold backup
+with a stale command-marker digest mismatch. Original bytes remained intact.
+The storage adapter now releases proven absent reservations under the writer lock
+and resolves older losing metadata reservations only with an independently attested
+winner. Unexplained corruption still rejects recovery. See [dated repair evidence](validation/storage-permission-recovery-2026-10-20.md).
+**Owner:** existing storage command/publication adapter and qualification harness.
+Finish the bounded read-only archive/browser retry/full restore journey on an
+isolated actual-NAS candidate containing the repair. Do not treat the two defect
+reproductions as repaired-image acceptance or update the permanent installation.
+Storage-full, public ingress/abuse and power-loss claims remain separate.
+
 #### NAS administration follow-up — not a product release gate
 
 Investigate supported DSM updates/settings to enable SFTP on the DS1522+
@@ -928,6 +944,8 @@ remain available when the actual hosts/devices are accessible. HL-05C active pre
 HL-07D is delivered with [public-image Portainer acceptance](validation/container-publication-2026-10-20.md).
 HL-06A's real-tool FLAC/Opus profiles are qualified with
 [independent audio acceptance](validation/audio-oracles-2026-10-20.md).
+HL-05D's source repair is ready for isolated NAS candidate qualification; see its
+[permission-failure record](validation/storage-permission-recovery-2026-10-20.md).
 
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access

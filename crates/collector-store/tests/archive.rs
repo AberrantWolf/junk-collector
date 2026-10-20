@@ -1177,6 +1177,221 @@ fn rewrite_record(path: &Path, update: impl FnOnce(&mut serde_json::Value)) {
         + "\n";
     std::fs::write(manifest, updated).unwrap();
 }
+#[test]
+fn failed_metadata_save_releases_absent_marker_before_a_new_save_and_backup() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let change = |value: &str| UpdateMetadataAuthorityCommand {
+        expected_revision: Revision(0),
+        change: MetadataAuthorityChange::SetFieldOverride {
+            field: MetadataField::Title,
+            value: value.into(),
+            language: None,
+        },
+    };
+    let transactions = root.path().join("archive/.transactions");
+    let retained = root.path().join("retained-transactions");
+    std::fs::rename(&transactions, &retained).unwrap();
+    std::fs::write(&transactions, b"fixture blocks journal creation").unwrap();
+    let failed = command();
+    assert!(matches!(
+        service.update_metadata_authority(&actor, saved.id, change("Failed save"), &failed),
+        Err(Error::Storage(_))
+    ));
+    std::fs::remove_file(&transactions).unwrap();
+    std::fs::rename(retained, &transactions).unwrap();
+    let expected = service
+        .update_metadata_authority(&actor, saved.id, change("Recovered save"), &command())
+        .unwrap();
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let stale: i64 = private
+        .query_row(
+            "SELECT COUNT(*) FROM command_receipts WHERE idempotency_key=?",
+            [failed.key()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale, 0);
+    drop(private);
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            ProcessingPort::metadata_authority(&reopened, collection.id, saved.id)
+                .unwrap()
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+    AdministrationPort::reindex(&reopened).unwrap();
+    let config = root.path().join("collector.toml");
+    std::fs::write(&config, "# generated recovery fixture\n").unwrap();
+    let backup = root.path().join("backup");
+    reopened.backup(&backup, &config).unwrap();
+    collector_store::validate_backup(&backup).unwrap();
+}
+
+#[test]
+fn legacy_failed_metadata_reservation_needs_an_attested_winner_and_intact_bytes() {
+    for mode in [
+        "completed",
+        "pending",
+        "no_attestation",
+        "changed_bytes",
+        "wrong_result",
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        let context = command();
+        let winner = service
+            .update_metadata_authority(
+                &actor,
+                saved.id,
+                UpdateMetadataAuthorityCommand {
+                    expected_revision: Revision(0),
+                    change: MetadataAuthorityChange::SetFieldOverride {
+                        field: MetadataField::Title,
+                        value: "Committed winner".into(),
+                        language: None,
+                    },
+                },
+                &context,
+            )
+            .unwrap();
+        let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+            .unwrap()
+            .map(|r| r.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .ends_with(&collection.id.to_string())
+            })
+            .unwrap();
+        let marker = collection_path.join(format!(
+            "metadata_authorities/{}/revisions/{:020}/record.v4.json",
+            saved.id, 1
+        ));
+        let original = std::fs::read(&marker).unwrap();
+        let relative = marker
+            .strip_prefix(root.path().join("archive"))
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let mut loser = winner.clone();
+        loser.updated_at -= chrono::Duration::seconds(3);
+        loser.authority.field_overrides[0].value = "Failed earlier attempt".into();
+        loser.display.as_mut().unwrap().title.value = "Failed earlier attempt".into();
+        let loser_bytes = serde_json::to_vec_pretty(&loser).unwrap();
+        let digest = Digest::sha256(&loser_bytes).hex;
+        assert!(matches!(
+            store
+                .begin_command(
+                    actor.user_id,
+                    1,
+                    "metadata.authority.update",
+                    "legacy-failed",
+                    "frozen-failed-input"
+                )
+                .unwrap(),
+            ReceiptDecision::Execute
+        ));
+        let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        private.execute("INSERT INTO command_outcomes(user_id,api_major,operation,idempotency_key,root,path,sha256,result) VALUES(?,1,'metadata.authority.update','legacy-failed','archive',?,?,?)",rusqlite::params![actor.user_id.to_string(),relative,digest,serde_json::to_string(&loser).unwrap()]).unwrap();
+        let winner_request: String = private
+            .query_row(
+                "SELECT request_sha256 FROM command_receipts WHERE idempotency_key=?",
+                [context.key()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if mode == "no_attestation" {
+            private
+                .execute(
+                    "DELETE FROM command_receipts WHERE idempotency_key=?",
+                    [context.key()],
+                )
+                .unwrap();
+        }
+        if mode == "pending" || mode == "wrong_result" {
+            private.execute("UPDATE command_receipts SET state='in_progress',result=NULL WHERE idempotency_key=?",[context.key()]).unwrap();
+            let result = if mode == "wrong_result" {
+                &loser
+            } else {
+                &winner
+            };
+            private.execute("INSERT INTO command_outcomes(user_id,api_major,operation,idempotency_key,root,path,sha256,result) VALUES(?,1,'metadata.authority.update',?,'archive',?,?,?)",rusqlite::params![actor.user_id.to_string(),context.key(),relative,Digest::sha256(&original).hex,serde_json::to_string(result).unwrap()]).unwrap();
+        }
+        if mode == "changed_bytes" {
+            let mut changed = original.clone();
+            changed.push(b'\n');
+            std::fs::write(&marker, changed).unwrap();
+        }
+        let frozen_marker = std::fs::read(&marker).unwrap();
+        drop(private);
+        drop(service);
+        drop(store);
+        let reopened = Store::open(root.path().join("archive"), root.path().join("state"));
+        if mode == "completed" || mode == "pending" {
+            let reopened = reopened.unwrap();
+            assert_eq!(
+                serde_json::to_value(
+                    ProcessingPort::metadata_authority(&reopened, collection.id, saved.id)
+                        .unwrap()
+                        .unwrap()
+                )
+                .unwrap(),
+                serde_json::to_value(&winner).unwrap()
+            );
+            let ReceiptDecision::Replay(replayed) = reopened
+                .begin_command(
+                    actor.user_id,
+                    1,
+                    "metadata.authority.update",
+                    context.key(),
+                    &winner_request,
+                )
+                .unwrap()
+            else {
+                panic!("winner lost its receipt")
+            };
+            assert_eq!(replayed, serde_json::to_value(&winner).unwrap());
+            let private =
+                rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+            let loser_count: i64 = private
+                .query_row(
+                    "SELECT COUNT(*) FROM command_receipts WHERE idempotency_key='legacy-failed'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(loser_count, 0);
+            assert_eq!(std::fs::read(&marker).unwrap(), original);
+        } else {
+            assert!(
+                matches!(reopened, Err(Error::Storage(_))),
+                "{mode}: unproven recovery succeeded"
+            );
+            assert_eq!(std::fs::read(&marker).unwrap(), frozen_marker);
+            let private =
+                rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+            let state: String = private
+                .query_row(
+                    "SELECT state FROM command_receipts WHERE idempotency_key='legacy-failed'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                state, "in_progress",
+                "failed recovery discarded unresolved evidence"
+            );
+        }
+    }
+}
+
 fn setup() -> (
     tempfile::TempDir,
     Arc<Store>,

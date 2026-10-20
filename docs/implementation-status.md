@@ -45,6 +45,20 @@ acceptance passed. See [repair evidence](validation/numeric-ip-authentication-20
 The published alpha.2 image predates this source repair; no production installation
 or public image was replaced.
 
+## Metadata save after storage permission loss — source repaired, 2026-10-20
+
+An isolated NAS permission-loss test exposed a failed manual-save reservation that
+could conflict with a later successful retry and block restart/cold backup. Source
+now releases provably uncommitted metadata reservations under the writer lock and
+recovers an older losing reservation only with an independently attested immutable
+winner. Unexplained digest changes and inconsistent responses still fail closed.
+No archive format/schema changed. Rebuilt-server Chrome failed-save/retry, exact
+originals, playback and full backup/restore passed with session/identity/TLS/manual
+authority continuity; all 440 workspace tests and strict Clippy passed. See
+[repair and acceptance scope](validation/storage-permission-recovery-2026-10-20.md).
+Actual NAS acceptance of a candidate containing this repair remains pending; the
+published alpha.2 image predates it. Parent HL-05 remains partial.
+
 ## Physical Safari LAN browser journey — qualified, 2026-10-20
 
 An isolated actual-NAS alpha.2 installation with synthetic FLAC/MP3, artwork and
