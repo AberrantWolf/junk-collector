@@ -513,7 +513,8 @@ The workspace is prepared as alpha.2 with honest storage/update notes. Policy te
 a real local multiarch OCI verifier fixture and Actionlint passed. See
 [preparation evidence](validation/container-release-preparation-2026-10-20.md) and
 [alpha.2 notes](releases/v0.1.0-alpha.2.md). Release source checks and native container
-smoke passed; multi-platform compilation is running. Disposable Portainer NAS
+smoke passed; the slow QEMU run was cancelled for a native AMD64/ARM64 retry
+without moving the signed source tag. Disposable Portainer NAS
 preflight passed with retained local images, including unchanged companion, saved
 originals, upload resume and full restore. See [current publication evidence](validation/container-publication-2026-10-20.md).
 Continue anonymous public Collector pulls/manifest/channel/bundle checks and actual

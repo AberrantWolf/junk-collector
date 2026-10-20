@@ -4,11 +4,19 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      source_ref:
+        description: Source ref for release verification
+        required: false
+        default: ''
+        type: string
 jobs:
   rust-and-web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.99.0

@@ -27,6 +27,13 @@ live in `scripts/container_release.py` and the existing workflow, outside applic
 and domain services. Public version verification precedes `preview`/stable `latest`
 promotion; bundles pin the verified manifest digest. Local OCI verification is
 separate from actual registry/pull deployment acceptance, which remains open.
+Release builds now use native AMD64/ARM64 runners with architecture-scoped caches
+and real native container smoke checks, then assemble their digest-addressed outputs.
+The source revision is frozen before checks/builds. A manual retry may select an
+existing published release tag; it fetches that release and checks out its exact
+`refs/tags/…` source. Empty-input manual runs remain nonpublishing OCI exports.
+The exported native indexes are merged with content digest checks; public version
+verification still precedes channel promotion and installation asset publication.
 The disposable `scripts/portainer_qualification.py` lifecycle adapter reuses the
 container recovery journey without application changes. It renders the shipped
 Compose service, initializes a separate loopback Portainer database using a temporary

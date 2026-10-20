@@ -14,7 +14,18 @@ build and shipped proxy/inbox install/update/full-backup/restore smoke passed.
 The earlier [preparation record](container-release-preparation-2026-10-20.md) retains
 its dated, pre-publication state.
 
-**In progress:** multi-platform image publication, anonymous registry acceptance,
+The initial emulated ARM64 build reached Collector's final crate but spent more
+than 40 minutes there (over 95 minutes in the container job). It was cancelled
+before version/channel/bundle acceptance, rather than repeatedly waiting on QEMU
+release optimization. The existing workflow now builds/smokes each architecture
+on its native GitHub runner and assembles digest-addressed outputs. No tag is moved.
+An explicit manual retry selects the already published tag, fetches its release
+status and freezes its source commit before source checks/builds. Empty-input
+manual dispatch remains nonpublishing. The tiny two-platform export fixture passed
+actual digest-preserving OCI copy/platform/source-label verification after merge;
+Actionlint passed. This is pipeline qualification, not public-image acceptance.
+
+**In progress:** native multi-platform image publication, anonymous registry acceptance,
 channel/bundle verification and public-image Portainer acceptance. No public digest
 is recorded until those operations finish.
 

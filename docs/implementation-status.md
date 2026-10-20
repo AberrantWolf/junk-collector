@@ -46,7 +46,8 @@ Policy/bundle tests, actual multiarch verifier-fixture export/copy/config checks
 Actionlint passed; see [dated preparation evidence](validation/container-release-preparation-2026-10-20.md).
 The signed `v0.1.0-alpha.2` source tag and GitHub prerelease are published. Release
 CI passed all source gates and the native container install/update/restore smoke;
-the multi-platform image build is running. The disposable Portainer lifecycle
+the native AMD64/ARM64 image retry is in progress after replacing the slow QEMU
+build. The frozen source tag is unchanged. The disposable Portainer lifecycle
 adapter passed actual NAS local-image preflight, including an unchanged companion,
 saved originals, resumed upload and full restore.
 **HL-07D remains open:** public image/anonymous pull/channel/bundle checks and
