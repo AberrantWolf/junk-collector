@@ -13,7 +13,8 @@ have been removed; completed work is described by status and dated validation.
 Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
 actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
 qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
-preparation failure/recovery acceptance and HL-06A real-tool audio oracles.
+preparation failure/recovery acceptance, HL-06A real-tool audio oracles, the numeric-IP
+startup/source storage repair and HL-05E bounded archive ENOSPC recovery.
 The 2026-10-19 native delivery and live-use triage remain recorded below.
 HL-01, HL-02 and HL-03 remain delivered. HL-04's bounded physical Safari browser
 journey passed; native/offline/failure qualification remains open. HL-07A/B/C are delivered. HL-07D public alpha.2 image/
@@ -273,7 +274,9 @@ plus captured successful full backup/validation output. The SIGTERM source fix,
 Compose package and release workflow exist; public image publication and isolated
 Portainer pull/update acceptance are delivered under HL-07D. HL-05C additionally
 qualifies isolated active-encoding cancel/failure/crash/full recovery with real
-browser controls. Remaining current-installation, storage-failure/abuse and
+browser controls. HL-05E adds bounded tmpfs archive ENOSPC/restart/full recovery;
+HL-05D's permission-loss source repair still awaits actual-NAS candidate acceptance.
+Remaining current-installation, broader storage-failure/abuse and
 public-ingress qualification stays open. Reuse the dated evidence without treating
 the earlier test install as acceptance of every permanent-installation path.
 **Maps:** R02/R03
@@ -428,6 +431,21 @@ Finish the bounded read-only archive/browser retry/full restore journey on an
 isolated actual-NAS candidate containing the repair. Do not treat the two defect
 reproductions as repaired-image acceptance or update the permanent installation.
 Storage-full, public ingress/abuse and power-loss claims remain separate.
+
+#### HL-05E — Bounded archive capacity failure and recovery
+
+**State:** qualified 2026-10-20 on published alpha.2 using an isolated actual-NAS
+96 MiB tmpfs archive. Real ENOSPC produced a visible failed browser save without
+changing committed metadata or exact originals. Freeing only the fixture filler,
+normal restart and browser retry succeeded; full backup/restore retained session,
+identity/TLS/manual title/prepared audio and original bytes. Real Chrome playback,
+seek, downloads, persistent player and mobile checks passed throughout. All generated
+volumes/keepers/data/secrets were cleaned and live services matched baseline. See
+[acceptance and reproduction](validation/storage-capacity-recovery-2026-10-20.md).
+**Owner:** bounded qualification adapters; no runtime change. This does not certify
+a physically full Btrfs/private SQLite filesystem, inode exhaustion, power loss,
+arbitrary publication interruption or permanent/public deployment. Keep these limits
+and reuse the accepted bounded case instead of repeating it.
 
 #### NAS administration follow-up — not a product release gate
 
@@ -946,6 +964,8 @@ HL-06A's real-tool FLAC/Opus profiles are qualified with
 [independent audio acceptance](validation/audio-oracles-2026-10-20.md).
 HL-05D's source repair is ready for isolated NAS candidate qualification; see its
 [permission-failure record](validation/storage-permission-recovery-2026-10-20.md).
+HL-05E's bounded archive ENOSPC/restart/full recovery is qualified; see its
+[capacity-failure record](validation/storage-capacity-recovery-2026-10-20.md).
 
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access

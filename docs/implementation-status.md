@@ -59,6 +59,16 @@ authority continuity; all 440 workspace tests and strict Clippy passed. See
 Actual NAS acceptance of a candidate containing this repair remains pending; the
 published alpha.2 image predates it. Parent HL-05 remains partial.
 
+## Bounded archive ENOSPC recovery — qualified, 2026-10-20
+
+The published alpha.2 runtime passed a real NAS/Chrome archive-full save failure,
+unchanged originals/committed metadata, space reclamation, normal restart, successful
+manual retry and full backup/restore. The fixture verified a dedicated 96 MiB tmpfs
+before filling it; the real Btrfs disk was never filled. Session/ServerId/TLS/manual
+authority and exact originals survived. Generated resources were cleaned and live
+services matched baseline. This qualifies bounded archive ENOSPC, not full private
+SQLite/Btrfs, lost power or public ingress. See [HL-05E acceptance](validation/storage-capacity-recovery-2026-10-20.md).
+
 ## Physical Safari LAN browser journey — qualified, 2026-10-20
 
 An isolated actual-NAS alpha.2 installation with synthetic FLAC/MP3, artwork and

@@ -57,6 +57,16 @@ metadata save/read/playback, restores the modes and retries. Application metadat
 publication and storage recovery own the outcome; no HTTP result or successful
 publication is mocked. This is permission loss, not disk-full or power-loss injection.
 
+Bounded capacity qualification adds a dedicated external Docker volume backed by a
+96 MiB tmpfs, mounted only as the generated fixture archive. A networkless sleeper
+keeps that mount alive across CLI/server stops. The fixture verifies the filesystem
+type and exact capacity before a bounded fill reaches real ENOSPC; it never fills
+the host's Btrfs storage. Removing only the filler and performing normal startup
+settles interrupted application journals before browser retry. Restore selects a
+second empty private volume; cleanup removes both volume/keeper pairs. Shared
+metadata assertions live in `scripts/storage_failure_qualification.py`; the capacity
+and permission adapters supply real filesystem mechanisms without mocking results.
+
 Real-tool audio qualification (HL-06A) adds a separate fixture oracle adapter,
 `scripts/audio_oracle_qualification.py`, to that generated Compose journey. It
 compares actual FLAC output against independently generated PCM and actual Opus

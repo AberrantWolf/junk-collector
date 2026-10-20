@@ -77,6 +77,9 @@ Strict all-target Clippy, formatting, architecture/document/fixture checks,
 container tools/release policy tests, Python 3.8 syntax, web type checks/build and
 JS syntax passed. Generated web assets remained byte-identical. The two new
 regressions were rerun after final self-review.
+The full actual-browser smoke suite also passed: WebAuthn registration/login,
+session expiry, inventory/roles, grouped/bulk import, concurrent preparation,
+playback/revocation, collection lists, artwork and mobile journeys.
 
 The public alpha.2 image predates this repair and the numeric-IP startup repair.
 The two failed NAS runs above are defect evidence, not repaired-image acceptance.

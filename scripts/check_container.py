@@ -6,6 +6,7 @@ an operator installation. Optional browser handoff exposes only generated fixtur
 credentials in a private temporary file; no production credential is read.
 """
 import argparse
+from contextlib import ExitStack
 import hashlib
 import ipaddress
 import json
@@ -41,6 +42,7 @@ def main():
     parser.add_argument("--preparation-faults", action="store_true", help="Qualify actual encoder cancellation/failure/restart through private browser handoffs")
     parser.add_argument("--audio-oracles", action="store_true", help="Qualify real FLAC and Opus profiles against independent tool/PCM oracles and browser journeys")
     parser.add_argument("--storage-permissions", action="store_true", help="Qualify generated archive write-permission failure and browser retry/recovery")
+    parser.add_argument("--storage-full", action="store_true", help="Qualify ENOSPC in a dedicated bounded 96 MiB tmpfs archive, with real restart/retry/recovery")
     args = parser.parse_args()
     if bool(args.snapshot_tool_image) != bool(args.snapshot_handoff):
         parser.error("Snapshot qualification requires both tools image and independent-storage handoff")
@@ -58,16 +60,16 @@ def main():
         parser.error("Browser handoff requires an explicit private HTTPS host/bind")
     if args.private_ip and not ipaddress.IPv4Address(args.private_ip).is_private:
         parser.error("Browser qualification binds only an explicit private IPv4 address")
-    if sum((args.preparation_faults, args.audio_oracles, args.storage_permissions)) > 1:
+    if sum((args.preparation_faults, args.audio_oracles, args.storage_permissions, args.storage_full)) > 1:
         parser.error("Choose one bounded qualification journey")
-    if (args.preparation_faults or args.audio_oracles or args.storage_permissions) and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
+    if (args.preparation_faults or args.audio_oracles or args.storage_permissions or args.storage_full) and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
         parser.error("Fault/audio qualification requires a fresh Compose inbox/browser installation")
     project_root = Path(__file__).resolve().parents[1]
     compose = project_root / "deploy/container/compose.yaml"
     password = secrets.token_hex(24)
     origin = f"http://localhost:{args.port_base + 1}"
     user_agent = args.provider_user_agent_file.read_text().strip() if args.provider_user_agent_file else None
-    with tempfile.TemporaryDirectory(prefix="collector-compose-", dir=args.data_parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix="collector-compose-", dir=args.data_parent) as temporary, ExitStack() as resources:
         snapshots = None
         original_root = Path(temporary)
         if args.snapshot_tool_image:
@@ -199,6 +201,16 @@ def main():
         if args.storage_permissions:
             from storage_permission_qualification import StoragePermissionQualification
             storage = StoragePermissionQualification(root_tool)
+        capacity = None
+        if args.storage_full:
+            from storage_capacity_qualification import StorageCapacityQualification
+            def restart():
+                stop()
+                up()
+                ready()
+            capacity = StorageCapacityQualification(command, env, args.image, root_tool, restart)
+            resources.callback(capacity.cleanup)
+            storage = capacity
 
         def browser_handoff(album_id, restored=False, scenario=None, **extra):
             if not args.browser_handoff:
@@ -253,6 +265,8 @@ def main():
             candidate_image_id = image_id(args.image)
             if args.update_from:
                 assert image_id(initial_image) != candidate_image_id, "Update qualification needs two distinct images"
+            if capacity:
+                capacity.new_archive()
             run("run", "--rm", "initialize", capture_output=True)
             initial = read_file("/data/config/collector.toml")
             run("run", "--rm", "initialize", capture_output=True)
@@ -450,6 +464,8 @@ def main():
                 assert protected.returncode != 0 and read_file("/data/config/collector.toml") == saved_config
                 root_tool("install", "-d", "-m", "0700", "-o", "10001", "-g", "10001", "/data/recovered")
                 env["COLLECTOR_DATA"] = str(original_root / "recovered")
+                if capacity:
+                    capacity.new_archive()
                 root_tool("install", "-d", "-m", "0700", "-o", "10001", "-g", "10001", "/data/config", "/data/archive", "/data/state", "/data/backups")
                 run("run", "--rm", "-v", f"{original_root}/backups/qualified:/backup:ro", "cli", "restore", "--backup", "/backup", "--archive", "/data/archive", "--state", "/data/state", capture_output=True)
             run("run", "--rm", "cli", "doctor", capture_output=True)
