@@ -105,6 +105,8 @@ Supported FLAC/MP3 purchases play directly after import. For CDs, configure the
 FLAC preparation and start it. Individual tracks and configured Opus profiles are
 also available in the editor's music preparation view. Preparation is explicit
 background work; prepared files are saved automatically.
+See the [audio support matrix](docs/audio-preparation.md) for qualified tools,
+profiles, clients and remaining limits.
 
 Open an album and choose **Play album**, **Play original** for one import, or a
 track's **Play** button. Play replaces the personal queue and starts immediately;

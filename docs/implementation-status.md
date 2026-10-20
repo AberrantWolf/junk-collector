@@ -34,6 +34,20 @@ removes the earlier destination-selection blocker. A small catalog/settings back
 would need more than SQLite alone; that mode and optional backup-age reminders are
 not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
 
+## Real-tool audio oracles — HL-06A qualified, 2026-10-20
+
+Published alpha.2 passed actual NAS FLAC PCM equality and configured Opus
+96/128/192 kbps preparation using flac 1.4.2 and opus-tools 0.2 / libopus 1.3.1.
+Independent decoding recovered all expected FLAC samples and exact Opus frame
+counts with distinct-channel signal checks. Chrome prepared/downloaded/played/sought
+each Opus-only item; full backup/restore retained the exact audio identities/bytes
+and repeated the independent Opus/browser checks. Test handoffs now publish complete
+private JSON atomically. Live services were unchanged and fixture resources cleaned.
+See the [current audio matrix](audio-preparation.md) and
+[bounded evidence](validation/audio-oracles-2026-10-20.md). This is single-track
+synthetic qualification, not owned-disc/catalog, gapless, bit-perfect device,
+native Opus or additional original-codec acceptance. Parent HL-06 remains partial.
+
 ## NAS preparation recovery — HL-05C qualified, 2026-10-20
 
 The published alpha.2 image passed real NAS cancellation during encoder execution,

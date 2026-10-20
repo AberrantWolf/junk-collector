@@ -13,8 +13,9 @@ have been removed; completed work is described by status and dated validation.
 Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
 actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
 qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
-preparation failure/recovery acceptance. The 2026-10-19 native
-delivery and live-use triage remain recorded below. HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
+preparation failure/recovery acceptance and HL-06A real-tool audio oracles.
+The 2026-10-19 native delivery and live-use triage remain recorded below.
+HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
 qualification remains open; HL-07A/B/C are delivered. HL-07D public alpha.2 image/
 pull/update acceptance is delivered; continue the remaining advertised-device,
 format and permanent-ingress qualification when its required hosts/reference
@@ -422,9 +423,15 @@ one owned Redump PlayStation complete match already passed; these do not qualify
 all formats or audio checks. Live AccurateRip/whole-disc owned audio verification
 remains open. Preserve partial/inconclusive results and exact computation coverage.
 
-Qualify real `opusenc` and configured lossy profiles only if advertising that path;
-FLAC-first releases may label Opus unqualified without blocking FLAC. CHD runtime,
-trainer-bearing NES and other unsupported/ambiguous layouts remain unavailable
+**HL-06A delivered 2026-10-20:** actual NAS real FLAC integer PCM equality and
+configured Opus 96/128/192 kbps independent decode/frame/channel checks passed on a
+known non-silent stereo fixture. Real Chrome preparation/download/Opus-only playback/
+seek and full-restore repetition passed. The [current audio matrix](audio-preparation.md)
+and [dated evidence](validation/audio-oracles-2026-10-20.md) bound these claims to the
+named tools, source and client. Do not repeat this qualification or infer multi-track/
+gapless, native Opus, original-codec expansion or owned-disc verification from it.
+
+CHD runtime, trainer-bearing NES and other unsupported/ambiguous layouts remain unavailable
 until their named independent vectors/oracles and bounded readers pass. Additional
 owned NES/N64/SNES/PC Engine matches require the actual dumps and matching catalogs;
 they are not prerequisites for a PlayStation/music home-lab delivery. Use manually
@@ -902,6 +909,8 @@ The packaged local backup area and consistent rollback policy are documented.
 HL-04 device and parent HL-05 permanent-installation/public-ingress qualification
 remain available when the actual hosts/devices are accessible. HL-05C active preparation recovery is also qualified; see its dated record above.
 HL-07D is delivered with [public-image Portainer acceptance](validation/container-publication-2026-10-20.md).
+HL-06A's real-tool FLAC/Opus profiles are qualified with
+[independent audio acceptance](validation/audio-oracles-2026-10-20.md).
 
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access

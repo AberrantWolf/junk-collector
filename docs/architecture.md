@@ -50,6 +50,15 @@ API or conversion policy is added. Application Job ownership/claim fencing and
 adapter process termination/publication remain responsible for actual recovery;
 see [actual-host acceptance](validation/nas-preparation-recovery-2026-10-20.md).
 
+Real-tool audio qualification (HL-06A) adds a separate fixture oracle adapter,
+`scripts/audio_oracle_qualification.py`, to that generated Compose journey. It
+compares actual FLAC output against independently generated PCM and actual Opus
+output against CLI decoder/frame/channel oracles; Chrome prepares and plays the
+three configured Opus profiles without FLAC masking. Private test handoffs publish
+complete files atomically. Production conversion/domain responsibilities are
+unchanged; see the [audio matrix](audio-preparation.md) and
+[bounded evidence](validation/audio-oracles-2026-10-20.md).
+
 **Current direction (2026-10-09):** [remaining work](remaining-work.md)
 is the only remaining-work queue. Older assignment/order and gap statements below
 are historical. Proposed contracts require reassessment under

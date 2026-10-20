@@ -21,18 +21,33 @@ try{
  await page.goto(fixture.origin);await page.getByLabel('Password',{exact:true}).fill(fixture.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  await page.goto(`${fixture.origin}/?collection=${fixture.collection_id}&item=${fixture.item_id}`);
- let cancelledOnly=false;
+ let cancelledOnly=false,expectedOpusMedia=null;
  if(fixture.scenario){
   const openPreparation=async()=>{
    await clickAction(page,'Edit / attach files');
    const curator=page.getByRole('dialog',{name:/Edit entry/});
    await curator.getByRole('button',{name:'Music',exact:true}).click();
    const preparation=curator.getByRole('region',{name:'Prepare audio'});
-   const batch=preparation.locator('.preparation-batches article').filter({hasText:fixture.batch_id});
-   await batch.waitFor();return {curator,preparation,batch};
+   const batch=fixture.batch_id?preparation.locator('.preparation-batches article').filter({hasText:fixture.batch_id}):null;
+   if(batch)await batch.waitFor();return {curator,preparation,batch};
   };
   let {curator,preparation,batch}=await openPreparation();
-  if(fixture.scenario==='cancel-preparation'){
+  if(fixture.scenario.startsWith('prepare-opus-')||fixture.scenario.startsWith('restored-opus-')){
+   assert.ok([96,128,192].includes(fixture.bitrate));
+   const label=`Opus ${fixture.bitrate} kbps`;
+   if(fixture.scenario.startsWith('prepare-opus-'))await preparation.getByRole('button',{name:`Prepare ${label}`,exact:true}).click();
+   const link=preparation.getByRole('link',{name:new RegExp(`^Download ${label} ·`)});
+   await link.waitFor({timeout:60000});
+   const downloadEvent=page.waitForEvent('download');await link.click();const download=await downloadEvent;
+   assert.equal(await download.failure(),null);
+   const file=path.join(scratch,`opus-${fixture.bitrate}.opus`);await download.saveAs(file);
+   const rows=await(await page.request.get(`${fixture.origin}/api/v1/items/${fixture.item_id}/music-tracks`)).json();
+   const row=rows.find(value=>value.profile?.codec==='opus'&&value.profile.bitrate_kbps===fixture.bitrate);
+   assert.equal(row.state.status,'available');expectedOpusMedia=`/api/v1/items/${fixture.item_id}/representations/${row.state.representation_id}/${row.state.file_index}`;const bytes=await readFile(file);
+   assert.equal(bytes.length,row.state.length);assert.equal(createHash('sha256').update(bytes).digest('hex'),row.state.digest.hex);
+   assert.equal(rows.some(value=>value.profile?.codec==='flac'&&value.state.status==='available'),false,'FLAC masked Opus-only playback');
+   await curator.getByRole('button',{name:'Close curator',exact:true}).click();
+  }else if(fixture.scenario==='cancel-preparation'){
    await batch.getByRole('button',{name:'Cancel outstanding tracks',exact:true}).click();
    await expect(batch).toContainText('1 cancelled');
    const response=await page.request.get(`${fixture.origin}/api/v1/music-preparation-batches/${fixture.batch_id}`);
@@ -60,6 +75,7 @@ try{
  const tracks=page.getByRole('region',{name:'Album tracks'});const player=page.getByRole('region',{name:'Music player'});
  await tracks.getByRole('button',{name:'Play album',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1;}return false;});
+ if(expectedOpusMedia){assert.equal(new URL(await player.locator('audio').evaluate(audio=>audio.currentSrc)).pathname,expectedOpusMedia);await expect.poll(()=>player.locator('audio').evaluate(audio=>audio.duration)).toBeCloseTo(3,1);}
  await player.getByRole('slider').fill('1');await expect.poll(()=>player.locator('audio').evaluate(audio=>audio.currentTime)).toBeGreaterThan(.9);
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
  await page.getByText('Album details, evidence & files',{exact:true}).click();
