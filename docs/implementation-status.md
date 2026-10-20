@@ -21,6 +21,17 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Public-ingress qualification scope — clarified 2026-10-21
+
+Use the existing configured Cloudflare hostname and a short real-origin smoke,
+reusing backend/isolated tests and operator-reported sign-in/playback. An additional
+tunnel or exhaustive repetition of configuration/failure/load matrices is not a
+home-lab release prerequisite. The live hostname passed normal trusted Chrome
+sign-in-page loading without script errors and typed anonymous account/admin API
+401 denials. No authenticated media journey was independently repeated or production
+state changed. See [live observations and limits](validation/synology-deployment-2026-10-19.md#lightweight-live-https-check--2026-10-21)
+and [scope policy](decisions/home-lab-scope.md#security-proportional-to-a-public-home-server).
+
 ## Backup operating scope — clarified 2026-10-20
 
 The packaged container initializes `${COLLECTOR_DATA}/backups` (on the inspected NAS,

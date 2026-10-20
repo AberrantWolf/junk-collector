@@ -294,24 +294,35 @@ model; local process-kill tests are not power-loss/NAS certification.
 For Internet access, execute one intended trusted-HTTPS proxy/tunnel configuration
 end to end. Public ingress must reach only the public listener; private management
 uses explicit private LAN/tailnet ingress. Curation/admin stay publicly disabled by
-default. Test all supported exposure combinations for both pages/assets and APIs,
-direct role denials, spoofed forwarded headers, exact Origin/CSRF, cookie/session
-expiry, recovery, credential revocation and redaction. Verify stable authentication
-origin and real supported browser/password-manager/passkey behavior; test a hardware
-key when that authenticator is part of the supported setup. Keep platform claims
-limited to the devices actually exercised.
+default, and may be explicitly enabled as in the operator's existing installation.
+Reuse source/isolated tests for exposure combinations, role/Origin/session controls,
+recovery, revocation and redaction. A short smoke at the intended hostname checks
+trusted TLS, the normal sign-in/playback/seek journey and anonymous API denial;
+reuse operator-observed steps already working there. Exercise another authenticator
+when it is actually part of the intended workflow. Keep platform claims limited
+to the clients exercised, without a new tunnel or exhaustive proxy matrix.
 
-Exercise account/peer/global rate buckets, process-restart reset behavior,
+2026-10-21: the operator selected the existing Cloudflare hostname and requested
+proportional qualification. Normal trusted Chrome loaded its sign-in page without
+script errors; same-origin anonymous account/admin API reads returned Collector's
+typed 401 responses. The configured public administration is intentionally enabled,
+consistent with the earlier deployment record. Existing operator-reported browser
+access/playback remains useful evidence. See the [lightweight live check](validation/synology-deployment-2026-10-19.md#lightweight-live-https-check--2026-10-21).
+
+Risk-driven follow-ups include account/peer/global rate buckets, process-restart reset behavior,
 unauthenticated enrollment/challenge floods, slow/oversized uploads and ranges,
 provider/parser CPU/memory bounds and Job cancellation under realistic home-server
 load. Keep forwarded headers untrusted. Fix demonstrable abuse gaps; distributed
-limiting is unnecessary for a single process. Document operator recovery and
+limiting is unnecessary for a single process. Reuse accepted HL-05C–G checks;
+do not repeat them through the public tunnel. Broader stress/failure cases are
+follow-ups unless a concrete deployment failure makes them necessary. Document operator recovery and
 certificate renewal/re-enrollment for the chosen ingress. Obtain focused review
 of exposed authentication, upload/media and listener boundaries; broader protocol
 certification is HL-14.
 
-**Done when:** the recorded installation can browse/listen, recover, deny unwanted
-access and withstand the bounded failure/abuse matrix. Public qualification is a
+**Done when:** the recorded installation supports its ordinary browse/listen flow
+over trusted HTTPS, practical recovery and expected access denial, using the
+combined deployment/operator/source evidence. Public qualification is a
 gate for supported public use, not for a LAN-only release. A commercial deployment
 matrix, automatic route switching and every browser/platform are unnecessary.
 

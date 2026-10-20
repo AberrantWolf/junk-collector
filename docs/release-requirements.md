@@ -39,7 +39,10 @@ See [the accepted scope policy](decisions/home-lab-scope.md).
   scaffolding alone is not release acceptance; HL-07 owns completion.
 - For supported public access, qualify trusted HTTPS, listener/page/API exposure,
   roles, Origin/session controls, recovery/revocation, credential redaction and
-  bounded untrusted work on the intended ingress. Keep focused security review;
+  bounded untrusted work. Reuse the existing backend/LAN/isolated evidence and
+  operator-observed journeys; add a short smoke check at the intended HTTPS URL.
+  A new isolated tunnel and repetition of every configuration/failure/load case
+  through the proxy are not release prerequisites. Keep focused security review;
   automatic rotation/discovery, exhaustive commercial matrices and distributed
   limiting are not default prerequisites.
 - Test real user journeys, reasonable collection scale on the intended host,

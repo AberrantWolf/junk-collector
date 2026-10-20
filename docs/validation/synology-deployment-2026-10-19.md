@@ -174,3 +174,27 @@ The NAS has not yet been updated to that repair, and actual recovery is pending.
   not configured or tested. Actual Btrfs/DSM eligibility, consistency across roots,
   retention, restore and independent destination remain unqualified. The request
   and acceptance criteria are recorded in HL-05 of the consolidated queue.
+
+## Lightweight live HTTPS check — 2026-10-21
+
+The operator selected the existing `https://collector.awkwardexplorer.com` for
+public-ingress checks and challenged the disproportionate qualification scope.
+An additional isolated tunnel is not required. Reuse existing backend/isolated
+coverage and operator-reported working browser access/playback; broader proxy,
+failure and load matrices are follow-ups unless a concrete problem warrants them.
+
+Read-only checks found a responding Cloudflare-backed endpoint and matching
+configured public curation/administration, intentionally enabled as recorded above.
+Chrome 155.0.8059.85, using normal certificate validation and a fresh anonymous
+context, loaded the sign-in page without script errors. Same-origin browser reads
+of `/api/v1/me` and `/api/v1/admin/settings` returned application JSON HTTP 401 with
+`unauthenticated`. Plain automated HTTP requests also encountered HTTP 403; those
+responses were not used as proof of Collector authorization.
+
+No login, account mutation, upload, flooding, production reconfiguration or trust
+installation was performed. Authenticated cookie/media/seek behavior was not
+independently repeated in this check; retain the earlier operator reports and
+existing tests rather than presenting these read-only observations as a new full
+end-to-end media test. This establishes a useful live HTTPS smoke check, not
+security certification. The previously pending source CI run also completed
+successfully before this follow-up.

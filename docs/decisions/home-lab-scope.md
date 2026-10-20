@@ -66,6 +66,16 @@ exhaustive platform certification and enterprise-sized load tests stay documente
 but deferred unless actual deployment needs justify them. Ordinary TLS renewal
 and explicit recovery instructions remain part of public deployment acceptance.
 
+Public-ingress qualification is proportional to that scope (clarified 2026-10-21).
+Use the existing intended HTTPS hostname; an additional isolated tunnel is not a
+prerequisite. Reuse backend/LAN tests and operator-observed working sign-in/playback.
+Add a short real-origin check for trusted TLS, the normal browser workflow and
+protected APIs, with playback/seek where that has not already been observed.
+Do not repeat every exposure combination, recovery scenario or abuse test through
+Cloudflare, or change production configuration just to exercise alternatives.
+Investigate concrete failures; broader load/failure matrices remain follow-ups,
+not a home-lab release certification exercise. Unrun cases remain unqualified.
+
 Backups must work, advertised evidence must be honest, and actual supported
 clients must be exercised. A separate native inventory application, Phono delivery,
 legacy importer for users without legacy data, full deployment matrix and indefinite
