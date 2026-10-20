@@ -15,8 +15,8 @@ actual-host isolated install/update/restore, HL-05B snapshot/incremental recover
 qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
 preparation failure/recovery acceptance and HL-06A real-tool audio oracles.
 The 2026-10-19 native delivery and live-use triage remain recorded below.
-HL-01, HL-02 and HL-03 remain delivered. HL-04 actual-device
-qualification remains open; HL-07A/B/C are delivered. HL-07D public alpha.2 image/
+HL-01, HL-02 and HL-03 remain delivered. HL-04's bounded physical Safari browser
+journey passed; native/offline/failure qualification remains open. HL-07A/B/C are delivered. HL-07D public alpha.2 image/
 pull/update acceptance is delivered; continue the remaining advertised-device,
 format and permanent-ingress qualification when its required hosts/reference
 material are available. NAS operations/recovery belong to HL-05A/B; Docker publication
@@ -227,10 +227,11 @@ behavior beyond the cases actually tested.
 transport and Trash Amp presentation; fixes belong in their owning layers.
 
 2026-10-20: physical Safari on the operator's iPhone 16 Pro (reported iOS 26.6.2)
-passed trusted certificate, artwork, FLAC/MP3 playback/seek and persisted Curator
-track editing against the isolated NAS. Independent API Viewer/write, grant/media
-and session denials passed with a separate probe account. Phone Viewer/revocation
-observations are in progress; parent HL-04 remains partial. See the
+passed trusted certificate, artwork, FLAC/MP3 playback/seek, persisted Curator
+track editing, Viewer control denial, grant-revoked playback/loaded-player retry,
+and session revocation/fresh sign-in against the isolated NAS. Independent API
+write/media/range/HEAD/session denials passed. Fixture cleanup passed and live
+services were unchanged. Parent HL-04 remains partial for the cases below. See the
 [dated acceptance and limits](validation/lan-device-preparation-2026-10-20.md).
 
 Use [the installation runbook](local-alpha-installation.md), Collector's
@@ -246,11 +247,12 @@ and sibling `docs/collector-connection.md`. Finish:
   during actual reads. Keep the passing ordinary CD and FLAC/MP3 paths as the
   baseline. Native playlist command loss/restart recovery should demonstrate the
   real durable-command path, not reproduce Phono tests.
-- An actual second LAN device with browser-trusted HTTPS: Viewer browse/artwork
-  and supported FLAC/MP3 playback, permitted Curator writes, denied Viewer writes
-  and grant/active-session revocation. Use Trash Amp on a second Mac only for claims about
-  that native platform; a web-device gate need not require a Mac. Verify supported
-  native downloads and Internet-disconnected LAN use on their actual client.
+- Reuse the qualified actual second-device Safari journey above; do not repeat
+  its trusted browse/artwork/playback, Curator/Viewer or grant/session checks.
+  Verify Internet-disconnected LAN use on the actual client. Use Trash Amp on a
+  second Mac only for claims about that native platform; a web-device gate need
+  not require a Mac. Verify remaining supported native download/failure behavior
+  on its actual client.
 
 **Done when:** the remaining relevant cases have reproducible reports naming host,
 browser/client, trust mode and output device. LA3 stays partially qualified without
