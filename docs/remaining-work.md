@@ -848,15 +848,20 @@ HL-06 live owned-disc qualification remains outstanding.
 
 ### HL-10 — Portable export and one-way legacy adoption
 
-**State:** P05.1 was paused; no implementation is claimed. **Maps:** P05.1, R01.
+**State:** standalone full export/import delivered 2026-10-21 in source; deltas and
+legacy adoption remain optional/unimplemented. **Maps:** P05.1, R01.
 **Owner:** application/archive export and legacy-import adapters.
 
-First deliver a coherent frozen full archive export retaining IDs, originals,
-assets, lists, recipes, meaningful collection history/evidence and exact unknown
-records under the HL-01 policy, with digests/completion marker and no
-credentials/grants. Test
-partial copy, concurrent later writes, fresh import/reindex and private-data absence.
-Standalone full export can precede optional delta bundles. Deltas require explicit base digest and dependency
+The local CLI now exports and validates a coherent frozen full archive retaining
+IDs, originals, assets, lists, recipes, meaningful history/evidence and exact unknown
+records under HL-01, with digests/completion marker and no operational credentials/
+grants/configuration. Import into an empty archive requires fresh setup and explicit
+first-Owner recovery. Actual compiled-CLI acceptance covers partial copy, later
+source writes, cold import/reindex, byte equality and private-state absence; see
+[delivery](archive-export.md) and [dated acceptance](validation/archive-export-2026-10-21.md).
+This source delivery is not included in published alpha.2. It is a full local copy,
+not online export, a redacted public share or a replacement for full recovery backup.
+Optional deltas require explicit base digest and dependency
 closure; they do not implement replication.
 
 Only implement Retro Junk migration when a real legacy archive must be adopted.
@@ -1015,6 +1020,9 @@ HL-05F bounds authentication identity retention and qualifies real loopback
 throttling/restart; see its [source acceptance](validation/rate-limit-retention-2026-10-20.md).
 HL-05G independently qualifies actual-NAS login ceilings from multiple loopback TCP
 sources and full recovery; see its [acceptance](validation/nas-authentication-limits-2026-10-20.md).
+HL-10's standalone portable full export/import is delivered with
+[local CLI acceptance](validation/archive-export-2026-10-21.md); deltas and legacy
+adoption remain conditional follow-ups.
 
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access

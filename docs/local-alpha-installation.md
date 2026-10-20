@@ -34,6 +34,10 @@ prove catalog/audio accuracy, power-loss safety, or complete Internet security.
 
 ## Stopped-server backup
 
+To transfer only portable collection data into a fresh installation, see
+[archive export/import](archive-export.md). The full recovery workflow below also
+preserves accounts, access, server identity and unfinished work.
+
 The packaged container initializes a local `${COLLECTOR_DATA}/backups` area;
 its CLI uses explicit fresh children under `/data/backups`. Native installations
 choose an explicit destination outside archive/state. These are manual full backups,

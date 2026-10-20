@@ -352,6 +352,9 @@ The examples below use the built binary; place `--config /absolute/path/collecto
 | `doctor` | Check configuration and optional encoders without locking the archive; can run while serving. Does not test provider reachability, passwords, grants, or browser certificate trust. |
 | `reindex` | Rebuild the catalog from archive records. Stop the server first. |
 | `backup --destination PATH` | Lock the stopped installation, settle journals/checkpoint SQLite and write a verified complete backup to a new directory. |
+| `export-archive --destination PATH` | Copy a stopped installation's portable archive to a new directory, excluding accounts/configuration/private work. |
+| `validate-archive-export --export PATH` | Validate the complete portable file inventory and every checksum without configuration or databases. |
+| `import-archive --export PATH --archive PATH` | Copy a validated export into an empty archive; use fresh setup and explicit Owner recovery afterward. |
 | `validate-backup --backup PATH` | Check the sealed inventory, complete file set and every digest without opening databases or current configuration. |
 | `restore --backup PATH --archive PATH --state PATH [--archive-only]` | Validate and copy into empty roots. `--config` names a new output configuration. Archive-only recovery requires a fresh identity and explicit grants. |
 | `unowned-collections [--limit 50] [--cursor ID]` | List recovered collections with no Owner grant. Run while stopped. |
@@ -366,6 +369,10 @@ These commands use `collector.toml` by default; select another configuration wit
 The [account delivery ledger](docs/account-usability-delivery.md) documents schema 19, preserved credentials and the native account-keyed conversion.
 
 ### Full backup
+
+For a fresh installation without transferred credentials or grants, use
+[portable full archive export/import](docs/archive-export.md). Full backup below
+also preserves operational identity, access and pending work.
 
 Stop the server, then run:
 

@@ -5,6 +5,8 @@ pub use file_music::{
 };
 mod backup;
 pub use backup::*;
+mod archive_export;
+pub use archive_export::*;
 mod game_identification;
 pub use game_identification::*;
 mod acquisitions;

@@ -104,7 +104,7 @@ impl Store {
     }
 }
 
-fn regular_file(path: &Path) -> Result<()> {
+pub(crate) fn regular_file(path: &Path) -> Result<()> {
     if !fs::symlink_metadata(path)
         .map_err(storage)?
         .file_type()
@@ -116,7 +116,7 @@ fn regular_file(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn create_private_dir(path: &Path) -> Result<()> {
+pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
     fs::create_dir(path).map_err(storage)?;
     private_directory(path)
 }
@@ -128,7 +128,7 @@ fn private_file(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn write_private(path: &Path, data: &[u8]) -> Result<()> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -140,11 +140,12 @@ fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     file.write_all(data).map_err(storage)?;
     file.sync_all().map_err(storage)
 }
-fn copy_file(
+pub(crate) fn copy_file(
     source: &Path,
     target: &Path,
     expected: Option<ByteLength>,
 ) -> Result<(ByteLength, Digest)> {
+    use sha2::{Digest as _, Sha256};
     regular_file(source)?;
     let input = File::open(source).map_err(storage)?;
     let length = input.metadata().map_err(storage)?.len();
@@ -160,13 +161,39 @@ fn copy_file(
         options.mode(0o600);
     }
     let mut output = options.open(target).map_err(storage)?;
-    if std::io::copy(&mut input, &mut output).map_err(storage)? != length {
+    let mut hash = Sha256::new();
+    let mut copied = 0u64;
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        let read = input.read(&mut buffer).map_err(storage)?;
+        if read == 0 {
+            break;
+        }
+        copied = copied.saturating_add(read as u64);
+        if copied > length {
+            return Err(Error::Storage("file changed during backup/restore".into()));
+        }
+        hash.update(&buffer[..read]);
+        output.write_all(&buffer[..read]).map_err(storage)?;
+    }
+    if copied != length {
         return Err(Error::Storage("file changed during backup/restore".into()));
     }
     output.sync_all().map_err(storage)?;
-    crate::files::hash_file(target)
+    let digest = Digest {
+        algorithm: HashAlgorithm::Sha256,
+        hex: hex::encode(hash.finalize()),
+    };
+    if crate::files::hash_file_checked(target, length, &mut || Ok(()))?
+        != (ByteLength(length), digest.clone())
+    {
+        return Err(Error::Storage(
+            "copied bytes differ from the source stream".into(),
+        ));
+    }
+    Ok((ByteLength(length), digest))
 }
-fn scan_tree(root: &Path, prefix: &str) -> Result<(BTreeSet<String>, Vec<String>)> {
+pub(crate) fn scan_tree(root: &Path, prefix: &str) -> Result<(BTreeSet<String>, Vec<String>)> {
     if !fs::symlink_metadata(root)
         .map_err(storage)?
         .file_type()
@@ -215,7 +242,7 @@ fn scan_tree(root: &Path, prefix: &str) -> Result<(BTreeSet<String>, Vec<String>
     directories.sort();
     Ok((files, directories))
 }
-fn sync_tree_directories(root: &Path, directories: &[String]) -> Result<()> {
+pub(crate) fn sync_tree_directories(root: &Path, directories: &[String]) -> Result<()> {
     for directory in directories.iter().rev() {
         sync_directory(&root.join(directory))?;
     }
@@ -315,7 +342,7 @@ pub(crate) fn verify_backup(backup: &Path) -> Result<()> {
     validate_backup(backup).map(|_| ())
 }
 
-fn root_lock(root: &Path, name: &str) -> Result<ProcessLock> {
+pub(crate) fn root_lock(root: &Path, name: &str) -> Result<ProcessLock> {
     if !fs::symlink_metadata(root)
         .map_err(storage)?
         .file_type()
@@ -363,7 +390,7 @@ fn lock_root_file(root: &Path, file: File) -> Result<ProcessLock> {
     })?;
     Ok(ProcessLock(file))
 }
-fn empty_root(path: &Path) -> Result<PathBuf> {
+pub(crate) fn empty_root(path: &Path) -> Result<PathBuf> {
     if !path.exists() {
         create_private_dir(path)?;
     }
@@ -380,7 +407,7 @@ fn empty_root(path: &Path) -> Result<PathBuf> {
     path.canonicalize().map_err(storage)
 }
 
-fn prospective_path(path: &Path) -> Result<PathBuf> {
+pub(crate) fn prospective_path(path: &Path) -> Result<PathBuf> {
     let name = path.file_name().ok_or_else(|| {
         Error::Invalid("select an explicit root or configuration filename".into())
     })?;

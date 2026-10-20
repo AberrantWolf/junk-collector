@@ -1,9 +1,11 @@
 //! Portable immutable revisions plus local SQLite projections and private operational state.
 mod acquisitions;
 mod album_grouping;
+mod archive_export;
 mod archive_v3;
 mod auth;
 mod backup;
+pub use archive_export::{import_archive, validate_archive_export};
 mod browse;
 mod bulk_intake;
 mod bulk_library;

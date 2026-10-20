@@ -56,6 +56,12 @@ proposed contracts must be reviewed for validity and excessive complexity before
 implementation. No older ticket is a mandatory stability/retention promise merely
 because it was written down.
 
+The standalone full portable archive export/import portion of HL-10 is now
+implemented in source; see its [operator workflow](archive-export.md) and
+[local acceptance](validation/archive-export-2026-10-21.md). It transfers preserved
+collection data into a fresh identity, with explicit access recovery. Deltas and
+legacy adoption remain conditional; full operational backup/restore is separate.
+
 ## Digital purchases — requested 2026-10-19
 
 [HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)

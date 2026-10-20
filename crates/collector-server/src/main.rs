@@ -41,6 +41,23 @@ enum Command {
         #[arg(long)]
         destination: PathBuf,
     },
+    /// Export portable collection records and originals without accounts/config. Stop the server first.
+    ExportArchive {
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    /// Check every portable export byte without opening storage or reading configuration.
+    ValidateArchiveExport {
+        #[arg(long)]
+        export: PathBuf,
+    },
+    /// Copy a portable export into an empty archive; create fresh configuration/accounts afterward.
+    ImportArchive {
+        #[arg(long)]
+        export: PathBuf,
+        #[arg(long)]
+        archive: PathBuf,
+    },
     /// Validate every backup byte without opening or migrating a database.
     ValidateBackup {
         #[arg(long)]
@@ -441,6 +458,44 @@ async fn main() -> Result<()> {
         )
         .init();
     let cli = Cli::parse();
+    if let Command::ValidateArchiveExport { export } = &cli.command {
+        let inventory = collector_store::validate_archive_export(export)?;
+        println!(
+            "Archive export valid: {} files. Checked bytes only; no database was opened.",
+            inventory.files.len()
+        );
+        return Ok(());
+    }
+    if let Command::ImportArchive { export, archive } = &cli.command {
+        collector_store::import_archive(export, archive)?;
+        println!("Archive import complete: {}", archive.display());
+        println!(
+            "Create a configuration pointing archive at this directory and state at a new, separate directory. Run setup, then unowned-collections and recover-collection-owner --collection-id ID --username NAME."
+        );
+        println!(
+            "No accounts, grants, TLS, server identity or pending jobs were copied. Collection records and original files may contain private information."
+        );
+        return Ok(());
+    }
+    if let Command::ExportArchive { destination } = &cli.command {
+        let paths = storage_paths(&cli.config)?;
+        anyhow::ensure!(
+            cli.config.is_file()
+                && paths.archive.is_dir()
+                && paths.state.join("private.sqlite").is_file(),
+            "export requires an existing installation and configuration; check paths before retrying"
+        );
+        let store = Store::open(&paths.archive, &paths.state)?;
+        store.export_archive(destination)?;
+        println!(
+            "Verified portable archive export: {}",
+            destination.display()
+        );
+        println!(
+            "Includes collection records and originals, which may contain private information. No accounts, grants, TLS, server identity, pending jobs or configuration were copied."
+        );
+        return Ok(());
+    }
     if matches!(
         cli.command,
         Command::UnownedCollections { .. } | Command::RecoverCollectionOwner { .. }
@@ -757,6 +812,9 @@ async fn main() -> Result<()> {
             unreachable!()
         }
         Command::Backup { .. }
+        | Command::ExportArchive { .. }
+        | Command::ValidateArchiveExport { .. }
+        | Command::ImportArchive { .. }
         | Command::ValidateBackup { .. }
         | Command::Restore { .. }
         | Command::UnownedCollections { .. }

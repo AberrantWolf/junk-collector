@@ -152,6 +152,28 @@ identity plus explicit access reassignment. External inboxes, DAT source files a
 encoder executables are reported for operator relocation, not silently copied or
 rewritten. Neither mode deletes or alters the backup or source records.
 
+### Portable full archive export
+
+HL-10's local `export-archive` command owns an offline Store and its two process
+locks. It also holds the writer/publication gates while freezing and copying the
+archive. Application-owned inventory policy includes every portable archive file
+and empty directory, including unknown records, and excludes only the operational
+writer lock and empty staging/journal directories. Unsettled scratch is refused,
+never silently omitted. No private state, configuration, credentials, grants,
+pending jobs or server identity is exported. Collection records can still contain
+private collection facts; an export is not a redacted public download.
+
+The filesystem adapter shares bounded tree traversal, private file creation,
+streaming copy, hashing and sync mechanisms with backup/restore. A versioned
+inventory records relative names, lengths and SHA-256 values without source paths;
+its digest completion marker is written last after byte validation. Validation
+opens no databases. `import-archive` validates first, copies only into an empty
+archive root, checks copied bytes again and fences partial copies with the existing
+restore marker. It creates no configuration or private state. Setup, reindex and
+explicit first-Owner recovery use the existing local commands. Later source writes
+do not change a completed export. This is a full local copy, not delta export,
+online replication, legacy conversion or a replacement for full recovery backups.
+
 HL-03 review repairs: `unowned-collections` provides bounded stopped-server
 discovery and `recover-collection-owner --collection-id … --username …` assigns
 the first Owner explicitly. Local filesystem authority plus both process locks

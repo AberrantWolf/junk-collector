@@ -21,6 +21,21 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## HL-10 portable full archive export/import — 2026-10-21
+
+Local `export-archive`, `validate-archive-export` and `import-archive` commands now
+copy a frozen full portable archive with digest inventory and completion seal.
+Originals, artwork, manual authority, evidence/history, lists, recipes and unknown
+records stay intact. Operational locks/scratch, configuration and private account/
+grant/session/server state are excluded; unresolved staging is refused. Imports
+use empty roots, fence interrupted copies and require fresh setup plus explicit
+first-Owner recovery. The real compiled CLI journey, byte equality, cold reindex,
+fresh identity/access and focused interruption/change regressions pass. See the
+[operator delivery](archive-export.md) and [dated acceptance](validation/archive-export-2026-10-21.md).
+This source feature is not in the published alpha.2 image. Deltas, existing-archive
+merge and Retro Junk conversion remain unimplemented. Portable records can include
+private collection facts; this is not a redacted sharing feature or full backup.
+
 ## Public-ingress qualification scope — clarified 2026-10-21
 
 Use the existing configured Cloudflare hostname and a short real-origin smoke,
