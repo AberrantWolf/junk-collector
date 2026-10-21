@@ -764,7 +764,7 @@ covered by the [browser regression and validation record](validation/library-wor
 Self-review strengthened restoration coverage after the modal unmounts; it passes.
 This closes the defect observed in the 2026-10-09 AccurateRip shortcut journey.
 
-- Add general document Assets/attachments and previews when manuals/receipts need
+- Active 2026-10-21: add general document Assets/attachments and previews when manuals/receipts need
   their own presentation, using existing visibility/publication and bounded
   validation. HL-02 already preserves purchase companions, including booklets and
   receipts, as reviewed original files with authorized downloads. That does not
@@ -788,11 +788,14 @@ optional ideas needing product/contract design, not established missing features
 
 #### Game-disc audio in music listening and Trash Amp
 
-**State:** post-alpha.3 source implementation and acceptance in progress, 2026-10-21.
+**State:** delivered in post-alpha.3 source, 2026-10-21.
 Standard BINARY CUE/BIN ranges, shared extraction, Collector/web preparation and
 listening, source-specific metadata/search and separate audio playlists are
 implemented. Owned-reader and full owned-browser journeys, isolated native streaming/offline
-and all source gates pass; publishing the native dependency pin remains.
+and all source gates pass. Trash Amp commit `e389cc7` on `codex/game-disc-audio`
+pins Collector `59faf34` and shared libraries `993afc9`; 32 affected tests,
+desktop checking and strict affected-consumer Clippy pass. Existing staged native
+release work was preserved. Future release packaging is separate.
 See [delivery](game-disc-audio.md) and [dated evidence](validation/game-disc-audio-2026-10-21.md).
 **Owner:** Games owns game identity and descriptive metadata; shared `junk-libs`
 readers own disc layout and PCM extraction; application services own preparation,

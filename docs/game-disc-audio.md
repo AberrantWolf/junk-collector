@@ -1,7 +1,8 @@
 # Game-disc CD audio
 
-Post-alpha.3 source implementation, 2026-10-21. This guide describes the selected
-contract; final source/native pin acceptance is in progress. The authoritative
+Delivered in post-alpha.3 source, 2026-10-21. Collector `59faf34` and Trash Amp
+`e389cc7` on `codex/game-disc-audio` have source, owned-disc/browser and isolated
+native streaming/offline acceptance. Published alpha.3 images are unchanged. The authoritative
 assignment is [HL-09](remaining-work.md#game-disc-audio-in-music-listening-and-trash-amp).
 
 The game keeps its collection identity, originals and artwork. Standard BINARY

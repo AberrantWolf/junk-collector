@@ -21,14 +21,16 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
-## Game-disc CD audio — 2026-10-21 Collector source accepted
+## Game-disc CD audio — 2026-10-21 delivered in source
 
 Standard BINARY CUE/BIN game packages now record source-bound AUDIO ranges and
 reuse FLAC/Opus preparation, listening catalogs, playlists and manual track titles.
 Data tracks stay excluded. Games retain their identity, artwork and originals;
 no duplicate music import is required. Shared-reader owned-disc, actual owned/browser
 and isolated native streaming/offline checks pass, as do all 458 source tests and
-required source gates. Publishing the native consumer pin is still in progress. See [delivery](game-disc-audio.md) and
+required source gates. Trash Amp’s published `codex/game-disc-audio` delivery pins
+Collector exactly and passes 32 affected tests plus desktop/Clippy checks. Its
+original checkout and staged native release work remain unchanged. See [delivery](game-disc-audio.md) and
 [dated evidence](validation/game-disc-audio-2026-10-21.md). This is post-alpha.3
 source work, not a change to the published image's advertised formats.
 

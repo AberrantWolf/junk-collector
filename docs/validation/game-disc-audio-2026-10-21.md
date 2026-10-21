@@ -64,8 +64,7 @@ physical-output callback test ignored), including actual TLS
 refresh, streaming/seek, explicit download, server shutdown, credential removal
 and offline reopen. A mixed-mode Game fixture exposes track 2 only; its title,
 artwork and audio survive offline reopen. The existing real audio-output callback
-acceptance remains opt-in and was not rerun for this adapter change. Publishing
-and final dependency-pin validation are recorded below when complete.
+acceptance remains opt-in and was not rerun for this adapter change. Publishing and exact-pin validation are complete; see below.
 
 ## Review and limits
 
@@ -101,6 +100,13 @@ non-CD game entries do not acquire empty music controls or preparation work.
 The focused new browser journey, owned PS1 run and final complete Chrome 155 smoke
 passed against served embedded assets. The smoke also covers setup/WebAuthn,
 provider concurrency/cancellation, bulk library recovery, music playback/revocation
-and playlist receipt/conflict recovery. No production container or data was changed. The native
-consumer's published-pin commit is a separate dependency follow-up to this source
-commit, with its evidence above retained rather than claimed prematurely.
+and playlist receipt/conflict recovery. No production container or data was changed. Trash Amp's published consumer commit is
+`e389cc7dd4d8b4ad51a76d0b17302314d067c011` on `codex/game-disc-audio`. It pins
+Collector `59faf341a0141c0424231d1700cfc16a006146a7` and shared libraries
+`993afc932c6b2acb5cf02c95d3cb8a387d9a70a5`. Against those exact published sources,
+32 affected audio/library/adapter tests pass, with two existing opt-in tests ignored,
+plus the Slint desktop check, strict affected-consumer Clippy and formatting.
+A fixed-array iteration repair leaves audio semantics unchanged on Rust 1.99.
+The old block 0.1.6 dependency reports a future-compiler incompatibility note; it
+is not a current build error. The original native checkout's staged packaging work
+remains unchanged. No new native package or Docker release is advertised.
