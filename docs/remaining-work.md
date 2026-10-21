@@ -1044,21 +1044,17 @@ unlimited future-retention requirement.
 The disabled DAT-o-MATIC downloader stays disabled. Manual download/upload is
 implemented; provider-access restoration or automated scraping is not an open task.
 
-## Active beta.1 publication assignment — 2026-10-21
+## Active beta release completion — 2026-10-21
 
-The user explicitly assigned packaging all accumulated Collector improvements as
-`0.1.0-beta.1`, self-review and signed commits, Docker publication and isolated
-upgrade verification, with an image that works on the operator's Synology NAS.
-Build native AMD64/ARM64 through the existing workflow; verify the DS1522+
-linux/amd64 image on that actual host. Start the isolated update from public
-alpha.3, reuse accepted device/audio evidence, retain explicit beta limits and
-leave production unchanged. Record actual image/source digests and upgrade/full
-restore outcomes in [publication acceptance](validation/container-beta1-publication-2026-10-21.md).
-This supersedes the earlier no-new-packaging instruction, not the prohibition on
-unassigned production updates. Trash Amp source improvements are separate from
-this Collector Docker release; preserve the native checkout's staged release work.
+The user requested beta.1 packaging, Docker publication and an isolated Synology upgrade.
+Beta.1 published, but its NAS upgrade failed on an obsolete music-search table.
+Preserve its signed tag. Finish the correction as **beta.2** and repeat the isolated
+alpha.3 upgrade, pending-upload resume and full restore. Leave production unchanged.
+See [beta.1 failure](validation/container-beta1-publication-2026-10-21.md) and
+[beta.2 acceptance](validation/container-beta2-publication-2026-10-21.md).
+Trash Amp application packaging remains separate; preserve its staged release files.
 
-## Active autonomous assignment — 2026-10-21
+## Completed autonomous source work — 2026-10-21
 
 The user assigned independent release-readiness review, remaining useful software
 work and game-disc audio, with self-review before completion and a commit per

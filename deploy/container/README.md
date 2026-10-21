@@ -12,10 +12,10 @@ Use an explicit image version or digest supplied by a release. On Synology DS152
 automatic platform selection uses linux/amd64.
 
 <!-- release-image:start -->
-- **Image:** `ghcr.io/aberrantwolf/junk-collector:v0.1.0-beta.1` (AMD64 and ARM64).
-- **Download:** [GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.1). The installation bundle pins the verified digest.
+- **Image:** `ghcr.io/aberrantwolf/junk-collector:v0.1.0-beta.2` (AMD64 and ARM64).
+- **Download:** [GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.2). The installation bundle pins the verified digest.
 - **Channels:** `preview` follows prereleases; `latest` is reserved for stable releases.
-- **Before updating:** read the [beta notes](../../docs/releases/v0.1.0-beta.1.md).
+- **Before updating:** read the [beta notes](../../docs/releases/v0.1.0-beta.2.md).
 
 <!-- release-image:end -->
 
@@ -331,7 +331,7 @@ separately only when its contents are no longer needed.
 
 ## Qualification records
 
-- [Beta.1 publication and isolated NAS update](../../docs/validation/container-beta1-publication-2026-10-21.md).
+- [Beta.2 publication and isolated NAS update](../../docs/validation/container-beta2-publication-2026-10-21.md).
 - [DS1522+ installation, playback and full restore](../../docs/validation/nas-operations-2026-10-20.md).
 - [Btrfs/incremental recovery](snapshot-recovery.md).
 

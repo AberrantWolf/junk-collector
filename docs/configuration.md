@@ -4,6 +4,8 @@
 
 ## Configuration reference
 
+Optional: [enable backup-age reminders](local-alpha-installation.md#optional-backup-age-reminder).
+
 Edit `collector.toml` and restart the server to apply changes. Unknown configuration keys are rejected. Relative filesystem paths are relative to the process's working directory, so absolute paths are recommended for a permanent installation or service.
 
 ### Storage and accounts

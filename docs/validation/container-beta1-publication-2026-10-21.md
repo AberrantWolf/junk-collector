@@ -1,22 +1,30 @@
-# Beta.1 container publication — 2026-10-21
+# Beta.1 publication — failed upgrade, 2026-10-21
 
-Release packaging is in progress for `v0.1.0-beta.1`. Source gates, image digests,
-public pulls and actual isolated Synology upgrade/restore outcomes will be recorded
-here as they finish. This file is not a successful-publication claim.
+**Do not upgrade to beta.1.** Use [beta.2](../releases/v0.1.0-beta.2.md).
+The signed beta.1 tag remains unchanged.
 
-The intended host reports Synology DS1522+, x86_64 Linux 4.4.302+, Docker 24.0.2
-linux/amd64. The existing workflow builds AMD64 and ARM64 natively. The isolated
-upgrade uses public alpha.3 as its starting image and separate generated data,
-ports and a disposable Portainer database. Production is not an update target.
+## Published build
 
-## Source preflight
+- Source: `765288415ee085a87ff0078f3d4bfb9b862cf9f2`.
+- [CI run](https://github.com/AberrantWolf/junk-collector/actions/runs/39588226176): passed.
+- Native AMD64/ARM64 container tests, anonymous pulls and bundle checksums passed.
+- Index: `sha256:ed93a4357a21ef53da8431ecb843464c9c8393dca2bd33c196ff5382c285d1cb`.
+- Source gates: 462 tests passed, four existing ignored; strict Clippy, formatting, architecture and web checks passed.
+- Actual Chrome smoke passed. README and release docs were shortened and linked.
 
-- **Passed:** architecture/docs/fixtures, formatting, strict workspace Clippy.
-- **Passed:** 462 workspace tests; four existing ignored tests.
-- **Passed:** web type check, API drift check, production web build and rebuilt server.
-- **Passed:** actual Chrome smoke journey, including playback/seek and access revocation.
-- **Passed:** four container-tool and six release-policy tests.
-- **Reviewed:** version/lockfile changes, native architecture workflow, release scope and recovery steps.
-- **Docs:** shortened README and beta notes; moved setup, configuration and commands to linked guides.
+## Synology result
 
-Docker publication and the actual-host update remain pending below.
+**Failed:** isolated alpha.3 → beta.1 Portainer update on DS1522+.
+The public AMD64 image ran, but resuming an upload failed:
+
+```text
+storage failure: table music_search has 7 columns but 8 values were supplied
+```
+
+Startup stamped schema 14 onto alpha.3's seven-column search table.
+The cached checkpoint then skipped rebuilding it. Fresh-image tests did not expose this upgrade path.
+
+The disposable fixture was cleaned up. All 17 live container IDs, images and start times stayed unchanged.
+No production update occurred. Full restore acceptance was not reached.
+
+See [beta.2 correction and qualification](container-beta2-publication-2026-10-21.md).

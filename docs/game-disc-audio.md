@@ -1,6 +1,6 @@
 # Game-disc CD audio
 
-Included in Collector beta.1, following source, owned-disc/browser and isolated
+Included in Collector beta.2, following source, owned-disc/browser and isolated
 native streaming/offline acceptance. The matching Trash Amp integration and native
 recovery improvements are committed on `codex/game-disc-audio`; this Docker release
 does not publish a new Trash Amp application package. The authoritative assignment
@@ -28,4 +28,4 @@ The user authorized read-only use of useful owned material under `~/dumps`; orig
 dumps stay unchanged and copyrighted payloads are not committed as test fixtures.
 Synthetic independent vectors and private owned-disc runs supply separate evidence.
 Results are recorded in [dated acceptance](validation/game-disc-audio-2026-10-21.md);
-beta.1 advertises only these accepted formats and bounded claims.
+beta.2 advertises only these accepted formats and bounded claims.

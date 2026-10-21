@@ -1,5 +1,10 @@
 # Architecture
 
+Catalog startup replaces obsolete projection databases before replaying archive records.
+It also detects beta.1's incorrectly stamped music-search table. Old catalog files
+are retained for diagnosis; private state and archive records are separate.
+This rebuild does not hash media payloads. See [beta correction](validation/container-beta2-publication-2026-10-21.md).
+
 Container packaging (2026-10-19) lives in `deploy/container` and the Dockerfile,
 outside domain/application services. A root one-shot initializer prepares only
 the selected mount roots and initial config; the server/CLI run as UID 10001.

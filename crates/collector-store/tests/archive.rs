@@ -17168,6 +17168,73 @@ fn checkpoint_missing_malformed_and_incomplete_projection_rebuild_without_losing
 }
 
 #[test]
+fn checkpoint_rebuilds_old_music_search_schema_and_repairs_beta1_schema_stamp() {
+    use collector_app::MusicSearchQuery;
+    // Alpha.3 used schema 13. A failed beta.1 upgrade could already mark that
+    // seven-column table as schema 14. Both must rebuild before any new write.
+    for version in [13, 14] {
+        let (root, store, actor, service, collection) = setup();
+        let mut inventory = item(collection.id);
+        inventory.title = "Preserved manual title".into();
+        inventory.domain.payload = RawJson::from_value(serde_json::json!({"tracks":[
+            {"position":1,"title":"Preserved song","start":0,"length":588}
+        ], "unknown_owner_data":{"keep":true}}));
+        let saved = save_inventory(&service, &actor, inventory, Revision(0)).unwrap();
+        let expected = serde_json::to_value(&saved).unwrap();
+        drop(service);
+        drop(store);
+        let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+        db.execute_batch("DROP TABLE music_search;
+            CREATE TABLE music_search(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,disc INTEGER NOT NULL,track INTEGER NOT NULL,title_key TEXT NOT NULL,search_key TEXT NOT NULL,record TEXT NOT NULL,PRIMARY KEY(item_id,disc,track));
+            CREATE INDEX music_search_order ON music_search(collection_id,title_key,item_id,disc,track);").unwrap();
+        // Keep the old checkpoint and all expected trigger names. Missing-object
+        // recovery alone must not conceal the incompatible table shape.
+        for operation in ["INSERT", "UPDATE", "DELETE"] {
+            db.execute_batch(&format!("CREATE TRIGGER checkpoint_music_search_{operation} AFTER {operation} ON music_search BEGIN UPDATE catalog_index_state SET epoch=epoch+1 WHERE singleton=1; END;")).unwrap();
+        }
+        db.pragma_update(None, "user_version", version).unwrap();
+        drop(db);
+        let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        assert!(!reopened.catalog_reused_at_startup(), "schema {version}");
+        assert_eq!(
+            serde_json::to_value(reopened.item(saved.id).unwrap()).unwrap(),
+            expected
+        );
+        let service = CollectionService::new(Arc::new(reopened), Arc::new(Registry::builtins()));
+        let query = || MusicSearchQuery {
+            search: Some("Preserved song".into()),
+            cursor: None,
+            limit: Some(50),
+        };
+        assert_eq!(
+            service
+                .music_search(&actor, collection.id, query())
+                .unwrap()
+                .items[0]
+                .song
+                .item_id,
+            saved.id
+        );
+        assert_eq!(
+            service.item_presented(&actor, saved.id).unwrap().id,
+            saved.id
+        );
+        let mut edited = saved.clone();
+        edited.title = "Updated after upgrade".into();
+        let updated = save_inventory(&service, &actor, edited, saved.revision).unwrap();
+        assert_eq!(updated.title, "Updated after upgrade");
+        assert_eq!(
+            service
+                .music_search(&actor, collection.id, query())
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+    }
+}
+
+#[test]
 fn checkpoint_corrupt_catalog_is_retained_and_private_access_survives() {
     let (root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();

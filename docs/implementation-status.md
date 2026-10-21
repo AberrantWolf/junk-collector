@@ -1,15 +1,12 @@
 # Implementation status
 
-## Beta.1 packaging — 2026-10-21
+## Beta.2 correction — 2026-10-21
 
-The user selected `0.1.0-beta.1` to package the accumulated game-disc CD audio,
-PDF/text attachments, optional backup-age reminders and protected-upload repair.
-The existing native AMD64/ARM64 workflow is reused. The intended Synology DS1522+
-reports x86_64 Linux 4.4.302+ and Docker 24.0.2 linux/amd64; verify the exact published
-AMD64 image in an isolated alpha.3 upgrade before declaring NAS acceptance. See
-[release scope](releases/v0.1.0-beta.1.md) and
-[publication progress/evidence](validation/container-beta1-publication-2026-10-21.md).
-This assignment does not update production or publish a new Trash Amp application.
+Beta.1 passed source checks and public pulls, then failed the isolated NAS upgrade.
+An old music-search table was incorrectly reused. Beta.2 rebuilds obsolete catalogs
+and repairs the bad schema stamp. Archive records and private accounts stay intact.
+See [release scope](releases/v0.1.0-beta.2.md), [beta.1 failure](validation/container-beta1-publication-2026-10-21.md)
+and [beta.2 publication progress](validation/container-beta2-publication-2026-10-21.md).
 
 Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
 

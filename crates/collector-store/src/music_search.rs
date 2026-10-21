@@ -10,6 +10,30 @@ struct Cursor {
     track: u16,
     source: String,
 }
+/// Positional inserts require this exact projection shape. A beta.1 startup
+/// could stamp an older seven-column table as current without rebuilding it.
+pub(super) fn schema_is_current(db: &Connection) -> Result<bool> {
+    let mut statement = db
+        .prepare("PRAGMA table_info(music_search)")
+        .map_err(storage)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(storage)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(storage)?;
+    Ok(columns
+        == [
+            "item_id",
+            "collection_id",
+            "disc",
+            "track",
+            "title_key",
+            "search_key",
+            "record",
+            "source",
+        ])
+}
+
 pub(super) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS music_search(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,disc INTEGER NOT NULL,track INTEGER NOT NULL,title_key TEXT NOT NULL,search_key TEXT NOT NULL,record TEXT NOT NULL,source TEXT NOT NULL,PRIMARY KEY(item_id,disc,track,source)); CREATE INDEX IF NOT EXISTS music_search_order ON music_search(collection_id,title_key,item_id,disc,track,source);").map_err(storage)
 }

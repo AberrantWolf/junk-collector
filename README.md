@@ -18,15 +18,15 @@ Each collection contains either games or music.
 | Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
 
-## Beta.1
+## Beta.2
 
-[`v0.1.0-beta.1`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.1)
+[`v0.1.0-beta.2`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.2)
 adds game-disc CD audio, PDF/text attachments, optional backup-age reminders and
 upload hardening. Docker images support **linux/amd64** and **linux/arm64**.
 Synology DS1522+ uses AMD64 automatically.
 
 **Back up before updating.** This beta targets personal home-lab use. Storage and
-interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.1.md)
+interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.2.md)
 for update requirements and supported limits.
 
 ## What it supports
