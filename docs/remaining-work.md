@@ -250,9 +250,14 @@ and sibling `docs/collector-connection.md`. Finish:
   actual TLS create/append commits, truncated responses, atomic pending-input
   binding, profile reopen and exact replay without duplicate playlists/entries.
   See [bounded acceptance](validation/native-failure-recovery-2026-10-21.md).
+- Actual native uncached-read grant and device-credential revocation is also
+  qualified in source with a distinct Viewer: a real chunk succeeds before the
+  permission change, and the next uncached read is denied. Reuse the same
+  [bounded acceptance](validation/native-failure-recovery-2026-10-21.md); buffered
+  bytes and retained offline copies are not recalled.
 - Exercise playback/transitions, seek and queue continuity across output-device
-  loss, stalled/malformed/changed ranges, denied trust and grant/device revocation
-  during actual reads. Keep the passing ordinary CD and FLAC/MP3 paths as the
+  loss, stalled/malformed/changed ranges and denied trust. Reuse the accepted
+  actual-read grant/device revocation above. Keep the passing ordinary CD and FLAC/MP3 paths as the
   baseline. Reuse the accepted native playlist recovery above.
 - Reuse the qualified actual second-device Safari journey above; do not repeat
   its trusted browse/artwork/playback, Curator/Viewer or grant/session checks.

@@ -33,3 +33,15 @@ This qualifies adapter/transport/profile recovery. System-trusted second-device
 enrollment, physical output-device loss, Internet-disconnected LAN operation and
 broader stalled/malformed media-read cases retain their separate HL-04 limits.
 No native package, Docker image or production update is published by this work.
+
+## Actual uncached-read revocation
+
+Native `8afb19d` enrolls a distinct non-administrator Viewer and reads a complete
+256 KiB original-media network chunk through the native playback RangeReader.
+The test then removes that collection grant or revokes that native credential
+through real application policy before the next uncached byte. Both reads fail
+with PermissionDenied. Worker-owned readers/runtimes and bounded coordination
+prevent teardown hangs. Nothing mocks a successful read or authorization result.
+All nine adapter tests and strict Clippy/formatting pass; the physical-output test
+remains opt-in. This qualifies future reads, not recall of buffered bytes or
+retained offline copies, and does not establish output-device loss handling.

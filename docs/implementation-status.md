@@ -1664,3 +1664,9 @@ the actual-output callback remains an existing opt-in test. The staged native
 release checkout is preserved. See [acceptance and remaining physical/media-read
 limits](validation/native-failure-recovery-2026-10-21.md). This source change is not
 a new native or Docker release.
+
+Native source `8afb19d` additionally qualifies real grant/device revocation after
+an actual successful network chunk: the next uncached byte is denied to the
+separate Viewer. Nine affected adapter tests and strict Clippy/formatting pass;
+buffered and retained offline bytes are outside that revocation claim. See the
+same [bounded native acceptance](validation/native-failure-recovery-2026-10-21.md).
