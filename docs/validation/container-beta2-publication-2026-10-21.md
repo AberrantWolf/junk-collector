@@ -65,3 +65,8 @@ original preservation and explicit FLAC remained usable.
 
 This qualifies the named isolated Linux/Synology path. It does not add physical-device,
 public-ingress or arbitrary-power-loss claims. See the [capability checklist](../release-readiness.md).
+
+## Later installation update
+
+An existing installation subsequently passed [update checks](live-beta2-upgrade-2026-10-21.md).
+That result is separate from the isolated publication drill above.

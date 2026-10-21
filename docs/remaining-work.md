@@ -10,7 +10,8 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-**Updated 2026-10-21:** beta.2 is published. Its isolated Synology upgrade and full restore passed.
+**Updated 2026-10-21:** beta.2 is published and [checked on an existing installation](validation/live-beta2-upgrade-2026-10-21.md).
+Its isolated Synology upgrade and full restore passed.
 See [publication acceptance](validation/container-beta2-publication-2026-10-21.md).
 Remaining device, network and owned-format checks keep their limits below.
 Completed milestones retain their existing numbers and dated evidence.
@@ -1038,6 +1039,7 @@ Native AMD64/ARM64 images, public pulls and the DS1522+ alpha.3 upgrade/resume/c
 All 17 live containers stayed unchanged; generated fixtures were removed.
 See [beta.1 failure](validation/container-beta1-publication-2026-10-21.md) and
 [beta.2 acceptance](validation/container-beta2-publication-2026-10-21.md).
+The later [existing-installation update](validation/live-beta2-upgrade-2026-10-21.md) changed only Collector; other services stayed running.
 Trash Amp application packaging remains separate; its staged release files are untouched.
 
 ## Completed autonomous source work — 2026-10-21

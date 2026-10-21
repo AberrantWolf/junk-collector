@@ -2,6 +2,8 @@
 
 ## Beta.2 correction — 2026-10-21
 
+**An existing installation was updated to beta.2.** [Update checks](validation/live-beta2-upgrade-2026-10-21.md).
+
 Beta.1 passed source checks and public pulls, then failed the isolated NAS upgrade.
 An old music-search table was incorrectly reused. Beta.2 rebuilds obsolete catalogs
 and repairs the bad schema stamp. Archive records and private accounts stay intact.
