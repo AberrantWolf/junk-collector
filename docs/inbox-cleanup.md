@@ -1,8 +1,8 @@
 # Optional inbox source cleanup
 
-Implemented in source for HL-09, 2026-10-21. Imports continue to keep their source
-files by default. This feature is not in the published alpha.2 image; the next
-Docker release packages it. See the [acceptance record](validation/inbox-cleanup-2026-10-21.md).
+Delivered for HL-09 in public **alpha.3**, 2026-10-21. Imports continue to keep
+their source files by default. See the [source acceptance](validation/inbox-cleanup-2026-10-21.md)
+and [native images/isolated Portainer qualification](validation/container-publication-2026-10-21.md).
 
 Open **Work & history**, select your completed inbox import, and expand its details.
 Under **Inbox source files**, confirm that copying and editing the source package

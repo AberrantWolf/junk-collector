@@ -6,7 +6,8 @@ selects **Rust 1.99.1** (`58cf8f9c3`, compiler date 2026-10-13). It was installe
 side by side with 1.99.0 and passed source/release/browser qualification. Repository/CI pins, README and the exact
 `rust:1.99.1-slim-bookworm` builder now agree. The builder tag exposes native
 AMD64/ARM64 manifests. The [alpha.3 acceptance record](validation/container-publication-2026-10-21.md)
-records completed checks and publication separately; pending builds are not acceptance.
+records passed source/browser/native-container gates, publication and isolated
+actual-NAS Portainer update/full recovery.
 No shared-library code or dependency pins changed in this delivery.
 
 

@@ -1,7 +1,7 @@
 # Portable full archive export
 
-HL-10's full export/import workflow is implemented in source as of 2026-10-21.
-It is not included in the published alpha.2 Docker image. The
+HL-10's full export/import workflow is included in public **alpha.3**, 2026-10-21;
+see [publication acceptance](validation/container-publication-2026-10-21.md). The
 [local acceptance record](validation/archive-export-2026-10-21.md) describes the
 tested commands and recovery cases.
 

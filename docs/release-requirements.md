@@ -24,7 +24,9 @@ See [the accepted scope policy](decisions/home-lab-scope.md).
 - Provide an executable stopped-server backup/restore workflow and qualify the
   intended Linux binary/container and storage layout. The HL-03 CLI and tested
   [operator runbook](local-alpha-installation.md#stopped-server-backup) provide the
-  stopped-server workflow; actual Linux deployment qualification remains open.
+  stopped-server workflow; [actual isolated NAS install/update/restore](validation/nas-operations-2026-10-20.md)
+  and [public alpha.3 Portainer upgrade/recovery](validation/container-publication-2026-10-21.md)
+  are qualified with their named limits.
   The [clarified backup scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
   requires practical local recovery, not automatic full-media backups, cloud storage
   or a separately chosen independent destination. External copies and backup-age
@@ -57,7 +59,7 @@ implementation. No older ticket is a mandatory stability/retention promise merel
 because it was written down.
 
 The standalone full portable archive export/import portion of HL-10 is now
-implemented in source; see its [operator workflow](archive-export.md) and
+included in public alpha.3; see its [operator workflow](archive-export.md) and
 [local acceptance](validation/archive-export-2026-10-21.md). It transfers preserved
 collection data into a fresh identity, with explicit access recovery. Deltas and
 legacy adoption remain conditional; full operational backup/restore is separate.

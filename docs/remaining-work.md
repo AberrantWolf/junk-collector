@@ -10,8 +10,9 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-Queue updated 2026-10-21 after HL-09 opt-in inbox cleanup and HL-10 full portable
-archive export/import source delivery, plus HL-07A/B/C usability/setup acceptance and HL-05A
+Queue updated 2026-10-21 after public alpha.3 publication and isolated Portainer
+update/cleanup/full restore, including HL-09 opt-in inbox cleanup and HL-10 full
+portable archive export/import, plus HL-07A/B/C usability/setup acceptance and HL-05A
 actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
 qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
 preparation failure/recovery acceptance, HL-06A real-tool audio oracles, the numeric-IP
@@ -541,7 +542,7 @@ or whole-disc audio verification. Expand formats only in response to actual use.
 
 ### HL-07 — Release and maintenance acceptance
 
-**State:** public experimental alpha.2 is published; no supported home-lab release
+**State:** public experimental alpha.3 is published; no supported home-lab release
 baseline is declared.
 **Maps:** bounded R03, release-toolchain maintenance and independent UI review.
 **Dependencies:** accepted HL-01–HL-03 capabilities plus remaining HL-04–HL-06
@@ -645,6 +646,14 @@ and [alpha.2 notes](releases/v0.1.0-alpha.2.md). Earlier
 Do not reopen packaging implementation or these accepted isolated drills. This is
 an experimental alpha; parent HL-07's remaining advertised-capability qualification
 is not implied complete.
+
+Follow-up release, 2026-10-21: signed public **alpha.3** packages the post-alpha.2
+fixes, full archive transfer and opt-in cleanup on qualified Rust 1.99.1. Native
+AMD64/ARM64 cleanup/recovery smokes, anonymous pulls/index/preview checks and the
+actual-NAS Portainer alpha.2 → alpha.3 update/full restore passed. Production stayed
+unchanged. See [alpha.3 acceptance](validation/container-publication-2026-10-21.md)
+and [release notes](releases/v0.1.0-alpha.3.md).
+
 **Owner:** release CI/container packaging with HL-05 deployment acceptance.
 
 Release packaging requirement added 2026-10-19: users must be able to install and
@@ -716,7 +725,8 @@ D05/D07 listening extensions, D06 follow-ups, FX-04 history bound, P06/R02 pract
 
 #### Optional cleanup after successful inbox import
 
-**State:** delivered in source 2026-10-21; next release packaging pending. **Owner:** application intake
+**State:** delivered in public alpha.3, 2026-10-21, with native container and isolated
+Portainer cleanup/recovery acceptance. **Owner:** application intake
 completion/ownership policy and filesystem adapter, with explicit web controls.
 
 Explicit cleanup is available in the requester's Work & history detail after
@@ -729,8 +739,10 @@ Default imports and packaged inbox binds remain non-destructive/read-only;
 `COLLECTOR_INBOX_READ_ONLY=false` and host write permissions are explicit opt-ins.
 Inbox admission pauses during active cleanup to fence shared/aliased source use.
 See the [delivery guide](inbox-cleanup.md) and [focused real-UI/recovery acceptance](validation/inbox-cleanup-2026-10-21.md).
-This is not general archive pruning. Linux container results belong to the next
-release record; existing passing HL-07A imports do not require cleanup.
+This is not general archive pruning. Both native images and the actual-NAS
+Portainer alpha.2 → alpha.3 drill passed read-only refusal, write-enabled cleanup
+and full restore; see [publication acceptance](validation/container-publication-2026-10-21.md).
+Existing passing HL-07A imports do not require cleanup.
 
 #### Collection convenience and performance follow-ups
 
@@ -851,7 +863,7 @@ HL-06 live owned-disc qualification remains outstanding.
 
 ### HL-10 — Portable export and one-way legacy adoption
 
-**State:** standalone full export/import delivered 2026-10-21 in source; deltas and
+**State:** standalone full export/import delivered in public alpha.3, 2026-10-21; deltas and
 legacy adoption remain optional/unimplemented. **Maps:** P05.1, R01.
 **Owner:** application/archive export and legacy-import adapters.
 
@@ -862,7 +874,8 @@ grants/configuration. Import into an empty archive requires fresh setup and expl
 first-Owner recovery. Actual compiled-CLI acceptance covers partial copy, later
 source writes, cold import/reindex, byte equality and private-state absence; see
 [delivery](archive-export.md) and [dated acceptance](validation/archive-export-2026-10-21.md).
-This source delivery is not included in published alpha.2. It is a full local copy,
+Public alpha.3 includes this delivery; see
+[publication acceptance](validation/container-publication-2026-10-21.md). It is a full local copy,
 not online export, a redacted public share or a replacement for full recovery backup.
 Optional deltas require explicit base digest and dependency
 closure; they do not implement replication.
@@ -1023,13 +1036,15 @@ HL-05F bounds authentication identity retention and qualifies real loopback
 throttling/restart; see its [source acceptance](validation/rate-limit-retention-2026-10-20.md).
 HL-05G independently qualifies actual-NAS login ceilings from multiple loopback TCP
 sources and full recovery; see its [acceptance](validation/nas-authentication-limits-2026-10-20.md).
-HL-09's explicit inbox cleanup is delivered in source with
+HL-09's explicit inbox cleanup is delivered with
 [real-UI and recovery acceptance](validation/inbox-cleanup-2026-10-21.md).
-The active assignment is to package these deliveries and the post-alpha.2 fixes
-into the next Docker prerelease, using the existing native build/publication pipeline
-and one isolated pull/update/recovery flow. Include the new read-only/read-write
-cleanup smoke; reuse accepted device/format/public-ingress evidence. Do not change
-live services or add a new deployment matrix.
+The requested cleanup and release assignment is complete: public **alpha.3**
+packages it, portable full archive transfer and the post-alpha.2 fixes. Both native
+images and one isolated actual-NAS Portainer pull/update/cleanup/full-restore drill
+passed; see [publication acceptance](validation/container-publication-2026-10-21.md).
+All 17 live container identities/images/start times stayed unchanged and generated
+fixtures were removed. Reuse this acceptance; no new deployment matrix or live
+production update is assigned.
 HL-10's standalone portable full export/import is delivered with
 [local CLI acceptance](validation/archive-export-2026-10-21.md); deltas and legacy
 adoption remain conditional follow-ups.
@@ -1037,7 +1052,7 @@ adoption remain conditional follow-ups.
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access
 > or independent reference material are available. Reuse the accepted HL-07D public
-> alpha.2 installation/update/recovery evidence; do not repeat packaging or infer
+> alpha.3 installation/update/recovery evidence; do not repeat packaging or infer
 > system-trusted second-device/public-ingress acceptance from it. Keep experimental
 > release limits explicit. Independent media copies, paid cloud backup and backup-age
 > reminders remain optional and do not block this queue. Production deployment

@@ -34,7 +34,8 @@ from the archive. Private schema 21 preserves previous data; downgrade needs the
 complete recovery point. The packaged bind remains read-only unless explicitly
 changed through the new environment option. See [delivery](inbox-cleanup.md) and
 [local real-browser/recovery evidence](validation/inbox-cleanup-2026-10-21.md).
-This is source acceptance; public alpha.2 does not contain this feature.
+Public alpha.3 packages this feature; both native container jobs and the isolated
+actual-NAS Portainer upgrade/cleanup/full restore passed. See [publication acceptance](validation/container-publication-2026-10-21.md).
 
 ## HL-10 portable full archive export/import — 2026-10-21
 
@@ -47,7 +48,8 @@ use empty roots, fence interrupted copies and require fresh setup plus explicit
 first-Owner recovery. The real compiled CLI journey, byte equality, cold reindex,
 fresh identity/access and focused interruption/change regressions pass. See the
 [operator delivery](archive-export.md) and [dated acceptance](validation/archive-export-2026-10-21.md).
-This source feature is not in the published alpha.2 image. Deltas, existing-archive
+Public alpha.3 includes this feature; see
+[publication acceptance](validation/container-publication-2026-10-21.md). Deltas, existing-archive
 merge and Retro Junk conversion remain unimplemented. Portable records can include
 private collection facts; this is not a redacted sharing feature or full backup.
 

@@ -10,7 +10,7 @@ existing stop path; this is not a new active-job drain guarantee.
 The fresh-install proxy-config transport (HL-05A, 2026-10-20) refuses existing
 archive/private state and empty input before atomic replacement. Setup/doctor own
 configuration validation and provider-contact readiness. The optional inbox Compose
-override supplies the same read-only bind and supplemental group to server and CLI;
+override supplies the same default read-only bind and supplemental group to server and CLI;
 filesystem ACLs remain a host mechanism. Actual Synology update/resume/restore and
 remote-browser checks are recorded in [NAS operations acceptance](validation/nas-operations-2026-10-20.md).
 HL-05B uses an operator stopped-server Btrfs point over those roots; standard

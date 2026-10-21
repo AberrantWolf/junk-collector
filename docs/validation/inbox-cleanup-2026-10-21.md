@@ -1,7 +1,8 @@
 # HL-09 opt-in inbox cleanup — 2026-10-21
 
-Source delivery tested with temporary local installations; production/NAS services,
-real inboxes and OS trust were not changed. The [operator guide](../inbox-cleanup.md)
+Source delivery tested with temporary local installations; later native-container
+and isolated NAS acceptance is linked below. Production services, real inboxes
+and OS trust were not changed. The [operator guide](../inbox-cleanup.md)
 defines opt-in, processing timing, writable mounts, recovery and limits.
 
 ## Focused source checks
@@ -52,8 +53,9 @@ remain visible and can retry from the archive after source cleanup.
 
 Actual Compose rendering preserves default read-only inbox mounts and supplies
 read/write mounts to both server and CLI only with the explicit environment option.
-The native Docker smoke adds a small real read-only refusal, write-enabled retry
-and preserved-download drill; its Linux results are recorded with the next release.
+Both native AMD64/ARM64 Docker jobs and the isolated actual-NAS Portainer upgrade
+passed the real read-only refusal, write-enabled retry and preserved-download drill.
+See [public alpha.3 publication and full recovery](container-publication-2026-10-21.md).
 The final actual Chrome journey passed. Architecture/documentation/fixture checks,
 format, API generation/drift check, strict all-target Clippy, TypeScript check,
 web build, container tooling and release-tooling checks passed. The server was
