@@ -7,6 +7,8 @@ pub use file_music::{
 };
 mod documents;
 pub use documents::*;
+mod backup_reminder;
+pub use backup_reminder::*;
 mod backup;
 pub use backup::*;
 mod archive_export;
@@ -1566,6 +1568,7 @@ pub struct CollectionService {
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
     artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
     catalog_uploads: Option<Arc<dyn UploadedCatalogPort>>,
+    backup_history: Option<Arc<dyn BackupHistoryPort>>,
     catalog_inspector: Option<Arc<dyn CatalogUploadInspectionPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
@@ -2327,6 +2330,7 @@ impl CollectionService {
             audio_converter: None,
             artwork_preview: None,
             catalog_uploads: None,
+            backup_history: None,
             catalog_inspector: None,
             streaming_providers: Arc::new(Default::default()),
             catalog_parsers: Arc::new(Default::default()),

@@ -20,7 +20,8 @@ unchanged. See [qualified recovery and limits](validation/snapshot-recovery-2026
 The [2026-10-20 backup-scope clarification](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
 keeps local rollback practical and external media copies optional. `${COLLECTOR_DATA}/backups`
 is the packaged local area; full backup remains explicit and includes media. No
-scheduler, lightweight catalog-only mode or backup-age UI is implemented.
+scheduler or lightweight catalog-only mode is implemented. The post-alpha.3
+optional backup-age reminder below reads bounded completion receipts.
 
 Release planning/OCI verification/bundle assembly (HL-07D, 2026-10-20)
 live in `scripts/container_release.py` and the existing workflow, outside application
@@ -1191,3 +1192,15 @@ validation: the preserved original is rendered by the browser's native PDF viewe
 on explicit request. Text previews contain escaped plain text with typed truncation;
 HTML is never interpreted. No PDF server renderer, invented thumbnail or metadata
 verification claim is introduced. Documents cannot become album/game artwork.
+
+### Optional backup-age reminder — 2026-10-21
+
+An opt-in configuration supplies an age threshold and selects locally recorded
+full-backup validation or an explicitly operator-reported external backup. The
+application computes recent/due/failed/unconfirmed/unknown status; adapters read a
+small receipt and render it in administrator Server settings and `doctor`. Reads
+never enumerate backups or hash media. Full-backup attempts retain a prior confirmed
+completion and record started/failed/completed outcomes; only final successful
+validation advances the completion date. Abrupt interruption stays unconfirmed.
+External reports are labelled unobserved and never called Collector validation.
+This adds no scheduler, automatic backup, catalog-only backup or destination scan.

@@ -31,7 +31,8 @@
     "test:purchases": "node tests/digital-purchases.mjs",
     "test:intake-review": "node tests/intake-review.mjs",
     "test:game-audio": "node tests/game-audio.mjs",
-    "test:documents": "node tests/documents.mjs"
+    "test:documents": "node tests/documents.mjs",
+    "test:backup-reminder": "node tests/backup-reminder.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

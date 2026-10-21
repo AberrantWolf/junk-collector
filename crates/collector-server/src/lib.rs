@@ -67,6 +67,7 @@ pub struct AppState {
     pub ingress: Ingress,
     pub pairing: Pairing,
     pub multi_user: bool,
+    pub backup_reminder: Option<collector_app::BackupReminderSettings>,
     pub inboxes: Arc<std::collections::BTreeMap<String, std::path::PathBuf>>,
     pub catalog_sources: Arc<Vec<CatalogSourceView>>,
     pub allowed_origins: Arc<Vec<String>>,
@@ -81,8 +82,9 @@ impl AppState {
     }
 
     pub fn new_with_registry(store: Arc<Store>, pairing: Pairing, modules: Arc<Registry>) -> Self {
-        let service =
-            CollectionService::new(store.clone(), modules).with_catalog_uploads(store.clone());
+        let service = CollectionService::new(store.clone(), modules)
+            .with_catalog_uploads(store.clone())
+            .with_backup_history(store.clone());
         Self {
             store,
             service,
@@ -90,6 +92,7 @@ impl AppState {
             ingress: Ingress::Public,
             pairing,
             multi_user: false,
+            backup_reminder: None,
             inboxes: Arc::new(std::collections::BTreeMap::new()),
             catalog_sources: Arc::new(Vec::new()),
             allowed_origins: Arc::new(vec![]),
@@ -4399,16 +4402,41 @@ async fn retry_job(
     let view = blocking(move || state.service.job(&actor, id)).await?;
     Ok((StatusCode::ACCEPTED, Json(view)).into_response())
 }
-#[utoipa::path(get, path = "/api/v1/admin/settings", responses((status = 200, body = serde_json::Value), (status = 403)))]
+#[derive(serde::Serialize, utoipa::ToSchema)]
+struct ServerSettingsView {
+    default_user_id: UserId,
+    current_user_id: UserId,
+    exposure: Exposure,
+    multi_user: bool,
+    server_id: ServerId,
+    ingress: String,
+    backup_reminder: Option<collector_app::BackupReminder>,
+}
+#[utoipa::path(get, path = "/api/v1/admin/settings", responses((status = 200, body = ServerSettingsView), (status = 403)))]
 async fn settings(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ServerSettingsView>> {
     let actor = principal(&state, &headers)?;
     let default_user_id = state.service.default_user_id(&actor)?;
-    Ok(Json(
-        serde_json::json!({"default_user_id":default_user_id,"current_user_id":actor.user_id,"exposure":state.exposure,"multi_user":state.multi_user,"server_id":state.pairing.server_id,"ingress":format!("{:?}",state.ingress)}),
-    ))
+    let reminder = if let Some(settings) = &state.backup_reminder {
+        let settings = settings.clone();
+        let service = state.service.clone();
+        let actor = actor.clone();
+        Some(blocking(move || service.backup_reminder(&actor, &settings)).await?)
+    } else {
+        None
+    };
+
+    Ok(Json(ServerSettingsView {
+        default_user_id,
+        current_user_id: actor.user_id,
+        exposure: state.exposure,
+        multi_user: state.multi_user,
+        server_id: state.pairing.server_id,
+        ingress: format!("{:?}", state.ingress),
+        backup_reminder: reminder,
+    }))
 }
 
 #[utoipa::path(get, path = "/api/v1/admin/catalog-sources", responses((status = 200, body = Vec<CatalogSourceView>), (status = 403)))]

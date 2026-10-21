@@ -598,7 +598,9 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ServerSettingsView"
+                }
               }
             }
           },
@@ -8753,6 +8755,49 @@
           }
         ]
       },
+      "BackupReminder": {
+        "type": "object",
+        "required": [
+          "status",
+          "after_days",
+          "externally_managed",
+          "checked_at"
+        ],
+        "properties": {
+          "after_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "externally_managed": {
+            "type": "boolean"
+          },
+          "last_completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BackupReminderStatus"
+          }
+        }
+      },
+      "BackupReminderStatus": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "recent",
+          "due",
+          "failed",
+          "unconfirmed"
+        ]
+      },
       "BadgeTone": {
         "type": "string",
         "enum": [
@@ -10942,6 +10987,17 @@
           "inconclusive",
           "unsupported"
         ]
+      },
+      "Exposure": {
+        "type": "object",
+        "properties": {
+          "public_administration": {
+            "type": "boolean"
+          },
+          "public_curation": {
+            "type": "boolean"
+          }
+        }
       },
       "FeaturesResponse": {
         "type": "object",
@@ -19092,6 +19148,47 @@
       "ServerId": {
         "type": "string",
         "format": "uuid"
+      },
+      "ServerSettingsView": {
+        "type": "object",
+        "required": [
+          "default_user_id",
+          "current_user_id",
+          "exposure",
+          "multi_user",
+          "server_id",
+          "ingress"
+        ],
+        "properties": {
+          "backup_reminder": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BackupReminder"
+              }
+            ]
+          },
+          "current_user_id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "default_user_id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "exposure": {
+            "$ref": "#/components/schemas/Exposure"
+          },
+          "ingress": {
+            "type": "string"
+          },
+          "multi_user": {
+            "type": "boolean"
+          },
+          "server_id": {
+            "$ref": "#/components/schemas/ServerId"
+          }
+        }
       },
       "SessionId": {
         "type": "string",

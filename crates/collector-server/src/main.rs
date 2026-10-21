@@ -152,6 +152,7 @@ struct Config {
     dat_sources: std::collections::BTreeMap<String, DatSourceConfig>,
     providers: ProviderConfig,
     encoders: EncoderConfig,
+    backup_reminder: Option<collector_app::BackupReminderSettings>,
     tls_names: Vec<String>,
     allowed_origins: Vec<String>,
     endpoints: Vec<String>,
@@ -206,6 +207,7 @@ impl Default for Config {
             dat_sources: std::collections::BTreeMap::new(),
             providers: ProviderConfig::default(),
             encoders: EncoderConfig::default(),
+            backup_reminder: None,
             tls_names: vec![
                 "localhost".into(),
                 "junk-collector.local".into(),
@@ -716,6 +718,9 @@ async fn main() -> Result<()> {
     } else {
         Config::default()
     };
+    if let Some(reminder) = &config.backup_reminder {
+        reminder.validate()?;
+    }
     if !config.public_bind.ip().is_loopback() || !config.private_bind.ip().is_loopback() {
         bail!(
             "HTTP listeners must bind loopback; use a dedicated trusted proxy for public/private access. Direct LAN clients use the TLS listener."
@@ -761,6 +766,23 @@ async fn main() -> Result<()> {
             || !config.state.join("tls/cert.pem").exists()
         {
             bail!("Account state or TLS identity missing. Run setup.");
+        }
+        if let Some(settings) = &config.backup_reminder {
+            let history = if settings.externally_managed {
+                None
+            } else {
+                collector_store::read_backup_history(&config.state)
+                    .ok()
+                    .flatten()
+            };
+            println!(
+                "Backup reminder (record only, no revalidation): {}",
+                serde_json::to_string(&collector_app::backup_reminder(
+                    settings,
+                    history.as_ref(),
+                    chrono::Utc::now()
+                ))?
+            );
         }
         probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());
         probe_optional_encoder(EncoderKind::Opus, config.encoders.opus.as_ref());
@@ -1011,6 +1033,7 @@ async fn main() -> Result<()> {
                     .collect(),
             );
             state.multi_user = config.multi_user;
+            state.backup_reminder = config.backup_reminder.clone();
             state.allowed_origins = Arc::new(config.allowed_origins.clone());
             state.passkeys = passkeys
                 .take()

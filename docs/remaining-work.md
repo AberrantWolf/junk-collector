@@ -405,11 +405,12 @@ interrupted-update recovery remain required evidence; their accepted tooling and
 qualification are not reopened. Local points cover rollback, not loss of the
 storage device. This does not implement HL-10 portable export/deltas.
 
-**Optional follow-up, not a release gate:** an operator-facing backup-age reminder
-may use known validated completion dates, preserve failure/unknown status, and allow
-for externally managed backups without claiming to observe them. It is not
-implemented. Reminder reads must not trigger media hashing or a full archive scan
-during browsing/polling.
+**Optional reminder delivered in post-alpha.3 source, 2026-10-21:** administrator
+Server settings and `doctor` report the age of a known full-backup validation
+receipt, preserving failure/unconfirmed/unknown status. Explicit external reports
+are labelled unobserved. Reads use one bounded receipt, with no backup enumeration,
+media hashing or archive scan. Configuration is opt-in; no scheduler or automatic
+backup is added. See [acceptance](validation/backup-reminder-2026-10-21.md).
 A future lightweight catalog/settings backup needs a separate bounded restore
 contract covering archive-owned metadata/evidence/assets and required private state;
 copying SQLite alone is insufficient. No new backup subsystem or scheduler is assigned
@@ -1038,7 +1039,7 @@ milestone. Complete focused authentication/upload/media review and actionable
 repairs first (HL-05H and the bounded checklist are now delivered). Game-disc audio
 across the shared reader, Collector, web and Trash Amp is delivered in source, with
 owned/browser/native acceptance; general PDF/text documents are also delivered.
-Continue independent native failure qualification and bounded backup-age conveniences where they can be delivered
+The opt-in backup-age reminder is also delivered. Continue independent native failure qualification where it can be delivered
 without new product/provider decisions. Preserve staged sibling release work.
 Read-only access to useful material in `~/dumps` is explicitly authorized; use owned
 mixed-mode references when available, keep originals unchanged and never commit

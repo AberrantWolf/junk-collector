@@ -6,6 +6,7 @@ mod archive_v3;
 mod auth;
 mod backup;
 pub use archive_export::{import_archive, validate_archive_export};
+pub use backup::read_backup_history;
 mod browse;
 mod bulk_intake;
 mod bulk_library;

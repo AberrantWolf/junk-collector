@@ -24634,3 +24634,84 @@ fn documents_preserve_bytes_bound_text_and_obey_visibility_reindex_and_archive()
             .any(|v| v.id == shared.id)
     );
 }
+
+#[test]
+fn backup_reminder_records_validated_completion_preserves_failures_and_reads_bounded_history() {
+    use collector_app::{BackupReminderSettings, BackupReminderStatus};
+    let clock = Arc::new(TestClock::new(1800000000));
+    let (root, store, actor, service, _collection) = setup_with_clock(Some(clock.clone()));
+    let service = service.with_backup_history(store.clone());
+    let settings = BackupReminderSettings {
+        after_days: 30,
+        externally_managed: false,
+        external_completed_at: None,
+        external_failed_at: None,
+    };
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unknown
+    );
+    let config = root.path().join("collector.toml");
+    std::fs::write(&config, b"# test configuration").unwrap();
+    let backup = root.path().join("backup");
+    store.backup(&backup, &config).unwrap();
+    collector_store::validate_backup(&backup).unwrap();
+    let completed = service.backup_reminder(&actor, &settings).unwrap();
+    assert_eq!(completed.status, BackupReminderStatus::Recent);
+    clock.advance(31 * 86400);
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Due
+    );
+    assert!(store.backup(&backup, &config).is_err()); // Existing destination is never overwritten.
+    let failed = service.backup_reminder(&actor, &settings).unwrap();
+    assert_eq!(failed.status, BackupReminderStatus::Failed);
+    assert_eq!(failed.last_completed_at, completed.last_completed_at);
+    let receipt = root.path().join("state/backup-history.v1.json");
+    let mut history = collector_store::read_backup_history(&root.path().join("state"))
+        .unwrap()
+        .unwrap();
+    history.outcome = collector_app::BackupAttemptOutcome::Started;
+    std::fs::write(&receipt, serde_json::to_vec(&history).unwrap()).unwrap();
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unconfirmed
+    );
+    std::fs::write(&receipt, b"corrupt").unwrap();
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unknown
+    );
+    history.version = 2;
+    std::fs::write(&receipt, serde_json::to_vec(&history).unwrap()).unwrap();
+    assert!(store.backup(&backup, &config).is_err());
+    assert_eq!(
+        service
+            .backup_reminder(&actor, &settings)
+            .unwrap()
+            .last_completed_at,
+        None
+    );
+    std::fs::write(&receipt, vec![b' '; 4097]).unwrap();
+    assert!(collector_store::read_backup_history(&root.path().join("state")).is_err());
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unknown
+    );
+    clock.advance(60);
+    store
+        .backup(&root.path().join("recovered-backup"), &config)
+        .unwrap();
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Recent
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&receipt).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}

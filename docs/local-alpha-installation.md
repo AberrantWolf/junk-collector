@@ -32,6 +32,45 @@ on the installation as the only operational catalog. Keep source originals; choo
 any independent media copies according to the [clarified backup scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20). These checks establish the exercised behavior; they do not
 prove catalog/audio accuracy, power-loss safety, or complete Internet security.
 
+## Optional backup-age reminder
+
+After updating to source that includes this feature, add this section to the
+server configuration and restart:
+
+```toml
+[backup_reminder]
+after_days = 30
+```
+
+Administration → Server settings and `doctor` then show a recorded full-backup
+completion date and recent/due/failed/unconfirmed/unknown status. Only a successful
+final full-backup validation advances the receipt. A later failed attempt retains
+the previous completion; interruption remains unconfirmed. Older backups have no
+receipt and remain unknown. The reminder does not discover destinations, recheck
+backup existence or validate its bytes. Use `validate-backup` for an explicit
+check; that command does not advance a backup-creation receipt. It never
+schedules a backup, hashes media during status reads, or creates
+cloud traffic. Remove the section to disable reminders.
+
+For backups managed outside Collector, explicitly report their dates instead:
+
+```toml
+[backup_reminder]
+after_days = 30
+externally_managed = true
+external_completed_at = "2026-10-01T00:00:00Z"
+# external_failed_at = "2026-10-02T00:00:00Z"
+```
+
+These are operator reports; Collector does not observe or validate external
+backups. A later failure is shown even when a previous completion exists. Future
+or malformed local history never becomes a recent-success claim. A restored full
+backup contains its captured pre-completion receipt, so it can correctly show an
+unconfirmed attempt until another full backup completes. Local receipts do not
+prove independent storage, current backup presence or a successful restore drill.
+The existing explicit full backup still includes media; this adds no lightweight
+catalog/settings-only backup mode.
+
 ## Stopped-server backup
 
 To transfer only portable collection data into a fresh installation, see

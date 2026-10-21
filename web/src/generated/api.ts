@@ -2588,6 +2588,18 @@ export interface components {
             /** @enum {string} */
             state: "unavailable";
         };
+        BackupReminder: {
+            /** Format: int32 */
+            after_days: number;
+            /** Format: date-time */
+            checked_at: string;
+            externally_managed: boolean;
+            /** Format: date-time */
+            last_completed_at?: string | null;
+            status: components["schemas"]["BackupReminderStatus"];
+        };
+        /** @enum {string} */
+        BackupReminderStatus: "unknown" | "recent" | "due" | "failed" | "unconfirmed";
         /** @enum {string} */
         BadgeTone: "neutral" | "positive" | "warning" | "negative";
         Begin: {
@@ -3127,6 +3139,10 @@ export interface components {
         EvidenceKind: "integrity" | "structure" | "game_catalog" | "accurate_rip" | "reconstruction" | "derivative_validation";
         /** @enum {string} */
         EvidenceOutcome: "passed" | "failed" | "inconclusive" | "unsupported";
+        Exposure: {
+            public_administration?: boolean;
+            public_curation?: boolean;
+        };
         FeaturesResponse: {
             administration: boolean;
             curation: boolean;
@@ -5017,6 +5033,15 @@ export interface components {
         ScanState: "ready" | "blocked" | "running" | "cancelling" | "completed" | "failed" | "changed";
         /** Format: uuid */
         ServerId: string;
+        ServerSettingsView: {
+            backup_reminder?: null | components["schemas"]["BackupReminder"];
+            current_user_id: components["schemas"]["UserId"];
+            default_user_id: components["schemas"]["UserId"];
+            exposure: components["schemas"]["Exposure"];
+            ingress: string;
+            multi_user: boolean;
+            server_id: components["schemas"]["ServerId"];
+        };
         /** Format: uuid */
         SessionId: string;
         SessionView: {
@@ -5760,7 +5785,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ServerSettingsView"];
                 };
             };
             403: {

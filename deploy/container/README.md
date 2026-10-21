@@ -330,7 +330,8 @@ copying terabytes of unchanged media. Snapshot points live outside the data root
 as documented in the recovery procedure. Full-media copies to other disks/NAS/cloud
 are optional operator choices; no paid cloud service or separate destination is
 required to install/update Collector. Local points provide rollback, not protection
-against loss of that storage device. Backup-age reminders remain a possible follow-up.
+against loss of that storage device. Optional [backup-age reminders](../../docs/local-alpha-installation.md#optional-backup-age-reminder)
+are available in post-alpha.3 source; published alpha.3 does not include them.
 
 ## Update
 

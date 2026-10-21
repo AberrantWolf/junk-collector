@@ -9,6 +9,46 @@ const RESTORING: &str = ".restore-in-progress";
 impl Store {
     /// The caller owns an offline Store, without application workers.
     pub fn backup(&self, destination: &Path, config: &Path) -> Result<()> {
+        use collector_app::{BackupAttemptOutcome, BackupHistory};
+        let attempted_at = self.clock.now();
+        let mut history = BackupHistory {
+            version: 1,
+            last_completed_at: read_backup_history(&self.state)
+                .ok()
+                .flatten()
+                .filter(|history| history.is_consistent_at(attempted_at))
+                .and_then(|v| v.last_completed_at),
+            attempted_at,
+            outcome: BackupAttemptOutcome::Started,
+        };
+        self.write_backup_history(&history)?;
+        let result = self.backup_inner(destination, config);
+        history.attempted_at = self.clock.now();
+        history.outcome = if result.is_ok() {
+            BackupAttemptOutcome::Completed
+        } else {
+            BackupAttemptOutcome::Failed
+        };
+        if result.is_ok() {
+            history.last_completed_at = Some(history.attempted_at);
+        }
+        if let Err(error) = self.write_backup_history(&history) {
+            // A receipt failure cannot invalidate a fully validated backup. The
+            // preceding Started receipt leaves a conservative unconfirmed warning.
+            tracing::warn!(%error,"could not persist backup outcome; reminder receipt may be unconfirmed");
+        }
+        result
+    }
+    fn write_backup_history(&self, history: &collector_app::BackupHistory) -> Result<()> {
+        let path = self.state.join("backup-history.v1.json");
+        let temporary = self
+            .state
+            .join(format!(".backup-history-{}.tmp", TransactionId::new()));
+        write_private(&temporary, &serde_json::to_vec(history).map_err(storage)?)?;
+        fs::rename(&temporary, path).map_err(storage)?;
+        sync_directory(&self.state)
+    }
+    fn backup_inner(&self, destination: &Path, config: &Path) -> Result<()> {
         let destination_path = std::path::absolute(destination).map_err(storage)?;
         let destination = destination_path.as_path();
         let _writer = lock(&self.writer)?;
@@ -651,6 +691,19 @@ fn restore_with_fault(
     }
     Ok(())
 }
+fn stable_backup_file(path: &str) -> bool {
+    path != "state/backup-history.v1.json"
+        && !Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| {
+                n.ends_with(".sqlite")
+                    || n.ends_with("-wal")
+                    || n.ends_with("-shm")
+                    || n.ends_with(".lock")
+            })
+}
+
 pub(crate) fn verify_backup_roots(store: &Store, backup: &Path) -> Result<()> {
     let inventory = backup_inventory(backup)?;
     if Path::new(&inventory.archive_root) != store.archive.canonicalize().map_err(storage)?
@@ -672,19 +725,14 @@ pub(crate) fn verify_backup_roots(store: &Store, backup: &Path) -> Result<()> {
         .filter(|entry| entry.path.starts_with("archive/") || entry.path.starts_with("state/"))
         .map(|entry| entry.path.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    let stable = |path: &String| {
-        !Path::new(path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| {
-                n.ends_with(".sqlite")
-                    || n.ends_with("-wal")
-                    || n.ends_with("-shm")
-                    || n.ends_with(".lock")
-            })
-    };
-    if current.iter().filter(|p| stable(p)).collect::<Vec<_>>()
-        != expected.iter().filter(|p| stable(p)).collect::<Vec<_>>()
+    if current
+        .iter()
+        .filter(|p| stable_backup_file(p))
+        .collect::<Vec<_>>()
+        != expected
+            .iter()
+            .filter(|p| stable_backup_file(p))
+            .collect::<Vec<_>>()
     {
         return Err(Error::Conflict);
     }
@@ -696,18 +744,10 @@ pub(crate) fn verify_backup_roots(store: &Store, backup: &Path) -> Result<()> {
         } else {
             continue;
         };
-        // SQLite checkpoint/projection caches may change on opening; portable records,
-        // private DB, scratch and config are all included in the backup itself.
-        if source
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| {
-                n.ends_with(".sqlite")
-                    || n.ends_with("-wal")
-                    || n.ends_with("-shm")
-                    || n.ends_with(".lock")
-            })
-        {
+        // Live completion receipts and SQLite/lock mechanisms may change after
+        // capture. The backup's own receipt is still fully verified above; this
+        // exception never covers archive records or unknown private files.
+        if !stable_backup_file(&entry.path) {
             continue;
         }
         if crate::files::hash_file(&source)? != (entry.bytes, entry.digest) {
@@ -762,6 +802,37 @@ fn database_digest(db: &Connection, schema: &str) -> Result<String> {
         }
     }
     Ok(hex::encode(hash.finalize()))
+}
+
+impl collector_app::BackupHistoryPort for Store {
+    fn backup_history(&self) -> Result<Option<collector_app::BackupHistory>> {
+        read_backup_history(&self.state)
+    }
+}
+
+/// Read one bounded operational receipt, without opening databases or scanning backups.
+pub fn read_backup_history(state: &Path) -> Result<Option<collector_app::BackupHistory>> {
+    let path = state.join("backup-history.v1.json");
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(storage(error)),
+        Ok(metadata) if !metadata.file_type().is_file() || metadata.len() > 4096 => {
+            return Err(Error::Invalid(
+                "backup history is not a bounded regular file".into(),
+            ));
+        }
+        Ok(_) => {}
+    }
+    let mut data = Vec::new();
+    File::open(path)
+        .map_err(storage)?
+        .take(4097)
+        .read_to_end(&mut data)
+        .map_err(storage)?;
+    if data.len() > 4096 {
+        return Err(Error::Invalid("backup history exceeds its bound".into()));
+    }
+    serde_json::from_slice(&data).map(Some).map_err(storage)
 }
 
 #[cfg(test)]

@@ -98,8 +98,9 @@ backup is required for release. Local consistent points provide practical update
 rollback; optional independent copies retain their qualified runbook.
 The [accepted scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
 removes the earlier destination-selection blocker. A small catalog/settings backup
-would need more than SQLite alone; that mode and optional backup-age reminders are
-not implemented. See [clarification validation](validation/backup-scope-2026-10-20.md).
+would need more than SQLite alone; that mode is not implemented. Optional backup-age
+reminders are delivered in post-alpha.3 source; see below and the earlier
+[clarification validation](validation/backup-scope-2026-10-20.md).
 
 ## Numeric-IP authentication startup — repaired and NAS-qualified, 2026-10-20
 
@@ -1636,3 +1637,19 @@ Shared byte classification/read bounds live in junk-libs-core, pinned to
 `193e0a88faaa0c3d5636976932f120c237831ad0`. See
 [acceptance and limits](validation/documents-2026-10-21.md). These changes are not
 in the published alpha.3 images.
+
+### Optional backup-age reminder — 2026-10-21
+
+An optional `[backup_reminder]` section enables an administrator Server settings
+notice and `doctor` output. Full-backup attempts record a small private receipt;
+only successful final validation advances the completion date. A failed attempt
+retains the previous date, and abrupt interruption stays unconfirmed. Missing,
+malformed, unsupported or future history stays unknown. Status reads one bounded
+receipt without scanning backups, opening media or rehashing bytes. External
+completion/failure dates can be explicitly reported in configuration and remain
+labelled operator reports that Collector has not observed or validated. The
+reminder never schedules or creates a backup; removing its configuration disables
+it. Existing backups without receipts stay unknown, and restored copies retain
+their captured history rather than inventing a new validation. See the
+[operator instructions](local-alpha-installation.md#optional-backup-age-reminder)
+and [acceptance](validation/backup-reminder-2026-10-21.md). Published alpha.3 is unchanged.
