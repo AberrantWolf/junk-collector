@@ -162,6 +162,24 @@ pub fn identify_game(
         return Ok(result);
     }
     result.analyses = hashes.values().cloned().collect();
+    if let Some(anchor) = cue {
+        let discovered_audio = crate::disc_audio::inspect(host, access, &inventory, anchor);
+        host.checkpoint()?;
+        match discovered_audio {
+            Ok(audio) => result
+                .analyses
+                .push(GameProcessingResult::CdAudio { audio }),
+            Err(e) => result.limitations.push(format!(
+                "CD audio unavailable: {}",
+                e.to_string()
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(512)
+                    .collect::<String>()
+            )),
+        }
+    }
+
     for id in snapshots {
         host.checkpoint()?;
         let snapshot: CatalogSnapshotInput = host.catalog_snapshot(*id)?;

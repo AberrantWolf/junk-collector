@@ -473,7 +473,11 @@ pub(crate) fn project_preparation(db: &Connection, item_id: ItemId) -> Result<()
         return Ok(());
     };
     let item: Item = serde_json::from_str(&raw).map_err(storage)?;
-    if item.domain.module.0 != "org.junk.music" || item.deleted {
+    if !matches!(
+        item.domain.module.0.as_str(),
+        "org.junk.music" | "org.junk.games"
+    ) || item.deleted
+    {
         db.execute(
             "DELETE FROM preparation_readiness WHERE item_id=?",
             [item_id.to_string()],
@@ -503,7 +507,7 @@ pub(crate) fn project_preparation(db: &Connection, item_id: ItemId) -> Result<()
             .filter(|r| r.role == RepresentationRole::PreservationMaster)
         {
             sources += 1;
-            let mut stmt=db.prepare("SELECT record FROM processing_observations WHERE source_scope='representation' AND source_id=? AND operation IN ('org.junk.music.cd-structure','org.junk.music.import-analysis') ORDER BY created_at DESC,id DESC").map_err(storage)?;
+            let mut stmt=db.prepare("SELECT record FROM processing_observations WHERE source_scope='representation' AND source_id=? AND operation IN ('org.junk.music.cd-structure','org.junk.music.import-analysis','org.junk.games.cd-audio','org.junk.games.identify','org.junk.games.import-analysis') ORDER BY created_at DESC,id DESC").map_err(storage)?;
             let mut rows = stmt.query([source.id.to_string()]).map_err(storage)?;
             let mut layout = None;
             while let Some(row) = rows.next().map_err(storage)? {
@@ -562,6 +566,14 @@ pub(crate) fn project_preparation(db: &Connection, item_id: ItemId) -> Result<()
     let (total, ready) = discs
         .values()
         .fold((0u32, 0u32), |(t, r), (dt, dr)| (t + dt, r + dr));
+    if item.domain.module.0 == "org.junk.games" && total == 0 {
+        db.execute(
+            "DELETE FROM preparation_readiness WHERE item_id=?",
+            [item_id.to_string()],
+        )
+        .map_err(storage)?;
+        return Ok(());
+    }
     db.execute("INSERT INTO preparation_readiness VALUES(?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET collection_id=excluded.collection_id,total_tracks=excluded.total_tracks,ready_tracks=excluded.ready_tracks,source_count=excluded.source_count,needs_attention=excluded.needs_attention",params![item_id.to_string(),item.collection_id.to_string(),total,ready,sources,total==0||ready<total]).map_err(storage)?;
     Ok(())
 }

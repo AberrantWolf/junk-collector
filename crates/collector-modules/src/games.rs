@@ -1,3 +1,4 @@
+use crate::disc_audio::{DiscAudioManifest, GAME_CD_AUDIO_OPERATION, TrackMetadataOverride};
 mod systems;
 pub use systems::*;
 mod identification;
@@ -41,6 +42,8 @@ pub struct GameItemPatch {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GameMetadataOverrides {
+    #[serde(default)]
+    pub track_overrides: Vec<TrackMetadataOverride>,
     pub platform: Option<String>,
     #[serde(default)]
     pub automatic_platform: bool,
@@ -125,6 +128,9 @@ pub enum GameStructureValue {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum GameProcessingResult {
+    CdAudio {
+        audio: DiscAudioManifest,
+    },
     Hashes {
         files: Vec<GameFileDigest>,
     },
@@ -944,7 +950,7 @@ impl CollectionModule for Games {
                 plan.file(inventory, "file_index", |_| true)?;
                 plan.normalize::<GameInspectOperationInput>()?;
             }
-            "org.junk.games.hash-tracks" => {
+            "org.junk.games.hash-tracks" | GAME_CD_AUDIO_OPERATION => {
                 plan.file(inventory, "cue_file_index", |n| {
                     n.to_ascii_lowercase().ends_with(".cue")
                 })?;
@@ -1070,7 +1076,9 @@ impl CollectionModule for Games {
             availability: Availability::Available,
             scope: OperationScope::CollectionDomain,
         };
+        descriptor.supports_listening = true;
         descriptor.capabilities.extend([
+            capability("cd-audio", "Inspect game CD audio"),
             capability("identify", "Identify game automatically"),
             capability("hash", "Hash game data"),
             capability("inspect-ines", "Inspect iNES structure"),
@@ -1113,6 +1121,7 @@ impl CollectionModule for Games {
             .parse()
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
         validate_texts([&value.platform])?;
+        crate::disc_audio::validate_track_overrides(&value.track_overrides)?;
         if value
             .platform
             .as_ref()
@@ -1141,7 +1150,7 @@ impl CollectionModule for Games {
                 .map_err(|error| ModuleError::Invalid(error.to_string()))?;
             if output.candidates.len() > 128
                 || output.limitations.len() > 64
-                || !(1..=2).contains(&output.observations.len())
+                || !(1..=3).contains(&output.observations.len())
                 || output.candidates.iter().any(|candidate| {
                     candidate.key.trim().is_empty()
                         || candidate.key.len() > 1024
@@ -1179,15 +1188,24 @@ impl CollectionModule for Games {
                     ));
                 }
             }
+            let mut audio_seen = false;
             for (index, observation) in output.observations.into_iter().enumerate() {
                 let observation = observation
                     .parse::<GameProcessingResult>()
                     .map_err(|error| ModuleError::Invalid(error.to_string()))?;
                 validate_processing_result(&observation)?;
+                if matches!(observation, GameProcessingResult::CdAudio { .. })
+                    && std::mem::replace(&mut audio_seen, true)
+                {
+                    return Err(ModuleError::Invalid(
+                        "Duplicate CD audio observation".into(),
+                    ));
+                }
                 if !matches!(
                     (index, &observation),
                     (0, GameProcessingResult::Hashes { .. })
                         | (1, GameProcessingResult::CatalogMatch { .. })
+                        | (1 | 2, GameProcessingResult::CdAudio { .. })
                 ) {
                     return Err(ModuleError::Invalid(
                         "game Import analysis contains an unexpected observation".into(),
@@ -1200,7 +1218,13 @@ impl CollectionModule for Games {
             let identified: GameIdentification = result
                 .parse()
                 .map_err(|e| ModuleError::Invalid(e.to_string()))?;
-            if identified.analyses.len() > 6
+            if identified
+                .analyses
+                .iter()
+                .filter(|v| matches!(v, GameProcessingResult::CdAudio { .. }))
+                .count()
+                > 1
+                || identified.analyses.len() > 6
                 || identified.limitations.len() > 128
                 || identified.catalogs.len() > 128
                 || identified.candidates.len() > 4096
@@ -1265,6 +1289,7 @@ impl CollectionModule for Games {
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
         validate_processing_result(&result)?;
         let expected_shape = match capability.as_str() {
+            GAME_CD_AUDIO_OPERATION => matches!(result, GameProcessingResult::CdAudio { .. }),
             "org.junk.games.hash" => matches!(result, GameProcessingResult::Hashes { .. }),
             "org.junk.games.inspect-ines" => {
                 matches!(result, GameProcessingResult::Structure { .. })
@@ -1314,6 +1339,21 @@ impl CollectionModule for Games {
             });
         }
         let result = match request.capability.as_str() {
+            GAME_CD_AUDIO_OPERATION => {
+                let input: GameCueOperationInput = request
+                    .input
+                    .parse()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+                GameProcessingResult::CdAudio {
+                    audio: crate::disc_audio::inspect(
+                        host,
+                        access,
+                        &inventory,
+                        input.cue_file_index,
+                    )?,
+                }
+            }
+
             "org.junk.games.hash" => {
                 let input: GameFileOperationInput = request
                     .input
@@ -1567,6 +1607,22 @@ fn import_analysis(
         (Some(_), None) => limitations
             .push("The collection item has no explicit platform/system for DAT matching.".into()),
     }
+    let discovered_audio = crate::disc_audio::discover(host, access, inventory);
+    host.checkpoint()?;
+    match discovered_audio {
+        Ok(Some(audio)) => {
+            observations.push(result_json(&GameProcessingResult::CdAudio { audio })?)
+        }
+        Ok(None) => {}
+        Err(e) => limitations.push(format!(
+            "CD audio unavailable: {}",
+            e.to_string()
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(512)
+                .collect::<String>()
+        )),
+    }
     let output = GameImportAnalysisOutput {
         candidates,
         limitations,
@@ -1675,6 +1731,7 @@ fn validate_year(value: Option<u16>) -> ModuleResult<()> {
 
 fn validate_processing_result(result: &GameProcessingResult) -> ModuleResult<()> {
     match result {
+        GameProcessingResult::CdAudio { audio } => audio.validate()?,
         GameProcessingResult::Hashes { files } => {
             let mut ids = std::collections::BTreeSet::new();
             if files.is_empty()
@@ -1829,6 +1886,49 @@ fn validate_catalog_match(result: &CatalogMatchResult) -> ModuleResult<()> {
         return Err(ModuleError::Invalid("invalid catalog match result".into()));
     }
     Ok(())
+}
+
+/// Resolve only this module's typed recorded geometry; this never opens media.
+pub fn recorded_disc_audio(
+    operation: &str,
+    payload: &RawJson,
+) -> ModuleResult<Option<DiscAudioManifest>> {
+    let results = match operation {
+        GAME_CD_AUDIO_OPERATION => vec![
+            payload
+                .parse::<GameProcessingResult>()
+                .map_err(|e| ModuleError::Invalid(e.to_string()))?,
+        ],
+        "org.junk.games.import-analysis" => payload
+            .parse::<GameImportAnalysisOutput>()
+            .map_err(|e| ModuleError::Invalid(e.to_string()))?
+            .observations
+            .iter()
+            .map(|v| {
+                v.parse::<GameProcessingResult>()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))
+            })
+            .collect::<ModuleResult<Vec<_>>>()?,
+        "org.junk.games.identify" => {
+            payload
+                .parse::<GameIdentification>()
+                .map_err(|e| ModuleError::Invalid(e.to_string()))?
+                .analyses
+        }
+        _ => return Ok(None),
+    };
+    let mut found = None;
+    for result in results {
+        if let GameProcessingResult::CdAudio { audio } = result {
+            audio.validate()?;
+            if found.replace(audio).is_some() {
+                return Err(ModuleError::Invalid(
+                    "Duplicate CD audio observation".into(),
+                ));
+            }
+        }
+    }
+    Ok(found)
 }
 
 #[cfg(test)]

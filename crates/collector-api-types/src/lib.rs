@@ -28,6 +28,7 @@ pub struct ListEntriesQuery {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateCollectionList {
+    pub kind: Option<CollectionListKind>,
     pub name: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -168,6 +169,8 @@ pub struct MusicSearchQuery {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MusicSearchRecord {
+    #[serde(default)]
+    pub source_representation_id: Option<RepresentationId>,
     pub duration_ms: Option<u64>,
     pub item_id: ItemId,
     pub title: String,

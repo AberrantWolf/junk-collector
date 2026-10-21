@@ -10234,6 +10234,16 @@
           "name"
         ],
         "properties": {
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectionListKind"
+              }
+            ]
+          },
           "name": {
             "type": "string"
           }
@@ -10384,6 +10394,79 @@
             ]
           }
         }
+      },
+      "DiscAudioManifest": {
+        "type": "object",
+        "required": [
+          "version",
+          "anchor_file_index",
+          "tracks",
+          "data_tracks"
+        ],
+        "properties": {
+          "anchor_file_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "data_tracks": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscAudioTrack"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "DiscAudioTrack": {
+        "type": "object",
+        "required": [
+          "position",
+          "start_frame",
+          "frame_count",
+          "source_start_frame",
+          "source_end_frame"
+        ],
+        "properties": {
+          "frame_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_end_frame": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source_start_frame": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "start_frame": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "DiscardIngestCommand": {
         "type": "object",
@@ -10971,6 +11054,24 @@
       },
       "GameProcessingResult": {
         "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "audio",
+              "result"
+            ],
+            "properties": {
+              "audio": {
+                "$ref": "#/components/schemas/DiscAudioManifest"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "cd_audio"
+                ]
+              }
+            }
+          },
           {
             "type": "object",
             "required": [
@@ -14455,6 +14556,9 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "supports_listening": {
+            "type": "boolean"
           }
         }
       },
@@ -15083,6 +15187,16 @@
           },
           "item_id": {
             "$ref": "#/components/schemas/ItemId"
+          },
+          "source_representation_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepresentationId"
+              }
+            ]
           },
           "title": {
             "type": "string"
@@ -16708,6 +16822,7 @@
             "items": {
               "type": "object",
               "required": [
+                "supports_listening",
                 "id",
                 "revision",
                 "name",
@@ -16738,6 +16853,9 @@
                 },
                 "revision": {
                   "$ref": "#/components/schemas/Revision"
+                },
+                "supports_listening": {
+                  "type": "boolean"
                 }
               }
             }
@@ -16762,6 +16880,7 @@
               "type": "object",
               "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
               "required": [
+                "supports_listening",
                 "digital_audio",
                 "workflow_generation",
                 "id",
@@ -16909,6 +17028,9 @@
                 },
                 "subtitle": {
                   "type": "string"
+                },
+                "supports_listening": {
+                  "type": "boolean"
                 },
                 "title": {
                   "type": "string"
@@ -17722,6 +17844,7 @@
       "PresentedCollection": {
         "type": "object",
         "required": [
+          "supports_listening",
           "id",
           "revision",
           "name",
@@ -17752,6 +17875,9 @@
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
+          },
+          "supports_listening": {
+            "type": "boolean"
           }
         }
       },
@@ -17857,6 +17983,7 @@
         "type": "object",
         "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
         "required": [
+          "supports_listening",
           "digital_audio",
           "workflow_generation",
           "id",
@@ -18004,6 +18131,9 @@
           },
           "subtitle": {
             "type": "string"
+          },
+          "supports_listening": {
+            "type": "boolean"
           },
           "title": {
             "type": "string"

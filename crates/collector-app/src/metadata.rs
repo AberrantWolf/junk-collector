@@ -1751,7 +1751,7 @@ impl CollectionService {
                     MetadataAuthorityChange::SetDomainOverrides { .. }
                 ) && item.domain.module.0 == "org.junk.music"
                 {
-                    self.validate_file_track_edits(
+                    self.validate_listening_track_edits(
                         &item,
                         &authority,
                         &previous_music_overrides.track_overrides,
@@ -1762,6 +1762,14 @@ impl CollectionService {
                         &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
                         &previous_music_overrides.disc_assignments,
                     )?;
+                }
+                if matches!(
+                    &command.change,
+                    MetadataAuthorityChange::SetDomainOverrides { .. }
+                ) && item.domain.module.0 == "org.junk.games"
+                {
+                    let previous = self.listening_track_overrides(&item)?;
+                    self.validate_listening_track_edits(&item, &authority, &previous)?;
                 }
                 if let MetadataAuthorityChange::SetArtworkChoice { asset_id } = &command.change
                     && !self

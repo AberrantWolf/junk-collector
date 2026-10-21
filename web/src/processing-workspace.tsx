@@ -17,6 +17,7 @@ type Props={item:Item;busy:boolean;setBusy:(value:boolean)=>void;onError:(error:
 
 const terminal=new Set<JobView['state']>(['completed','failed','cancelled']);
 const operations:Record<string,string>={
+ 'org.junk.games.cd-audio':'Inspect game CD audio',
  'org.junk.games.hash':'Hash game data',
  'org.junk.games.inspect-ines':'Inspect iNES structure',
  'org.junk.games.hash-tracks':'Hash raw 2352-byte tracks',
@@ -43,6 +44,7 @@ function resultLabel(summary:{result:unknown}):string{
  if(result.result==='hashes')return 'File hashes recorded';
  if(result.result==='track_hashes')return 'Track hashes recorded';
  if(result.result==='structure')return `${String(result.format||'Game')} structure inspected`;
+ if(result.result==='cd_audio')return `Game CD audio recorded · ${Array.isArray(object(result.audio).tracks)?(object(result.audio).tracks as unknown[]).length:0} audio tracks`;
  if(result.result==='layout')return `CD structure recorded · ${Array.isArray(result.tracks)?result.tracks.length:0} tracks`;
  if(result.result==='audio_verification'){const verification=object(result.verification);return `AccurateRip: ${presentationLabel(String(verification.status||'unknown'))}`;}
  if(Array.isArray(result.observations))return result.observations.map(value=>resultLabel({...summary,result:object(value)})).join(' · ');
@@ -92,7 +94,7 @@ function RepresentationOperations({item,capture,representation,capabilities,snap
 
  const [preferences]=useState<Record<string,unknown>>(()=>{try{return object(JSON.parse(sessionStorage.getItem(preferenceKey)||'{}'));}catch{return {};}});
  const available=capabilities.filter(value=>operations[value.id]);
- const [operation,setOperation]=useState(focusOperation==='accuraterip'?'org.junk.music.accuraterip-verification':focusOperation==='structure'?'org.junk.music.cd-structure':typeof preferences.operation==='string'&&available.some(v=>v.id===preferences.operation)?preferences.operation:available.find(value=>value.id==='org.junk.games.hash'||value.id==='org.junk.music.cd-structure')?.id||available.find(value=>value.availability.state==='available')?.id||'');
+ const [operation,setOperation]=useState(focusOperation==='accuraterip'?'org.junk.music.accuraterip-verification':focusOperation==='structure'?(item.domain.module==='org.junk.games'?'org.junk.games.cd-audio':'org.junk.music.cd-structure'):typeof preferences.operation==='string'&&available.some(v=>v.id===preferences.operation)?preferences.operation:available.find(value=>value.id==='org.junk.games.hash'||value.id==='org.junk.music.cd-structure')?.id||available.find(value=>value.availability.state==='available')?.id||'');
  const [fileIndex,setFileIndex]=useState<number|null>(typeof preferences.fileIndex==='number'?preferences.fileIndex:null);const [maximumOffset,setMaximumOffset]=useState(typeof preferences.maximumOffset==='number'?preferences.maximumOffset:2939);const [profile,setProfile]=useState(typeof preferences.profile==='string'?preferences.profile:'raw');const [copierHeader,setCopierHeader]=useState(preferences.copierHeader===true);const [catalogInput,setCatalogInput]=useState(typeof preferences.catalogInput==='string'?preferences.catalogInput:'raw_files');const [system,setSystem]=useState(()=>String(preferences.system??object(item.domain.payload).platform??''));const [snapshotId,setSnapshotId]=useState(()=>typeof preferences.snapshotId==='string'?preferences.snapshotId:snapshots.find(value=>value.active)?.snapshot.id||snapshots[0]?.snapshot.id||'');const [summaries,setSummaries]=useState<Summary[]>([]);const [cursor,setCursor]=useState<string|null>(null);
  async function load(after?:string,signal=lifecycle.current.signal){const generation=++historyGeneration.current;const page=await api<SummaryPage>(`/captures/${capture.id}/operations?representation_id=${representation.id}&limit=100${after?`&cursor=${encodeURIComponent(after)}`:''}`,{signal});if(signal.aborted||generation!==historyGeneration.current)return;setSummaries(current=>after?[...current,...page.items]:page.items);setCursor(page.next_cursor??null);}
  useEffect(()=>{load().catch(error=>{if(!lifecycle.current.signal.aborted)onError(error);});},[capture.id,representation.id]);
@@ -107,7 +109,7 @@ function RepresentationOperations({item,capture,representation,capabilities,snap
   }
   else if(operation==='org.junk.music.cd-structure')selection={...(fileIndex===null?{}:{anchor_file_index:fileIndex})};
   else if(operation==='org.junk.music.accuraterip-verification'){selection={...(fileIndex===null?{}:{anchor_file_index:fileIndex}),...(snapshotId?{snapshot_id:snapshotId}:{}),maximum_offset:maximumOffset};frozenSnapshot=snapshotId||null;}
-  else if(operation==='org.junk.games.hash-tracks')selection={...(fileIndex===null?{}:{cue_file_index:fileIndex})};
+  else if(['org.junk.games.hash-tracks','org.junk.games.cd-audio'].includes(operation))selection={...(fileIndex===null?{}:{cue_file_index:fileIndex})};
   else if(operation==='org.junk.games.inspect-ines')selection={...(fileIndex===null?{}:{file_index:fileIndex})};
   else selection={...(fileIndex===null?{}:{file_index:fileIndex}),profile,...(['snes_payload','pce_payload'].includes(profile)?{copier_header:copierHeader}:{})};
   return {operation,operation_version:1,representation_id:representation.id,snapshot_id:frozenSnapshot,selection};

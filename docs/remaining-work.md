@@ -788,7 +788,12 @@ optional ideas needing product/contract design, not established missing features
 
 #### Game-disc audio in music listening and Trash Amp
 
-**State:** requested 2026-10-10; game-disc listening is not implemented.
+**State:** post-alpha.3 source implementation and acceptance in progress, 2026-10-21.
+Standard BINARY CUE/BIN ranges, shared extraction, Collector/web preparation and
+listening, source-specific metadata/search and separate audio playlists are
+implemented. Owned-reader and full owned-browser journeys, isolated native streaming/offline
+and all source gates pass; publishing the native dependency pin remains.
+See [delivery](game-disc-audio.md) and [dated evidence](validation/game-disc-audio-2026-10-21.md).
 **Owner:** Games owns game identity and descriptive metadata; shared `junk-libs`
 readers own disc layout and PCM extraction; application services own preparation,
 authorized listening projections and list expansion; web and Trash Amp consume
@@ -801,10 +806,9 @@ actual CD audio tracks, including mixed data/audio discs; proprietary in-game au
 files and soundtrack decoding are separate future scope. Preserve the original
 game package and its collection identity without requiring a duplicate music import.
 
-Before implementation, settle cross-module listening capability ownership and
-source-bound track metadata, including manual titles and useful unnamed-track
-defaults. Current preparation requires a music collection, and mixed-mode audio
-preparation is unsupported. Extend the existing preparation/availability/media,
+The selected contract settles cross-module listening ownership and source-bound
+track metadata, including manual titles and useful unnamed-track defaults. It
+extends the existing preparation/availability/media,
 music discovery and list pipeline rather than introducing a second importer,
 player or workflow. Complete bounded, cancellable audio-range extraction with
 explicit data-track exclusion and gap/boundary policy; reuse exact source

@@ -1480,8 +1480,11 @@ async fn client_collections(
 ) -> ApiResult<Json<Vec<collector_api_types::ClientCollection>>> {
     let actor = principal(&state, &headers)?;
     let curation = state.exposure.allows(state.ingress, Surface::Curation);
-    let values = blocking(move || state.service.collections(&actor)).await?;
-    Ok(Json(values.into_iter().filter(|v| matches!(&v.binding, CollectionBinding::Assigned {module} if module.0=="org.junk.music")).map(|v|collector_api_types::ClientCollection { id:v.id,name:v.name,can_browse:v.effective_permissions.can_browse,can_play:v.effective_permissions.can_browse,can_edit_playlists:curation&&v.content_permissions.can_edit }).collect()))
+    let mut values = blocking(move || state.service.listening_collections(&actor)).await?;
+    for collection in &mut values {
+        collection.can_edit_playlists &= curation;
+    }
+    Ok(Json(values))
 }
 #[utoipa::path(get,path="/api/v1/client/albums",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_api_types::ClientAlbum>)))]
 async fn client_albums(
@@ -1490,26 +1493,9 @@ async fn client_albums(
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<Page<collector_api_types::ClientAlbum>>> {
     let actor = principal(&state, &headers)?;
-    let values = blocking(move || state.service.browse_presented(&actor, query)).await?;
-    Ok(Json(Page {
-        items: values
-            .items
-            .into_iter()
-            .filter(|v| v.domain.module.0 == "org.junk.music")
-            .map(|v| collector_api_types::ClientAlbum {
-                id: v.id,
-                collection_id: v.collection_id,
-                title: v.effective_metadata.title.value,
-                artist: v
-                    .effective_metadata
-                    .subtitle
-                    .map(|s| s.value)
-                    .unwrap_or(v.subtitle),
-                artwork: v.primary_artwork,
-            })
-            .collect(),
-        next_cursor: values.next_cursor,
-    }))
+    Ok(Json(
+        blocking(move || state.service.listening_albums(&actor, query)).await?,
+    ))
 }
 #[utoipa::path(get,path="/api/v1/items/{item}/client-tracks",params(("item"=ItemId,Path)),responses((status=200,body=Vec<collector_api_types::MusicTrackAvailability>),(status=403)))]
 async fn client_music_tracks(

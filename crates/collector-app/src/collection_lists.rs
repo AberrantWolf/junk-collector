@@ -89,7 +89,11 @@ impl CollectionService {
         self.authorize(actor, collection, Action::Curate)?;
         self.execute_command(actor, context, "collection.list.create", &(collection, &command), |effects| {
             let binding = self.reader.collection(collection)?.binding;
-            let kind = if matches!(binding, CollectionBinding::Assigned { ref module } if module.0 == "org.junk.music") { CollectionListKind::MusicTracks } else { CollectionListKind::Items };
+            let default_kind = if matches!(binding, CollectionBinding::Assigned { ref module } if module.0 == "org.junk.music") { CollectionListKind::MusicTracks } else { CollectionListKind::Items };
+            let kind = command.kind.unwrap_or(default_kind);
+            if kind == CollectionListKind::MusicTracks && !matches!(&binding, CollectionBinding::Assigned { module } if self.modules.supports_listening(module)) {
+                return Err(Error::Invalid("This collection does not support audio playlists.".into()));
+            }
             let id = CollectionListId(deterministic_job_id(actor.user_id, "collection.list.create", context.key()).0);
             let list = CollectionList {id, collection_id: collection, revision: Revision(1), name: command.name.trim().into(), kind, entries: vec![], deleted: false};
             list.validate()?;
@@ -148,10 +152,8 @@ impl CollectionService {
         source: Option<RepresentationId>,
         track: Option<u16>,
     ) -> Result<Vec<ListTarget>> {
-        if item.domain.module.0 != "org.junk.music" || (track.is_some() && source.is_none()) {
-            return Err(Error::Invalid(
-                "Choose a music album, or a source disc and track.".into(),
-            ));
+        if track.is_some() && source.is_none() {
+            return Err(Error::Invalid("Choose a source disc and track.".into()));
         }
         let rows = self.music_track_availability_for_item(actor.user_id, item)?;
         let coverage = self.music_album_coverage(actor, item.id)?;
@@ -185,6 +187,29 @@ impl CollectionService {
                         .any(|t| !available.contains(&t.position))
                     {
                         return Err(Error::Unavailable("Some purchased tracks are unavailable; add individual available tracks instead.".into()));
+                    }
+                    continue;
+                }
+                if let Some(manifest) = self
+                    .recorded_game_audio(item.collection_id, candidate.source_representation_id)?
+                {
+                    let recorded = manifest
+                        .tracks
+                        .iter()
+                        .map(|t| t.position)
+                        .collect::<BTreeSet<_>>();
+                    let available = rows
+                        .iter()
+                        .filter(|r| {
+                            r.primary_playback()
+                                && r.source_representation_id == candidate.source_representation_id
+                        })
+                        .map(|r| r.track_position)
+                        .collect::<BTreeSet<_>>();
+                    if recorded != available {
+                        return Err(Error::Unavailable(
+                            "The complete game disc audio scope is unavailable.".into(),
+                        ));
                     }
                     continue;
                 }
@@ -393,8 +418,6 @@ impl CollectionService {
                     view.album = Some(item.title.clone());
                     view.track_position = Some(track_position);
                     view.title = format!("Track {track_position:02}");
-                    if self.modules.has_module(&item.domain.module)
-                        && item.domain.module.0 == "org.junk.music"
                     {
                         if let std::collections::btree_map::Entry::Vacant(slot) =
                             audio.entry(item.id)
@@ -451,14 +474,20 @@ impl CollectionService {
                                     ListEntryAvailability::Preparing
                                 }
                                 MusicTrackAvailabilityState::Unavailable { .. } => {
-                                    ListEntryAvailability::NeedsPreparation
+                                    if self.modules.has_module(&item.domain.module) {
+                                        ListEntryAvailability::NeedsPreparation
+                                    } else {
+                                        ListEntryAvailability::ModuleUnavailable
+                                    }
                                 }
                             }
                         } else {
-                            ListEntryAvailability::SourceUnavailable
+                            if self.modules.has_module(&item.domain.module) {
+                                ListEntryAvailability::SourceUnavailable
+                            } else {
+                                ListEntryAvailability::ModuleUnavailable
+                            }
                         };
-                    } else {
-                        view.availability = ListEntryAvailability::ModuleUnavailable;
                     }
                 }
             }

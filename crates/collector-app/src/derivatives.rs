@@ -13,7 +13,7 @@ use crate::ProcessingExecutionContext;
 pub fn build_music_conversion_recipe(
     id: RecipeId,
     source_fingerprint: SourceFingerprint,
-    tracks: &[collector_modules::music::ConversionPcmTrack],
+    tracks: &[collector_modules::disc_audio::ConversionPcmTrack],
     selected_positions: &[u16],
     profile: ConversionProfile,
     encoder_version: String,
@@ -252,13 +252,13 @@ mod tests {
     #[test]
     fn presets_seal_exact_music_owned_ranges_and_encoder_identity() {
         let tracks = vec![
-            collector_modules::music::ConversionPcmTrack {
+            collector_modules::disc_audio::ConversionPcmTrack {
                 position: 1,
                 start_frame: 0,
                 frame_count: 588,
                 leading_hidden_frames: 588,
             },
-            collector_modules::music::ConversionPcmTrack {
+            collector_modules::disc_audio::ConversionPcmTrack {
                 position: 2,
                 start_frame: 588,
                 frame_count: 1_176,
@@ -305,7 +305,7 @@ mod tests {
         let recipe = build_music_conversion_recipe(
             RecipeId::new(),
             source(),
-            &[collector_modules::music::ConversionPcmTrack {
+            &[collector_modules::disc_audio::ConversionPcmTrack {
                 position: 1,
                 start_frame: 0,
                 frame_count: 588,
@@ -423,6 +423,8 @@ pub struct FrozenDerivativeJob {
     pub collection_id: CollectionId,
     pub collection_binding: CollectionBinding,
     pub selection: collector_modules::music::CdPackageSelection,
+    #[serde(default)]
+    pub disc_audio: Option<collector_modules::disc_audio::DiscAudioManifest>,
     pub recipe: ConversionRecipe,
     pub representation_id: RepresentationId,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -431,10 +433,31 @@ pub struct FrozenDerivativeJob {
 impl FrozenDerivativeJob {
     pub fn validate(&self) -> Result<()> {
         self.recipe.validate()?;
-        if self.collection_binding
-            != (CollectionBinding::Assigned {
-                module: collector_core::ModuleId("org.junk.music".into()),
-            })
+        if self.selection.package_kind == collector_modules::music::CdPackageKind::CueAudio {
+            let audio = self.disc_audio.as_ref().ok_or_else(|| {
+                Error::Invalid("Game audio recipe needs its frozen source geometry".into())
+            })?;
+            audio.validate()?;
+            if self.collection_binding
+                != (CollectionBinding::Assigned {
+                    module: collector_core::ModuleId("org.junk.games".into()),
+                })
+                || self.recipe.tracks.iter().any(|track| {
+                    !audio.tracks.iter().any(|recorded| {
+                        recorded.position == track.position
+                            && recorded.start_frame == track.start.0
+                            && recorded.frame_count == track.length.0
+                    })
+                })
+                || audio.anchor_file_index != self.selection.anchor_file_index
+            {
+                return Err(Error::Conflict);
+            }
+        } else if self.disc_audio.is_some() {
+            return Err(Error::Conflict);
+        }
+
+        if !matches!(&self.collection_binding,CollectionBinding::Assigned{module} if !module.0.is_empty())
             || self.recipe.tracks.len() != 1
             || !matches!(
                 self.recipe.source_fingerprint.source,
@@ -573,8 +596,10 @@ impl CollectionService {
             Some(capture.collection_id),
             capture.association.item_id,
         )?;
-        if eligibility.owner.0 != "org.junk.music" {
-            return Err(Error::Invalid("music collection required".into()));
+        if !self.modules.supports_listening(&eligibility.owner) {
+            return Err(Error::Invalid(
+                "This collection type does not support audio listening".into(),
+            ));
         }
         if !capture.representations.iter().any(|r| {
             r.id == command.representation_id
@@ -610,6 +635,13 @@ impl CollectionService {
         binding: CollectionBinding,
         command: &PrepareMusicDerivative,
     ) -> Result<FrozenDerivativeJob> {
+        if matches!(&binding, CollectionBinding::Assigned { module } if module.0 == "org.junk.games")
+            != (command.selection.package_kind == collector_modules::music::CdPackageKind::CueAudio)
+        {
+            return Err(Error::Invalid(
+                "Choose the recorded audio layout for this collection type".into(),
+            ));
+        }
         let capture_id = capture.id;
         let source = PackageScope::Representation(command.representation_id);
         let fingerprint = self
@@ -623,15 +655,33 @@ impl CollectionService {
             },
             claim: None,
         };
-        let pcm = collector_modules::music::open_conversion_pcm_selection(
-            &host,
-            host.access,
-            &command.selection,
-        )?;
+        let mut disc_audio = None;
+        let tracks = if command.selection.package_kind
+            == collector_modules::music::CdPackageKind::CueAudio
+        {
+            let manifest = self
+                .recorded_game_audio(capture.collection_id, command.representation_id)?
+                .ok_or_else(|| {
+                    Error::Invalid("Inspect this original's CD audio before preparation".into())
+                })?;
+            if manifest.anchor_file_index != command.selection.anchor_file_index {
+                return Err(Error::Conflict);
+            }
+            let tracks = manifest.conversion_tracks();
+            disc_audio = Some(manifest);
+            tracks
+        } else {
+            collector_modules::music::open_conversion_pcm_selection(
+                &host,
+                host.access,
+                &command.selection,
+            )?
+            .tracks
+        };
         let mut recipe = build_music_conversion_recipe(
             RecipeId::new(),
             fingerprint,
-            &pcm.tracks,
+            &tracks,
             &[command.track_position],
             command.profile.clone(),
             command.encoder_version.clone(),
@@ -651,6 +701,7 @@ impl CollectionService {
             collection_id: capture.collection_id,
             collection_binding: binding,
             selection: command.selection.clone(),
+            disc_audio,
             recipe,
             representation_id: RepresentationId(identity),
             created_at: self.authentication.now(),
@@ -723,8 +774,10 @@ impl CollectionService {
             Some(item.collection_id),
             Some(item_id),
         )?;
-        if eligibility.owner.0 != "org.junk.music" {
-            return Err(Error::Invalid("music collection required".into()));
+        if !self.modules.supports_listening(&eligibility.owner) {
+            return Err(Error::Invalid(
+                "This collection type does not support audio listening".into(),
+            ));
         }
         // The receipt binds the client request, not derived tool or source state.
         // Resolve those only on the first execution; never nest command receipts.
@@ -798,10 +851,11 @@ impl CollectionService {
     ) -> Result<MusicAlbumCoverage> {
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, crate::Action::Browse)?;
-        if item.deleted || item.domain.module.0 != "org.junk.music" {
+        if item.deleted {
             return Err(Error::NotFound);
         }
-        let release = if self.modules.has_module(&item.domain.module)
+        let release = if item.domain.module.0 == "org.junk.music"
+            && self.modules.has_module(&item.domain.module)
             && self.modules.inspect(&item.domain).is_ok()
         {
             self.effective_music_release(&item)?
@@ -819,21 +873,39 @@ impl CollectionService {
                 representation.role == collector_core::RepresentationRole::PreservationMaster
             }) {
                 let layout = self.recorded_music_layout(item.collection_id, source.id)?;
-                let (disc_id, positions) = match layout {
-                    Some(collector_modules::music::CdProcessingResult::Layout {
-                        tracks,
-                        disc_ids,
-                        ..
-                    }) => (
-                        disc_ids.map(|ids| ids.musicbrainz),
+                let game_audio = if item.domain.module.0 == "org.junk.games" {
+                    self.recorded_game_audio(item.collection_id, source.id)?
+                } else {
+                    None
+                };
+                let (disc_id, positions) = if let Some(audio) = game_audio {
+                    (
+                        None,
                         Some(
-                            tracks
-                                .iter()
-                                .map(|track| u16::from(track.position))
+                            audio
+                                .tracks
+                                .into_iter()
+                                .map(|t| t.position)
                                 .collect::<Vec<_>>(),
                         ),
-                    ),
-                    _ => (None, None),
+                    )
+                } else {
+                    match layout {
+                        Some(collector_modules::music::CdProcessingResult::Layout {
+                            tracks,
+                            disc_ids,
+                            ..
+                        }) => (
+                            disc_ids.map(|ids| ids.musicbrainz),
+                            Some(
+                                tracks
+                                    .iter()
+                                    .map(|track| u16::from(track.position))
+                                    .collect::<Vec<_>>(),
+                            ),
+                        ),
+                        _ => (None, None),
+                    }
                 };
                 let assignment = assignments.iter().find(|value| {
                     value.source_representation_id == source.id
@@ -864,11 +936,15 @@ impl CollectionService {
                     capture_id: capture.id,
                     captured_at: capture.created_at,
                     source_representation_id: source.id,
-                    file_label: source
-                        .files
-                        .first()
-                        .map(|file| file.name.clone())
-                        .unwrap_or_else(|| "Original package".into()),
+                    file_label: if item.domain.module.0 == "org.junk.games" {
+                        "Game disc original".into()
+                    } else {
+                        source
+                            .files
+                            .first()
+                            .map(|file| file.name.clone())
+                            .unwrap_or_else(|| "Original package".into())
+                    },
                     file_count: source.files.len(),
                     recorded_disc_id: disc_id,
                     track_count: positions.as_ref().map(Vec::len),
@@ -1001,10 +1077,11 @@ impl CollectionService {
             return Err(Error::NotFound);
         }
         let music_owner = item.domain.module.0 == "org.junk.music";
+        let game_owner = item.domain.module.0 == "org.junk.games";
         let readable_music_schema = music_owner
             && self.modules.has_module(&item.domain.module)
             && self.modules.inspect(&item.domain).is_ok();
-        let writable_music = music_owner
+        let writable_music = self.modules.supports_listening(&item.domain.module)
             && self
                 .content_write_eligibility_for_job(user_id, Some(item.collection_id), Some(item_id))
                 .is_ok();
@@ -1049,6 +1126,18 @@ impl CollectionService {
                 }
                 let mut tracks = Vec::<ConversionTrack>::new();
                 let mut source_readable = false;
+                if game_owner
+                    && let Some(manifest) =
+                        self.recorded_game_audio(item.collection_id, source.id)?
+                {
+                    tracks.extend(manifest.tracks.into_iter().map(|track| ConversionTrack {
+                        position: track.position,
+                        start: PcmFrame(track.start_frame),
+                        length: PcmFrame(track.frame_count),
+                    }));
+                    source_readable = self.modules.supports_listening(&item.domain.module)
+                        && self.modules.inspect(&item.domain).is_ok();
+                }
                 if !recorded_only
                     && readable_music_schema
                     && let Ok(selection) =
@@ -1218,11 +1307,15 @@ impl CollectionService {
                             display_position: None,
                             audio_format: None,
                             capture_id: capture.id,
-                            source_label: source
-                                .files
-                                .first()
-                                .map(|f| f.name.clone())
-                                .unwrap_or_else(|| "Original".into()),
+                            source_label: if game_owner {
+                                "Game disc original".into()
+                            } else {
+                                source
+                                    .files
+                                    .first()
+                                    .map(|f| f.name.clone())
+                                    .unwrap_or_else(|| "Original".into())
+                            },
                             disc_position: medium.map(|m| m.position),
                             source_representation_id: source.id,
                             track_position: track.position,
@@ -1252,6 +1345,26 @@ impl CollectionService {
                 }
             }
         }
+        let edits = self.listening_track_overrides(item)?;
+        for row in &mut rows {
+            if let Some(edit) = edits.iter().find(|e| {
+                e.source_representation_id == row.source_representation_id
+                    && e.track_position == row.track_position
+            }) {
+                if let Some(title) = &edit.title {
+                    row.title = title.clone();
+                }
+                if edit.disc_position.is_some() {
+                    row.disc_position = edit.disc_position;
+                }
+                if edit.display_position.is_some() {
+                    row.display_position = edit.display_position;
+                }
+                if edit.album_selected == Some(false) {
+                    row.album_selection = collector_api_types::MusicAlbumSelection::Excluded;
+                }
+            }
+        }
         rows.sort_by_key(|row| {
             (
                 row.capture_id,
@@ -1268,6 +1381,19 @@ impl CollectionService {
         collection_id: CollectionId,
         source: RepresentationId,
     ) -> Result<collector_modules::music::CdPackageSelection> {
+        let collection = self.reader.collection(collection_id)?;
+        if matches!(collection.binding,CollectionBinding::Assigned{ref module} if module.0=="org.junk.games")
+        {
+            let audio = self
+                .recorded_game_audio(collection_id, source)?
+                .ok_or_else(|| {
+                    Error::Invalid("Inspect this original's CD audio before preparation".into())
+                })?;
+            return Ok(collector_modules::music::CdPackageSelection {
+                package_kind: collector_modules::music::CdPackageKind::CueAudio,
+                anchor_file_index: audio.anchor_file_index,
+            });
+        }
         let inventory = self
             .processing
             .package_inventory(collection_id, PackageScope::Representation(source))?;
@@ -1347,6 +1473,11 @@ impl CollectionService {
                 current_capture.association.item_id,
             )?;
             self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+            if !self.modules.supports_listening(&eligibility.owner) {
+                return Err(Error::Unavailable(
+                    "Audio listening module is unavailable".into(),
+                ));
+            }
             if self.processing.recorded_source(
                 frozen.collection_id,
                 frozen.recipe.source_fingerprint.source,
@@ -1374,6 +1505,18 @@ impl CollectionService {
             },
             claim: Some((self.jobs.as_ref(), claim)),
         };
+        if let Some(expected) = &frozen.disc_audio {
+            let actual = collector_modules::disc_audio::inspect(
+                &host,
+                host.access,
+                &inventory,
+                frozen.selection.anchor_file_index,
+            )?;
+            checkpoint()?;
+            if &actual != expected {
+                return Err(Error::Conflict);
+            }
+        }
         let pcm = collector_modules::music::open_conversion_pcm_selection(
             &host,
             host.access,

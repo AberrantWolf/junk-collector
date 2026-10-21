@@ -1472,7 +1472,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-accuraterip"
 version = "0.1.0"
-source = "git+https://github.com/AberrantWolf/junk-libs?rev=2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98#2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98"
+source = "git+https://github.com/AberrantWolf/junk-libs?rev=993afc932c6b2acb5cf02c95d3cb8a387d9a70a5#993afc932c6b2acb5cf02c95d3cb8a387d9a70a5"
 dependencies = [
  "junk-libs-core",
  "junk-libs-disc",
@@ -1482,7 +1482,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-audio"
 version = "0.1.0"
-source = "git+https://github.com/AberrantWolf/junk-libs?rev=2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98#2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98"
+source = "git+https://github.com/AberrantWolf/junk-libs?rev=993afc932c6b2acb5cf02c95d3cb8a387d9a70a5#993afc932c6b2acb5cf02c95d3cb8a387d9a70a5"
 dependencies = [
  "claxon",
  "junk-libs-disc",
@@ -1495,7 +1495,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-core"
 version = "0.1.0"
-source = "git+https://github.com/AberrantWolf/junk-libs?rev=2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98#2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98"
+source = "git+https://github.com/AberrantWolf/junk-libs?rev=993afc932c6b2acb5cf02c95d3cb8a387d9a70a5#993afc932c6b2acb5cf02c95d3cb8a387d9a70a5"
 dependencies = [
  "crc32fast",
  "md5",
@@ -1507,7 +1507,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-dat"
 version = "0.1.0"
-source = "git+https://github.com/AberrantWolf/junk-libs?rev=2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98#2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98"
+source = "git+https://github.com/AberrantWolf/junk-libs?rev=993afc932c6b2acb5cf02c95d3cb8a387d9a70a5#993afc932c6b2acb5cf02c95d3cb8a387d9a70a5"
 dependencies = [
  "log",
  "quick-xml",
@@ -1517,7 +1517,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-disc"
 version = "0.1.0"
-source = "git+https://github.com/AberrantWolf/junk-libs?rev=2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98#2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98"
+source = "git+https://github.com/AberrantWolf/junk-libs?rev=993afc932c6b2acb5cf02c95d3cb8a387d9a70a5#993afc932c6b2acb5cf02c95d3cb8a387d9a70a5"
 dependencies = [
  "chd",
  "crc32fast",
@@ -1532,7 +1532,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-disc-id"
 version = "0.1.0"
-source = "git+https://github.com/AberrantWolf/junk-libs?rev=2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98#2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98"
+source = "git+https://github.com/AberrantWolf/junk-libs?rev=993afc932c6b2acb5cf02c95d3cb8a387d9a70a5#993afc932c6b2acb5cf02c95d3cb8a387d9a70a5"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1543,7 +1543,7 @@ dependencies = [
 [[package]]
 name = "junk-libs-game-formats"
 version = "0.1.0"
-source = "git+https://github.com/AberrantWolf/junk-libs?rev=2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98#2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98"
+source = "git+https://github.com/AberrantWolf/junk-libs?rev=993afc932c6b2acb5cf02c95d3cb8a387d9a70a5#993afc932c6b2acb5cf02c95d3cb8a387d9a70a5"
 dependencies = [
  "crc32fast",
  "junk-libs-core",

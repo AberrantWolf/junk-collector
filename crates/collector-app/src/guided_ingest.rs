@@ -1113,7 +1113,12 @@ impl CollectionService {
         match record.view.phase {
             ImportPhase::Analyzing => {
                 if intent.analysis == IngestAnalysisPolicy::PreserveOnly
-                    || item.domain.module.0 == "org.junk.games"
+                    || (item.domain.module.0 == "org.junk.games"
+                        && !record
+                            .view
+                            .files
+                            .iter()
+                            .any(|file| file.name.to_ascii_lowercase().ends_with(".cue")))
                 {
                     record.view.review = Some(ImportReviewDecision {
                         identity: ImportIdentityDecision::Unidentified,

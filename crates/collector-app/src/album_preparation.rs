@@ -150,10 +150,7 @@ pub struct FrozenDerivativeBatchJob {
 impl FrozenDerivativeBatchJob {
     pub fn validate(&self) -> Result<()> {
         self.collection_binding.validate()?;
-        if self.collection_binding
-            != (CollectionBinding::Assigned {
-                module: collector_core::ModuleId("org.junk.music".into()),
-            })
+        if !matches!(&self.collection_binding,CollectionBinding::Assigned{module} if !module.0.is_empty())
             || self.profile != ConversionProfile::Flac
             || self.members.is_empty()
             || self.members.len() > MAX_ALBUM_PREPARATION_MEMBERS
@@ -280,8 +277,10 @@ impl CollectionService {
             Some(item.collection_id),
             Some(item.id),
         )?;
-        if eligibility.owner.0 != "org.junk.music" {
-            return Err(Error::Invalid("music collection required".into()));
+        if !self.modules.supports_listening(&eligibility.owner) {
+            return Err(Error::Invalid(
+                "This collection type does not support audio listening".into(),
+            ));
         }
         let rows = self.music_track_availability_for_item(user_id, item)?;
         let plan = album_plan_for_item(item, &rows);
@@ -1099,6 +1098,12 @@ pub fn preparation_layout_projection(
             .any(|(f, s)| f.sha256 != s.digest || f.bytes != s.bytes)
     {
         return Ok(None);
+    }
+    if let Some(audio) = collector_modules::games::recorded_disc_audio(
+        observation.operation.as_str(),
+        &observation.typed_result.payload,
+    )? {
+        return Ok(Some((source.id.to_string(), audio.tracks.len() as u16)));
     }
     if let Some(collector_modules::music::CdProcessingResult::Layout {
         tracks, disc_ids, ..

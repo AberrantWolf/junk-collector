@@ -6,6 +6,8 @@ pub mod music;
 pub mod import_discovery;
 pub mod scan_inputs;
 
+pub mod disc_audio;
+
 use collector_core::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -82,6 +84,8 @@ pub struct ModuleDescriptor {
     pub display_name: String,
     pub collection_type_label: String,
     pub metadata_terms: MetadataTerms,
+    #[serde(default)]
+    pub supports_listening: bool,
     pub fields: Vec<DomainFieldDescriptor>,
     pub capabilities: Vec<Capability>,
 }
@@ -838,6 +842,11 @@ impl Registry {
             scope,
         })
     }
+    pub fn supports_listening(&self, module: &ModuleId) -> bool {
+        self.modules
+            .get(module.0.as_str())
+            .is_some_and(|owner| owner.descriptor().supports_listening)
+    }
     pub fn descriptors(&self) -> Vec<ModuleDescriptor> {
         self.modules
             .values()
@@ -947,6 +956,7 @@ pub(crate) fn descriptor(
         display_name: name.into(),
         collection_type_label: name.into(),
         metadata_terms: metadata_terms(id),
+        supports_listening: false,
         fields,
         capabilities: vec![
             capability(

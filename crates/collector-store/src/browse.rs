@@ -90,8 +90,15 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
         return Err(Error::Invalid("search is too long".into()));
     }
     let scope = Digest::sha256(
-        &serde_json::to_vec(&(user, query.collection_id, search, query.sort, query.filter))
-            .map_err(storage)?,
+        &serde_json::to_vec(&(
+            user,
+            query.collection_id,
+            search,
+            query.sort,
+            query.filter,
+            query.listening_only,
+        ))
+        .map_err(storage)?,
     )
     .hex;
     let cursor = match query.cursor {
@@ -142,8 +149,13 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
     } else {
         " AND i.id IN (SELECT id FROM search WHERE search MATCH ?7)"
     };
+    let listening = if query.listening_only {
+        "(json_extract(i.record,'$.domain.module')='org.junk.music' OR EXISTS(SELECT 1 FROM music_search m WHERE m.item_id=i.id) OR EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=i.id AND EXISTS(SELECT 1 FROM conversion_recipes recipe WHERE recipe.id=json_extract(r.value,'$.id'))))"
+    } else {
+        "1"
+    };
     let sql = format!(
-        "SELECT i.record,{key},b.title_key FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
+        "SELECT i.record,{key},b.title_key FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND ({listening}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
         i64::from(query.filter == BrowseFilter::Removed),
         if query.filter == BrowseFilter::Removed {
             "g.role>=1"

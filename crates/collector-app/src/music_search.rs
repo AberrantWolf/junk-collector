@@ -84,6 +84,7 @@ pub fn music_search_projection(
     };
     let (album, artist) = music_search_labels(item, display, artist_override);
     let make = |disc, position, title: String, frames: Option<u64>| MusicSearchRecord {
+        source_representation_id: None,
         duration_ms: frames
             .filter(|frames| *frames > 0)
             .and_then(|frames| u64::try_from(u128::from(frames) * 1000 / 44100).ok()),
@@ -151,6 +152,9 @@ impl CollectionService {
                 .iter()
                 .filter(|row| {
                     row.primary_playback()
+                        && song
+                            .source_representation_id
+                            .is_none_or(|source| row.source_representation_id == source)
                         && row.track_position == song.track_position
                         && song
                             .disc_position

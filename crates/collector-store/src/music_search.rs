@@ -8,9 +8,10 @@ struct Cursor {
     id: String,
     disc: u16,
     track: u16,
+    source: String,
 }
 pub(super) fn install(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE IF NOT EXISTS music_search(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,disc INTEGER NOT NULL,track INTEGER NOT NULL,title_key TEXT NOT NULL,search_key TEXT NOT NULL,record TEXT NOT NULL,PRIMARY KEY(item_id,disc,track)); CREATE INDEX IF NOT EXISTS music_search_order ON music_search(collection_id,title_key,item_id,disc,track);").map_err(storage)
+    db.execute_batch("CREATE TABLE IF NOT EXISTS music_search(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,disc INTEGER NOT NULL,track INTEGER NOT NULL,title_key TEXT NOT NULL,search_key TEXT NOT NULL,record TEXT NOT NULL,source TEXT NOT NULL,PRIMARY KEY(item_id,disc,track,source)); CREATE INDEX IF NOT EXISTS music_search_order ON music_search(collection_id,title_key,item_id,disc,track,source);").map_err(storage)
 }
 pub(super) fn project(
     db: &Connection,
@@ -25,7 +26,11 @@ pub(super) fn project(
     )
     .map_err(storage)?;
     let mut songs = collector_app::music_search_projection(item, display, candidates, artist);
-    if item.domain.module.0 == "org.junk.music" && !item.deleted {
+    if matches!(
+        item.domain.module.0.as_str(),
+        "org.junk.music" | "org.junk.games"
+    ) && !item.deleted
+    {
         let mut hydrated = item.clone();
         hydrate_captures(db, &mut hydrated)?;
         let mut observations = Vec::new();
@@ -37,6 +42,9 @@ pub(super) fn project(
         {
             let fingerprint = processing::representation_fingerprint(representation)?;
             for operation in [
+                "org.junk.games.cd-audio",
+                "org.junk.games.identify",
+                "org.junk.games.import-analysis",
                 "org.junk.music.cd-structure",
                 "org.junk.music.import-analysis",
             ] {
@@ -70,12 +78,23 @@ pub(super) fn project(
             artist_override,
             authority.as_ref(),
         )?;
+        let game_songs = collector_app::game_audio_search_projection(
+            &hydrated,
+            &observations,
+            &album,
+            &artist,
+            authority.as_ref(),
+        )?;
+        if !game_songs.is_empty() {
+            songs = game_songs;
+        }
         if !file_songs.is_empty() {
             songs = file_songs;
         }
         if songs.is_empty() {
             for position in collector_app::recorded_song_positions(&observations)? {
                 songs.push(MusicSearchRecord {
+                    source_representation_id: None,
                     duration_ms: None,
                     item_id: item.id,
                     title: format!("Track {position:02}"),
@@ -93,7 +112,7 @@ pub(super) fn project(
             song.title, song.artist, song.album
         ));
         db.execute(
-            "INSERT INTO music_search VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO music_search VALUES(?,?,?,?,?,?,?,?)",
             params![
                 item.id.to_string(),
                 item.collection_id.to_string(),
@@ -101,7 +120,10 @@ pub(super) fn project(
                 song.track_position,
                 collector_app::normalized_music_search(&song.title),
                 search_key,
-                serde_json::to_string(&song).map_err(storage)?
+                serde_json::to_string(&song).map_err(storage)?,
+                song.source_representation_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default()
             ],
         )
         .map_err(storage)?;
@@ -137,7 +159,7 @@ pub(super) fn search(
         Some(_) => return Err(Error::Invalid("music cursor too large".into())),
         None => None,
     };
-    let mut stmt=db.prepare("SELECT m.record FROM music_search m JOIN items i ON i.id=m.item_id JOIN private.grants g ON g.collection_id=m.collection_id AND g.user_id=? WHERE m.collection_id=? AND i.deleted=0 AND instr(m.search_key,?)>0 AND (?=0 OR (m.title_key,m.item_id,m.disc,m.track)>(?,?,?,?)) ORDER BY m.title_key,m.item_id,m.disc,m.track LIMIT ?").map_err(storage)?;
+    let mut stmt=db.prepare("SELECT m.record FROM music_search m JOIN items i ON i.id=m.item_id JOIN private.grants g ON g.collection_id=m.collection_id AND g.user_id=? WHERE m.collection_id=? AND i.deleted=0 AND instr(m.search_key,?)>0 AND (?=0 OR (m.title_key,m.item_id,m.disc,m.track,m.source)>(?,?,?,?,?)) ORDER BY m.title_key,m.item_id,m.disc,m.track,m.source LIMIT ?").map_err(storage)?;
     let raw = stmt
         .query_map(
             params![
@@ -149,6 +171,7 @@ pub(super) fn search(
                 cursor.as_ref().map_or("", |c| c.id.as_str()),
                 cursor.as_ref().map_or(0, |c| c.disc),
                 cursor.as_ref().map_or(0, |c| c.track),
+                cursor.as_ref().map_or("", |c| c.source.as_str()),
                 u32::from(limit) + 1
             ],
             |r| r.get::<_, String>(0),
@@ -167,6 +190,10 @@ pub(super) fn search(
                 id: s.item_id.to_string(),
                 disc: s.disc_position.unwrap_or(0),
                 track: s.track_position,
+                source: s
+                    .source_representation_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
             })
             .map_err(storage)?,
         ))

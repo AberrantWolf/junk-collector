@@ -21,6 +21,17 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Game-disc CD audio — 2026-10-21 Collector source accepted
+
+Standard BINARY CUE/BIN game packages now record source-bound AUDIO ranges and
+reuse FLAC/Opus preparation, listening catalogs, playlists and manual track titles.
+Data tracks stay excluded. Games retain their identity, artwork and originals;
+no duplicate music import is required. Shared-reader owned-disc, actual owned/browser
+and isolated native streaming/offline checks pass, as do all 458 source tests and
+required source gates. Publishing the native consumer pin is still in progress. See [delivery](game-disc-audio.md) and
+[dated evidence](validation/game-disc-audio-2026-10-21.md). This is post-alpha.3
+source work, not a change to the published image's advertised formats.
+
 ## Focused release review and early body authentication — 2026-10-21
 
 Curation routes now authenticate before JSON/byte body extraction; administration
@@ -441,7 +452,7 @@ not require permanent provenance history. The current append-only envelopes and 
 2026-10-10 and 2026-10-17 deliveries reuse equivalent responses and provide explicit
 duplicate-payload conversion; general record deletion remains unimplemented. See [the accepted scope policy](decisions/home-lab-scope.md).
 
-## Game-disc listening scope — 2026-10-10
+## Game-disc listening scope — 2026-10-10 (historical)
 
 Listening to CD audio tracks preserved with games through the normal music
 interface and Trash Amp is requested future work, not an implemented capability.

@@ -18,6 +18,7 @@ struct StampWebFixtureModule;
 impl collector_modules::CollectionModule for AbsentFixtureModule {
     fn descriptor(&self) -> collector_modules::ModuleDescriptor {
         collector_modules::ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.absent".into()),
             schema_version: 8,
             display_name: "Temporary absent fixture".into(),
@@ -61,6 +62,7 @@ impl collector_modules::CollectionModule for StampWebFixtureModule {
     fn descriptor(&self) -> collector_modules::ModuleDescriptor {
         use collector_modules::{DomainFieldDescriptor, DomainFieldKind, ModuleDescriptor};
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.stamps".into()),
             schema_version: 1,
             display_name: "Stamp fixture module".into(),
@@ -4937,6 +4939,7 @@ async fn collection_lists_reads_and_writes_follow_listener_composition_and_roles
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Playlist".into(),
             },
             &command(),

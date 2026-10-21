@@ -1449,6 +1449,8 @@ pub enum BrowseFilter {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BrowseQuery {
     #[serde(default)]
+    pub listening_only: bool,
+    #[serde(default)]
     pub sort: BrowseSort,
     #[serde(default)]
     pub filter: BrowseFilter,

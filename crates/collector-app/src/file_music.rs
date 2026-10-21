@@ -430,6 +430,7 @@ pub fn file_music_search_projection(
                     .and_then(|v| v.split('/').next()?.parse().ok())
             });
             songs.entry((disc, position)).or_insert(MusicSearchRecord {
+                source_representation_id: None,
                 item_id: item.id,
                 title,
                 artist: artist_override
@@ -543,7 +544,7 @@ impl Seek for FileMetadataReader {
 fn file_track_overrides(
     item: &Item,
     record: Option<&MetadataAuthorityRecord>,
-) -> Result<Vec<collector_modules::music::MusicTrackOverride>> {
+) -> Result<Vec<collector_modules::disc_audio::TrackMetadataOverride>> {
     let Some(record) = record else {
         return Ok(vec![]);
     };
@@ -640,58 +641,5 @@ pub fn import_preservation_format(
         "original-file-audio-package"
     } else {
         "original-package"
-    }
-}
-
-impl CollectionService {
-    pub(crate) fn validate_file_track_edits(
-        &self,
-        item: &Item,
-        authority: &MetadataAuthority,
-        previous: &[collector_modules::music::MusicTrackOverride],
-    ) -> Result<()> {
-        let Some(overrides) = &authority.domain_overrides else {
-            return Ok(());
-        };
-        let overrides = overrides
-            .payload
-            .parse::<collector_modules::music::MusicMetadataOverrides>()?;
-        let mut positions = std::collections::BTreeMap::new();
-        for edit in overrides
-            .track_overrides
-            .iter()
-            .filter(|edit| !previous.contains(edit))
-        {
-            if !item
-                .captures
-                .iter()
-                .flat_map(|c| &c.representations)
-                .any(|r| r.id == edit.source_representation_id)
-            {
-                return Err(Error::Forbidden);
-            }
-            if let std::collections::btree_map::Entry::Vacant(entry) =
-                positions.entry(edit.source_representation_id)
-            {
-                let manifest = self
-                    .recorded_file_tracks(item.collection_id, edit.source_representation_id)?
-                    .ok_or_else(|| {
-                        Error::Invalid("No supported file track manifest is recorded.".into())
-                    })?;
-                entry.insert(
-                    manifest
-                        .tracks
-                        .into_iter()
-                        .map(|t| t.position)
-                        .collect::<std::collections::BTreeSet<_>>(),
-                );
-            }
-            if !positions[&edit.source_representation_id].contains(&edit.track_position) {
-                return Err(Error::Invalid(
-                    "Track edit does not address a recorded source track.".into(),
-                ));
-            }
-        }
-        Ok(())
     }
 }

@@ -1,4 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod disc_audio;
+pub use disc_audio::game_audio_search_projection;
 mod file_music;
 pub use file_music::{
     UpdateDigitalPurchase, file_music_search_projection, import_preservation_format,
@@ -1833,6 +1835,7 @@ impl From<Role> for EffectivePermissions {
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedCollection {
+    pub supports_listening: bool,
     pub id: CollectionId,
     pub revision: Revision,
     pub name: String,
@@ -1994,6 +1997,7 @@ pub struct PresentedAudioCheck {
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
+    pub supports_listening: bool,
     pub digital_audio: bool,
     pub workflow_generation: u64,
     pub merged_into: Option<ItemId>,
@@ -2431,7 +2435,22 @@ impl CollectionService {
         let role = self.reader.role(actor.user_id, collection.id)?;
         let (effective_permissions, content_permissions) =
             self.presented_content_permissions(role, &collection, None);
+        let supports_listening = matches!(&collection.binding, CollectionBinding::Assigned { module } if self.modules.supports_listening(module))
+            || !self
+                .reader
+                .browse(
+                    actor.user_id,
+                    BrowseQuery {
+                        listening_only: true,
+                        collection_id: Some(collection.id),
+                        limit: Some(1),
+                        ..Default::default()
+                    },
+                )?
+                .items
+                .is_empty();
         Ok(PresentedCollection {
+            supports_listening,
             id: collection.id,
             revision: collection.revision,
             name: collection.name,
@@ -2697,9 +2716,25 @@ impl CollectionService {
         } else {
             None
         };
+        let has_cd_audio_input = item
+            .captures
+            .iter()
+            .flat_map(|c| &c.representations)
+            .any(|r| {
+                r.role == RepresentationRole::PreservationMaster
+                    && r.files
+                        .iter()
+                        .any(|f| f.name.to_ascii_lowercase().ends_with(".cue"))
+            });
+        let supports_listening = (self.modules.supports_listening(&item.domain.module)
+            && (item.domain.module.0 == "org.junk.music" || has_cd_audio_input))
+            || !self
+                .music_track_availability_recorded(user, &item)?
+                .is_empty();
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
+            supports_listening,
             digital_audio,
             workflow_generation: item.lifecycle.generation,
             merged_into: item.lifecycle.merged_into,

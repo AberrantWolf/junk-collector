@@ -281,6 +281,7 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
     .await
     .unwrap();
     let list_input = collector_client::collector_api_types::CreateCollectionList {
+        kind: None,
         name: "LAN playlist".into(),
     };
     let key = TransactionId::new().to_string();

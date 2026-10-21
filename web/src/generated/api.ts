@@ -2938,6 +2938,7 @@ export interface components {
             name: string;
         };
         CreateCollectionList: {
+            kind?: null | components["schemas"]["CollectionListKind"];
             name: string;
         };
         CreateIntake: {
@@ -2979,6 +2980,25 @@ export interface components {
             order_reference?: string | null;
             source_url?: string | null;
             store?: string | null;
+        };
+        DiscAudioManifest: {
+            anchor_file_index: number;
+            data_tracks: number[];
+            tracks: components["schemas"]["DiscAudioTrack"][];
+            /** Format: int32 */
+            version: number;
+        };
+        DiscAudioTrack: {
+            /** Format: int64 */
+            frame_count: number;
+            /** Format: int32 */
+            position: number;
+            /** Format: int64 */
+            source_end_frame: number;
+            /** Format: int64 */
+            source_start_frame: number;
+            /** Format: int64 */
+            start_frame: number;
         };
         DiscardIngestCommand: {
             /** Format: int64 */
@@ -3124,6 +3144,10 @@ export interface components {
             status: components["schemas"]["GameDetectionStatus"];
         };
         GameProcessingResult: {
+            audio: components["schemas"]["DiscAudioManifest"];
+            /** @enum {string} */
+            result: "cd_audio";
+        } | {
             files: components["schemas"]["GameFileDigest"][];
             /** @enum {string} */
             result: "hashes";
@@ -3939,6 +3963,7 @@ export interface components {
             metadata_terms: components["schemas"]["MetadataTerms"];
             /** Format: int32 */
             schema_version: number;
+            supports_listening?: boolean;
         };
         ModuleId: string;
         ModulePresentation: {
@@ -4090,6 +4115,7 @@ export interface components {
             /** Format: int64 */
             duration_ms?: number | null;
             item_id: components["schemas"]["ItemId"];
+            source_representation_id?: null | components["schemas"]["RepresentationId"];
             title: string;
             /** Format: int32 */
             track_position: number;
@@ -4482,6 +4508,7 @@ export interface components {
                 id: components["schemas"]["CollectionId"];
                 name: string;
                 revision: components["schemas"]["Revision"];
+                supports_listening: boolean;
             }[];
             next_cursor?: string | null;
         };
@@ -4511,6 +4538,7 @@ export interface components {
                 revision: components["schemas"]["Revision"];
                 specimens: components["schemas"]["PresentedSpecimen"][];
                 subtitle: string;
+                supports_listening: boolean;
                 title: string;
                 translations: components["schemas"]["LocalizedText"][];
                 /** Format: date-time */
@@ -4709,6 +4737,7 @@ export interface components {
             id: components["schemas"]["CollectionId"];
             name: string;
             revision: components["schemas"]["Revision"];
+            supports_listening: boolean;
         };
         PresentedEvidence: {
             catalog?: null | components["schemas"]["CatalogSnapshot"];
@@ -4761,6 +4790,7 @@ export interface components {
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["PresentedSpecimen"][];
             subtitle: string;
+            supports_listening: boolean;
             title: string;
             translations: components["schemas"]["LocalizedText"][];
             /** Format: date-time */

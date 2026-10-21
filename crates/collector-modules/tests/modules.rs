@@ -44,6 +44,7 @@ impl CollectionModule for Stamps {
 
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.stamps".into()),
             schema_version: 2,
             display_name: "Stamps".into(),

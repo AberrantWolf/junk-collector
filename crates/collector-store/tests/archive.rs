@@ -47,6 +47,7 @@ struct LegacyUnavailableModule;
 impl CollectionModule for LegacyUnavailableModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.unavailable".into()),
             schema_version: 7,
             display_name: "Temporary legacy fixture".into(),
@@ -80,6 +81,7 @@ impl CollectionModule for LegacyUnavailableModule {
 impl CollectionModule for UnknownStampsModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.stamps".into()),
             schema_version: 4,
             display_name: "Temporary stamps fixture".into(),
@@ -122,6 +124,7 @@ impl CollectionModule for ReaderProcessingModule {
 
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.reader".into()),
             schema_version: 1,
             display_name: "Reader processing fixture".into(),
@@ -346,6 +349,7 @@ impl CollectionModule for ImportAnalyzingModule {
 
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.junk.music".into()),
             schema_version: 1,
             display_name: "Import analysis fixture".into(),
@@ -420,6 +424,7 @@ impl CollectionModule for ImportAnalyzingModule {
 impl CollectionModule for ArtworkSelectingModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.junk.music".into()),
             schema_version: 1,
             display_name: "Artwork selection fixture".into(),
@@ -1659,6 +1664,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
             .browse_presented(
                 &viewer,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Removed,
                     ..Default::default()
                 }
@@ -1678,6 +1684,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 filter: BrowseFilter::Removed,
                 ..Default::default()
             },
@@ -1690,6 +1697,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Removed,
                     search: Some("風の歌".into()),
                     ..Default::default()
@@ -4182,6 +4190,7 @@ fn pagination_and_fts_do_not_cross_grants() {
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 search: Some("Golden".into()),
                 limit: Some(1),
                 ..Default::default()
@@ -4194,6 +4203,7 @@ fn pagination_and_fts_do_not_cross_grants() {
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 search: Some("Golden".into()),
                 limit: Some(1),
                 cursor: first.next_cursor,
@@ -13418,6 +13428,7 @@ fn derivative_jobs_converge_replay_keep_track_ownership_and_survive_item_edits_r
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Playable,
                     ..Default::default()
                 }
@@ -15066,6 +15077,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
                 .browse_presented(
                     &actor,
                     BrowseQuery {
+                        listening_only: false,
                         sort,
                         filter,
                         limit: Some(17),
@@ -15094,6 +15106,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 limit: Some(1),
                 ..Default::default()
             },
@@ -15103,6 +15116,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
         service.browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 sort: BrowseSort::Artist,
                 cursor: first.next_cursor,
                 ..Default::default()
@@ -15143,6 +15157,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     search: Some("Zebra".into()),
                     ..Default::default()
                 }
@@ -15197,6 +15212,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
             .browse_presented(
                 &viewer,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::NeedsAttention,
                     ..Default::default()
                 }
@@ -15259,6 +15275,7 @@ fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter,
                     ..Default::default()
                 },
@@ -15282,6 +15299,7 @@ fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Playable,
                     ..Default::default()
                 }
@@ -17266,6 +17284,7 @@ fn checkpoint_generated_scale_measurements() {
                 .browse_presented(
                     &actor,
                     BrowseQuery {
+                        listening_only: false,
                         collection_id: Some(collection.id),
                         limit: Some(50),
                         ..Default::default()
@@ -19634,6 +19653,7 @@ fn collection_lists_track_occurrences_replay_conflict_and_rebuild_without_payloa
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Evening".into(),
             },
             &create,
@@ -19645,6 +19665,7 @@ fn collection_lists_track_occurrences_replay_conflict_and_rebuild_without_payloa
                 &actor,
                 collection.id,
                 CreateCollectionList {
+                    kind: None,
                     name: "Evening".into()
                 },
                 &create
@@ -19829,6 +19850,7 @@ fn collection_lists_enforce_collection_roles_and_frozen_source_revisions() {
             &curator,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Shared".into(),
             },
             &command(),
@@ -19975,6 +19997,7 @@ fn collection_lists_recover_each_archive_commit_boundary_and_command_receipt() {
         let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
         let receipt = command();
         let request = CreateCollectionList {
+            kind: None,
             name: "Recovered".into(),
         };
         assert!(
@@ -20044,6 +20067,7 @@ fn collection_lists_generic_items_and_music_source_choices_remain_distinct() {
             &actor,
             games.id,
             CreateCollectionList {
+                kind: None,
                 name: "To finish".into(),
             },
             &command(),
@@ -20112,6 +20136,7 @@ fn collection_lists_generic_items_and_music_source_choices_remain_distinct() {
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Music".into(),
             },
             &command(),
@@ -20192,6 +20217,7 @@ fn collection_lists_follow_merged_capture_ownership_and_guarded_undo() {
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Across grouping".into(),
             },
             &command(),
@@ -20364,6 +20390,7 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
                     &actor,
                     collection.id,
                     CreateCollectionList {
+                        kind: None,
                         name: "Complete disc scope".into(),
                     },
                     &command(),
@@ -20415,6 +20442,7 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
                 &actor,
                 collection.id,
                 CreateCollectionList {
+                    kind: None,
                     name: "Restored disc".into(),
                 },
                 &command(),
@@ -23658,6 +23686,7 @@ fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Purchased playlist".into(),
             },
             &command(),
@@ -24230,4 +24259,243 @@ fn mp3_single_and_multidisc_purchase_have_distinct_items_and_native_order() {
             .specimen_id,
         None
     );
+}
+
+#[test]
+fn game_disc_audio_import_preparation_search_playlists_and_reindex() {
+    use collector_app::{
+        CollectionListChange, CreateCollectionList, MusicSearchQuery, UpdateCollectionList,
+    };
+    let (root, store, actor, base, _) = setup();
+    let collection = base
+        .create_collection(
+            &AuthenticatedPrincipal {
+                principal: actor.clone(),
+                credential_kind: CredentialKind::TestLocal,
+                authenticated_at: chrono::Utc::now(),
+            },
+            CreateCollectionCommand {
+                name: "Game audio".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let service = base.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let cue=b"FILE \"disc.bin\" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\n TRACK 02 AUDIO\n INDEX 00 00:00:01\n INDEX 01 00:00:02\n TRACK 03 AUDIO\n INDEX 00 00:00:03\n INDEX 01 00:00:04\n";
+    let pcm = vec![0x55; 6 * 2352];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: Some(0),
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Mixed game".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "game.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let started = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = started.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, import, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import, 1, 0, &pcm)
+        .unwrap();
+    provider_drain(&service);
+    let detail = service.ingest_detail(&actor, import).unwrap();
+    let id = detail.summary.target_item_id.expect("Game published");
+    let saved = store.item(id).unwrap();
+    let capture = &saved.captures[0];
+    let source = capture.representations[0].id;
+    assert_eq!(saved.domain.module.0, "org.junk.games");
+    let tracks = service
+        .recorded_music_track_availability(&actor, id)
+        .unwrap();
+    assert_eq!(
+        tracks
+            .iter()
+            .filter(|v| v.primary_playback())
+            .map(|v| v.track_position)
+            .collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    assert!(
+        tracks
+            .iter()
+            .all(|v| v.source_label == "Game disc original")
+    );
+    let inventory = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                kind: None,
+                name: "Inventory".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(inventory.kind, CollectionListKind::Items);
+    let list = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                kind: Some(CollectionListKind::MusicTracks),
+                name: "Soundtrack".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let list = service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: list.revision,
+                change: CollectionListChange::Append {
+                    item_id: id,
+                    source_representation_id: Some(source),
+                    track_position: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(list.entry_count, 2);
+    let review = service.metadata_review(&actor, id).unwrap();
+    service.update_metadata_authority(&actor,id,UpdateMetadataAuthorityCommand {expected_revision:review.revision,change:MetadataAuthorityChange::SetDomainOverrides {overrides:ModuleData {module:saved.domain.module.clone(),schema_version:1,payload:RawJson::from_value(serde_json::json!({"track_overrides":[{"source_representation_id":source,"track_position":2,"title":"Game theme","disc_position":1,"display_position":1}]}))}}}, &command()).unwrap();
+    let songs = service
+        .music_search(
+            &actor,
+            collection.id,
+            MusicSearchQuery {
+                search: Some("Game theme".into()),
+                cursor: None,
+                limit: Some(1),
+            },
+        )
+        .unwrap();
+    assert_eq!(songs.items.len(), 1);
+    assert_eq!(songs.items[0].song.source_representation_id, Some(source));
+    assert!(songs.items[0].sources.iter().all(|v| v.track_position == 2
+        && v.source_representation_id == source
+        && v.title == "Game theme"));
+    // Catalog reads and admission use recorded geometry even when the large
+    // master is temporarily offline. Byte validation belongs to the worker.
+    let paths = files_named(&root.path().join("archive"), "disc.bin");
+    assert_eq!(paths.len(), 1);
+    let held = paths[0].with_extension("held");
+    std::fs::rename(&paths[0], &held).unwrap();
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, id)
+            .unwrap()
+            .iter()
+            .filter(|v| v.primary_playback())
+            .count(),
+        2
+    );
+    let batch = service
+        .prepare_music_album(
+            &actor,
+            id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![source],
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    let result = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(result.failed, 2, "{result:?}");
+    assert_eq!(result.succeeded, 0);
+    assert_eq!(store.capture(capture.id).unwrap().representations.len(), 1);
+    std::fs::rename(held, &paths[0]).unwrap();
+    service
+        .retry_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    provider_drain(&service);
+    let result = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(result.succeeded, 2, "{result:?}");
+    store.reindex().unwrap();
+    let albums = service
+        .listening_albums(
+            &actor,
+            BrowseQuery {
+                collection_id: Some(collection.id),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(albums.items.len(), 1);
+    assert_eq!(albums.items[0].id, id);
+    let snapshot = service
+        .album_playback_snapshot(&actor, id, Some(source))
+        .unwrap();
+    assert_eq!(snapshot.tracks.len(), 2);
+    assert_eq!(snapshot.tracks[0].title, "Game theme");
+    assert_eq!(snapshot.tracks[0].display_position, Some(1));
+    let missing = CollectionService::new(store.clone(), Arc::new(Registry::default()));
+    let historical = missing
+        .collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            collector_app::ListEntriesQuery {
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(historical.entries.items.iter().all(|entry| matches!(
+        entry.availability,
+        collector_app::ListEntryAvailability::Available { .. }
+    )));
+
+    assert!(snapshot.tracks.iter().all(|v| matches!(
+        v.state,
+        collector_app::MusicTrackAvailabilityState::Available { .. }
+    )));
 }

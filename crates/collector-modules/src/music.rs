@@ -1,3 +1,4 @@
+use crate::disc_audio::{ConversionPcmSource, ConversionPcmTrack};
 use collector_core::PackageFileName;
 pub mod catalog;
 pub mod files;
@@ -62,22 +63,10 @@ pub struct MusicItemPatch {
 #[serde(deny_unknown_fields)]
 pub struct MusicMetadataOverrides {
     #[serde(default)]
-    pub track_overrides: Vec<MusicTrackOverride>,
+    pub track_overrides: Vec<crate::disc_audio::TrackMetadataOverride>,
     pub artist: Option<String>,
     #[serde(default)]
     pub disc_assignments: Vec<MusicDiscAssignment>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct MusicTrackOverride {
-    #[serde(default)]
-    pub album_selected: Option<bool>,
-    pub source_representation_id: RepresentationId,
-    pub track_position: u16,
-    pub title: Option<String>,
-    pub disc_position: Option<u16>,
-    pub display_position: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -91,6 +80,7 @@ pub struct MusicDiscAssignment {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CdPackageKind {
+    CueAudio,
     Cue,
     Redumper,
 }
@@ -100,26 +90,6 @@ pub enum CdPackageKind {
 pub struct CdPackageSelection {
     pub package_kind: CdPackageKind,
     pub anchor_file_index: usize,
-}
-
-/// Music-owned mapping from one supported package timeline to independently
-/// addressable derivative tracks. Coordinates are stereo PCM frames in the
-/// returned reader, not CD sectors or AccurateRip sample offsets.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConversionPcmTrack {
-    pub position: u16,
-    pub start_frame: u64,
-    pub frame_count: u64,
-    /// Stored audio before this track's INDEX 01 which this mapping retains.
-    /// D05's later INDEX 00 spans belong to the preceding track; only track 1
-    /// can therefore have a nonzero leading count here (HTOA).
-    pub leading_hidden_frames: u64,
-}
-
-pub struct ConversionPcmSource {
-    pub reader: Box<dyn junk_libs_disc::CdPcmReader + Send>,
-    pub tracks: Vec<ConversionPcmTrack>,
-    pub total_frames: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1485,7 +1455,7 @@ fn anchor_file(
         .ok_or_else(|| ModuleError::Invalid("anchor file index is out of bounds".into()))
 }
 
-fn read_cue(
+pub(crate) fn read_cue(
     host: &dyn crate::ModuleHost,
     access: PackageAccess,
     inventory: &PackageInventory,
@@ -1521,6 +1491,9 @@ fn analyze_selection(
     selection: &CdPackageSelection,
 ) -> ModuleResult<CdProcessingResult> {
     match selection.package_kind {
+        CdPackageKind::CueAudio => Err(ModuleError::UnavailableCapability(
+            "Playback-only game CD audio does not support whole-disc verification".into(),
+        )),
         CdPackageKind::Cue => {
             let (id, cue) = read_cue(host, access, inventory, selection.anchor_file_index)?;
             analyze_cue_package(&cue, id, inventory)
@@ -1571,6 +1544,11 @@ fn open_pcm_selection(
 ) -> ModuleResult<(PackagePcmReader, Vec<DiscPcmTrack>, CdProcessingResult)> {
     let layout = analyze_selection(host, access, inventory, selection)?;
     let (reader, tracks) = match selection.package_kind {
+        CdPackageKind::CueAudio => {
+            return Err(ModuleError::UnavailableCapability(
+                "Playback-only game CD audio does not support whole-disc verification".into(),
+            ));
+        }
         CdPackageKind::Cue => {
             let (id, cue) = read_cue(host, access, inventory, selection.anchor_file_index)?;
             let (reader, tracks) =
@@ -1599,6 +1577,12 @@ pub fn open_conversion_pcm_selection(
 ) -> ModuleResult<ConversionPcmSource> {
     let inventory = host.package_inventory(access)?;
     match selection.package_kind {
+        CdPackageKind::CueAudio => crate::disc_audio::open_conversion(
+            host,
+            access,
+            &inventory,
+            selection.anchor_file_index,
+        ),
         CdPackageKind::Cue => {
             let (id, cue) = read_cue(host, access, &inventory, selection.anchor_file_index)?;
             open_cue_conversion_pcm_package(&cue, id, &inventory, |file| {
@@ -2050,7 +2034,7 @@ impl CollectionModule for Music {
             .map(|(index, kind)| IngestAnchorChoice {
                 file_index: *index,
                 label: match kind {
-                    CdPackageKind::Cue => "BIN/CUE",
+                    CdPackageKind::Cue | CdPackageKind::CueAudio => "BIN/CUE",
                     CdPackageKind::Redumper => "Redumper TOC",
                 }
                 .into(),
@@ -2138,6 +2122,7 @@ impl CollectionModule for Music {
             availability: Availability::Available,
             scope: OperationScope::CollectionDomain,
         };
+        descriptor.supports_listening = true;
         descriptor.capabilities.extend([
             capability(CD_STRUCTURE_OPERATION, "Inspect CD structure"),
             capability(
@@ -2181,20 +2166,7 @@ impl CollectionModule for Music {
             .parse()
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
         validate_texts([&value.artist])?;
-        if value.track_overrides.len() > 10_000 {
-            return Err(ModuleError::Invalid("too many track edits".into()));
-        }
-        let mut tracks = std::collections::BTreeSet::new();
-        for track in &value.track_overrides {
-            validate_texts([&track.title])?;
-            if track.track_position == 0
-                || track.disc_position == Some(0)
-                || track.display_position == Some(0)
-                || !tracks.insert((track.source_representation_id, track.track_position))
-            {
-                return Err(ModuleError::Invalid("invalid source track edit".into()));
-            }
-        }
+        crate::disc_audio::validate_track_overrides(&value.track_overrides)?;
         if value.disc_assignments.len() > 128 {
             return Err(ModuleError::Invalid("too many disc assignments".into()));
         }

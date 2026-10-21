@@ -86,6 +86,7 @@ fn archive_export_cli_preserves_history_unknown_data_artwork_and_lists_with_fres
             &authenticated.principal,
             collection_id,
             CreateCollectionList {
+                kind: None,
                 name: "Preserved order".into(),
             },
             &CommandContext::new("create-export-list").unwrap(),
@@ -160,6 +161,7 @@ fn archive_export_cli_preserves_history_unknown_data_artwork_and_lists_with_fres
             &authenticated.principal,
             collection_id,
             CreateCollectionList {
+                kind: None,
                 name: "Created after export".into(),
             },
             &CommandContext::new("after-export").unwrap(),

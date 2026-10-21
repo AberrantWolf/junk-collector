@@ -311,3 +311,117 @@ fn identification_envelope_cannot_invent_matches_or_completeness() {
         );
     }
 }
+
+#[test]
+fn mixed_game_audio_keeps_disc_numbers_and_never_decodes_data() {
+    use collector_modules::disc_audio::*;
+    let cue = b"FILE \"data.bin\" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\nFILE \"audio.bin\" BINARY\n TRACK 02 AUDIO\n INDEX 00 00:00:00\n INDEX 01 00:00:01\n TRACK 03 AUDIO\n INDEX 00 00:00:02\n INDEX 01 00:00:03\n";
+    let bytes = (0..5 * 588)
+        .flat_map(|frame| {
+            let left = (frame as i16).to_le_bytes();
+            let right = (-(frame as i16)).to_le_bytes();
+            [left[0], left[1], right[0], right[1]]
+        })
+        .collect();
+    let host = Host::new(vec![
+        ("game.cue", cue.to_vec()),
+        ("data.bin", vec![0xa5; 2352]),
+        ("audio.bin", bytes),
+    ]);
+    let audio = inspect(
+        &host,
+        host.access,
+        &host.package_inventory(host.access).unwrap(),
+        0,
+    )
+    .unwrap();
+    assert_eq!(audio.data_tracks, vec![1]);
+    assert_eq!(
+        audio
+            .tracks
+            .iter()
+            .map(|t| (t.position, t.start_frame, t.frame_count))
+            .collect::<Vec<_>>(),
+        vec![(2, 0, 2 * 588), (3, 2 * 588, 2 * 588)]
+    );
+    let mut pcm = open_conversion(
+        &host,
+        host.access,
+        &host.package_inventory(host.access).unwrap(),
+        0,
+    )
+    .unwrap();
+    let mut out = [[0i16; 2]; 700];
+    let mut actual = vec![];
+    loop {
+        let n = pcm.reader.read_frames(&mut out).unwrap();
+        if n == 0 {
+            break;
+        }
+        actual.extend_from_slice(&out[..n]);
+    }
+    let expected = (588..5 * 588)
+        .map(|frame| [frame as i16, -(frame as i16)])
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+    pcm.reader.seek_frame(2 * 588).unwrap();
+    assert!(pcm.reader.read_frames(&mut out).unwrap() > 0);
+    assert_eq!(out[0], [3 * 588, -(3 * 588)]);
+    let mut identification = host.identify();
+    let capability = CapabilityId::new("org.junk.games.identify").unwrap();
+    Games
+        .validate_operation_result(
+            &capability,
+            &RawJson::from_value(serde_json::to_value(&identification).unwrap()),
+        )
+        .unwrap();
+    identification.analyses.push(GameProcessingResult::CdAudio {
+        audio: audio.clone(),
+    });
+    let duplicate = RawJson::from_value(serde_json::to_value(&identification).unwrap());
+    assert!(
+        Games
+            .validate_operation_result(&capability, &duplicate)
+            .is_err()
+    );
+    assert!(recorded_disc_audio(capability.as_str(), &duplicate).is_err());
+    let mut inconsistent = audio.clone();
+    inconsistent.tracks[1].start_frame += 1;
+    assert!(inconsistent.validate().is_err());
+    let mut inconsistent = audio;
+    inconsistent.data_tracks.push(2);
+    assert!(inconsistent.validate().is_err());
+}
+
+#[test]
+fn game_audio_rejects_malformed_or_truncated_cue_sources() {
+    use collector_modules::disc_audio::*;
+    for (cue, length) in [
+        (
+            "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n",
+            2351,
+        ),
+        (
+            "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\nFILE \"./audio.bin\" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:00:00\n",
+            2352,
+        ),
+        (
+            "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n UNSUPPORTED 1\n",
+            2352,
+        ),
+    ] {
+        let host = Host::new(vec![
+            ("game.cue", cue.as_bytes().to_vec()),
+            ("audio.bin", vec![0; length]),
+        ]);
+        assert!(
+            inspect(
+                &host,
+                host.access,
+                &host.package_inventory(host.access).unwrap(),
+                0
+            )
+            .is_err()
+        );
+    }
+}
