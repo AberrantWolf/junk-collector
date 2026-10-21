@@ -1670,3 +1670,11 @@ an actual successful network chunk: the next uncached byte is denied to the
 separate Viewer. Nine affected adapter tests and strict Clippy/formatting pass;
 buffered and retained offline bytes are outside that revocation claim. See the
 same [bounded native acceptance](validation/native-failure-recovery-2026-10-21.md).
+
+Native source `339a871` adds accepted real-TLS range rejection/recovery,
+header/body-stall cancellation and pinned-identity rejection with complete-catalog
+retention. Eleven affected adapter tests pass with strict Clippy and formatting;
+the physical-output callback remains an existing opt-in check. Native UI queue
+continuity and the remaining physical-device/network/trust scenarios retain their
+HL-04 limits. See the same
+[finite acceptance](validation/native-failure-recovery-2026-10-21.md).

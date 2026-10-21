@@ -255,10 +255,15 @@ and sibling `docs/collector-connection.md`. Finish:
   permission change, and the next uncached read is denied. Reuse the same
   [bounded acceptance](validation/native-failure-recovery-2026-10-21.md); buffered
   bytes and retained offline copies are not recalled.
-- Exercise playback/transitions, seek and queue continuity across output-device
-  loss, stalled/malformed/changed ranges and denied trust. Reuse the accepted
-  actual-read grant/device revocation above. Keep the passing ordinary CD and FLAC/MP3 paths as the
-  baseline. Reuse the accepted native playlist recovery above.
+- Bounded actual native transport faults are qualified: changed/ignored/truncated
+  range rejection without partial publication, successful read/seek recovery,
+  cancellation during header/body stalls, and wrong pinned-TLS identity rejection
+  while retaining the complete catalog. See the same
+  [acceptance](validation/native-failure-recovery-2026-10-21.md).
+- Exercise remaining native UI playback/transitions, seek and queue continuity
+  through output-device loss and transport failures on the actual supported
+  client. Reuse the accepted transport, revocation and playlist recovery cases
+  above; they do not establish physical output behavior or every UI transition.
 - Reuse the qualified actual second-device Safari journey above; do not repeat
   its trusted browse/artwork/playback, Curator/Viewer or grant/session checks.
   Verify Internet-disconnected LAN use on the actual client. Use Trash Amp on a
@@ -1047,8 +1052,11 @@ milestone. Complete focused authentication/upload/media review and actionable
 repairs first (HL-05H and the bounded checklist are now delivered). Game-disc audio
 across the shared reader, Collector, web and Trash Amp is delivered in source, with
 owned/browser/native acceptance; general PDF/text documents are also delivered.
-The opt-in backup-age reminder is also delivered. Continue independent native failure qualification where it can be delivered
-without new product/provider decisions. Preserve staged sibling release work.
+The opt-in backup-age reminder is also delivered. Bounded native software failure
+qualification now covers durable command loss/restart, actual-read grant/device
+revocation, changed/ignored/truncated ranges, header/body stall cancellation and
+wrong pinned-trust recovery. The remaining HL-04 UI/physical-device/network checks
+and conditional provider/product decisions retain their named limits. Preserve staged sibling release work.
 Read-only access to useful material in `~/dumps` is explicitly authorized; use owned
 mixed-mode references when available, keep originals unchanged and never commit
 copyrighted media. Keep actual-device/reference gaps unqualified and continue other

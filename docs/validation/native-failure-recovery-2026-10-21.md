@@ -45,3 +45,28 @@ prevent teardown hangs. Nothing mocks a successful read or authorization result.
 All nine adapter tests and strict Clippy/formatting pass; the physical-output test
 remains opt-in. This qualifies future reads, not recall of buffered bytes or
 retained offline copies, and does not establish output-device loss handling.
+
+## Actual range faults, cancellation and pinned-trust recovery
+
+Native `339a871` adds a bounded real-server response fault adapter. After a normal
+chunk, changed ETag, ignored Range/200 and a streamed body ending short all fail
+without publishing a byte to the caller or advancing its position. Normal retry
+and backward seek then succeed. Other cases hold real response headers or the
+actual authorized body; cancellation returns Interrupted before the normal timeout.
+The fixture is released before assertions and readers/runtimes stay on workers.
+No stored master is altered and no successful source bytes are manufactured.
+
+The two-server regression also sends a saved pinned connection to a different
+TLS identity: refresh fails, the last complete catalog is retained exactly, and
+restoring the original route/trust permits a new successful refresh. This tests
+owner-provided certificate trust, not system-trusted second-device enrollment.
+All eleven adapter tests pass (four unit/seven actual TLS), with one existing
+physical-output callback opt-in/ignored, strict all-target Clippy and formatting.
+No dependency versions or production adapters change in this qualification.
+
+The finite transport cases above are accepted. Native UI playback/queue behavior
+across every fault, actual output-device loss, system-trusted second-device
+approval and actual Internet-disconnected LAN use remain separate. Reuse these
+software checks instead of restarting an exhaustive matrix or duplicating them
+through a public tunnel. Existing physical Safari and normal native playback
+acceptance remain valid within their recorded limits.
