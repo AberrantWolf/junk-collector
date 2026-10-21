@@ -19,7 +19,7 @@ jobs:
           ref: ${{ inputs.source_ref || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           components: rustfmt, clippy
       - uses: actions/setup-node@v4
         with:

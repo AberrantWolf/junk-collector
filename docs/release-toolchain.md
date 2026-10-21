@@ -1,8 +1,18 @@
 # Release Rust toolchain
 
+Alpha.3 preparation, 2026-10-21: the official stable manifest dated
+[2026-10-15](https://static.rust-lang.org/dist/2026-10-15/channel-rust-stable.toml)
+selects **Rust 1.99.1** (`58cf8f9c3`, compiler date 2026-10-13). It was installed
+side by side with 1.99.0 and passed source/release/browser qualification. Repository/CI pins, README and the exact
+`rust:1.99.1-slim-bookworm` builder now agree. The builder tag exposes native
+AMD64/ARM64 manifests. The [alpha.3 acceptance record](validation/container-publication-2026-10-21.md)
+records completed checks and publication separately; pending builds are not acceptance.
+No shared-library code or dependency pins changed in this delivery.
+
+
 The October 9 maintenance delivery selects Rust 1.99.0, the current stable release
 announced on [October 1](https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/).
-`rust-toolchain.toml`, CI, the Docker builder and README use this tested baseline.
+That was the tested baseline for alpha.2; the current alpha.3 baseline is above.
 The existing warning-denied Collector Clippy finding in PCM serialization now uses
 fixed-size `as_chunks_mut::<4>()` arrays, preserving the little-endian stereo bytes.
 No lint was suppressed. The tested release baseline is not an independently
