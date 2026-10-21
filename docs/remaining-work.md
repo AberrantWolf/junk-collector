@@ -246,11 +246,14 @@ and sibling `docs/collector-connection.md`. Finish:
   multiple servers/accounts, cancelled or interrupted enrollment and switching
   during playback or uncertain edits. Reassess old native matrix cases against
   the actual Trash Amp implementation before adding new requirements.
+- Native playlist command response loss/restart is now qualified in source:
+  actual TLS create/append commits, truncated responses, atomic pending-input
+  binding, profile reopen and exact replay without duplicate playlists/entries.
+  See [bounded acceptance](validation/native-failure-recovery-2026-10-21.md).
 - Exercise playback/transitions, seek and queue continuity across output-device
   loss, stalled/malformed/changed ranges, denied trust and grant/device revocation
   during actual reads. Keep the passing ordinary CD and FLAC/MP3 paths as the
-  baseline. Native playlist command loss/restart recovery should demonstrate the
-  real durable-command path, not reproduce Phono tests.
+  baseline. Reuse the accepted native playlist recovery above.
 - Reuse the qualified actual second-device Safari journey above; do not repeat
   its trusted browse/artwork/playback, Curator/Viewer or grant/session checks.
   Verify Internet-disconnected LAN use on the actual client. Use Trash Amp on a

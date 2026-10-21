@@ -1653,3 +1653,14 @@ it. Existing backups without receipts stay unknown, and restored copies retain
 their captured history rather than inventing a new validation. See the
 [operator instructions](local-alpha-installation.md#optional-backup-age-reminder)
 and [acceptance](validation/backup-reminder-2026-10-21.md). Published alpha.3 is unchanged.
+
+### Native list response/restart recovery — 2026-10-21
+
+Trash Amp source `0493b59` fences the complete inputs of an unresolved playlist
+receipt before HTTP. Actual TLS tests truncate responses after genuine create and
+append commits, reopen the native profile and retry saved requests without extra
+playlists or entries. All eight affected adapter tests and strict Clippy passed;
+the actual-output callback remains an existing opt-in test. The staged native
+release checkout is preserved. See [acceptance and remaining physical/media-read
+limits](validation/native-failure-recovery-2026-10-21.md). This source change is not
+a new native or Docker release.
