@@ -228,7 +228,7 @@ COLLECTOR_INBOX_GID=65538
 ```
 
 The inbox source must already exist; the override refuses to create a misspelled
-source path. It mounts `/inbox` read-only and applies the same supplemental group
+source path. It mounts `/inbox` read-only by default and applies the same supplemental group
 to server and CLI tools. Add this section to the actual server config while stopped:
 
 ```toml
@@ -244,10 +244,13 @@ docker compose run --rm --entrypoint ls cli /inbox
 ```
 
 Grant traverse/read permission to the host group on the share and package
-subdirectories, including SMB-created files. If explicitly choosing a writable
-mount, edit `read_only` in the override and grant the corresponding host ACL; neither
-change enables source cleanup. Imports keep source files. Optional cleanup remains
-unimplemented. Do not recursively change ownership of an existing music share.
+subdirectories, including SMB-created files. For explicit per-import cleanup, set
+`COLLECTOR_INBOX_READ_ONLY=false` in `.env`, grant the corresponding host write/
+traverse ACLs and recreate the service. Both server and CLI use that bind choice.
+If you previously edited `read_only` directly, retain that choice in `.env` when
+using a new bundle. Write access alone never deletes sources: use the separate
+confirmed [inbox cleanup action](../../docs/inbox-cleanup.md) after preservation.
+Do not recursively change ownership of an existing music share.
 
 Doctor reports whether provider contact is configured and validates its format.
 A monitored MusicBrainz contact is required, not an account. Configured providers

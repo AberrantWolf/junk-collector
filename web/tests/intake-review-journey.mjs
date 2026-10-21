@@ -6,7 +6,7 @@ import {expect} from '@playwright/test';
 export async function intakeReviewJourney(page,{scratch,startProviderFixture,restartServer}){
  const nav=page.getByRole('navigation',{name:'Collection tasks'});
  const inbox=path.join(scratch,'inbox');
- const packageNames=['Review disc 1','Review disc 2'];
+ const packageNames=['Review disc 1','Review disc 2'];let cleanupFixture;
  for(const [index,name] of packageNames.entries()){
   const root=path.join(inbox,name);
   for(const dir of ['@eaDir/disc.bin','#recycle/old','notes'])await mkdir(path.join(root,dir),{recursive:true});
@@ -64,7 +64,7 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
   const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);
   assert.equal(members.length,2);
   assert.equal(new Set(members.map(m=>m.import.target_item_id)).size,1);
-  const itemId=members[0].import.target_item_id;
+  const itemId=members[0].import.target_item_id;cleanupFixture={collectionId:members[0].import.collection_id,importId:members[0].import.import_id,itemId,source:path.join(inbox,packageNames[0])};
   const album=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),itemId);
   assert.equal(album.title,manual?'My explicit review title':'Bulk resolved album');
   assert.ok(album.primary_artwork,'Automatic artwork did not reach the grouped album');
@@ -90,4 +90,5 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
   await imports.getByRole('button',{name:'Back to imports',exact:true}).click();
  }
  console.log('HL-07A passed: real inbox anchor selection, retained privacy/drafts, automatic/manual titles and artwork, one-copy/separate-copy grouping, housekeeping exclusion and restart.');
+ return cleanupFixture;
 }

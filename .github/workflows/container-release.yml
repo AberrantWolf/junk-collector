@@ -90,7 +90,7 @@ jobs:
           tags: junk-collector:release-smoke
           cache-from: type=gha,scope=collector-${{ matrix.architecture }}
           cache-to: type=gha,scope=collector-${{ matrix.architecture }},mode=max
-      - run: python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox
+      - run: python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
       - name: Log in to GHCR
         if: needs.plan.outputs.publish == 'true'
         uses: docker/login-action@v3

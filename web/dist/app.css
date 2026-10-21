@@ -420,6 +420,8 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 .intake-actions>label{margin:0}
 @media(max-width:700px){.intake-review-row{grid-template-columns:minmax(0,1fr)}.intake-review-row>label{margin:0}.intake-actions{align-items:start;flex-direction:column}}
 
+.inbox-cleanup code{overflow-wrap:anywhere;white-space:normal}
+
 .job-ledger {
   border-top: 1px solid var(--line);
   margin-top: 28px;

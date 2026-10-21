@@ -3917,6 +3917,64 @@
         }
       }
     },
+    "/api/v1/ingests/{id}/inbox-cleanup": {
+      "post": {
+        "operationId": "cleanup_ingest_inbox",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupInboxCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobId"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/ingests/{id}/retry": {
       "post": {
         "operationId": "retry_ingest",
@@ -9500,6 +9558,18 @@
         },
         "additionalProperties": false
       },
+      "CleanupInboxCommand": {
+        "type": "object",
+        "required": [
+          "source_is_idle"
+        ],
+        "properties": {
+          "source_is_idle": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "ClientAlbum": {
         "type": "object",
         "required": [
@@ -11570,6 +11640,49 @@
           }
         }
       },
+      "InboxCleanupView": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "state",
+          "removed_bytes",
+          "total_bytes",
+          "completed",
+          "retained_files"
+        ],
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "recovery_directory": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "removed_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "retained_files": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "total_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          }
+        }
+      },
       "InboxImport": {
         "type": "object",
         "required": [
@@ -11775,6 +11888,16 @@
           "import": {
             "$ref": "#/components/schemas/ImportView"
           },
+          "inbox_cleanup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InboxCleanupView"
+              }
+            ]
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -11855,6 +11978,7 @@
       "IngestPermissions": {
         "type": "object",
         "required": [
+          "can_clean_inbox",
           "can_resume_upload",
           "can_cancel",
           "can_discard",
@@ -11862,6 +11986,9 @@
         ],
         "properties": {
           "can_cancel": {
+            "type": "boolean"
+          },
+          "can_clean_inbox": {
             "type": "boolean"
           },
           "can_correct_association": {

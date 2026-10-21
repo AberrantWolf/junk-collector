@@ -1252,6 +1252,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingests/{id}/inbox-cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cleanup_ingest_inbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ingests/{id}/retry": {
         parameters: {
             query?: never;
@@ -2753,6 +2769,9 @@ export interface components {
             reset_metadata: boolean;
             retained_representation?: null | components["schemas"]["RepresentationId"];
         };
+        CleanupInboxCommand: {
+            source_is_idle: boolean;
+        };
         ClientAlbum: {
             artist: string;
             artwork?: null | components["schemas"]["AssetId"];
@@ -3264,6 +3283,16 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        InboxCleanupView: {
+            completed: boolean;
+            error?: string | null;
+            job_id: components["schemas"]["JobId"];
+            recovery_directory?: string | null;
+            removed_bytes: components["schemas"]["ByteLength"];
+            retained_files: boolean;
+            state: components["schemas"]["JobState"];
+            total_bytes: components["schemas"]["ByteLength"];
+        };
         InboxImport: {
             expected_revision: components["schemas"]["Revision"];
             item_id: components["schemas"]["ItemId"];
@@ -3312,6 +3341,7 @@ export interface components {
             attempts: components["schemas"]["IngestAttemptView"][];
             cleanup?: null | components["schemas"]["IngestDiscardResult"];
             import: components["schemas"]["ImportView"];
+            inbox_cleanup?: null | components["schemas"]["InboxCleanupView"];
             steps: components["schemas"]["IngestStepView"][];
             summary: components["schemas"]["IngestSummary"];
         };
@@ -3331,6 +3361,7 @@ export interface components {
         };
         IngestPermissions: {
             can_cancel: boolean;
+            can_clean_inbox: boolean;
             can_correct_association: boolean;
             can_discard: boolean;
             can_resume_upload: boolean;
@@ -8380,6 +8411,57 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cleanup_ingest_inbox: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupInboxCommand"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobId"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -8,7 +8,7 @@ services:
       - type: bind
         source: ${COLLECTOR_INBOX:?Set COLLECTOR_INBOX to an existing absolute inbox directory}
         target: /inbox
-        read_only: true
+        read_only: ${COLLECTOR_INBOX_READ_ONLY:-true}
         bind:
           create_host_path: false
   cli:
@@ -18,6 +18,6 @@ services:
       - type: bind
         source: ${COLLECTOR_INBOX}
         target: /inbox
-        read_only: true
+        read_only: ${COLLECTOR_INBOX_READ_ONLY:-true}
         bind:
           create_host_path: false

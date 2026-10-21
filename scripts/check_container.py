@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--port-base", type=int, default=9841)
     parser.add_argument("--proxy", action="store_true", help="Exercise the shipped proxy configuration transport")
     parser.add_argument("--inbox", action="store_true", help="Exercise the shipped supplemental-group inbox override")
+    parser.add_argument("--inbox-cleanup", action="store_true", help="Qualify opt-in cleanup with real read-only/read-write mounts")
     parser.add_argument("--provider-user-agent-file", type=Path, help="Optional real monitored provider contact; never printed")
     parser.add_argument("--browser-host", help="Private DNS name used by an external qualification browser")
     parser.add_argument("--private-ip", help="Explicit private IPv4 bind for the isolated browser fixture")
@@ -66,6 +67,8 @@ def main():
     if (args.preparation_faults or args.audio_oracles or args.storage_permissions or args.storage_full or args.authentication_limits) and (not args.inbox or not args.browser_handoff or args.update_from or args.snapshot_tool_image or args.portainer_image):
         parser.error("Fault/audio qualification requires a fresh Compose inbox/browser installation")
     project_root = Path(__file__).resolve().parents[1]
+    if args.inbox_cleanup and not args.inbox:
+        parser.error("Inbox cleanup qualification requires --inbox")
     compose = project_root / "deploy/container/compose.yaml"
     password = secrets.token_hex(24)
     origin = f"http://localhost:{args.port_base + 1}"
@@ -94,6 +97,8 @@ def main():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(content)
             env.update(COLLECTOR_INBOX=str(inbox), COLLECTOR_INBOX_GID="65538")
+            if args.inbox_cleanup:
+                env["COLLECTOR_INBOX_READ_ONLY"] = "true"
             command.extend(["-f", str(project_root / "deploy/container/compose.inbox.yaml")])
 
         def run(*arguments, **kwargs):
@@ -457,6 +462,10 @@ def main():
                 storage.exercise(cookie, album_id, request, lambda session, item: verify_originals(session, item, originals), browser_handoff)
             if authentication:
                 authentication.exercise(cookie, request, restart)
+            if args.inbox_cleanup:
+                from inbox_cleanup_qualification import qualify
+                qualify(cookie, imported, request, verify_originals,
+                        originals, env, root_tool, read_file, up, ready)
             browser_handoff(album_id)
             stop()
             if snapshots:

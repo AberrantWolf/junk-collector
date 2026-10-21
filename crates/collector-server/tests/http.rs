@@ -1229,6 +1229,11 @@ async fn provisional_import_routes_follow_curation_listener_composition() {
                 format!("/api/v1/collections/{collection}/inboxes/label/stage"),
                 serde_json::json!({"package":"package"}),
             ),
+            (
+                "POST",
+                format!("/api/v1/ingests/{import}/inbox-cleanup"),
+                serde_json::json!({"source_is_idle":true}),
+            ),
         ] {
             let response = app
                 .clone()

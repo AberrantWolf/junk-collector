@@ -599,6 +599,7 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        self.admit_inbox_cleanup(&tx, &spec)?;
         if let Some(parent) = spec
             .request
             .get("game_parent")
@@ -1548,6 +1549,10 @@ fn cancel_job_import(
     request: &str,
     now: i64,
 ) -> Result<()> {
+    // Removing an optional source copy does not cancel the preserved import.
+    if kind == "inbox_cleanup" {
+        return Ok(());
+    }
     let request: serde_json::Value = serde_json::from_str(request).map_err(storage)?;
     if let Some(import_id) = request.get("import_id").and_then(serde_json::Value::as_str) {
         // Generic Job cancellation must also settle guided provider work. Its

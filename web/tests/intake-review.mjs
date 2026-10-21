@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {createServer} from 'node:http';
 import {intakeReviewJourney} from './intake-review-journey.mjs';
+import {inboxCleanupJourney} from './inbox-cleanup-journey.mjs';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-intake-review-'));
 const config=path.join(scratch,'collector.toml');
@@ -45,7 +46,8 @@ try{
  await admin.getByLabel('Collection name').fill('Review shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>(await(await fetch('/api/v1/collection-search?limit=50')).json()).items.find(c=>c.name==='Review shelf').id);
  await page.goto(`${origin}/imports?collection=${collection}`);
- await intakeReviewJourney(page,{scratch,startProviderFixture:()=>{},restartServer:async()=>{await stopServer();await startServer();}});
+ const cleanupFixture=await intakeReviewJourney(page,{scratch,startProviderFixture:()=>{},restartServer:async()=>{await stopServer();await startServer();}});
+ await inboxCleanupJourney(page,{...cleanupFixture,scratch,restartServer:async()=>{await stopServer();await startServer();}});
  assert.deepEqual(errors,[]);console.log(`Chrome ${await browser.version()}; temporary artifacts: ${scratch}`);
 }catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText().catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;
 }finally{await browser?.close();await stopServer();provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));}

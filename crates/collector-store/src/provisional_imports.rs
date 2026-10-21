@@ -317,6 +317,7 @@ fn parse(row: StoredImport) -> Result<ImportRecord> {
 const SELECT: &str = "SELECT id,user_id,revision,collection_id,source_kind,source_label,package_name,files,capture_id,representation_id,item_id,specimen_id,component_id,carrier_id,expected_item_revision,candidates,limitations,review,analysis_job_id,phase,created_at,updated_at FROM private.imports";
 
 fn insert_import(tx: &rusqlite::Transaction<'_>, record: &ImportRecord) -> Result<()> {
+    Store::ensure_inbox_acceptance(tx, record)?;
     validate(record)?;
     if let Some(item_id) = record.view.association.item_id {
         let current: Option<(String, u64, bool)> = tx
@@ -462,6 +463,24 @@ impl Store {
 }
 
 impl ProvisionalImportPort for Store {
+    fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId> {
+        self.queue_inbox_source_cleanup(id, source, spec)
+    }
+    fn inbox_cleanup_status(
+        &self,
+        id: ImportId,
+    ) -> Result<Option<collector_app::InboxCleanupView>> {
+        self.inbox_source_cleanup_status(id)
+    }
+    fn clean_inbox_source(
+        &self,
+        id: ImportId,
+        claim: &JobClaim,
+        guard: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<collector_app::InboxCleanupView> {
+        self.remove_preserved_inbox_source(id, claim, guard)
+    }
+
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord> {
         let mut db = lock(&self.db)?;
         let tx = db

@@ -45,6 +45,12 @@ pub fn is_intake_housekeeping(name: &str, directory: bool) -> bool {
     }) || (!directory && parts.last() == Some(&".DS_Store"))
 }
 
+/// Reserved direct inbox recovery directory; never a generic package-file filter.
+pub fn is_inbox_cleanup_directory(name: &str) -> bool {
+    name.strip_prefix(".collector-cleanup-")
+        .is_some_and(|id| id.parse::<ImportId>().is_ok())
+}
+
 fn validate_plan_files(files: &[UploadFile]) -> Result<()> {
     validate_intake_files(files, 10_000)
 }
@@ -1374,7 +1380,11 @@ impl CollectionService {
         Ok(false)
     }
 
-    fn ingest_summary(&self, actor: &Principal, view: ImportView) -> Result<IngestSummary> {
+    pub(crate) fn ingest_summary(
+        &self,
+        actor: &Principal,
+        view: ImportView,
+    ) -> Result<IngestSummary> {
         let intent = self
             .provisional_imports
             .guided_ingest_intent(view.id)?
@@ -1382,17 +1392,24 @@ impl CollectionService {
         let jobs = self
             .provisional_imports
             .import_job_records(view.id, actor.user_id)?;
-        let failed = jobs.iter().any(|job| {
-            job.state == JobState::Failed
-                || super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some()
-        }) || intent.enrichment_error.is_some()
+        let failed = jobs
+            .iter()
+            .filter(|job| job.kind != "inbox_cleanup")
+            .any(|job| {
+                job.state == JobState::Failed
+                    || super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some()
+            })
+            || intent.enrichment_error.is_some()
             || intent.preparation_error.is_some();
-        let active = jobs.iter().any(|job| {
-            matches!(
-                job.state,
-                JobState::Queued | JobState::Running | JobState::CancelRequested
-            )
-        });
+        let active = jobs
+            .iter()
+            .filter(|job| job.kind != "inbox_cleanup")
+            .any(|job| {
+                matches!(
+                    job.state,
+                    JobState::Queued | JobState::Running | JobState::CancelRequested
+                )
+            });
         let outcome = if view.phase == ImportPhase::Cancelled || intent.cancelled {
             IngestStepState::Cancelled
         } else if failed {
@@ -1429,6 +1446,12 @@ impl CollectionService {
             prepare_music: intent.prepare_music,
             updated_at: view.updated_at,
             permissions: IngestPermissions {
+                can_clean_inbox: can_write
+                    && view.source.kind == ImportSourceKind::Inbox
+                    && view.phase == ImportPhase::Published
+                    && intent.settled
+                    && !intent.cancelled
+                    && !active,
                 can_resume_upload: can_write
                     && !intent.cancelled
                     && view.phase == ImportPhase::Staging
@@ -1780,6 +1803,7 @@ impl CollectionService {
             steps.retain(|step| step.step != "preparation" && step.step != "metadata");
         }
         Ok(IngestDetail {
+            inbox_cleanup: self.provisional_imports.inbox_cleanup_status(id)?,
             summary,
             import: record.view,
             steps,

@@ -21,6 +21,21 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## HL-09 explicit inbox source cleanup — 2026-10-21
+
+The import requester's Work & history detail now offers explicit inbox cleanup
+after committed preservation and settled processing, with confirmation, typed
+progress/failure/cancellation and retry. Bounded background checks verify actual
+archive originals and frozen source identities/checksums before deletion. Durable
+quarantine/per-file intents preserve restart inputs and protect replacement source
+names. Extra content stays retained; source files remain by default. Active cleanup
+pauses new inbox admission, including aliased roots. Optional processing can retry
+from the archive. Private schema 21 preserves previous data; downgrade needs the old
+complete recovery point. The packaged bind remains read-only unless explicitly
+changed through the new environment option. See [delivery](inbox-cleanup.md) and
+[local real-browser/recovery evidence](validation/inbox-cleanup-2026-10-21.md).
+This is source acceptance; public alpha.2 does not contain this feature.
+
 ## HL-10 portable full archive export/import — 2026-10-21
 
 Local `export-archive`, `validate-archive-export` and `import-archive` commands now

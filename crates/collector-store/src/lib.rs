@@ -24,6 +24,7 @@ mod music_search;
 pub use backup::{restore_backup, validate_backup};
 mod snapshot_compaction;
 pub use snapshot_compaction::{SnapshotDuplicate, SnapshotDuplicatePlan};
+mod inbox_cleanup;
 mod processing;
 mod provisional_imports;
 mod publication;
@@ -53,6 +54,8 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
 };
+
+pub(crate) const PRIVATE_SCHEMA: u32 = 21;
 
 pub(crate) fn storage(e: impl std::fmt::Display) -> Error {
     Error::Storage(e.to_string())
@@ -2026,14 +2029,14 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    db.execute_batch("CREATE TABLE IF NOT EXISTS private.game_direct_members(request_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,job_id TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS private.game_scan_members(parent TEXT NOT NULL,item_id TEXT NOT NULL,representation_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(parent,item_id,representation_id));
-            CREATE TABLE IF NOT EXISTS private.active_game_catalogs(collection_id TEXT NOT NULL,system TEXT NOT NULL,catalog TEXT NOT NULL,byte_domain TEXT NOT NULL,snapshot_id TEXT NOT NULL,activated_at INTEGER NOT NULL,PRIMARY KEY(collection_id,system,catalog,byte_domain));").map_err(storage)?;
-    if private_version > 20 {
+    if private_version > PRIVATE_SCHEMA {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
     }
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.game_direct_members(request_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,job_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS private.game_scan_members(parent TEXT NOT NULL,item_id TEXT NOT NULL,representation_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(parent,item_id,representation_id));
+            CREATE TABLE IF NOT EXISTS private.active_game_catalogs(collection_id TEXT NOT NULL,system TEXT NOT NULL,catalog TEXT NOT NULL,byte_domain TEXT NOT NULL,snapshot_id TEXT NOT NULL,activated_at INTEGER NOT NULL,PRIMARY KEY(collection_id,system,catalog,byte_domain));").map_err(storage)?;
     if private_version < 2 {
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch("
@@ -2524,13 +2527,18 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
       CREATE INDEX IF NOT EXISTS private.acquisition_links_work ON acquisition_links(acquisition_job);
       CREATE TABLE IF NOT EXISTS private.acquisition_waits(owner_job TEXT PRIMARY KEY,acquisition_job TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS private.snapshot_bindings(job_id TEXT NOT NULL,snapshot_id TEXT NOT NULL,item_id TEXT,generation INTEGER NOT NULL,PRIMARY KEY(job_id,snapshot_id));
-      PRAGMA private.user_version=20;")
+      ")
         .map_err(storage)?;
     if private_version < 20 {
         tx.execute_batch("INSERT OR IGNORE INTO private.snapshot_bindings(job_id,snapshot_id,item_id,generation) SELECT j.id,COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id')),j.item_id,COALESCE(g.generation,0) FROM private.jobs j LEFT JOIN private.item_job_generations g ON g.job_id=j.id WHERE j.state='completed' AND j.item_id IS NOT NULL AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id')) IS NOT NULL;").map_err(storage)?;
         Store::adopt_existing_acquisitions(&tx)?;
     }
     tx.commit().map_err(storage)?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.inbox_cleanup(import_id TEXT PRIMARY KEY, source_path TEXT NOT NULL, job_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL CHECK(length(record)<=16777216));
+        CREATE INDEX IF NOT EXISTS private.inbox_cleanup_source ON inbox_cleanup(source_path);
+        ").map_err(storage)?;
+    db.execute_batch(&format!("PRAGMA private.user_version={PRIVATE_SCHEMA};"))
+        .map_err(storage)?;
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
         .map_err(storage)?;

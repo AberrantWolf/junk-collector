@@ -10,7 +10,8 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-Queue updated 2026-10-20 after HL-07A/B/C usability/setup acceptance and HL-05A
+Queue updated 2026-10-21 after HL-09 opt-in inbox cleanup and HL-10 full portable
+archive export/import source delivery, plus HL-07A/B/C usability/setup acceptance and HL-05A
 actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
 qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
 preparation failure/recovery acceptance, HL-06A real-tool audio oracles, the numeric-IP
@@ -715,19 +716,21 @@ D05/D07 listening extensions, D06 follow-ups, FX-04 history bound, P06/R02 pract
 
 #### Optional cleanup after successful inbox import
 
-**State:** requested 2026-10-19; not implemented. **Owner:** application intake
+**State:** delivered in source 2026-10-21; next release packaging pending. **Owner:** application intake
 completion/ownership policy and filesystem adapter, with explicit web controls.
 
-Offer opt-in cleanup of successfully imported inbox packages. Read/write access
-alone does not implement cleanup. Require durable successful preservation, explicit
-definition of cleanup timing relative to optional metadata/preparation, frozen
-source identity and change checks, and visible outcomes. Changed or in-use sources,
-partial failure, cancellation and retry/restart must not delete the wrong files or
-lose recovery inputs. Test the real workflow and failure paths with small offline
-packages before offering it on a live inbox. Do not infer safe deletion from a
-completed generic Job or introduce general archive pruning. Coordinate HL-01's
-existing reference/replay safety principles without reopening its completed audit.
-The basic import-review repair HL-07A must work without this feature.
+Explicit cleanup is available in the requester's Work & history detail after
+preservation commits and requested processing settles. Optional processing failures
+do not block it: retries use the archive. Background checks bind source identities
+and actual source/archive checksums, then quarantine and delete only recorded files.
+Cancellation, durable per-file intents and restart preserve remaining inputs; retries
+cannot target a replacement at the old name. Unimported content stays retained.
+Default imports and packaged inbox binds remain non-destructive/read-only;
+`COLLECTOR_INBOX_READ_ONLY=false` and host write permissions are explicit opt-ins.
+Inbox admission pauses during active cleanup to fence shared/aliased source use.
+See the [delivery guide](inbox-cleanup.md) and [focused real-UI/recovery acceptance](validation/inbox-cleanup-2026-10-21.md).
+This is not general archive pruning. Linux container results belong to the next
+release record; existing passing HL-07A imports do not require cleanup.
 
 #### Collection convenience and performance follow-ups
 
@@ -1020,6 +1023,13 @@ HL-05F bounds authentication identity retention and qualifies real loopback
 throttling/restart; see its [source acceptance](validation/rate-limit-retention-2026-10-20.md).
 HL-05G independently qualifies actual-NAS login ceilings from multiple loopback TCP
 sources and full recovery; see its [acceptance](validation/nas-authentication-limits-2026-10-20.md).
+HL-09's explicit inbox cleanup is delivered in source with
+[real-UI and recovery acceptance](validation/inbox-cleanup-2026-10-21.md).
+The active assignment is to package these deliveries and the post-alpha.2 fixes
+into the next Docker prerelease, using the existing native build/publication pipeline
+and one isolated pull/update/recovery flow. Include the new read-only/read-write
+cleanup smoke; reuse accepted device/format/public-ingress evidence. Do not change
+live services or add a new deployment matrix.
 HL-10's standalone portable full export/import is delivered with
 [local CLI acceptance](validation/archive-export-2026-10-21.md); deltas and legacy
 adoption remain conditional follow-ups.

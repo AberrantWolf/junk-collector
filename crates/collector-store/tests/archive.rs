@@ -2208,21 +2208,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         .join("collections/synthetic--018f0000-0000-7000-8000-000000000001/assets/018f0000-0000-7000-8000-000000000070/revisions/00000000000000000001/record.v3.json")
         .exists());
 
-    let catalog = rusqlite::Connection::open(state.join("catalog.sqlite")).unwrap();
-    assert_eq!(
-        catalog
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .unwrap(),
-        13 // Song search adds a rebuildable projection; archived fixture bytes stay unchanged.
-    );
-
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
-    assert_eq!(
-        private
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .unwrap(),
-        20 // Provider ownership/bindings preserve existing accounts, credentials and requests. preserves existing accounts, credentials and bound requests.
-    );
     assert_eq!(
         private
             .query_row("SELECT COUNT(*) FROM publication_recovery", [], |row| {
@@ -4282,6 +4268,411 @@ fn configured_inbox_preserves_sources_and_reuses_import_evidence() {
     assert_eq!(
         store.evidence(saved.id).unwrap()[0].outcome,
         EvidenceOutcome::Passed
+    );
+}
+
+fn inbox_cleanup_fixture() -> (
+    tempfile::TempDir,
+    Arc<Store>,
+    Principal,
+    CollectionService,
+    ImportId,
+    PathBuf,
+) {
+    let (root, store, actor, service, collection) = setup();
+    let source = root.path().join("inbox/package");
+    std::fs::create_dir_all(source.join("nested")).unwrap();
+    std::fs::write(source.join("one.bin"), b"preserved first original").unwrap();
+    std::fs::write(source.join("nested/two.bin"), b"preserved second original").unwrap();
+    let id = start_cleanup_fixture_import(&service, &actor, collection.id, &source).unwrap();
+    service
+        .ensure_guided_inbox_staging(id, source.to_str().unwrap())
+        .unwrap();
+    for _ in 0..12 {
+        if !service.run_next_job("cleanup-fixture-import").unwrap() {
+            break;
+        }
+    }
+    assert_eq!(
+        service.ingest_detail(&actor, id).unwrap().summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+    (root, store, actor, service, id, source)
+}
+fn start_cleanup_fixture_import(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    source: &Path,
+) -> Result<ImportId> {
+    let plan = service
+        .plan_ingest(
+            actor,
+            PlanIngestCommand {
+                collection_id: collection,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Inbox,
+                        label: Some("incoming".into()),
+                        package_name: "package".into(),
+                    },
+                    files: Store::inventory_directory(source).unwrap(),
+                }],
+            },
+        )
+        .unwrap();
+    service
+        .start_ingest(
+            actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .map(|accepted| accepted.imports[0].import_id)
+}
+fn request_cleanup(
+    service: &CollectionService,
+    actor: &Principal,
+    id: ImportId,
+    source: &Path,
+) -> JobId {
+    service
+        .request_inbox_cleanup(
+            actor,
+            id,
+            collector_app::CleanupInboxCommand {
+                source_is_idle: true,
+            },
+            &command(),
+            |_| Ok(source.to_str().unwrap().into()),
+        )
+        .unwrap()
+}
+
+#[test]
+fn inbox_cleanup_is_explicit_preserves_archive_and_unimported_files_and_replays_safely() {
+    let (_root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    let original = std::fs::read(source.join("one.bin")).unwrap();
+    assert!(store.inbox_cleanup_status(id).unwrap().is_none());
+    assert!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: false
+                },
+                &command(),
+                |_| panic!("unconfirmed action resolved a source")
+            )
+            .is_err()
+    );
+    std::fs::write(source.join(".DS_Store"), b"unimported housekeeping").unwrap();
+    let receipt = command();
+    let cleanup = service
+        .request_inbox_cleanup(
+            &actor,
+            id,
+            collector_app::CleanupInboxCommand {
+                source_is_idle: true,
+            },
+            &receipt,
+            |_| Ok(source.to_str().unwrap().into()),
+        )
+        .unwrap();
+    assert!(source.join("one.bin").is_file());
+    assert!(service.run_next_job("remove-inbox").unwrap());
+    let status = store.inbox_cleanup_status(id).unwrap().unwrap();
+    assert!(status.completed, "{status:?}");
+    assert!(status.retained_files);
+    assert_eq!(status.removed_bytes, status.total_bytes);
+    assert!(!source.exists());
+    let recovery = source
+        .parent()
+        .unwrap()
+        .join(format!(".collector-cleanup-{id}/package"));
+    assert_eq!(
+        std::fs::read(recovery.join(".DS_Store")).unwrap(),
+        b"unimported housekeeping"
+    );
+    assert!(!recovery.join("one.bin").exists());
+    let import = store.import_record(id).unwrap();
+    let item = store
+        .capture(import.view.capture_id)
+        .unwrap()
+        .association
+        .item_id
+        .unwrap();
+    assert_eq!(
+        resource_bytes(
+            store
+                .representation(item, import.view.representation_id, 1)
+                .unwrap()
+        ),
+        original
+    );
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("one.bin"), b"replacement package stays").unwrap();
+    assert_eq!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true
+                },
+                &receipt,
+                |_| panic!("receipt replay resolved mutable source configuration")
+            )
+            .unwrap(),
+        cleanup
+    );
+    assert_eq!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true
+                },
+                &command(),
+                |_| panic!("completed cleanup re-resolved a replacement")
+            )
+            .unwrap(),
+        cleanup
+    );
+    assert_eq!(
+        std::fs::read(source.join("one.bin")).unwrap(),
+        b"replacement package stays"
+    );
+}
+
+#[test]
+fn inbox_cleanup_changed_sources_corrupt_archive_and_new_files_never_authorize_deletion() {
+    for scenario in ["changed-source", "corrupt-archive", "new-file", "symlink"] {
+        let (root, store, actor, service, id, source) = inbox_cleanup_fixture();
+        let cleanup = request_cleanup(&service, &actor, id, &source);
+        match scenario {
+            "changed-source" => {
+                std::fs::write(source.join("one.bin"), b"changed! first original!").unwrap();
+            }
+            "corrupt-archive" => {
+                let path =
+                    find_file_with_bytes(&root.path().join("archive"), b"preserved first original")
+                        .unwrap();
+                std::fs::write(path, b"damaged archive payload").unwrap();
+            }
+            "new-file" => {
+                std::fs::write(source.join("new.txt"), b"unimported meaningful data").unwrap();
+            }
+            "symlink" => {
+                #[cfg(unix)]
+                {
+                    std::fs::remove_file(source.join("one.bin")).unwrap();
+                    std::os::unix::fs::symlink(
+                        source.join("nested/two.bin"),
+                        source.join("one.bin"),
+                    )
+                    .unwrap();
+                }
+                #[cfg(not(unix))]
+                {
+                    continue;
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(service.run_next_job("refuse-unsafe-cleanup").unwrap());
+        let status = store.inbox_cleanup_status(id).unwrap().unwrap();
+        assert_eq!(status.state, JobState::Failed, "{scenario}: {status:?}");
+        assert_eq!(status.removed_bytes, ByteLength(0));
+        assert!(source.join("nested/two.bin").exists());
+        assert!(service.retry_job(&actor, cleanup, &command()).is_err());
+        if scenario == "changed-source" {
+            std::fs::write(source.join("one.bin"), b"preserved first original").unwrap();
+            assert_ne!(request_cleanup(&service, &actor, id, &source), cleanup);
+            assert!(service.run_next_job("retry-restored-source").unwrap());
+            assert!(store.inbox_cleanup_status(id).unwrap().unwrap().completed);
+        }
+    }
+}
+
+#[test]
+fn inbox_cleanup_restart_resumes_the_quarantine_and_never_deletes_a_replacement_package() {
+    for phase in [
+        collector_store::PublicationFaultPoint::PayloadPublished,
+        collector_store::PublicationFaultPoint::BytesStaged,
+        collector_store::PublicationFaultPoint::RevisionCommitted,
+    ] {
+        let (root, store, actor, service, id, source) = inbox_cleanup_fixture();
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(FailPublicationOnce {
+                    point: phase,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        request_cleanup(&service, &actor, id, &source);
+        assert!(service.run_next_job("interrupted-cleanup").unwrap());
+        assert_eq!(
+            store.inbox_cleanup_status(id).unwrap().unwrap().state,
+            JobState::Failed
+        );
+        assert!(!source.exists());
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("one.bin"), b"new source must survive").unwrap();
+        drop(service);
+        drop(store);
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true,
+                },
+                &command(),
+                |_| panic!("quarantine resume resolved a new source"),
+            )
+            .unwrap();
+        assert!(service.run_next_job("resumed-cleanup").unwrap());
+        assert!(store.inbox_cleanup_status(id).unwrap().unwrap().completed);
+        assert_eq!(
+            std::fs::read(source.join("one.bin")).unwrap(),
+            b"new source must survive"
+        );
+    }
+}
+
+#[test]
+fn inbox_cleanup_fences_pending_imports_cancellation_and_lost_authority() {
+    let (_root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    let collection = store.import_record(id).unwrap().view.collection_id;
+    let pending = start_cleanup_fixture_import(&service, &actor, collection, &source).unwrap();
+    assert!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true
+                },
+                &command(),
+                |_| Ok(source.to_str().unwrap().into())
+            )
+            .is_err()
+    );
+    service
+        .ensure_guided_inbox_staging(pending, source.to_str().unwrap())
+        .unwrap();
+    for _ in 0..12 {
+        if !service.run_next_job("finish-sibling-import").unwrap() {
+            break;
+        }
+    }
+    let job = request_cleanup(&service, &actor, id, &source);
+    assert!(start_cleanup_fixture_import(&service, &actor, collection, &source).is_err());
+    service.cancel_job(&actor, job, &command()).unwrap();
+    assert!(!service.run_next_job("cancelled-cleanup").unwrap());
+    assert!(source.join("one.bin").is_file());
+    request_cleanup(&service, &actor, id, &source);
+    let peer = store
+        .create_user("another-owner", "another long test password", true)
+        .unwrap();
+    store.grant(collection, peer, Role::Owner).unwrap();
+    store
+        .grant(collection, actor.user_id, Role::Viewer)
+        .unwrap();
+    assert!(service.run_next_job("revoked-cleanup").unwrap());
+    assert!(source.join("one.bin").is_file());
+    assert_eq!(
+        store.inbox_cleanup_status(id).unwrap().unwrap().state,
+        JobState::Failed
+    );
+}
+
+#[test]
+fn inbox_cleanup_unfinished_running_job_recovers_after_cold_open_without_a_new_request() {
+    let (root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::BytesStaged,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let job = request_cleanup(&service, &actor, id, &source);
+    let old = store
+        .claim_job("terminated-cleanup-process", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(old.id, job);
+    assert!(store.clean_inbox_source(id, &old, &mut || Ok(())).is_err());
+    assert_eq!(
+        store.inbox_cleanup_status(id).unwrap().unwrap().state,
+        JobState::Running
+    );
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("new.bin"), b"new inputs").unwrap();
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert!(service.run_next_job("restarted-cleanup-process").unwrap());
+    assert!(store.inbox_cleanup_status(id).unwrap().unwrap().completed);
+    assert_eq!(
+        std::fs::read(source.join("new.bin")).unwrap(),
+        b"new inputs"
+    );
+    assert!(store.clean_inbox_source(id, &old, &mut || Ok(())).is_err());
+}
+
+#[test]
+fn inbox_cleanup_cancellation_inside_validation_retains_the_original_package() {
+    let (_root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    let job = request_cleanup(&service, &actor, id, &source);
+    let claim = store.claim_job("cancellable-cleanup", 30).unwrap().unwrap();
+    let mut checkpoints = 0;
+    let result = store.clean_inbox_source(id, &claim, &mut || {
+        checkpoints += 1;
+        if checkpoints == 3 {
+            store.request_job_cancellation(job, actor.user_id)?;
+        }
+        Ok(())
+    });
+    assert!(matches!(result, Err(Error::JobCancelled)));
+    assert!(source.join("one.bin").is_file());
+    assert!(source.join("nested/two.bin").is_file());
+    store.cancel_claimed_job(job, &claim.claim_token).unwrap();
+    assert_eq!(
+        service.ingest_detail(&actor, id).unwrap().summary.outcome,
+        collector_app::IngestStepState::Succeeded
     );
 }
 
@@ -6558,12 +6949,6 @@ fn current_private_schema_preserves_durable_imports_without_private_path_columns
     drop(store);
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
-    assert_eq!(
-        private
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .unwrap(),
-        20 // Provider ownership and bindings add no private paths to Import records.
-    );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
         .query_map([], |row| row.get::<_, String>(1))

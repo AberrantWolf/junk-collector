@@ -632,6 +632,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(discover_ingest))
         .routes(routes!(start_ingest, list_ingests))
         .routes(routes!(ingest_detail))
+        .routes(routes!(cleanup_ingest_inbox))
         .routes(routes!(discard_ingest))
         .routes(routes!(cancel_ingest))
         .routes(routes!(retry_ingest))
@@ -3436,6 +3437,29 @@ async fn ingest_detail(
     ))
 }
 
+#[utoipa::path(post, path="/api/v1/ingests/{id}/inbox-cleanup", params(("id"=ImportId,Path),("Idempotency-Key"=String,Header)), request_body=collector_app::CleanupInboxCommand, responses((status=202,body=JobId),(status=403),(status=404),(status=409),(status=422)))]
+async fn cleanup_ingest_inbox(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(command): Json<collector_app::CleanupInboxCommand>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job = blocking(move || {
+        state
+            .service
+            .request_inbox_cleanup(&actor, id, command, &context, |source| {
+                let (path, _) = resolve_inbox_package(&state, source)?;
+                path.into_os_string()
+                    .into_string()
+                    .map_err(|_| Error::Invalid("Inbox path must be UTF-8".into()))
+            })
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(job)).into_response())
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 struct DiscardIngestCommand {
@@ -3782,6 +3806,7 @@ fn paged_inbox_packages(
         };
         if !metadata.is_dir()
             || collector_app::is_intake_housekeeping(&name, true)
+            || collector_app::is_inbox_cleanup_directory(&name)
             || metadata.file_type().is_symlink()
             || name.is_empty()
             || name.contains(['/', '\\'])
@@ -3818,6 +3843,7 @@ fn direct_inbox_packages(root: &std::path::Path) -> Result<Vec<String>> {
         };
         if metadata.is_dir()
             && !collector_app::is_intake_housekeeping(&name, true)
+            && !collector_app::is_inbox_cleanup_directory(&name)
             && !metadata.file_type().is_symlink()
             && !name.is_empty()
             && !name.contains(['/', '\\'])
@@ -3849,7 +3875,9 @@ fn resolve_inbox_package_retaining(
     if source.package_name.is_empty()
         || source.package_name.contains(['/', '\\'])
         || matches!(source.package_name.as_str(), "." | "..")
-        || (retained.is_none() && collector_app::is_intake_housekeeping(&source.package_name, true))
+        || (retained.is_none()
+            && (collector_app::is_intake_housekeeping(&source.package_name, true)
+                || collector_app::is_inbox_cleanup_directory(&source.package_name)))
     {
         return Err(Error::Invalid(
             "select a direct inbox package directory".into(),

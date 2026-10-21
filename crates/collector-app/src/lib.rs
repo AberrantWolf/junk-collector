@@ -28,7 +28,9 @@ pub use collection_types::*;
 mod derivatives;
 pub use derivatives::*;
 mod guided_ingest;
-pub use guided_ingest::is_intake_housekeeping;
+mod inbox_cleanup;
+pub use guided_ingest::{is_inbox_cleanup_directory, is_intake_housekeeping};
+pub use inbox_cleanup::*;
 mod item_lifecycle;
 pub use item_lifecycle::prepare_clean_reimport;
 mod library_care;
@@ -703,6 +705,7 @@ pub struct IngestAttemptView {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPermissions {
+    pub can_clean_inbox: bool,
     pub can_resume_upload: bool,
     pub can_cancel: bool,
     pub can_discard: bool,
@@ -729,6 +732,7 @@ pub struct IngestSummary {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestDetail {
+    pub inbox_cleanup: Option<InboxCleanupView>,
     pub summary: IngestSummary,
     pub import: ImportView,
     pub steps: Vec<IngestStepView>,
@@ -759,6 +763,14 @@ pub struct RetryIngestCommand {
 }
 
 pub trait ProvisionalImportPort: Send + Sync {
+    fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId>;
+    fn inbox_cleanup_status(&self, id: ImportId) -> Result<Option<InboxCleanupView>>;
+    fn clean_inbox_source(
+        &self,
+        id: ImportId,
+        claim: &JobClaim,
+        guard: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<InboxCleanupView>;
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord>;
     fn import_record(&self, id: ImportId) -> Result<ImportRecord>;
     fn save_import(&self, record: ImportRecord, expected_revision: u64) -> Result<ImportRecord>;
@@ -996,11 +1008,13 @@ impl From<JobRecord> for JobView {
             || record.state == JobState::Completed
                 && metadata_artwork_error(&record.kind, record.result.as_ref()).is_some();
         let result = safe_job_result(&record.kind, record.result.as_ref());
-        let progress_kind = if record.kind == "processing_operation"
-            && matches!(
-                record.state,
-                JobState::Queued | JobState::Running | JobState::CancelRequested
-            ) {
+        let progress_kind = if matches!(
+            record.kind.as_str(),
+            "processing_operation" | "inbox_cleanup"
+        ) && matches!(
+            record.state,
+            JobState::Queued | JobState::Running | JobState::CancelRequested
+        ) {
             JobProgressKind::Indeterminate
         } else {
             JobProgressKind::Measured
@@ -5296,6 +5310,7 @@ impl CollectionService {
                     .is_some()
             });
         let result = match claim.kind.as_str() {
+            "inbox_cleanup" => self.run_inbox_cleanup(&claim),
             "integrity_verification" => (|| {
                 if claim.phase == "revision_committed" {
                     let item = self.reader.item(claim.item_id.ok_or_else(|| {

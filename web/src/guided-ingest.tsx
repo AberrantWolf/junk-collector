@@ -35,6 +35,8 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  useEffect(()=>{if(initialItem)setDestination(initialItem);},[initialItem?.id,initialItem?.revision]);
  const [detail,setDetail]=useState<Detail>();const [detailOpen,setDetailOpen]=useState(false);const [target,setTarget]=useState<Item|null>();
  const [uploadProgress,setUploadProgress]=useState<UploadProgress>();const [activity,setActivity]=useState('');
+ const [inboxConfirmed,setInboxConfirmed]=useState(false);
+ useEffect(()=>setInboxConfirmed(false),[detail?.import.id]);
  const [notice,setNotice]=useState('');const [failure,setFailure]=useState('');
  const lifecycle=useRef(new AbortController());const reads=useOperationScope(collectionId);const reading=useRef(false);const mutating=useRef(false);
  const acceptance=useRef<string|undefined>(undefined);const detailId=useRef<string|undefined>(undefined);
@@ -116,6 +118,16 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  async function discard(){if(!detail||!confirm(`Discard ${detail.summary.package_name} and delete its temporary files?`))return;await mutate(async()=>{await request(`/ingests/${detail.summary.import_id}/discard`,{method:'POST',body:JSON.stringify({expected_revision:detail.import.revision})});setNotice('Import discarded. Temporary file cleanup is shown below.');await open(detail.summary.import_id);});}
  async function cancel(){if(!detail)return;await mutate(async()=>{setDetail(await request<Detail>(`/ingests/${detail.summary.import_id}/cancel`,{method:'POST',body:JSON.stringify({expected_revision:detail.import.revision})}));});}
  async function retry(jobId?:string|null){if(!detail)return;await mutate(async()=>{setDetail(await request<Detail>(`/ingests/${detail.summary.import_id}/retry`,{method:'POST',body:JSON.stringify({job_id:jobId||null})}));});}
+ async function cleanInbox(){if(!detail||!inboxConfirmed)return;const id=detail.import.id;await mutate(async()=>{
+  const draftKey=`collector:inbox-cleanup:${getApiIdentity()?.user_id}:${id}`;
+  const pending=await loadDraft<{key:string}>(draftKey)||{key:crypto.randomUUID()};
+  await saveDraft(draftKey,pending);
+  await request(`/ingests/${id}/inbox-cleanup`,{method:'POST',headers:{'Idempotency-Key':pending.key},body:JSON.stringify({source_is_idle:true})});
+  await saveDraft(draftKey,undefined);setInboxConfirmed(false);await loadDetail(id);
+ });}
+ async function cancelInboxCleanup(){if(!detail?.inbox_cleanup)return;const id=detail.import.id;await mutate(async()=>{
+  await request(`/jobs/${detail.inbox_cleanup!.job_id}/cancel`,{method:'POST'});await loadDetail(id);
+ });}
  async function correct(){if(!detail||!associationChanged||detail.summary.capture_revision===null)return;await mutate(async()=>{
   const selected=target?await request<Item>(`/items/${target.id}`):null;
   if(selected&&selected.collection_id!==collectionId)throw new Error('The destination is outside this collection.');
@@ -156,6 +168,22 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   {detail&&<details className="ingest-detail" open={detailOpen} onToggle={event=>setDetailOpen(event.currentTarget.open)}><summary>Details: {detail.summary.package_name}</summary>
    {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {target?.id===detail.import.association.item_id?target.title:'its saved collection entry'}. Other discs attached to that entry are retained.</p>}
    {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label={detail.import.source.kind==='browser'?'Upload progress':'Copying original files'} completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Uploaded files are saved on the server."/>}
+   {detail.import.source.kind==='inbox'&&<section aria-label="Inbox source cleanup" className="notice inbox-cleanup">
+    <strong>Inbox source files</strong>
+    <p>Originals stay in the inbox unless you explicitly remove them here. Cleanup is available after preservation succeeds and requested processing finishes. Optional metadata or preparation failures can still be retried from the archive. Finish other inbox imports first; new inbox imports pause while cleanup runs.</p>
+    {detail.inbox_cleanup&&<>
+     <p role="status">{detail.inbox_cleanup.completed?'Inbox cleanup complete':`Cleanup ${stateLabel(detail.inbox_cleanup.state)}`} · Confirmed removed {bytes(detail.inbox_cleanup.removed_bytes)} of {bytes(detail.inbox_cleanup.total_bytes)}</p>
+     {detail.inbox_cleanup.error&&<p role="alert">{detail.inbox_cleanup.error}</p>}
+     {detail.inbox_cleanup.recovery_directory&&(!detail.inbox_cleanup.completed||detail.inbox_cleanup.retained_files)&&<p>Recovery location: <code>{detail.inbox_cleanup.recovery_directory}</code> inside the configured inbox. Files that could not be moved stay in the original package. Retry cleanup to continue; unimported files are kept.</p>}
+     {detail.inbox_cleanup.retained_files&&<p>Unimported files or directories remain in that recovery area. They were not deleted.</p>}
+     {['queued','running','cancel_requested'].includes(detail.inbox_cleanup.state)&&!detail.inbox_cleanup.completed&&<button disabled={busy||detail.inbox_cleanup.state==='cancel_requested'} onClick={()=>void cancelInboxCleanup()}>Cancel inbox cleanup</button>}
+    </>}
+    {detail.summary.permissions.can_clean_inbox&&!detail.inbox_cleanup?.completed&&(!detail.inbox_cleanup||['failed','cancelled'].includes(detail.inbox_cleanup.state))&&<>
+     <p>Checksums of the inbox files and their preserved archive copies are checked first. Only matching imported files are removed. The inbox must allow renaming and deletion.</p>
+     <label><input type="checkbox" checked={inboxConfirmed} disabled={busy} onChange={event=>setInboxConfirmed(event.target.checked)}/> Copying and editing this source package have finished. Remove its imported inbox files and keep the archive originals.</label>
+     <button disabled={busy||!inboxConfirmed} onClick={()=>void cleanInbox()}>{detail.inbox_cleanup?'Retry inbox cleanup':'Remove imported inbox files'}</button>
+    </>}
+   </section>}
    {detail.cleanup&&<p role="status">Temporary files cleared: {bytes(detail.cleanup.reclaimed_bytes)} · Remaining: {bytes(detail.cleanup.pending_bytes)}{detail.cleanup.cleanup_pending?' · cleanup pending':' · cleanup complete'}</p>}
    {detail.attempts.length>0&&<details><summary>Technical details: previous attempts</summary>{detail.attempts.map((attempt,index)=><p key={`${attempt.job_id}:${attempt.attempt}:${index}`}><strong>{stateLabel(attempt.step)} · attempt {attempt.attempt}</strong> — {stateLabel(attempt.state)}{attempt.diagnostic&&<> · {attempt.diagnostic}</>}</p>)}</details>}
    {detail.summary.capture_id&&<details><summary>Technical details</summary><p>Import ID: {detail.summary.import_id}</p><p>Capture ID: {detail.summary.capture_id}</p></details>}
