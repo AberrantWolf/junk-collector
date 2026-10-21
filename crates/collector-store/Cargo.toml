@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+junk-libs-core.workspace = true
 collector-core.workspace = true
 collector-app.workspace = true
 serde.workspace = true

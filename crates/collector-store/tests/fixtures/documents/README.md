@@ -1,0 +1,1 @@
+A generated one-page PDF with the text “Collector test manual”, Helvetica, exact xref offsets and an uncompressed content stream. No external or copyrighted source is used. Document classification is signature recognition; browser preview, authorization and raw-byte preservation are tested separately.

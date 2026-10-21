@@ -30,7 +30,8 @@
     "test:game-catalog": "node tests/game-catalog-upload.mjs",
     "test:purchases": "node tests/digital-purchases.mjs",
     "test:intake-review": "node tests/intake-review.mjs",
-    "test:game-audio": "node tests/game-audio.mjs"
+    "test:game-audio": "node tests/game-audio.mjs",
+    "test:documents": "node tests/documents.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

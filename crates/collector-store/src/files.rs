@@ -1212,38 +1212,45 @@ impl Store {
             visibility,
             alt_text,
         } = command;
-        if bytes.len() > 20 * 1024 * 1024 || alt_text.len() > 4096 {
-            return Err(Error::Invalid("image exceeds upload limit".into()));
+        if bytes.len() > collector_app::MAX_ASSET_BYTES || alt_text.len() > 4096 {
+            return Err(Error::Invalid("asset exceeds upload limit".into()));
         }
-        if !matches!(kind, AssetKind::Cover | AssetKind::Photo | AssetKind::Scan) {
-            return Err(Error::Invalid("unsupported image asset kind".into()));
-        }
-        let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
-            .with_guessed_format()
-            .map_err(storage)?;
-        let format = reader
-            .format()
-            .ok_or_else(|| Error::Invalid("unsupported image".into()))?;
-        let (extension, media_type) = match format {
-            image::ImageFormat::Png => ("png", "image/png"),
-            image::ImageFormat::Jpeg => ("jpg", "image/jpeg"),
-            image::ImageFormat::WebP => ("webp", "image/webp"),
-            _ => return Err(Error::Invalid("use PNG, JPEG, or WebP".into())),
+        let (extension, media_type, thumbnail) = if kind == AssetKind::Document {
+            let format = junk_libs_core::document::classify(bytes, collector_app::MAX_ASSET_BYTES)
+                .map_err(|e| Error::Invalid(e.to_string()))?;
+            (format.extension(), format.media_type(), None)
+        } else {
+            if !matches!(kind, AssetKind::Cover | AssetKind::Photo | AssetKind::Scan) {
+                return Err(Error::Invalid("unsupported asset kind".into()));
+            }
+            let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
+                .map_err(storage)?;
+            let format = reader
+                .format()
+                .ok_or_else(|| Error::Invalid("unsupported image".into()))?;
+            let (extension, media_type) = match format {
+                image::ImageFormat::Png => ("png", "image/png"),
+                image::ImageFormat::Jpeg => ("jpg", "image/jpeg"),
+                image::ImageFormat::WebP => ("webp", "image/webp"),
+                _ => return Err(Error::Invalid("use PNG, JPEG, or WebP".into())),
+            };
+            let mut limits = image::Limits::default();
+            limits.max_image_width = Some(12000);
+            limits.max_image_height = Some(12000);
+            limits.max_alloc = Some(256 * 1024 * 1024);
+            reader.limits(limits);
+            let image = reader
+                .decode()
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            let mut thumbnail = std::io::Cursor::new(Vec::new());
+            image
+                .thumbnail(192, 192)
+                .write_to(&mut thumbnail, image::ImageFormat::Png)
+                .map_err(storage)?;
+            let thumbnail = thumbnail.into_inner();
+            (extension, media_type, Some(thumbnail))
         };
-        let mut limits = image::Limits::default();
-        limits.max_image_width = Some(12000);
-        limits.max_image_height = Some(12000);
-        limits.max_alloc = Some(256 * 1024 * 1024);
-        reader.limits(limits);
-        let image = reader
-            .decode()
-            .map_err(|error| Error::Invalid(error.to_string()))?;
-        let mut thumbnail = std::io::Cursor::new(Vec::new());
-        image
-            .thumbnail(192, 192)
-            .write_to(&mut thumbnail, image::ImageFormat::Png)
-            .map_err(storage)?;
-        let thumbnail = thumbnail.into_inner();
         let digest = Digest::sha256(bytes);
 
         let _writer = lock(&self.writer)?;
@@ -1313,7 +1320,9 @@ impl Store {
         fs::create_dir_all(&staging).map_err(storage)?;
         let original_name = format!("original.{extension}");
         write_new_or_verify(&staging.join(&original_name), bytes)?;
-        write_new_or_verify(&staging.join("thumbnail.png"), &thumbnail)?;
+        if let Some(thumbnail) = &thumbnail {
+            write_new_or_verify(&staging.join("thumbnail.png"), thumbnail)?;
+        }
         sync_directory(&staging)?;
         sync_directory(
             staging
@@ -1332,11 +1341,11 @@ impl Store {
                 bytes: ByteLength(bytes.len() as u64),
                 digest,
             },
-            thumbnail: Some(StoredFile {
+            thumbnail: thumbnail.as_ref().map(|thumbnail| StoredFile {
                 visibility: Default::default(),
                 name: "thumbnail.png".into(),
                 bytes: ByteLength(thumbnail.len() as u64),
-                digest: Digest::sha256(&thumbnail),
+                digest: Digest::sha256(thumbnail),
             }),
             alt_text,
         };
@@ -1344,27 +1353,22 @@ impl Store {
             .join("assets")
             .join(asset_id.to_string())
             .join("payload");
+        let mut legacy_payloads = vec![archive_v3::LegacyPayloadV3 {
+            role: "original".into(),
+            relative_path: relative(&self.archive, &payload_root.join(&asset.file.name))?,
+            sha256: asset.file.digest.hex.clone(),
+        }];
+        if let Some(thumbnail) = &asset.thumbnail {
+            legacy_payloads.push(archive_v3::LegacyPayloadV3 {
+                role: "thumbnail".into(),
+                relative_path: relative(&self.archive, &payload_root.join(&thumbnail.name))?,
+                sha256: thumbnail.digest.hex.clone(),
+            });
+        }
         let record = archive_v3::AssetRecordV3 {
             collection_id,
             revision: Revision(1),
-            legacy_payloads: vec![
-                archive_v3::LegacyPayloadV3 {
-                    role: "original".into(),
-                    relative_path: relative(&self.archive, &payload_root.join(&asset.file.name))?,
-                    sha256: asset.file.digest.hex.clone(),
-                },
-                archive_v3::LegacyPayloadV3 {
-                    role: "thumbnail".into(),
-                    relative_path: relative(&self.archive, &payload_root.join("thumbnail.png"))?,
-                    sha256: asset
-                        .thumbnail
-                        .as_ref()
-                        .expect("thumbnail was created")
-                        .digest
-                        .hex
-                        .clone(),
-                },
-            ],
+            legacy_payloads,
             asset,
             deleted: false,
             updated_at: self.clock.now(),

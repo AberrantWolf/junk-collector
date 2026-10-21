@@ -616,6 +616,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(item_asset))
         .routes(routes!(asset_metadata))
         .routes(routes!(asset_original))
+        .routes(routes!(asset_text_preview))
         .routes(routes!(asset_thumbnail))
         .routes(routes!(music_track_availability))
         .routes(routes!(music_album_coverage))
@@ -2317,6 +2318,23 @@ async fn asset_original(
     })
     .await?;
     file_response(resource, headers, false).await
+}
+
+#[utoipa::path(get,path="/api/v1/collections/{collection}/assets/{asset}/text-preview",params(("collection"=CollectionId,Path),("asset"=AssetId,Path)),responses((status=200,body=collector_app::DocumentTextPreview),(status=400),(status=403),(status=404)))]
+async fn asset_text_preview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, asset)): Path<(CollectionId, AssetId)>,
+) -> ApiResult<Json<collector_app::DocumentTextPreview>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .document_text_preview(&actor, collection, asset)
+        })
+        .await?,
+    ))
 }
 
 #[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}/thumbnail", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, content_type = "image/png"), (status = 206, content_type = "image/png"), (status = 403), (status = 404), (status = 416)))]

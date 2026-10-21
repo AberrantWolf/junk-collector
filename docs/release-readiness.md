@@ -15,6 +15,7 @@ experimental. No stable API/storage/upgrade promise is introduced by this review
 | Public/private surfaces, authentication and media authorization | [Focused ingress review](validation/ingress-review-2026-10-21.md), existing HTTP/access regressions | Reuses actual-origin/operator evidence; bounded single-process controls, no enterprise certification |
 | FLAC/Opus preparation | [Independent real-tool audio oracles](validation/audio-oracles-2026-10-20.md) | Named fixture/tool/client; no implied gapless/device-bit-perfect/whole-disc catalog verification |
 | Catalog/audio identity claims | [Supported game matrix](game-identification.md), [audio matrix](audio-preparation.md) | Additional owned format/AccurateRip references remain required for broader claims |
+| PDF/text document attachments | [Post-alpha.3 source acceptance](validation/documents-2026-10-21.md) | Original-preserving uploads/downloads; native browser PDF viewer and bounded text preview; no server PDF rendering or all-browser claim |
 | Game-disc CD audio | Post-alpha.3 source delivered; owned/browser/native streaming and offline acceptance | Not in alpha.3; exact shared/Collector/native pins qualified; future release packaging and broader physical/raw-format coverage remain separate |
 
 Per-release source gates, current-stable toolchain selection, embedded-asset rebuild,

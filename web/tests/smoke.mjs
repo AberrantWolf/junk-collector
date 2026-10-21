@@ -284,7 +284,7 @@ try{
  const photoRecord=curator.getByRole('article',{name:/photo attached to Item/});
  await photoRecord.waitFor();
  page.once('dialog',dialog=>dialog.accept());
- await photoRecord.getByRole('button',{name:'Save image',exact:true}).click();
+ await photoRecord.getByRole('button',{name:'Archive image',exact:true}).click();
  await photoRecord.waitFor({state:'detached'});
  assert.equal(await assetForm.getByLabel('Artwork image').evaluate(node=>node===document.activeElement),true,'focus was not restored after archiving an image');
  await page.setViewportSize({width:390,height:844});

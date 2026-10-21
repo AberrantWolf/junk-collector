@@ -4027,10 +4027,10 @@ fn unsupported_or_invalid_asset_inputs_publish_nothing() {
         service.create_asset(
             &actor,
             command_for(AssetKind::Document),
-            b"document",
+            b"binary\0document",
             &CommandContext::new("asset-document").unwrap()
         ),
-        Err(Error::Unavailable(message)) if message.contains("not implemented")
+        Err(Error::Invalid(_))
     ));
     assert!(matches!(
         service.create_asset(
@@ -24498,4 +24498,139 @@ fn game_disc_audio_import_preparation_search_playlists_and_reindex() {
         v.state,
         collector_app::MusicTrackAvailabilityState::Available { .. }
     )));
+}
+
+#[test]
+fn documents_preserve_bytes_bound_text_and_obey_visibility_reindex_and_archive() {
+    let (_root, store, actor, service, collection) = setup();
+    let entry = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let viewer = Principal {
+        user_id: store
+            .create_user("document-viewer", "long viewer password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    Catalog::grant(store.as_ref(), collection.id, viewer.user_id, Role::Viewer).unwrap();
+    let input = |visibility, caption: &str| CreateAssetCommand {
+        collection_id: collection.id,
+        subject: AssetSubject::Item { item_id: entry.id },
+        kind: AssetKind::Document,
+        visibility,
+        alt_text: caption.into(),
+    };
+    let pdf = include_bytes!("fixtures/documents/manual.pdf");
+    let key = command();
+    let shared = service
+        .create_asset(&actor, input(Visibility::Shared, "Manual"), pdf, &key)
+        .unwrap();
+    assert_eq!(
+        service
+            .create_asset(&actor, input(Visibility::Shared, "Manual"), pdf, &key)
+            .unwrap()
+            .id,
+        shared.id
+    );
+    assert!(shared.thumbnail.is_none());
+    assert_eq!(shared.media_type, "application/pdf");
+    assert_eq!(
+        service
+            .item_presented(&viewer, entry.id)
+            .unwrap()
+            .primary_artwork,
+        None
+    );
+    assert!(
+        service
+            .document_text_preview(&viewer, collection.id, shared.id)
+            .is_err()
+    );
+    let text = format!(
+        "<script>globalThis.documentExecuted=true</script>\n{}",
+        "日本語 repeated text\n".repeat(15000)
+    );
+    let private = service
+        .create_asset(
+            &actor,
+            input(Visibility::Curators, "Receipt"),
+            text.as_bytes(),
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        !service
+            .item_presented(&viewer, entry.id)
+            .unwrap()
+            .assets
+            .iter()
+            .any(|v| v.id == private.id)
+    );
+    assert!(matches!(
+        service.document_text_preview(&viewer, collection.id, private.id),
+        Err(Error::Forbidden)
+    ));
+    service
+        .update_asset(
+            &actor,
+            private.id,
+            private.revision,
+            collector_app::UpdateAssetCommand {
+                visibility: Visibility::Shared,
+                alt_text: "Shared receipt".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let preview = service
+        .document_text_preview(&viewer, collection.id, private.id)
+        .unwrap();
+    assert!(preview.truncated);
+    assert!(preview.text.len() <= 128 * 1024);
+    assert!(preview.text.starts_with("<script>"));
+    let review = service.metadata_review(&actor, entry.id).unwrap();
+    assert!(
+        service
+            .update_metadata_authority(
+                &actor,
+                entry.id,
+                UpdateMetadataAuthorityCommand {
+                    expected_revision: review.revision,
+                    change: MetadataAuthorityChange::SetArtworkChoice {
+                        asset_id: shared.id
+                    }
+                },
+                &command()
+            )
+            .is_err()
+    );
+    store.reindex().unwrap();
+    for (id, expected) in [(shared.id, pdf.as_slice()), (private.id, text.as_bytes())] {
+        let mut resource = service
+            .asset_resource(&viewer, collection.id, id, false)
+            .unwrap();
+        let mut actual = vec![];
+        resource.reader.read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(resource.digest, Digest::sha256(expected));
+    }
+    let current = service
+        .asset_presented(&actor, collection.id, private.id)
+        .unwrap();
+    service
+        .tombstone_asset(&actor, private.id, current.revision, &command())
+        .unwrap();
+    store.reindex().unwrap();
+    assert!(
+        service
+            .asset_resource(&viewer, collection.id, private.id, false)
+            .is_err()
+    );
+    assert!(
+        service
+            .item_presented(&viewer, entry.id)
+            .unwrap()
+            .assets
+            .iter()
+            .any(|v| v.id == shared.id)
+    );
 }

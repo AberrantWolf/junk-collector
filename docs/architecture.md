@@ -1178,3 +1178,16 @@ a later archive invalidates an older queued lookup. Restoration publishes a new 
 retaining the tombstone, original bytes, visibility and alternative text; automatic
 refresh cannot restore archived artwork. Concurrent equal selections converge on
 the already committed artwork choice without rewriting unrelated metadata.
+
+### General document Assets — 2026-10-21
+
+Document Assets reuse subject ownership, explicit shared/curator visibility,
+immutable original publication, archive/reindex and authorized media downloads.
+The selected initial formats are opaque PDF files and UTF-8 text, bounded by the
+existing 20 MiB asset upload policy. Shared byte classification and bounded text
+reader mechanics live in junk-libs-core; application services own allowed formats,
+preview length and authorization. PDF signature recognition is not structural
+validation: the preserved original is rendered by the browser's native PDF viewer
+on explicit request. Text previews contain escaped plain text with typed truncation;
+HTML is never interpreted. No PDF server renderer, invented thumbnail or metadata
+verification claim is introduced. Documents cannot become album/game artwork.

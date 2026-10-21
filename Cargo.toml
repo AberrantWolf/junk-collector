@@ -32,13 +32,13 @@ utoipa-axum = "0.2"
 url = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 httpdate = "1"
-junk-libs-audio = { git = "https://github.com/AberrantWolf/junk-libs", rev = "993afc932c6b2acb5cf02c95d3cb8a387d9a70a5" }
-junk-libs-accuraterip = { git = "https://github.com/AberrantWolf/junk-libs", rev = "993afc932c6b2acb5cf02c95d3cb8a387d9a70a5" }
-junk-libs-core = { git = "https://github.com/AberrantWolf/junk-libs", rev = "993afc932c6b2acb5cf02c95d3cb8a387d9a70a5" }
-junk-libs-disc = { git = "https://github.com/AberrantWolf/junk-libs", rev = "993afc932c6b2acb5cf02c95d3cb8a387d9a70a5" }
-junk-libs-disc-id = { git = "https://github.com/AberrantWolf/junk-libs", rev = "993afc932c6b2acb5cf02c95d3cb8a387d9a70a5" }
-junk-libs-game-formats = { git = "https://github.com/AberrantWolf/junk-libs", rev = "993afc932c6b2acb5cf02c95d3cb8a387d9a70a5" }
-junk-libs-dat = { git = "https://github.com/AberrantWolf/junk-libs", rev = "993afc932c6b2acb5cf02c95d3cb8a387d9a70a5" }
+junk-libs-audio = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-accuraterip = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-core = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-disc = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-disc-id = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-game-formats = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-dat = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
 
 [profile.release]
 lto = "thin"

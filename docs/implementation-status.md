@@ -864,8 +864,7 @@ The full first release, native clients and public deployment remain later target
   PNG thumbnails. Visibility/alt-text updates and tombstones create independent
   schema-3 Asset revisions without changing Item revisions; subjects remain
   immutable, payloads/history survive tombstoning, and reindex retains standalone
-  records. Documents are rejected as explicitly unavailable rather than accepted
-  as a placeholder.
+  records. The post-alpha.3 document delivery below adds PDF and text Assets.
 - U04.2 exposes revisioned `PresentedAsset` metadata and collection-scoped
   original/thumbnail resources through application-owned authorization. Viewer
   DTOs omit visibility and stored filenames/digests, while curator-only metadata
@@ -881,8 +880,8 @@ The full first release, native clients and public deployment remain later target
   retained-history guidance. Browse/detail consume server-selected artwork and
   visibly separate missing artwork from identity uncertainty. Keyboard flow,
   focus restoration, reduced motion, viewer filtering, and responsive layout are
-  browser tested. U04 is locally complete; document uploads, offline artwork, and
-  independent review remain outstanding.
+  browser tested. General document upload/preview support is described below;
+  broader offline artwork and independent review remain separate.
 - P03.1 advances private state to schema v9 and persists provisional Import
   workflows under an `ImportId` distinct from Jobs and command transactions.
   Records retain a safe source summary, bounded file inventory with offsets and
@@ -1622,3 +1621,18 @@ corruption fails closed. See [conversion](snapshot-duplicate-conversion.md) and
 [delivery validation](validation/concurrent-processing.md). No live archive was
 converted. Full-source validation is retained; disk contention and hashing redesign
 remain separate work. This does not qualify live-provider or real-disc HL-06 checks.
+
+### General document attachments — 2026-10-21
+
+Post-alpha.3 source supports PDF and UTF-8 text Assets, up to 20 MiB, attached
+through the existing subject, revision, visibility and archive pipeline. The
+Documents editor defaults to Curators only and explicitly offers sharing. The
+item view provides original downloads, browser-native PDF viewing and escaped
+128 KiB text previews with a truncation notice. No server PDF renderer, PDF
+structural-validation claim or artificial thumbnail is provided. Documents cannot
+be selected as artwork. Originals and visibility survive reindexing; archived
+originals remain in history. Existing purchase companion preservation is unchanged.
+Shared byte classification/read bounds live in junk-libs-core, pinned to
+`193e0a88faaa0c3d5636976932f120c237831ad0`. See
+[acceptance and limits](validation/documents-2026-10-21.md). These changes are not
+in the published alpha.3 images.

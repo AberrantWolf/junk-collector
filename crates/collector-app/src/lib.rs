@@ -5,6 +5,8 @@ mod file_music;
 pub use file_music::{
     UpdateDigitalPurchase, file_music_search_projection, import_preservation_format,
 };
+mod documents;
+pub use documents::*;
 mod backup;
 pub use backup::*;
 mod archive_export;
@@ -2638,9 +2640,9 @@ impl CollectionService {
             })
             .collect::<Vec<_>>();
         presentation.artwork.retain(|reference| {
-            asset_states
-                .iter()
-                .any(|state| state.asset.id == reference.asset_id)
+            asset_states.iter().any(|state| {
+                state.asset.id == reference.asset_id && state.asset.kind != AssetKind::Document
+            })
         });
         let module_artwork = presentation.artwork.first().map(|value| value.asset_id);
         let mut fallback = asset_states
@@ -2668,9 +2670,11 @@ impl CollectionService {
         }
         let private = role != Role::Viewer;
         asset_states.sort_by_key(|state| state.asset.id);
-        effective_metadata.artwork = effective_metadata
-            .artwork
-            .filter(|asset_id| asset_states.iter().any(|state| state.asset.id == *asset_id));
+        effective_metadata.artwork = effective_metadata.artwork.filter(|asset_id| {
+            asset_states
+                .iter()
+                .any(|state| state.asset.id == *asset_id && state.asset.kind != AssetKind::Document)
+        });
         let primary_artwork = effective_metadata.artwork.or(primary_artwork);
         let mut digital_audio = false;
         let accuraterip = if item.domain.module.0 == "org.junk.music" {
@@ -3768,8 +3772,8 @@ impl CollectionService {
         bytes: &[u8],
         context: &CommandContext,
     ) -> Result<PresentedAsset> {
-        validate_asset_upload(&command.kind, &command.alt_text, bytes)?;
         let role = self.authorize(actor, command.collection_id, Action::Curate)?;
+        validate_asset_upload(&command.kind, &command.alt_text, bytes)?;
         self.content_write_eligibility(actor, command.collection_id)?;
         let subject_collection = self.content.asset_subject_collection(command.subject)?;
         if subject_collection != command.collection_id {
@@ -6507,21 +6511,16 @@ fn deterministic_new_asset_id(user: UserId, key: &str) -> AssetId {
 }
 
 fn validate_asset_upload(kind: &AssetKind, alt_text: &str, bytes: &[u8]) -> Result<()> {
-    match kind {
-        AssetKind::Cover | AssetKind::Photo | AssetKind::Scan => {}
-        AssetKind::Document => {
-            return Err(Error::Unavailable(
-                "document uploads are not implemented in Wave 3".into(),
-            ));
-        }
-        AssetKind::Other => {
-            return Err(Error::Invalid(
-                "asset kind must be cover, photo, or scan".into(),
-            ));
-        }
+    if !matches!(
+        kind,
+        AssetKind::Cover | AssetKind::Photo | AssetKind::Scan | AssetKind::Document
+    ) {
+        return Err(Error::Invalid(
+            "asset kind must be cover, photo, scan, or document".into(),
+        ));
     }
-    if bytes.len() > 20 * 1024 * 1024 || alt_text.len() > 4096 {
-        return Err(Error::Invalid("image exceeds upload limit".into()));
+    if bytes.len() > MAX_ASSET_BYTES || alt_text.len() > 4096 {
+        return Err(Error::Invalid("asset exceeds upload limit".into()));
     }
     Ok(())
 }

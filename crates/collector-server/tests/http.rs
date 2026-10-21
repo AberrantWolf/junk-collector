@@ -3922,6 +3922,66 @@ async fn asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_select
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
+    let response=app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/v1/collections/{}/assets?subject_kind=item&subject_id={}&kind=document&visibility=shared",collection.id,item.id)).header("authorization",format!("Bearer {owner_token}")).header("origin","https://collector.example").header("idempotency-key","http-document").body(Body::from("日本語 <b>plain text</b>")).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let doc = document["id"].as_str().unwrap();
+    for (scope, token, expected) in [
+        (collection.id, &viewer_token, StatusCode::OK),
+        (collection.id, &stranger_token, StatusCode::FORBIDDEN),
+        (other_collection.id, &owner_token, StatusCode::NOT_FOUND),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/v1/collections/{scope}/assets/{doc}/text-preview"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        if expected == StatusCode::OK {
+            let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+                .await
+                .unwrap();
+            let preview: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(preview["text"], "日本語 <b>plain text</b>");
+            assert_eq!(preview["truncated"], false);
+        }
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/collections/{}/assets/{doc}/original",
+                    collection.id
+                ))
+                .header("authorization", format!("Bearer {viewer_token}"))
+                .header("range", "bytes=0-8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/plain; charset=utf-8"
+    );
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    let bytes = axum::body::to_bytes(response.into_body(), 64)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), "日本語".as_bytes());
 }
 
 #[tokio::test]

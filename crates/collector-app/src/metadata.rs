@@ -1776,7 +1776,11 @@ impl CollectionService {
                         .content
                         .asset_states_for_item(item.id)?
                         .iter()
-                        .any(|state| !state.deleted && state.asset.id == *asset_id)
+                        .any(|state| {
+                            !state.deleted
+                                && state.asset.id == *asset_id
+                                && state.asset.kind != AssetKind::Document
+                        })
                 {
                     return Err(Error::Invalid(
                         "metadata artwork choice is not an active asset for this item".into(),

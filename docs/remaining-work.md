@@ -764,11 +764,12 @@ covered by the [browser regression and validation record](validation/library-wor
 Self-review strengthened restoration coverage after the modal unmounts; it passes.
 This closes the defect observed in the 2026-10-09 AccurateRip shortcut journey.
 
-- Active 2026-10-21: add general document Assets/attachments and previews when manuals/receipts need
-  their own presentation, using existing visibility/publication and bounded
-  validation. HL-02 already preserves purchase companions, including booklets and
-  receipts, as reviewed original files with authorized downloads. That does not
-  implement a general document Asset/preview surface. Image Covers/Photos/Scans work.
+- Completed 2026-10-21: general PDF/UTF-8 text document Assets, private-by-default
+  attachment editor, authorized original downloads, native browser PDF viewing and
+  bounded escaped text previews. Existing visibility, revisions, archive/reindex
+  and upload receipts apply; documents cannot become artwork. See
+  [acceptance and limits](validation/documents-2026-10-21.md). This is post-alpha.3
+  source work; broader document rendering/formats remain conditional.
 - Add a game metadata/artwork provider only for an identified collection need,
   with provider terms/access established, bounded acquisition, meaningful source
   attribution and manual authority preserved under HL-01 retention policy. Manual
@@ -1034,9 +1035,10 @@ implemented; provider-access restoration or automated scraping is not an open ta
 The user assigned independent release-readiness review, remaining useful software
 work and game-disc audio, with self-review before completion and a commit per
 milestone. Complete focused authentication/upload/media review and actionable
-repairs first (HL-05H and the bounded checklist are now delivered); then complete game-disc audio across the shared reader, Collector,
-web and Trash Amp contracts. Continue independent native failure qualification and
-bounded document-preview/backup-age conveniences where they can be delivered
+repairs first (HL-05H and the bounded checklist are now delivered). Game-disc audio
+across the shared reader, Collector, web and Trash Amp is delivered in source, with
+owned/browser/native acceptance; general PDF/text documents are also delivered.
+Continue independent native failure qualification and bounded backup-age conveniences where they can be delivered
 without new product/provider decisions. Preserve staged sibling release work.
 Read-only access to useful material in `~/dumps` is explicitly authorized; use owned
 mixed-mode references when available, keep originals unchanged and never commit

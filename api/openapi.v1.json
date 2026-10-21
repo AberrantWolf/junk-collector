@@ -2111,6 +2111,50 @@
         }
       }
     },
+    "/api/v1/collections/{collection}/assets/{asset}/text-preview": {
+      "get": {
+        "operationId": "asset_text_preview",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTextPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/collections/{collection}/assets/{asset}/thumbnail": {
       "get": {
         "operationId": "asset_thumbnail",
@@ -10561,6 +10605,21 @@
           }
         },
         "additionalProperties": false
+      },
+      "DocumentTextPreview": {
+        "type": "object",
+        "required": [
+          "text",
+          "truncated"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
       },
       "DomainEdit": {
         "type": "object",

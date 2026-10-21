@@ -708,6 +708,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{collection}/assets/{asset}/text-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["asset_text_preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{collection}/assets/{asset}/thumbnail": {
         parameters: {
             query?: never;
@@ -3021,6 +3037,10 @@ export interface components {
             date: string;
             possession: components["schemas"]["ReturnedPossession"];
             reason: string;
+        };
+        DocumentTextPreview: {
+            text: string;
+            truncated: boolean;
         };
         /**
          * @description A bounded owner-mediated patch. The raw object preserves JSON scalar types;
@@ -6965,6 +6985,46 @@ export interface operations {
                 content?: never;
             };
             416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    asset_text_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                asset: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTextPreview"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
