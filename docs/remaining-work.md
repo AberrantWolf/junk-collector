@@ -10,24 +10,10 @@ have been removed; completed work is described by status and dated validation.
 [Implementation status](implementation-status.md) records capabilities;
 [release requirements](release-requirements.md) records the revised delivery gate.
 
-Queue updated 2026-10-21 after public alpha.3 publication and isolated Portainer
-update/cleanup/full restore, including HL-09 opt-in inbox cleanup and HL-10 full
-portable archive export/import, plus HL-07A/B/C usability/setup acceptance and HL-05A
-actual-host isolated install/update/restore, HL-05B snapshot/incremental recovery
-qualification, HL-07D public alpha.2/Portainer acceptance and HL-05C active
-preparation failure/recovery acceptance, HL-06A real-tool audio oracles, the numeric-IP
-startup/storage repair, HL-05E bounded archive ENOSPC recovery and HL-05F bounded
-authentication identity retention and HL-05G actual-NAS TCP login thresholds.
-The 2026-10-19 native delivery and live-use triage remain recorded below.
-HL-01, HL-02 and HL-03 remain delivered. HL-04's bounded physical Safari browser
-journey passed; native/offline/failure qualification remains open. HL-07A/B/C are delivered. HL-07D public alpha.2 image/
-pull/update acceptance is delivered; continue the remaining advertised-device,
-format and permanent-ingress qualification when its required hosts/reference
-material are available. NAS operations/recovery belong to HL-05A/B; Docker publication
-and release usability belong to HL-07A–D. Keep the existing milestone numbers.
-The earlier insertion assigned
-digital purchases to HL-02, moved unfinished LAN qualification to HL-04 and former
-HL-04–HL-13 to HL-05–HL-14. Dated completed records retain their original labels.
+**Updated 2026-10-21:** beta.2 is published. Its isolated Synology upgrade and full restore passed.
+See [publication acceptance](validation/container-beta2-publication-2026-10-21.md).
+Remaining device, network and owned-format checks keep their limits below.
+Completed milestones retain their existing numbers and dated evidence.
 
 ## Prioritization and execution
 
@@ -1044,37 +1030,26 @@ unlimited future-retention requirement.
 The disabled DAT-o-MATIC downloader stays disabled. Manual download/upload is
 implemented; provider-access restoration or automated scraping is not an open task.
 
-## Active beta release completion — 2026-10-21
+## Completed beta release — 2026-10-21
 
-The user requested beta.1 packaging, Docker publication and an isolated Synology upgrade.
-Beta.1 published, but its NAS upgrade failed on an obsolete music-search table.
-Preserve its signed tag. Finish the correction as **beta.2** and repeat the isolated
-alpha.3 upgrade, pending-upload resume and full restore. Leave production unchanged.
+**Beta.2 is published and accepted.** Beta.1's isolated NAS test found an obsolete
+music-search table. Beta.1's signed tag stays unchanged; beta.2 repairs the upgrade.
+Native AMD64/ARM64 images, public pulls and the DS1522+ alpha.3 upgrade/resume/cleanup/full restore passed.
+All 17 live containers stayed unchanged; generated fixtures were removed.
 See [beta.1 failure](validation/container-beta1-publication-2026-10-21.md) and
 [beta.2 acceptance](validation/container-beta2-publication-2026-10-21.md).
-Trash Amp application packaging remains separate; preserve its staged release files.
+Trash Amp application packaging remains separate; its staged release files are untouched.
 
 ## Completed autonomous source work — 2026-10-21
 
-The user assigned independent release-readiness review, remaining useful software
-work and game-disc audio, with self-review before completion and a commit per
-milestone. Complete focused authentication/upload/media review and actionable
-repairs first (HL-05H and the bounded checklist are now delivered). Game-disc audio
-across the shared reader, Collector, web and Trash Amp is delivered in source, with
-owned/browser/native acceptance; general PDF/text documents are also delivered.
-The opt-in backup-age reminder is also delivered. Bounded native software failure
-qualification now covers durable command loss/restart, actual-read grant/device
-revocation, changed/ignored/truncated ranges, header/body stall cancellation and
-wrong pinned-trust recovery. The remaining HL-04 UI/physical-device/network checks
-and conditional provider/product decisions retain their named limits. Preserve staged sibling release work.
-Read-only access to useful material in `~/dumps` is explicitly authorized; use owned
-mixed-mode references when available, keep originals unchanged and never commit
-copyrighted media. Keep actual-device/reference gaps unqualified and continue other
-independent work. Game-disc audio may remain outside the next advertised release
-scope until its relevant validation passes. Reuse accepted alpha.3 publication and
-NAS recovery evidence; no production update or giant repeat matrix is assigned.
-Deferred provider integrations, legacy migration without actual legacy data,
-new codecs, synchronization and enterprise matrices remain conditional.
+- [Game-disc audio](game-disc-audio.md): shared reader, Collector/web and Trash Amp source; owned-disc/browser/native acceptance.
+- [PDF/text attachments](validation/documents-2026-10-21.md): private uploads, original downloads and bounded previews.
+- [Optional backup-age reminder](validation/backup-reminder-2026-10-21.md): recorded outcomes and labelled operator dates.
+- [Native failure recovery](validation/native-failure-recovery-2026-10-21.md): command loss/restart, read revocation, ranges, cancellation and pinned-trust failure.
+- [Focused access review](validation/ingress-review-2026-10-21.md): protected uploads authenticate before reading bodies.
+
+Remaining physical UI/device/network checks retain their limits under HL-04/08.
+Provider integrations, additional codecs, synchronization and legacy migration remain conditional.
 
 ## Ready-to-send next assignment
 
@@ -1103,13 +1078,8 @@ HL-05G independently qualifies actual-NAS login ceilings from multiple loopback 
 sources and full recovery; see its [acceptance](validation/nas-authentication-limits-2026-10-20.md).
 HL-09's explicit inbox cleanup is delivered with
 [real-UI and recovery acceptance](validation/inbox-cleanup-2026-10-21.md).
-The requested cleanup and release assignment is complete: public **alpha.3**
-packages it, portable full archive transfer and the post-alpha.2 fixes. Both native
-images and one isolated actual-NAS Portainer pull/update/cleanup/full-restore drill
-passed; see [publication acceptance](validation/container-publication-2026-10-21.md).
-All 17 live container identities/images/start times stayed unchanged and generated
-fixtures were removed. Reuse this acceptance; no new deployment matrix or live
-production update is assigned.
+Current Docker release: **beta.2**, with [isolated Synology upgrade/restore acceptance](validation/container-beta2-publication-2026-10-21.md).
+Alpha.3's [publication record](validation/container-publication-2026-10-21.md) remains historical evidence.
 HL-10's standalone portable full export/import is delivered with
 [local CLI acceptance](validation/archive-export-2026-10-21.md); deltas and legacy
 adoption remain conditional follow-ups.
@@ -1117,7 +1087,7 @@ adoption remain conditional follow-ups.
 > Continue the remaining HL-04 trusted-device/LAN, HL-05 actual public-ingress and
 > HL-06 owned-format qualification only when their named devices, deployment access
 > or independent reference material are available. Reuse the accepted HL-07D public
-> alpha.3 installation/update/recovery evidence; do not repeat packaging or infer
+> beta.2 installation/update/recovery evidence; do not repeat packaging or infer
 > system-trusted second-device/public-ingress acceptance from it. Keep experimental
 > release limits explicit. Independent media copies, paid cloud backup and backup-age
 > reminders remain optional and do not block this queue. Production deployment

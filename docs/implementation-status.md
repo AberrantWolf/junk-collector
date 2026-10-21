@@ -5,8 +5,10 @@
 Beta.1 passed source checks and public pulls, then failed the isolated NAS upgrade.
 An old music-search table was incorrectly reused. Beta.2 rebuilds obsolete catalogs
 and repairs the bad schema stamp. Archive records and private accounts stay intact.
+Both native images, anonymous pulls and the isolated DS1522+ alpha.3 upgrade/full restore passed.
+All 17 live containers stayed unchanged.
 See [release scope](releases/v0.1.0-beta.2.md), [beta.1 failure](validation/container-beta1-publication-2026-10-21.md)
-and [beta.2 publication progress](validation/container-beta2-publication-2026-10-21.md).
+and [beta.2 publication acceptance](validation/container-beta2-publication-2026-10-21.md).
 
 Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
 
@@ -20,7 +22,7 @@ those prefixes for comparison but never rewrites them. Saved reviews can be edit
 again after a failed publication, and transient restore failures retain the saved
 Import identity. These changes add permanent recovery and browser regression tests.
 
-This repository is an executable architecture/server foundation, not the complete first release described in the accepted plan. Capability reporting must stay honest as remaining modules land.
+Use the [capability checklist](release-readiness.md) for current supported scope. The detailed entries below include earlier development stages.
 
 Use the [consolidated backlog](remaining-work.md) for all remaining work and
 [release requirements](release-requirements.md) for the revised home-lab gate.
