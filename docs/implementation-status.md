@@ -21,6 +21,17 @@ Completed records retain their historical milestone labels; the 2026-10-19 queue
 renumbering is documented in remaining work. Active remaining-work references use
 its current IDs.
 
+## Focused release review and early body authentication — 2026-10-21
+
+Curation routes now authenticate before JSON/byte body extraction; administration
+routes also enforce application administrator policy first. Collection-specific
+and handler authority checks remain current. A reproducing no-body-poll regression,
+all 32 HTTP tests, 455 workspace tests, strict Clippy and actual Chrome workflows
+pass. This post-alpha.3 source repair and its bounded review are recorded in
+[acceptance](validation/ingress-review-2026-10-21.md). The
+[release capability checklist](release-readiness.md) links accepted evidence and
+keeps broader native/owned-format and game-audio scope explicitly incomplete.
+
 ## HL-09 explicit inbox source cleanup — 2026-10-21
 
 The import requester's Work & history detail now offers explicit inbox cleanup

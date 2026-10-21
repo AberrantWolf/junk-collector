@@ -847,6 +847,14 @@ configuration enum owns both the live verifier and its unavailable reason; the
 features API and security panel consume that state. TLS validation, exact Origin
 allowlisting, listener composition and stored credentials are unchanged.
 
+Runtime curation/API composition authenticates callers before body extraction;
+administration composition also calls application administrator policy before
+reading a body. Handler/application checks revalidate current authority and all
+collection-specific/freshness/command policy after extraction. This prevents large
+anonymous curation bodies from being parsed while keeping explicit bootstrap
+routes and exposure composition independent of caller headers. See the
+[focused ingress review](validation/ingress-review-2026-10-21.md).
+
 Three surfaces: client, curation, administration. Public curation and administration default off. Public administration implies curation exposure; roles remain mandatory. Routers omit disabled pages, JavaScript management entrypoints and mutation APIs. The public listener stays public regardless of `Forwarded` or `X-Forwarded-For`.
 
 Authentication/enrollment throttling is a process-local HTTP adapter mechanism.

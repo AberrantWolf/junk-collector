@@ -483,6 +483,28 @@ fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<Authenticat
 fn principal(state: &AppState, headers: &HeaderMap) -> ApiResult<Principal> {
     Ok(authenticated(state, headers)?.principal)
 }
+
+// Reject untrusted large uploads before body extractors allocate or parse them.
+// Collection-specific authority is still checked by each application command.
+async fn authenticated_api(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> ApiResult<Response> {
+    principal(&state, request.headers())?;
+    Ok(next.run(request).await)
+}
+
+async fn administrator_api(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> ApiResult<Response> {
+    state
+        .service
+        .require_administrator(&principal(&state, request.headers())?)?;
+    Ok(next.run(request).await)
+}
 fn command_context(headers: &HeaderMap) -> ApiResult<CommandContext> {
     let key = headers
         .get("idempotency-key")
@@ -520,7 +542,10 @@ pub fn router(state: AppState) -> Router {
             .route("/library-imports.js", get(library_imports_js))
             .route("/collection-access.js", get(collection_access_js))
             .route("/work-history.js", get(work_history_js))
-            .merge(curation_api);
+            .merge(curation_api.route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                authenticated_api,
+            )));
     }
     if state
         .exposure
@@ -530,7 +555,12 @@ pub fn router(state: AppState) -> Router {
         router = router
             .route("/admin", get(index))
             .route("/administration.js", get(administration_js))
-            .merge(administration_api);
+            .merge(
+                administration_api.route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    administrator_api,
+                )),
+            );
     }
     router
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))

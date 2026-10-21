@@ -494,6 +494,17 @@ addresses are not distinct physical clients or a public proxy/NAT. External ingr
 enrollment/media abuse, sustained load and physical-device claims remain separate.
 The published image still predates HL-05F's memory-bound source repair.
 
+#### HL-05H — Reject untrusted upload callers before body reads
+
+**State:** delivered in source 2026-10-21. Runtime curation/authentication and
+administration/application-role guards run before body extraction. Handler and
+collection authority checks remain current. The reproducing body-poll regression,
+32 HTTP tests, full workspace/Clippy gates and actual Chrome workflows passed.
+The focused listener/authentication/upload/media review and limits are in the
+[acceptance record](validation/ingress-review-2026-10-21.md); the
+[capability checklist](release-readiness.md) consolidates existing release evidence.
+This source repair is after alpha.3. No live service changed.
+
 #### NAS administration follow-up — not a product release gate
 
 Investigate supported DSM updates/settings to enable SFTP on the DS1522+
@@ -1010,6 +1021,24 @@ unlimited future-retention requirement.
 
 The disabled DAT-o-MATIC downloader stays disabled. Manual download/upload is
 implemented; provider-access restoration or automated scraping is not an open task.
+
+## Active autonomous assignment — 2026-10-21
+
+The user assigned independent release-readiness review, remaining useful software
+work and game-disc audio, with self-review before completion and a commit per
+milestone. Complete focused authentication/upload/media review and actionable
+repairs first (HL-05H and the bounded checklist are now delivered); then complete game-disc audio across the shared reader, Collector,
+web and Trash Amp contracts. Continue independent native failure qualification and
+bounded document-preview/backup-age conveniences where they can be delivered
+without new product/provider decisions. Preserve staged sibling release work.
+Read-only access to useful material in `~/dumps` is explicitly authorized; use owned
+mixed-mode references when available, keep originals unchanged and never commit
+copyrighted media. Keep actual-device/reference gaps unqualified and continue other
+independent work. Game-disc audio may remain outside the next advertised release
+scope until its relevant validation passes. Reuse accepted alpha.3 publication and
+NAS recovery evidence; no production update or giant repeat matrix is assigned.
+Deferred provider integrations, legacy migration without actual legacy data,
+new codecs, synchronization and enterprise matrices remain conditional.
 
 ## Ready-to-send next assignment
 

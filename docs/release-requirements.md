@@ -12,6 +12,9 @@ See [the accepted scope policy](decisions/home-lab-scope.md).
 
 ## Current home-lab release gate
 
+The [current capability/evidence checklist](release-readiness.md) records accepted
+coverage and remaining native/owned-format limits without creating another queue.
+
 - Preserve raw originals, physical collection facts, manual authority, unknown data
   and meaningful source-bound evidence. Keep accepted metadata/artwork attribution;
   do not require a permanent history of every lookup or equivalent provider response.

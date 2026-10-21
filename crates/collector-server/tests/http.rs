@@ -1469,6 +1469,53 @@ async fn asset_mutations_follow_curation_listener_composition() {
     }
 }
 #[tokio::test]
+async fn protected_upload_routes_reject_untrusted_callers_before_reading_bodies() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_root, mut state) = state();
+    state.ingress = Ingress::Private;
+    let viewer = state
+        .store
+        .create_user("upload-viewer", "a long viewer password", false)
+        .unwrap();
+    let (token, _) = state.store.issue_session(viewer, "browser").unwrap();
+    let app = router(state);
+    for (path, credential, expected) in [
+        ("/api/v1/intake-discoveries", None, StatusCode::UNAUTHORIZED),
+        ("/api/v1/imports", None, StatusCode::UNAUTHORIZED),
+        (
+            "/api/v1/admin/collections",
+            Some(token.as_str()),
+            StatusCode::FORBIDDEN,
+        ),
+    ] {
+        let polled = Arc::new(AtomicBool::new(false));
+        let observed = polled.clone();
+        let body = Body::from_stream(futures_util::stream::once(async move {
+            observed.store(true, Ordering::SeqCst);
+            Err::<axum::body::Bytes, _>(std::io::Error::other("untrusted body was read"))
+        }));
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("origin", "https://collector.example")
+            .header("content-type", "application/json");
+        if let Some(token) = credential {
+            request = request.header("cookie", format!("collector_session={token}"));
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(body).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected, "{path}");
+        assert!(
+            !polled.load(Ordering::SeqCst),
+            "{path} read a rejected caller's body"
+        );
+    }
+}
+
+#[tokio::test]
 async fn private_surface_still_requires_authentication_and_csrf_origin() {
     let (_root, mut state) = state();
     state.ingress = Ingress::Private;
