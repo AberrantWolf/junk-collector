@@ -27,7 +27,7 @@ private formats fail closed. Local recovery retains enabled/admin/default status
 and grants, including when the account is disabled.
 
 Before upgrading, stop the server and copy the complete archive and private-state
-root as described in [full backup](../README.md#full-backup). Restore the complete
+root as described in [full backup](server-operations.md#full-backup). Restore the complete
 backup with its matching executable if an upgrade fails; do not downgrade just the
 SQLite version marker or replace the private root. Lookup/recovery never rebuilds
 accounts from archive contents.

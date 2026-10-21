@@ -1,39 +1,22 @@
 # Container installation and updates
 
-Run Junk Collector on a Linux Docker host or a compatible NAS with Docker Compose
-v2 or later. The recommended browser entry point is an HTTPS hostname managed by
-an existing reverse proxy or Cloudflare Tunnel. Direct private HTTPS is an
-alternative. The server runs as UID/GID 10001 with a read-only root filesystem;
-configuration, accounts, uploads, archive files, and prepared audio persist outside
-the image. FLAC and Opus encoders are included.
+**For Linux Docker hosts and compatible Synology NAS devices.** Requires Compose v2.
+FLAC and Opus tools are included. The server runs as UID/GID 10001; data stays outside the image.
 
-Builds remain experimental alpha software. Backed-up personal use of supported
-features is the intended starting point. Storage formats may change; read the
-selected build's notes before updating. Full Internet-ingress, active-work failure,
-and power-loss qualification remain incomplete. The dated validation records
-state which installation paths have actually been exercised.
+**Install:** [image and storage](#1-select-an-image-and-storage) → [HTTPS](#2-configure-https-access) → [initialize](#3-initialize-and-start).
+**Already installed?** See [updates](#update), [Portainer](#portainer-managed-stacks-and-ssh-maintenance) or [recovery](recovery.md).
 
 ## 1. Select an image and storage
 
-Use an explicit image version or digest supplied by a release.
+Use an explicit image version or digest supplied by a release. On Synology DS1522+,
+automatic platform selection uses linux/amd64.
 
 <!-- release-image:start -->
-Published alpha.2 supplies `ghcr.io/aberrantwolf/junk-collector:v0.1.0-alpha.2` for
-linux/amd64 and linux/arm64. Download the installation bundle and image record from
-[the GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-alpha.2).
-The release bundle's `.env.example` pins this verified index:
+- **Image:** `ghcr.io/aberrantwolf/junk-collector:v0.1.0-beta.1` (AMD64 and ARM64).
+- **Download:** [GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.1). The installation bundle pins the verified digest.
+- **Channels:** `preview` follows prereleases; `latest` is reserved for stable releases.
+- **Before updating:** read the [beta notes](../../docs/releases/v0.1.0-beta.1.md).
 
-```text
-ghcr.io/aberrantwolf/junk-collector@sha256:f86f46d2c8870f8d647fc9225ce2cfe7c4319521a29c89897b419abb77629433
-```
-
-Source compilation or image-archive transfer is unnecessary. When using this
-source directory instead of the bundle, set `.env`'s `COLLECTOR_IMAGE` to that
-reference (the source example retains its local-build placeholder). For deliberate
-moving-channel updates select `ghcr.io/aberrantwolf/junk-collector:preview`; stable releases
-alone use `latest`. Retain the old digest and complete consistent recovery point.
-To build a local development image, run `docker build -t junk-collector:local .`
-from the repository root and explicitly select that local tag.
 <!-- release-image:end -->
 
 Extract the release installation bundle on the server, or use this directory from
@@ -48,7 +31,7 @@ Set these values in `.env`:
 
 | Setting | Value |
 |---|---|
-| `COLLECTOR_IMAGE` | Selected image tag/digest, or `junk-collector:local` for the build above. |
+| `COLLECTOR_IMAGE` | Selected image tag/digest; use the bundle's pinned default. |
 | `COLLECTOR_DATA` | New permanent absolute data directory, e.g. `/srv/junk-collector` or `/volume1/junk-collector` on Synology. |
 | `COLLECTOR_HOST`, `COLLECTOR_PRIVATE_IP` | Leave their loopback defaults for the proxy setup; see the direct HTTPS alternative below. |
 
@@ -91,35 +74,24 @@ Configure the proxy/tunnel route:
 | `https://collector.example.com` | `http://127.0.0.1:9841` | Public router, with the exposure selected above. |
 | Separate private management origin, if used | `http://127.0.0.1:9842` | Full management, reachable only through private ingress. |
 
-The upstream addresses are relative to the proxy/connector's network namespace.
-A host process or Linux host-network container on the same machine can reach them.
-A bridge-network container's `localhost` means that container; neither its ordinary
-service name nor the NAS's LAN address reaches Collector's loopback HTTP listener.
-Use a host-local/host-network proxy or connector for this package. Do not point
-an existing bridge connector at its own localhost, widen the HTTP binds, or route
-an Internet hostname to port 9842. Changing a shared connector's network can also
-break its other Docker service-name routes; choose its topology deliberately.
+**The connector must reach the host's loopback.** Use a host process or Linux host-network container.
+A bridge container's `localhost` points to itself. A NAS reverse proxy can provide the local hop instead.
+Keep any existing connector routes intact when choosing this topology.
 
-An existing host-level reverse proxy, including a NAS's built-in proxy, can also
-provide the local connection to `127.0.0.1:9841`. A bridge-network tunnel connector
-can reach that proxy's private service address instead. If that hop uses HTTPS,
-verify its certificate. Use the local origin address, not a public hostname that
-routes back into the same tunnel.
+For Cloudflare Tunnel, choose service type **HTTP** and URL `127.0.0.1:9841` in a
+host-local connector. Cloudflare manages the browser certificate; phones need no
+Collector certificate import. Collector login and collection permissions still apply.
+See [Cloudflare routing](https://developers.cloudflare.com/tunnel/concepts/routing/).
 
-For Cloudflare Tunnel, add a published application hostname with service type
-**HTTP** and URL `127.0.0.1:9841` in the host-local connector. Cloudflare provides
-browser-facing HTTPS; no Collector certificate import is needed for this HTTP
-upstream. See [Cloudflare's routing documentation](https://developers.cloudflare.com/tunnel/concepts/routing/).
-An Access policy can restrict initial browser use to selected users; Collector's
-own login and collection permissions remain required.
+**Never route Internet access to port 9842.** Forwarded headers do not grant private access.
 
-Preserve browser Origin, cookies, request bodies, Range headers and response cache
-controls. Bypass shared caching for the Collector hostname; do not add a Cache
-Everything rule. Proxy/tunnel upload limits and timeouts still apply to individual
-requests. Original package uploads are chunked, while other uploads can have their
-own limits. Check the provider's [request-size limits](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/)
-and [cache behavior](https://developers.cloudflare.com/cache/concepts/cache-control/)
-when configuring it. Forwarded headers do not grant private-router access.
+Proxy requirements:
+
+- Preserve Origin, cookies, request bodies, Range headers and response cache controls.
+- Bypass shared caching for this hostname; avoid Cache Everything rules.
+- Check [upload limits](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/)
+  and [cache behavior](https://developers.cloudflare.com/cache/concepts/cache-control/).
+- For an HTTPS upstream hop, verify its certificate. Avoid a public origin URL that routes back into the tunnel.
 
 ### Alternative: direct private HTTPS
 
@@ -179,18 +151,10 @@ sha256sum collector.toml
 docker compose run --rm --entrypoint sha256sum cli /data/config/collector.toml
 ```
 
-The two configuration digests must match. `-T` passes redirected input without a
-pseudo-terminal. The helper refuses empty input, existing archive data or private
-state; it publishes a private temporary file atomically rather than truncating the
-current config. This replaces the previously unverified stdin-copy step with a
-checked transfer; the cause of that historical failed copy was not established.
-Setup normalizes config formatting and saves a previous-file backup. Check the
-actual origins/exposure in doctor afterward; a changed formatting digest alone is
-not proof the copy failed. Configuration syntax and provider contact are validated
-by setup/doctor.
-Do not use this fresh-install helper over an established installation. Correct the
-actual retained config deliberately while stopped, without rerunning account setup.
-For direct HTTPS, keep the initializer's generated config and skip this copy.
+The two digests must match. `-T` passes redirected input without a pseudo-terminal.
+The helper is for fresh installations only; it refuses existing archive data or private state.
+Setup later normalizes formatting. Check the retained origins and exposure with `doctor`.
+For direct HTTPS, skip this copy and keep the initializer's config.
 
 Create the owner account, check configuration, and start:
 
@@ -252,24 +216,12 @@ using a new bundle. Write access alone never deletes sources: use the separate
 confirmed [inbox cleanup action](../../docs/inbox-cleanup.md) after preservation.
 Do not recursively change ownership of an existing music share.
 
-Doctor reports whether provider contact is configured and validates its format.
-A monitored MusicBrainz contact is required, not an account. Configured providers
-still need network access and a matching release; doctor does not establish either.
-Unconfigured/unavailable providers must leave original preservation usable. The
-import review's typed readiness and final outcomes show what can actually run.
-
 ## 4. Check before bulk intake
 
-Create a collection, import one complete supported package, download its originals,
-and compare them with the sources. Restart the service and confirm login and item
-access. For music preparation, prepare a supported source and check real playback
-and seeking. Complete a backup/restore drill before treating the installation as
-an operational catalog. Keep source originals and follow your media-backup policy.
-
-These checks establish the workflows exercised through the chosen ingress, not
-complete Internet security or power-loss certification. If an operation is
-unsupported or a provider/tool is unavailable, keep its failure visible rather
-than assuming identification, verification or playback succeeded.
+- Import one complete supported package. Download and compare its originals.
+- Restart. Confirm login and item access.
+- If using audio, prepare a track, play it and seek.
+- Complete a [recovery drill](recovery.md). Keep source originals according to your backup policy.
 
 ## Portainer-managed stacks and SSH maintenance
 
@@ -316,22 +268,13 @@ Portainer definition.
 
 ## Local backup area and optional media copies
 
-Initialization creates `${COLLECTOR_DATA}/backups` on the host, available as
-`/data/backups` to the one-shot CLI. With the inspected NAS layout this is
-`/volume1/junk-collector/backups`. Use a fresh named child for each explicit backup.
-The CLI still requires `--destination`; this directory does not imply an automatic
-backup job.
-
-The current full-backup command copies **all originals** as well as catalog/private
-state/config. A lightweight database/catalog-only mode is not implemented, and
-SQLite alone would omit archive-owned inventory, manual metadata and evidence.
-For ordinary updates on eligible Btrfs, use local consistent snapshots rather than
-copying terabytes of unchanged media. Snapshot points live outside the data root,
-as documented in the recovery procedure. Full-media copies to other disks/NAS/cloud
-are optional operator choices; no paid cloud service or separate destination is
-required to install/update Collector. Local points provide rollback, not protection
-against loss of that storage device. Optional [backup-age reminders](../../docs/local-alpha-installation.md#optional-backup-age-reminder)
-are available in post-alpha.3 source; published alpha.3 does not include them.
+| Choice | Use |
+| --- | --- |
+| Local backup directory | `${COLLECTOR_DATA}/backups` on the host; `/data/backups` in CLI commands. Choose a fresh child directory for each backup. |
+| [Btrfs recovery point](snapshot-recovery.md) | Routine local rollback without copying terabytes of unchanged media. |
+| Full backup | Copies originals, archive records, private state and config. There is no database-only mode. |
+| Independent media copy | Optional disk/NAS/cloud copy for protection against loss of the host's storage. |
+| [Backup-age reminder](../../docs/local-alpha-installation.md#optional-backup-age-reminder) | Optional reminder; does not schedule or perform backups. |
 
 ## Update
 
@@ -386,25 +329,10 @@ docker compose down
 Containers are removed; persistent data remains. Delete the selected data directory
 separately only when its contents are no longer needed.
 
-## Build and deployment status
+## Qualification records
 
-The repository includes the Dockerfile and a release workflow for versioned
-amd64/arm64 images plus this installation bundle. Public alpha.2 version/preview
-pulls and digest-pinned assets passed anonymous both-platform/source checks. The older NAS qualification passed original-byte round trips,
-container recreation and full backup/restore. The revised Compose package and
-proxy/tunnel package passed isolated actual-host runtime acceptance; actual public
-ingress still requires its separate checks. Current
-status and dated evidence live in the repository's implementation/validation docs;
-this guide describes the installation process, not a security certification.
+- [Beta.1 publication and isolated NAS update](../../docs/validation/container-beta1-publication-2026-10-21.md).
+- [DS1522+ installation, playback and full restore](../../docs/validation/nas-operations-2026-10-20.md).
+- [Btrfs/incremental recovery](snapshot-recovery.md).
 
-## Actual-host qualification
-
-The isolated DS1522+ install/distinct-image update/partial-upload resume/FLAC/full
-restore path and remote Chrome playback/seek/download checks passed on 2026-10-20.
-See [evidence and limits](../../docs/validation/nas-operations-2026-10-20.md) and
-`scripts/check_container.py` in the source tree. Production Portainer/tunnels were
-inspected only. The [Btrfs/incremental path](snapshot-recovery.md) also passed isolated
-NAS/Mac restore qualification. Independent media-backup storage is optional; public
-registry and disposable Portainer pull/update/fresh-install/restore also passed
-[publication acceptance](../../docs/validation/container-publication-2026-10-20.md).
-The full-copy procedure above remains a fallback.
+Each record states its tested scope. Live production updates are separate operator actions.

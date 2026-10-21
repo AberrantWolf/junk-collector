@@ -14,7 +14,7 @@ device or layout. The only remaining-work queue is [remaining work](remaining-wo
 | Prepared Opus on Trash Amp or other browsers/devices | Externally unqualified by HL-06A | HL-06A exercises Chrome on the Mac; device acceptance stays in HL-04/HL-08 |
 | Whole-disc audio catalog verification | Live owned-disc AccurateRip qualification remains open | Encoding, PCM equality, structural checks and metadata identity do not establish a catalog match |
 
-Configure the [external encoders](../README.md#audio-encoders), then use the album's
+Configure the [external encoders](configuration.md#audio-encoders), then use the album's
 music preparation controls. Keep the raw masters. Prepared derivatives can be
 downloaded and used by the normal player according to client codec support.
 Multi-track boundaries, gapless playback, bit-perfect device output and additional

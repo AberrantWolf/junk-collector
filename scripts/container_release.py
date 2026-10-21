@@ -174,11 +174,11 @@ def bundle(root, expected, record, destination):
                 raise ValueError("Installation image instructions are missing their release boundary")
             before, rest = text.split(start)
             _, after = rest.split(end)
-            published = (f"This release supplies `{expected['reference']}` for linux/amd64 and linux/arm64.\n"
-                         f"The included `.env.example` pins `{pinned}`; source compilation/image transfer is unnecessary.\n"
-                         f"`release-image.json` records the source revision and platform digests.\n"
-                         f"For deliberate moving-channel updates, select `{expected['image']}:{expected['channel']}`.\n"
-                         "The channel may refer to a newer release. Read its storage/recovery notes and keep the previous digest.\n")
+            published = (f"- **Image:** `{expected['reference']}` (linux/amd64 and linux/arm64).\n"
+                         f"- **Pinned install:** `.env.example` uses `{pinned}`.\n"
+                         "- **Evidence:** `release-image.json` records source and platform digests.\n"
+                         f"- **Moving channel:** `{expected['image']}:{expected['channel']}` may point to a newer release.\n"
+                         "- **Before updating:** read that release's recovery notes and keep the previous digest.\n")
             text = before + published + after
             text = text.replace("Registry publication has not yet\nbeen exercised.",
                                 "This bundle's image passed anonymous pulls and both-platform metadata checks;\nactual Portainer pull/redeploy acceptance is a separate deployment check.")

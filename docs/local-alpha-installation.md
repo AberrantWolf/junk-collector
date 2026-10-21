@@ -2,7 +2,7 @@
 
 For Docker hosts, start with the [container installation guide](../deploy/container/README.md).
 It includes external HTTPS, initial account setup, updates, and container-specific
-recovery commands. For native builds, use the [README](../README.md#quick-start).
+recovery commands. For native builds, use the [source setup](getting-started.md#build-from-source).
 This runbook describes storage and the stopped-server CLI workflow for either
 installation type. Historical acceptance results live in the
 [dated installation record](local-alpha-installation-history.md).

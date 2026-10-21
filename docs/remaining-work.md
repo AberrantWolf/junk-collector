@@ -1044,6 +1044,20 @@ unlimited future-retention requirement.
 The disabled DAT-o-MATIC downloader stays disabled. Manual download/upload is
 implemented; provider-access restoration or automated scraping is not an open task.
 
+## Active beta.1 publication assignment — 2026-10-21
+
+The user explicitly assigned packaging all accumulated Collector improvements as
+`0.1.0-beta.1`, self-review and signed commits, Docker publication and isolated
+upgrade verification, with an image that works on the operator's Synology NAS.
+Build native AMD64/ARM64 through the existing workflow; verify the DS1522+
+linux/amd64 image on that actual host. Start the isolated update from public
+alpha.3, reuse accepted device/audio evidence, retain explicit beta limits and
+leave production unchanged. Record actual image/source digests and upgrade/full
+restore outcomes in [publication acceptance](validation/container-beta1-publication-2026-10-21.md).
+This supersedes the earlier no-new-packaging instruction, not the prohibition on
+unassigned production updates. Trash Amp source improvements are separate from
+this Collector Docker release; preserve the native checkout's staged release work.
+
 ## Active autonomous assignment — 2026-10-21
 
 The user assigned independent release-readiness review, remaining useful software
