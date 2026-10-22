@@ -1,5 +1,20 @@
 # Implementation status
 
+## Build-once container publication — source implemented, CI acceptance pending, 2026-10-22
+
+The existing release workflow now separates validation from publication. Validation
+builds labelled native AMD64/ARM64 OCI exports once, imports those exact runtime
+configs for the existing recovery/inbox/proxy smokes, verifies their merged index
+and retains a 30-day immutable Actions artifact. Publication restores only a
+successful trusted same-source validation, checks the artifact/archive digests and
+platform/source evidence, and copies those bytes to GHCR without compilation.
+Anonymous pulls, channel downgrade guards and pinned installation assets remain.
+Missing/expired/mismatched artifacts fail closed; manual reuse rehearses acceptance
+without publishing. See [operator contract](container-release-pipeline.md) and
+[qualification record](validation/container-promotion-2026-10-22.md).
+Local policy/failure tests and workflow lint pass; actual CI acceptance remains
+pending. Beta.4 and the running NAS are unchanged.
+
 **Beta.4 published — 2026-10-22:** the automatic private playback image is verified
 ready on `ghcr.io/aberrantwolf/junk-collector:preview`. Both native architectures,
 container smoke, anonymous pulls, source labels and pinned installation bundle

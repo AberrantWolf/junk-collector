@@ -30,6 +30,7 @@ jobs:
       - run: python3 scripts/check_architecture.py
       - run: python3 -B scripts/check_container_tools.py
       - run: python3 -B scripts/check_container_release.py
+      - run: python3 -B scripts/check_container_validation.py
       - run: npm --prefix web ci
       - run: npm --prefix web run check
       - run: npm --prefix web run build

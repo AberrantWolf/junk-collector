@@ -1,5 +1,12 @@
 # Remaining work — home-lab priorities
 
+**Active authorized follow-up — build once, promote validated images (2026-10-22):**
+source implementation is on `codex/publish-validated-images`; local provenance,
+archive identity and failure/recovery tests pass. Complete the actual native
+nonpublishing validation and same-source reuse rehearsal before declaring this
+delivery complete. Keep beta.4/`preview`, the NAS and Tailscale unchanged. See
+[contract](container-release-pipeline.md) and [pending acceptance](validation/container-promotion-2026-10-22.md).
+
 **Beta.4 published — 2026-10-22:** the automatic private playback image is verified
 ready on `ghcr.io/aberrantwolf/junk-collector:preview`. Both native architectures,
 container smoke, anonymous pulls, source labels and pinned installation bundle
