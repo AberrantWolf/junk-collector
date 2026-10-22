@@ -136,6 +136,41 @@ def assemble(platform_dir, destination):
         return digest
 
 
+def saved_config_digest(path):
+    """Read exact config bytes from Docker's portable save format, across stores."""
+    if path.stat().st_size > MAX_ARCHIVE:
+        raise ValueError('Oversized daemon export')
+    with tarfile.open(path, 'r:') as archive:
+        manifest = archive.getmember('manifest.json')
+        if not manifest.isfile() or manifest.size > MAX_JSON:
+            raise ValueError('Invalid daemon save manifest')
+        with archive.extractfile(manifest) as source:
+            entries = json.load(source)
+        if len(entries) != 1:
+            raise ValueError('Smoke daemon export must contain exactly one runtime')
+        name = entries[0]['Config']
+        if not re.fullmatch(r'(?:blobs/sha256/)?[0-9a-f]{64}(?:\.json)?', name):
+            raise ValueError('Invalid daemon config path')
+        member = archive.getmember(name)
+        if not member.isfile() or member.size > MAX_JSON:
+            raise ValueError('Invalid daemon config blob')
+        with archive.extractfile(member) as source:
+            return 'sha256:' + hashlib.sha256(source.read(MAX_JSON + 1)).hexdigest()
+
+
+def daemon_config_digest():
+    # containerd-backed Docker identifies images by their target manifest rather
+    # than the config ID used by the classic store. Compare actual saved config
+    # bytes instead of assuming that inspect .Id always means config digest.
+    with tempfile.TemporaryDirectory(prefix='collector-smoke-identity-') as temporary:
+        path = Path(temporary) / 'daemon.tar'
+        def bound_file():
+            resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_ARCHIVE, MAX_ARCHIVE))
+        subprocess.run(['docker', 'image', 'save', '--output', str(path), 'junk-collector:release-smoke'],
+                       check=True, timeout=180, preexec_fn=bound_file)
+        return saved_config_digest(path)
+
+
 def smoke_identity(archive_path, architecture):
     """The daemon must run the exact config/diffIDs exported by the one build."""
     with tarfile.open(archive_path) as archive:
@@ -143,8 +178,8 @@ def smoke_identity(archive_path, architecture):
             digest = json.load(source)['manifests'][0]['digest']
         _, config = native_descriptors(archive, digest, architecture)
     actual = release.command('docker', 'image', 'inspect', '--format', '{{.Id}}', 'junk-collector:release-smoke')
-    if actual != config:
-        raise ValueError('Smoke image differs from the exported runtime image')
+    if actual != config and daemon_config_digest() != config:
+        raise ValueError('Smoke config bytes differ from the exported runtime image (daemon ID: ' + actual + ')')
 
 
 def seal(expected, image, archive, run_id, attempt):

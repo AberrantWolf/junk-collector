@@ -141,7 +141,8 @@ class ValidationTests(unittest.TestCase):
             expected['linux/' + architecture] = runtime
             with patch.object(release, 'command', return_value=config):
                 validation.smoke_identity(path, architecture)
-            with patch.object(release, 'command', return_value='sha256:' + '0' * 64), self.assertRaises(ValueError):
+            with patch.object(release, 'command', return_value='sha256:' + '0' * 64), \
+                 patch.object(validation, 'daemon_config_digest', return_value='sha256:' + '0' * 64), self.assertRaises(ValueError):
                 validation.smoke_identity(path, architecture)
         merged = self.root / 'merged.tar'
         merged_digest = validation.assemble(self.root, merged)
@@ -149,6 +150,26 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(release.platforms(validation.blob_json(archive, merged_digest)), expected)
         self.assertEqual(validation.assemble(self.root, self.root / 'merged-again.tar'), merged_digest)
         self.assertEqual(validation.sha_file(merged), validation.sha_file(self.root / 'merged-again.tar'))
+
+    def test_containerd_manifest_id_still_requires_exact_saved_config_bytes(self):
+        path = self.root / 'native.tar'
+        index, runtime, config = fixture(path, 'amd64')
+        with patch.object(release, 'command', return_value=runtime), \
+             patch.object(validation, 'daemon_config_digest', return_value=config):
+            validation.smoke_identity(path, 'amd64')
+        with tarfile.open(path) as archive:
+            config_bytes = archive.extractfile('blobs/sha256/' + config[7:]).read()
+        for name in (config[7:] + '.json', 'blobs/sha256/' + config[7:]):
+            saved = self.root / 'daemon.tar'
+            for payload in (config_bytes, config_bytes + b'changed'):
+                with tarfile.open(saved, 'w') as archive:
+                    for member_name, data in [('manifest.json', json.dumps([dict(Config=name)]).encode()), (name, payload)]:
+                        member = tarfile.TarInfo(member_name)
+                        member.size = len(data)
+                        archive.addfile(member, io.BytesIO(data))
+                self.assertEqual(validation.saved_config_digest(saved), digest(payload))
+                if payload != config_bytes:
+                    self.assertNotEqual(validation.saved_config_digest(saved), config)
 
     def test_oci_merge_rejects_wrong_native_platform_tamper_and_paths(self):
         for architecture in ('amd64', 'arm64'):
