@@ -7,7 +7,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 const root=path.resolve(import.meta.dirname,'../..'),scratch=await mkdtemp(path.join(tmpdir(),'collector-backup-reminder-')),config=path.join(scratch,'collector.toml'),binary=path.join(root,'target/debug/collector-server'),password=randomBytes(24).toString('hex'),origin='http://localhost:19912';
-const base=`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19911"\nprivate_bind = "127.0.0.1:19912"\nlan_bind = "127.0.0.1:19913"\nauthentication_origin = "https://localhost:19913"\nallowed_origins = ["${origin}"]\n[backup_reminder]\nafter_days = 30\n`;
+const base=`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19911"\nprivate_bind = "127.0.0.1:19912"\nlan_bind = "127.0.0.1:19913"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "https://localhost:19913"\nallowed_origins = ["${origin}"]\n[backup_reminder]\nafter_days = 30\n`;
 await writeFile(config,base);const cli=(args,input)=>spawnSync(binary,['--config',config,...args],{input,encoding:'utf8',timeout:60000});const setup=cli(['setup','--username','owner'],password);assert.equal(setup.status,0,setup.stderr);
 let server,browser,page,logs='';
 async function start(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);for(let i=0;i<300;i++){if(server.exitCode!==null)throw Error(logs);try{if((await fetch('http://127.0.0.1:19911/healthz')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server readiness timeout: '+logs);}

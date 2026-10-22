@@ -9,7 +9,7 @@ const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-account-'));
 const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');
 const base='http://localhost:19952';const binary=path.join(root,'target/debug/collector-server');
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19951"\nprivate_bind = "127.0.0.1:19952"\nlan_bind = "127.0.0.1:19953"\nallowed_origins = ["${base}"]\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19951"\nprivate_bind = "127.0.0.1:19952"\nlan_bind = "127.0.0.1:19953"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${base}"]\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let browser;let server;let logs='';
 try{

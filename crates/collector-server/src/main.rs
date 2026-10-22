@@ -145,6 +145,9 @@ struct Config {
     private_bind: SocketAddr,
     private_tls_bind: Option<SocketAddr>,
     lan_bind: SocketAddr,
+    local_playback_bind: Option<SocketAddr>,
+    local_playback_enabled: bool,
+    remote_media_allowed: bool,
     multi_user: bool,
     exposure: Exposure,
     authentication_origin: Option<String>,
@@ -201,6 +204,9 @@ impl Default for Config {
             private_bind: "127.0.0.1:9842".parse().unwrap(),
             private_tls_bind: None,
             lan_bind: "0.0.0.0:9843".parse().unwrap(),
+            local_playback_bind: Some("0.0.0.0:9845".parse().unwrap()),
+            local_playback_enabled: true,
+            remote_media_allowed: false,
             multi_user: false,
             exposure: Exposure::default(),
             authentication_origin: None,
@@ -261,6 +267,22 @@ fn instructions(config: &Config, path: &std::path::Path) {
             "Advertised client HTTPS: {endpoint}. Requires working DNS; setup does not create DNS records."
         );
     }
+    if let Some(bind) = config
+        .local_playback_bind
+        .filter(|_| config.local_playback_enabled)
+    {
+        println!(
+            "Automatic private media: {bind} (TCP native HTTPS / UDP browser WebTransport). Trust is supplied through the signed-in/paired connection; no internal certificate import is needed. Allow this port on the private host firewall."
+        );
+    }
+    println!(
+        "Public media fallback: {}. Login/library control remains available.",
+        if config.remote_media_allowed {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     let certificate = config.state.join("tls/cert.pem");
     if let Ok(file) = std::fs::File::open(&certificate) {
         use std::io::Read;
@@ -1047,7 +1069,19 @@ async fn main() -> Result<()> {
                 .take()
                 .expect("serve validates passkey configuration before opening storage");
             let _job_runtime = collector_server::start_job_workers(state.clone())?;
+            let _local_runtime = match config
+                .local_playback_bind
+                .filter(|_| config.local_playback_enabled)
+            {
+                Some(bind) => {
+                    Some(collector_server::local_playback::start(&mut state, bind).await?)
+                }
+                None => None,
+            };
+            state.remote_media_allowed = config.remote_media_allowed;
+            state.direct_media = false;
             let public = router(state.clone());
+            state.direct_media = true;
             let lan = router(state.clone());
             state.ingress = Ingress::Private;
             let private = router(state.clone());

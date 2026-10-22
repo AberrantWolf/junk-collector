@@ -16,7 +16,7 @@ async function openChecks(editor){const details=editor.locator('details').filter
 let server,browser,page,logs='';
 try{
  const datPath=path.join(scratch,'ambiguous.dat');await writeFile(datPath,'<datafile><header><name>Scan choices</name><version>1</version></header><game name="Ambiguous A"><rom name="game.bin" size="67108864" crc="b2eb30ed"/></game><game name="Ambiguous B"><rom name="game.bin" size="67108864" crc="b2eb30ed"/></game></datafile>');
- await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19951"\nprivate_bind = "127.0.0.1:19952"\nlan_bind = "127.0.0.1:19953"\nallowed_origins = []\n[dat_sources.scan_choices]\npath = "${datPath}"\nsystem = "nes"\ncatalog = "Scan choices"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`);
+ await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19951"\nprivate_bind = "127.0.0.1:19952"\nlan_bind = "127.0.0.1:19953"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n[dat_sources.scan_choices]\npath = "${datPath}"\nsystem = "nes"\ncatalog = "Scan choices"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`);
  const init=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(init.status,0,init.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',v=>logs+=v);server.stdout.on('data',v=>logs+=v);
  let ready=false;for(let n=0;n<100;n++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}assert.ok(ready,logs);

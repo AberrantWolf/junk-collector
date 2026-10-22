@@ -1,13 +1,111 @@
 # Architecture
 
+The accepted home-listening **stopgap** uses a dedicated manual LAN HTTPS hostname,
+`collector-lan.awkwardexplorer.com`, resolving to the reserved NAS address even
+through public DNS. It serves the same public/client listener and account store;
+the exact browser origin is allowlisted without changing the configured passkey
+authentication origin. It introduces no application transport or helper subsystem.
+See the [current LAN delivery](lan-playback-first.md#current-delivery-explicit-lan-hostname--2026-10-22)
+for operator-confirmed work-Mac browser and Trash Amp playback/seek with
+GlobalProtect connected. Unattended certificate renewal remains outstanding.
+
+The real solution remains automatic detection of and connection to a reachable,
+trusted local Collector in **both the browser and Trash Amp**, with authorized
+remote access when LAN is unavailable. It is unimplemented and tracked in HL-12;
+the manual hostname does not complete it. Browser HTTPS/origin/authentication and
+local-network permission handling require a bounded design/feasibility step.
+Native transport selection follows the Iroh trial independently; native-only
+success cannot stand in for browser automatic selection. Preserve account/content
+identity and validate server/endpoint authority before sending credentials. This
+tracking clarification selects no browser transport mechanism or new subsystem.
+
+The expanded [route and browser design](https-relay-and-lan-switching.md#route-policy-trust-reachability-and-transfer-cost)
+first filters authorized, media-eligible endpoints, then prefers direct LAN
+reachability; the unresolved Cloudflare media route is not an automatic fallback.
+Endpoint/path cost remains unknown when unobservable. There is no Tailscale
+integration or provider-specific discovery; already configured private HTTPS
+routes use the normal OS stack. Application services own endpoint authority,
+media eligibility and scoped read-grant policy; HTTP/browser adapters own probes,
+TLS/CORS/CSP, media-element and permission mechanisms. Browser feasibility retains
+the normal app/login origin and tests encrypted direct local media with scoped
+authorization. The earlier ordinary-HTTPS media-lease baseline is a control for
+the private transport alternatives below. It does not widen login cookies or trust
+unauthenticated discovery.
+These are planned boundaries, not implemented automatic playback or budget controls.
+
+The user clarified that private playback should approach install/sign-in-or-pair/use
+without manual internal certificate, DNS or router setup. Public server operators
+retain responsibility for their chosen HTTPS/tunnel/ingress; Collector must not
+require a particular provider, vendor certificate service or relay product.
+Evaluate automatically retained native trust, browser WebTransport certificate
+hashes and authenticated WebRTC data channels alongside operator-provided HTTPS.
+Browser pinning here is specific to WebTransport; it does not make ordinary
+fetch/audio requests accept a self-signed certificate. Peer/signaling authorization,
+HTTP/range adaptation, certificate lifecycle and browser playback remain application
+and adapter work, not solved by an encrypted echo test. Loopback-only experiments
+belong under `scripts/experiments/direct-transports`, outside production crates.
+
+The next bounded LAN experiment keeps a separate disposable Collector account,
+archive and listeners on the NAS. An experiment-only browser adapter bridges the
+unchanged `MusicPlayer` media requests through a service worker and page-owned
+WebTransport session. The HTTP/3 sidecar forwards only bounded media reads to that
+Collector's public router, retaining its session and collection authorization on
+every read. The test HTTPS origin uses the already installed operator certificate;
+the distinct WebTransport endpoint uses a generated short-lived pinned identity.
+This tests playback mechanics and authorization across devices, not automatic
+discovery, production endpoint enrollment or a new production subsystem.
+
+The public-origin follow-up mounts this same disposable fixture only beneath an
+exact test path at the existing public hostname. Test assets/control/cookies and
+the service-worker registration stay path-scoped; the worker controls test-page
+clients, never production pages. Its separate CSP names the pinned LAN endpoint.
+The LAN handshake and ephemeral media grant are bound to the initiating exact
+origin. Public tunnel routing is limited to that test path and loopback-only
+fixture HTTP listener; neither production APIs nor private management are proxied
+by the fixture. Verify the page uses the public route: split DNS resolving the
+hostname to the NAS cannot qualify public-to-private browser permission behavior.
+
 ## Planned HTTPS relay and native route selection — 2026-10-22
 
-The requested [relay and LAN-switching plan](https-relay-and-lan-switching.md)
+### Automatic private playback — 2026-10-22 source delivery
+
+The user now authorizes implementing automatic local playback for web and Trash
+Amp together, with remote/Cloudflare media fallback disabled. The normal saved
+connection remains the authenticated control plane. A typed authenticated local
+descriptor advertises bounded generic OS interface candidates and software-managed
+short-lived certificate trust. It does not inspect any overlay provider or infer
+authorization from addresses. The server adapter owns interface enumeration,
+P-256 identity rotation, HTTPS/WebTransport listeners and bounded range framing;
+application services own session-bound, origin/representation-scoped browser
+grants and live role/revocation checks. The new listeners expose media and server
+identity only, never management. Public HTTP media eligibility is an explicit
+listener capability; a rejected local route cannot retry media on the control
+origin. Ordinary library/login traffic retains that origin.
+
+Web uses a same-origin service worker controlled by a document-owned pinned
+WebTransport broker, with permission remediation and bounded candidate probes.
+Native retains its existing ranged reader and decoders, obtaining per-route HTTPS
+trust from the authenticated descriptor and verifying ServerId before sending its
+credential. Endpoint selection does not change account, saved connection, queue
+or cache identity. Reuse the existing `collector-client` across Trash Amp rather
+than duplicating a transport/resume implementation. Generic external mechanisms
+come from established transport libraries; a new shared networking crate is not
+needed solely to wrap those dependencies. See the [implemented contract](automatic-private-playback.md) and
+[dated acceptance](validation/automatic-private-playback-2026-10-22.md). Source
+implementation and deployed-device qualification remain distinct.
+
+**Earlier design record, superseded for private playback by the implementation above:**
+the requested [relay and LAN-switching plan](https-relay-and-lan-switching.md)
 is design only. The later [LAN-first plan](lan-playback-first.md) selects local
 DNS for the existing HTTPS origin and a trusted home proxy to `public_bind`,
 enabling browser and system-HTTPS Trash Amp home listening before the Iroh trial.
 It changes network destination without changing browser origin or enrollment;
-it is not active-stream failover. No home DNS/proxy changes are deployed yet.
+it is not active-stream failover. Subsequent authorized setup installed and assigned
+a production certificate to the NAS public-listener proxy, reserved the NAS address
+and enabled the scoped home DNS override. Direct local HTTPS passes normal CA,
+hostname and ServerId checks; public AAAA/HTTPS/SVCB answers are suppressed locally.
+Unattended renewal and acceptance of this earlier same-origin route remain pending; see
+[partial setup](validation/lan-https-2026-10-22.md).
 The required work-machine VPN may override DNS or deny direct LAN access; both
 must be tested independently before this topology is qualified for that client.
 A normal remote HTTPS frontend forwards through an authenticated outbound

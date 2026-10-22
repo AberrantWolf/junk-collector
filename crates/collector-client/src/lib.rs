@@ -1,5 +1,6 @@
 //! UI-independent connection trust, endpoint policy and offline cache planning.
 mod library;
+mod local_playback;
 mod media;
 pub use collector_api_types;
 pub use collector_core;

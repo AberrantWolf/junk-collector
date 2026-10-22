@@ -336,3 +336,15 @@ separately only when its contents are no longer needed.
 - [Btrfs/incremental recovery](snapshot-recovery.md).
 
 Each record states its tested scope. Live production updates are separate operator actions.
+
+### Automatic private media
+
+New builds automatically expose media-only TCP/UDP **9845**, with internally
+managed short-lived certificate trust. Allow that port on the private host
+firewall; do not forward it from the Internet. Browser listeners sign in normally
+and may need to allow Local network access; Trash Amp pairs normally and obtains
+trust automatically. No listener certificate import or private DNS is needed.
+The existing direct management port 9844 is unchanged. Public media fallback
+defaults to disabled; keep `remote_media_allowed = false` while the public media
+path is unresolved. Public login/library access remains available. See the
+[configuration and trust contract](../../docs/automatic-private-playback.md).

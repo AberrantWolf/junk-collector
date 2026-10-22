@@ -979,10 +979,128 @@ Native/offline gaps apply to the actual supported client, Trash Amp.
 
 ### HL-12 — HTTPS relay, LAN switching and deferred certificate rotation
 
-**State:** requested delivery plan recorded 2026-10-22; implementation and external
-acceptance remain unstarted. Manual trusted endpoints work; S04/C02 remain
-unimplemented. This planning request does not replace the active implementation
-assignment above or authorize paid provisioning/live configuration changes.
+
+**Source delivery, 2026-10-22:** automatic trusted private media selection now
+covers web and Trash Amp, with software-managed certificate trust, streaming
+ranges, live authorization and bounded recovery. Public media fallback is disabled
+by default. See the [implemented contract](automatic-private-playback.md) and
+[dated acceptance](validation/automatic-private-playback-2026-10-22.md).
+The source feature supersedes the earlier “automatic detection unimplemented”
+statements in the dated planning/feasibility history below. The deployed personal
+LAN URL remains a **manual stopgap** until installation of these builds.
+
+**Remaining acceptance:** install/qualify the new builds on the NAS and actual
+work Mac, including managed Local network permission/UDP denial and network
+changes; qualify Firefox/Safari explicitly rather than extrapolating Chrome.
+Retain physical-path/cost uncertainty and the separate remote/Iroh/relay work.
+There is no Tailscale integration assignment. No public infrastructure, DNS,
+production server or work-machine policy is changed by this source delivery.
+
+**Playback priorities and scope, 2026-10-22:** avoid the unresolved public
+Cloudflare tunnel for media, keep listener use simple, and prefer actual LAN
+transfer to conserve home upload allowances/infrastructure. Reachability, trusted
+identity, media eligibility and evidence of physical path/cost are separate facts.
+Only eligible routes may be selected or retried; do not automatically fall back
+to Cloudflare media while that route is unresolved. Retain small control/login
+traffic there if needed. A conservative owner policy can disable remote-media
+fallback; unknown-cost private paths must not be labelled zero-WAN from their IP.
+
+There is **no Tailscale integration** in this feature: no SDK/CLI/API interaction,
+discovery, provisioning or provider-path telemetry. An already configured,
+authorized HTTPS endpoint may work over whatever private route the OS supplies.
+Same-tailnet membership alone neither discovers that endpoint nor proves LAN
+traffic. Use generic endpoint selection; do not change or inspect Tailscale.
+
+**Minimal-setup requirement, 2026-10-22:** aim for install → sign in/pair → use.
+Avoid manual private HTTPS certificate imports, internal DNS/proxy setup or a
+listener helper. Public hosts choose and maintain their own public HTTPS/tunnels;
+do not mandate Collector-managed DNS, a particular proxy or vendor relay service.
+Use software-managed trust for internal encrypted peers. Normal browser HTTPS
+bootstrap and account authorization remain required; no warning bypasses.
+
+**Feasibility evidence:** [dated primitive tests](validation/direct-transports-2026-10-22.md)
+passed in Firefox 157 and Chrome 155 on the personal Mac: pinned WebTransport with
+a generated seven-day certificate transferred 64 KiB and rejected wrong/missing
+hashes; WebRTC transferred 1 MiB with DTLS and host/host candidates, no configured
+ICE servers. No certificate imports or browser security flags. The existing native
+generated-certificate enrollment/range fixture also passed. These are same-computer
+primitives, not actual automatic Collector playback, cross-LAN or work-VPN tests.
+
+**Actual LAN follow-up:** the [NAS player experiment](validation/webtransport-lan-2026-10-22.md)
+now passes pinned connections from Firefox/Chrome, exact early/late media bytes,
+real Collector authorization/collection denial and session revocation, including
+the real player's release of its source. HTTPS media fallback is disabled.
+**Work-Mac Chrome playback and forward/backward seeking pass**, confirmed by the
+operator under the requested GlobalProtect-connected conditions with no errors or
+unexpected prompts noticed. Saved diagnostics show unbuffered late/earlier ranges,
+superseded response cancellation and passing pin/authorization controls. The
+personal Mac's audio-output failure is retained as historical device evidence.
+Production is unchanged; automatic detection for both clients remains open.
+
+**Public-origin follow-up:** an approved isolated path on the normal public origin
+now passes work-Mac Chrome permission deny/allow and pinned LAN connections,
+including wrong descriptor identities, pin rejection and real authorization.
+See [evidence and remaining controls](validation/public-origin-webtransport-2026-10-22.md).
+Public-origin playback/scrubbing and the CSP-denial control also pass. Test
+forwarding is retired to a static 404, with the two fixtures stopped; an inert
+path guard remains to avoid the dashboard's associated-DNS deletion. Production
+app routes/CSP and automatic selection are unchanged.
+
+**Historical next gate (private source work superseded above):** production authenticated endpoint/trust delivery
+and certificate rollover,
+route loss/UDP denial and bounded overfetch/cancellation. Keep Safari and Firefox
+playback qualification explicit; the one work-Mac result does not cover every
+VPN policy. Evaluate authenticated WebRTC data channels if
+the first contract is unsuitable; retain operator-provided HTTPS as a supported
+comparison, not a private-user certificate requirement. Neither transport directly
+feeds `<audio src>`; qualify its streaming adapter without whole-album buffering or
+an unrelated decoder rewrite. Native trust should arrive automatically through the
+authenticated enrollment/descriptor rather than PEM files. The [expanded design](https-relay-and-lan-switching.md#minimize-private-setup-keep-public-hosting-independent)
+records peer/authentication/lifecycle boundaries. Then
+deliver descriptor/authorization, bounded selection, UI and actual playback for
+both browser and Trash Amp as one complete delivery. Native HTTPS selection at
+open need not wait for the Iroh trial; the trial still gates a general native
+transport/resume manager. No provider integration, budget engine or new remote
+relay is a hidden dependency. Prove actual local media bytes with controlled WAN
+counters/capture, not route labels, and measure probe overhead. Full subsequent
+discovery/network-change acceptance remains part of the real solution below.
+
+**Real solution remains open — clarified 2026-10-22:** implement automatic LAN
+detection and route selection for **both the browser and Trash Amp**. From their
+normal entry point/saved connection, detect a reachable, trusted instance of the
+enrolled server, prefer its local route, and retain/recover the authorized remote
+route when local access is unavailable. Preserve account, queue and content
+identity without manually choosing a LAN URL, reconnecting/re-enrolling to change
+addresses, or installing the proposed Mac helper. Detect actual trusted reachability,
+not matching subnet/IP alone. Browser automatic selection is required scope;
+native-only detection or split-DNS configuration alone does not complete this item.
+Resolve browser HTTPS/origin/authentication and local-network permission constraints
+in a bounded design/feasibility step. The native Iroh trial informs implementation
+but cannot substitute for browser acceptance. No new implementation is claimed here.
+
+**Accepted stopgap, 2026-10-22:** configure the explicit manual
+`https://collector-lan.awkwardexplorer.com/` route for browser and Trash Amp,
+without a Mac helper. Public DNS-only and home A records point to the NAS; the
+certificate is installed/assigned and the exact origin is added to the running
+server. Normal DNS-based HTTPS, expected certificate/ServerId and Firefox login
+rendering pass. The operator confirmed browser password login/playback/scrubbing
+and the requested Trash Amp enrollment/playback/seek workflow with GlobalProtect
+connected. The bounded manual home-listening stopgap is accepted. This does not
+complete automatic LAN detection for either client or close HL-12. Password/account
+authority, the existing passkey authentication origin and native one-connection-per-account
+behavior are retained. Unattended certificate renewal remains outstanding. Automatic route selection and the
+broader earlier acceptance matrix do not block this bounded manual home delivery.
+
+**State:** requested delivery plan recorded 2026-10-22; the later explicitly
+authorized home-HTTPS setup is [partially deployed](validation/lan-https-2026-10-22.md).
+Router key-only SSH works, the production certificate is installed and assigned
+to the NAS proxy, and the NAS reservation/local DNS override is applied. Direct
+local HTTPS validates normally against the expected ServerId; local DNS suppresses
+public IPv6/HTTPS/SVCB answers. Unattended renewal and acceptance of the earlier
+same-origin route remain pending; the dedicated manual hostname is accepted above.
+Remote relay/native transport work has
+not started; S04/C02 remain unimplemented. The original planning request does not
+replace the active source assignment or authorize paid provisioning.
 
 **Later home-listening request, 2026-10-22:** the user can configure local DNS.
 First deliver the [LAN-first milestone](lan-playback-first.md): the existing
@@ -995,7 +1113,11 @@ fallback is about 3–6 days across trust, reads, UI and actual acceptance. Both
 plans, not implementation claims. This milestone may finish before the Iroh trial
 and remote relay; it does not authorize changes to the live installation here.
 The user's macOS and Windows work machines must retain Palo Alto GlobalProtect.
-First qualify their effective DNS and direct NAS reachability separately; the
+The work Mac reportedly still reaches Cloudflare after the router override, but
+hostname-preserving direct NAS HTTPS returns HTTP 200 with normal TLS validation
+while GlobalProtect remains connected. The dedicated manual LAN hostname above
+now has operator-confirmed browser/native playback acceptance on that Mac.
+Automatic same-origin routing and Windows remain unqualified; the earlier
 estimate assumes a usable local path. Native
 endpoint selection addresses DNS/discovery only when that path is reachable.
 Record an allowed remote route or supported IT exception if the VPN prevents it;
@@ -1003,7 +1125,7 @@ personal-device split-DNS success does not qualify this work-machine requirement
 
 The [HTTPS relay and LAN-switching plan](https-relay-and-lan-switching.md) owns
 the concrete listener-without-VPN outcome: normal browser/native remote HTTPS,
-automatic verified native local connections and recovery, a bounded Iroh trial
+automatic verified browser and native local connections and recovery, a bounded Iroh trial
 before writing a general native route/resume manager, and extraction of reusable
 mechanisms into `junk-libs-net`. It includes dated VM/transfer estimates for geographically spread
 listeners and changes across deployment, Collector, shared transport and Trash Amp.
@@ -1011,7 +1133,14 @@ Keep this as one complete delivery with its dependencies and actual native/outpu
 acceptance; do not split implementation into independent layer handoffs. It is
 not a new prerequisite for already supported manual single-route use or release.
 
-**Done when:** the plan's remote enrollment/listening, offline LAN, route-loss/
+**Done when:** both the real browser and Trash Amp automatically select the
+verified local server at home and use/recover remote access away from home or when
+LAN is unavailable, without manual URL selection or route-change re-enrollment.
+Prove actual local media traffic, trusted identity and playback/seek in each client,
+including the work Mac with required GlobalProtect connected where LAN is allowed.
+Keep browser-origin/permission failures visible and credentials off untrusted
+discovery targets. The accepted manual URL is not evidence of this behavior.
+Also qualify the plan's remote enrollment/listening, offline LAN, route-loss/
 recovery, identity/access denial, exact byte continuity and affected-sibling checks
 are qualified on named real clients, with deployed costs/capacity and rollback
 recorded. Update this entry, plan, architecture and status together. The following

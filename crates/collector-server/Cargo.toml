@@ -36,6 +36,9 @@ futures-util = "0.3"
 utoipa.workspace = true
 utoipa-axum.workspace = true
 url.workspace = true
+wtransport = { version = "0.7.2", features = ["quinn"] }
+if-addrs = "0.15"
+time = "0.3"
 
 webauthn-rs = { version = "=0.5.4", default-features = false }
 

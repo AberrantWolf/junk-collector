@@ -2180,6 +2180,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/playback/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["browser_grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playback/routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["routes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/native-devices": {
         parameters: {
             query?: never;
@@ -2605,6 +2637,11 @@ export interface components {
         BadgeTone: "neutral" | "positive" | "warning" | "negative";
         Begin: {
             username: string;
+        };
+        BrowserPlaybackGrant: {
+            /** Format: date-time */
+            expires_at: string;
+            token: string;
         };
         /** @enum {string} */
         BulkLibraryKind: "metadata" | "music_preparation";
@@ -3748,6 +3785,21 @@ export interface components {
         };
         /** Format: uuid */
         LoanId: string;
+        /** @description Authenticated control-plane advertisement; each endpoint has the same server identity. */
+        LocalPlaybackDescriptor: {
+            endpoints: components["schemas"]["LocalPlaybackEndpoint"][];
+            remote_media_allowed: boolean;
+            server_id: components["schemas"]["ServerId"];
+        };
+        LocalPlaybackEndpoint: {
+            certificate_pem: string;
+            /** @description SHA-256 of the DER leaf, as required by WebTransport serverCertificateHashes. */
+            certificate_sha256: string;
+            /** Format: date-time */
+            expires_at: string;
+            https_url: string;
+            webtransport_url: string;
+        };
         LocalizedText: {
             language: components["schemas"]["LanguageTag"];
             text: string;
@@ -4724,6 +4776,11 @@ export interface components {
         PlanIngestCommand: {
             collection_id: components["schemas"]["CollectionId"];
             packages: components["schemas"]["IngestPackageSelection"][];
+        };
+        PlaybackTarget: {
+            file_index: number;
+            item_id: components["schemas"]["ItemId"];
+            representation_id: components["schemas"]["RepresentationId"];
         };
         /** @enum {string} */
         Possession: "present" | "lent" | "elsewhere" | "unknown";
@@ -11218,6 +11275,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Pairing"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    browser_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybackTarget"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPlaybackGrant"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    routes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalPlaybackDescriptor"];
                 };
             };
             401: {

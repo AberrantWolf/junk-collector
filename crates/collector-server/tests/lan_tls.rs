@@ -97,6 +97,7 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
     };
     let mut state = AppState::new(store.clone(), pairing.clone());
     state.ingress = Ingress::Private;
+    state.direct_media = true;
     let browser_origin = format!("https://{address}");
     state.allowed_origins = Arc::new(vec![browser_origin.clone()]);
     let collection = state
@@ -159,6 +160,30 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
         .service
         .commit_upload(&owner, upload.id, &command())
         .unwrap();
+    let _local =
+        collector_server::local_playback::start(&mut state, "127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+    let service = state.service.clone();
+    let local = state.local_playback.clone().unwrap();
+    let mut public = state.clone();
+    public.direct_media = false;
+    let blocked = tower::ServiceExt::oneshot(
+        router(public),
+        axum::http::Request::builder()
+            .uri(format!(
+                "/api/v1/items/{}/representations/{}/0",
+                item.id, upload.representation_id
+            ))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        blocked.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    );
     let app = router(state);
     let task = tokio::spawn(async move {
         axum_server::from_tcp_rustls(listener, config)
@@ -214,12 +239,183 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
     let approval = client
         .post(format!("{base}/api/v1/enrollments/approve"))
         .header("origin", &browser_origin)
-        .header("cookie", cookie)
+        .header("cookie", &cookie)
         .json(&serde_json::json!({"user_code": approval_code}))
         .send()
         .await
         .unwrap();
     assert!(approval.status().is_success());
+    let target = collector_api_types::PlaybackTarget {
+        item_id: item.id,
+        representation_id: upload.representation_id,
+        file_index: 0,
+    };
+    let grant = client
+        .post(format!("{base}/api/v1/playback/grants"))
+        .header("origin", &browser_origin)
+        .header("cookie", &cookie)
+        .json(&target)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(grant.status(), reqwest::StatusCode::OK);
+    let grant: collector_api_types::BrowserPlaybackGrant = grant.json().await.unwrap();
+    let descriptor = local.descriptor(false);
+    let endpoint = &descriptor.endpoints[0];
+    let hash = wtransport::tls::Sha256Digest::new(
+        hex::decode(&endpoint.certificate_sha256)
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    );
+    let wt = wtransport::Endpoint::client(
+        wtransport::ClientConfig::builder()
+            .with_bind_default()
+            .with_server_certificate_hashes([hash])
+            .build(),
+    )
+    .unwrap();
+    let connection = wt
+        .connect(
+            wtransport::endpoint::ConnectOptions::builder(&endpoint.webtransport_url)
+                .add_header("origin", &browser_origin)
+                .build(),
+        )
+        .await
+        .unwrap();
+    async fn request(
+        connection: &wtransport::Connection,
+        input: serde_json::Value,
+    ) -> (u16, Vec<u8>) {
+        let (mut send, mut receive) = connection.open_bi().await.unwrap().await.unwrap();
+        send.write_all(&serde_json::to_vec(&input).unwrap())
+            .await
+            .unwrap();
+        send.finish().await.unwrap();
+        let mut output = Vec::new();
+        let mut buffer = [0u8; 1024];
+        while let Some(n) = receive.read(&mut buffer).await.unwrap() {
+            assert!(output.len() + n < 8192);
+            output.extend_from_slice(&buffer[..n]);
+        }
+        let newline = output.iter().position(|b| *b == b'\n').unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&output[..newline]).unwrap();
+        (
+            response["status"].as_u64().unwrap() as u16,
+            output[newline + 1..].to_vec(),
+        )
+    }
+    let read = serde_json::json!({"token":grant.token,"target":target,"method":"GET","start":2,"end":5,"etag":null});
+    let response = request(&connection, read.clone()).await;
+    assert_eq!(response, (206, b"2345".to_vec()));
+    let mut wrong = read.clone();
+    wrong["token"] = serde_json::json!("0".repeat(64));
+    assert_eq!(request(&connection, wrong).await.0, 401);
+    let mut wrong = read.clone();
+    wrong["target"]["file_index"] = serde_json::json!(1);
+    assert_eq!(request(&connection, wrong).await.0, 401);
+    let mut wrong = read.clone();
+    wrong["end"] = serde_json::json!(300000);
+    assert_eq!(request(&connection, wrong).await.0, 416);
+    assert!(
+        service
+            .browser_playback_resource(
+                &grant.token,
+                "https://other.invalid",
+                &target,
+                chrono::Utc::now()
+            )
+            .is_err()
+    );
+    assert!(
+        service
+            .browser_playback_resource(&grant.token, &browser_origin, &target, grant.expires_at)
+            .is_err()
+    );
+    assert!(
+        wt.connect(
+            wtransport::endpoint::ConnectOptions::builder(&endpoint.webtransport_url)
+                .add_header("origin", "https://other.invalid")
+                .build()
+        )
+        .await
+        .is_err()
+    );
+    let wrong_hash = wtransport::tls::Sha256Digest::new([0; 32]);
+    let bad = wtransport::Endpoint::client(
+        wtransport::ClientConfig::builder()
+            .with_bind_default()
+            .with_server_certificate_hashes([wrong_hash])
+            .build(),
+    )
+    .unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            bad.connect(
+                wtransport::endpoint::ConnectOptions::builder(&endpoint.webtransport_url)
+                    .add_header("origin", &browser_origin)
+                    .build()
+            )
+        )
+        .await
+        .map_or(true, |result| result.is_err())
+    );
+    // A successful prior range cannot freeze browser authority after logout.
+    let session = cookie.strip_prefix("collector_session=").unwrap();
+    let browser = service.authenticate(session).unwrap();
+    service
+        .logout_session(&browser.principal, browser.principal.device_id.unwrap())
+        .unwrap();
+    assert_eq!(request(&connection, read).await.0, 401);
+    let viewer = store
+        .create_user("viewer", "long viewer password", false)
+        .unwrap();
+    service
+        .grant(
+            &test_authentication(&owner),
+            collection.id,
+            viewer,
+            Role::Viewer,
+            &command(),
+        )
+        .unwrap();
+    let (session, _) = service
+        .login("viewer", "long viewer password", "Viewer LAN")
+        .unwrap();
+    let now = chrono::Utc::now();
+    let viewer_grant = service
+        .issue_browser_playback(
+            &session,
+            &browser_origin,
+            target.clone(),
+            "a".repeat(64),
+            now,
+        )
+        .unwrap();
+    assert!(
+        service
+            .browser_playback_resource(&viewer_grant.token, &browser_origin, &target, now)
+            .is_ok()
+    );
+    let current = service
+        .grant_for_username(&owner, collection.id, "viewer")
+        .unwrap()
+        .unwrap();
+    service
+        .set_grant(
+            &test_authentication(&owner),
+            collection.id,
+            "viewer",
+            current.revision,
+            None,
+            &command(),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.browser_playback_resource(&viewer_grant.token, &browser_origin, &target, now),
+        Err(Error::Forbidden)
+    ));
     let storage = TestCredentialStorage::default();
     let enrolled = pending.complete(&client).await.unwrap();
     storage.save(&enrolled).unwrap();
@@ -262,6 +458,10 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
         let mut reader = client
             .media_reader(item_id, representation, 0, cancellation.clone())
             .unwrap();
+        assert!(
+            reader.is_local(),
+            "the enrolled control origin was used for media"
+        );
         assert_eq!(reader.length(), 10);
         reader.seek(SeekFrom::Start(2)).unwrap();
         let mut bytes = [0; 4];

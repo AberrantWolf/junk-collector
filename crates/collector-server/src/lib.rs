@@ -5,6 +5,7 @@ use collector_api_types::{
 use collector_app::{
     WorkEntry, WorkHistoryCommand, WorkJobView, WorkJobsQuery, WorkQuery, WorkTarget,
 };
+pub mod local_playback;
 pub mod passkeys;
 use axum::{
     Json, Router,
@@ -67,6 +68,9 @@ pub struct AppState {
     pub ingress: Ingress,
     pub pairing: Pairing,
     pub multi_user: bool,
+    pub local_playback: Option<Arc<local_playback::LocalPlayback>>,
+    pub remote_media_allowed: bool,
+    pub direct_media: bool,
     pub backup_reminder: Option<collector_app::BackupReminderSettings>,
     pub inboxes: Arc<std::collections::BTreeMap<String, std::path::PathBuf>>,
     pub catalog_sources: Arc<Vec<CatalogSourceView>>,
@@ -92,6 +96,9 @@ impl AppState {
             ingress: Ingress::Public,
             pairing,
             multi_user: false,
+            local_playback: None,
+            remote_media_allowed: false,
+            direct_media: false,
             backup_reminder: None,
             inboxes: Arc::new(std::collections::BTreeMap::new()),
             catalog_sources: Arc::new(Vec::new()),
@@ -534,6 +541,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pair", get(index))
         .route("/lists", get(index))
         .route("/app.js", get(app_js))
+        .route("/playback-sw.js", get(local_playback::worker))
         .route("/app.css", get(app_css))
         .route("/security.js", get(security_js))
         .merge(client_api);
@@ -581,6 +589,8 @@ pub fn router(state: AppState) -> Router {
 fn client_api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(routes!(identity))
+        .routes(routes!(local_playback::routes))
+        .routes(routes!(local_playback::browser_grant))
         .routes(routes!(features))
         .routes(routes!(login))
         .routes(routes!(recover))
@@ -843,6 +853,11 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         .map(|peer| peer.0.ip().to_string())
         .unwrap_or_else(|| "unknown-direct-peer".into());
     request.extensions_mut().insert(DirectPeer(peer));
+    let local_origins = state
+        .local_playback
+        .as_ref()
+        .map(|local| local.connect_origins())
+        .unwrap_or_default();
     let mut response = next.run(request).await;
     for (key, value) in [
         ("x-content-type-options", "nosniff"),
@@ -857,6 +872,17 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         response
             .headers_mut()
             .insert(key, HeaderValue::from_static(value));
+    }
+    if !local_origins.is_empty() {
+        let csp = format!(
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' {}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            local_origins.join(" ")
+        );
+        if let Ok(value) = HeaderValue::from_str(&csp) {
+            response
+                .headers_mut()
+                .insert("content-security-policy", value);
+        }
     }
     response
 }
@@ -2506,6 +2532,12 @@ async fn media(
     headers: HeaderMap,
     Path((id, representation, index)): Path<(ItemId, RepresentationId, usize)>,
 ) -> ApiResult<Response> {
+    if !state.direct_media && !state.remote_media_allowed {
+        return Err(Error::Unavailable(
+            "Local playback is required; public media fallback is disabled".into(),
+        )
+        .into());
+    }
     let actor = principal(&state, &headers)?;
     let resource = blocking(move || {
         state

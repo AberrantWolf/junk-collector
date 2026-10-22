@@ -10,7 +10,7 @@ const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-game-catalog-'));
 const config=path.join(scratch,'collector.toml'),password=randomBytes(24).toString('hex');
 const origin='http://localhost:19972',binary=path.join(root,'target/debug/collector-server');
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19971"\nprivate_bind = "127.0.0.1:19972"\nlan_bind = "127.0.0.1:19973"\nallowed_origins = ["${origin}"]\n[exposure]\npublic_curation = false\npublic_administration = false\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19971"\nprivate_bind = "127.0.0.1:19972"\nlan_bind = "127.0.0.1:19973"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}"]\n[exposure]\npublic_curation = false\npublic_administration = false\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let server,browser,page,logs='';
 const cue=Buffer.from('FILE "one.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\nFILE "two.bin" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:00:00\n');

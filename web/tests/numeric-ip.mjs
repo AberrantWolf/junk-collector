@@ -12,7 +12,7 @@ const scratch=await mkdtemp(path.join(tmpdir(),'collector-ip-origin-'));
 const config=path.join(scratch,'collector.toml'),origin='https://127.0.0.1:19663';
 const password=randomBytes(24).toString('hex');
 const artifact=path.join(tmpdir(),'collector-ip-passkeys.png');
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19661"\nprivate_bind = "127.0.0.1:19662"\nlan_bind = "127.0.0.1:19663"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["127.0.0.1"]\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19661"\nprivate_bind = "127.0.0.1:19662"\nlan_bind = "127.0.0.1:19663"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["127.0.0.1"]\n`);
 const binary=path.join(root,'target/debug/collector-server');
 let browser,page,server,logs='';
 try{

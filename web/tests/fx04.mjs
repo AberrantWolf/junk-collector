@@ -15,7 +15,7 @@ const password=randomBytes(24).toString('hex');
 const origin='http://localhost:19982';
 let server,browser,page,logs='';
 try{
- await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19981"\nprivate_bind = "127.0.0.1:19982"\nlan_bind = "127.0.0.1:19983"\nallowed_origins = []\n`);
+ await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19981"\nprivate_bind = "127.0.0.1:19982"\nlan_bind = "127.0.0.1:19983"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n`);
  const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',chunk=>logs+=chunk);server.stdout.on('data',chunk=>logs+=chunk);
  let ready=false;for(let n=0;n<100;n++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-fx06-'));const binary=path.join(root,'target/debug/collector-server');const config=path.join(scratch,'collector.toml');const origin='http://localhost:20012';const password=randomBytes(24).toString('hex');const replacement=randomBytes(24).toString('hex');let server,browser,page,logs='';
 try{
- await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:20011"\nprivate_bind = "127.0.0.1:20012"\nlan_bind = "127.0.0.1:20013"\nallowed_origins = []\n`);
+ await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:20011"\nprivate_bind = "127.0.0.1:20012"\nlan_bind = "127.0.0.1:20013"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n`);
  const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',value=>logs+=value);server.stdout.on('data',value=>logs+=value);
  let ready=false;for(let i=0;i<200;i++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);

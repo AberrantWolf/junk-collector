@@ -218,6 +218,9 @@ fn state() -> (tempfile::TempDir, AppState) {
             endpoints: vec![],
         },
     );
+    // This fixture explicitly exercises a direct-media listener. Public refusal
+    // is covered by the distinct production listener tests.
+    state.direct_media = true;
     state.allowed_origins = Arc::new(vec!["https://collector.example".into()]);
     (root, state)
 }

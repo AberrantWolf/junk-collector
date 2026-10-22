@@ -14,7 +14,7 @@ COPY --chmod=755 deploy/container/install-proxy-config.sh /usr/local/bin/collect
 LABEL org.opencontainers.image.source="https://github.com/AberrantWolf/junk-collector"
 USER collector
 WORKDIR /home/collector
-EXPOSE 9843 9844
+EXPOSE 9843 9844 9845/tcp 9845/udp
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["junk-collector"]
 CMD ["--config", "/config/collector.toml", "serve"]

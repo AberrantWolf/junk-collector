@@ -2,6 +2,38 @@
 use collector_core::*;
 use serde::{Deserialize, Serialize};
 
+/// Authenticated control-plane advertisement; each endpoint has the same server identity.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LocalPlaybackDescriptor {
+    pub server_id: ServerId,
+    pub endpoints: Vec<LocalPlaybackEndpoint>,
+    pub remote_media_allowed: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LocalPlaybackEndpoint {
+    pub https_url: String,
+    pub webtransport_url: String,
+    pub certificate_pem: String,
+    /// SHA-256 of the DER leaf, as required by WebTransport serverCertificateHashes.
+    pub certificate_sha256: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackTarget {
+    pub item_id: ItemId,
+    pub representation_id: RepresentationId,
+    pub file_index: usize,
+}
+
+#[derive(Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct BrowserPlaybackGrant {
+    pub token: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CollectionListSummary {
     pub id: CollectionListId,

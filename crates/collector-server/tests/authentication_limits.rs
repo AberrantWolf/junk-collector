@@ -82,7 +82,7 @@ async fn actual_listeners_share_direct_peer_limits_and_restart_resets_only_trans
     let public = format!("http://{}", addresses[0]);
     let private = format!("http://{}", addresses[1]);
     fs::write(&config, format!(
-        "archive = {:?}\nstate = {:?}\npublic_bind = {:?}\nprivate_bind = {:?}\nlan_bind = {:?}\nallowed_origins = [{private:?}]\n",
+        "archive = {:?}\nstate = {:?}\npublic_bind = {:?}\nprivate_bind = {:?}\nlan_bind = {:?}\nlocal_playback_bind = \"127.0.0.1:0\"\nallowed_origins = [{private:?}]\n",
         root.path().join("archive"),root.path().join("state"),addresses[0].to_string(),addresses[1].to_string(),addresses[2].to_string()
     )).unwrap();
     let mut setup = Process(

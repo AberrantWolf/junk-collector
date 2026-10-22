@@ -32,7 +32,7 @@ fn terminate_and_interrupt_exit_successfully_and_release_storage() {
     fs::write(
         &config,
         format!(
-            "archive = {:?}\nstate = {:?}\npublic_bind = {:?}\nprivate_bind = {:?}\nlan_bind = {:?}\n",
+            "archive = {:?}\nstate = {:?}\npublic_bind = {:?}\nprivate_bind = {:?}\nlan_bind = {:?}\nlocal_playback_bind = \"127.0.0.1:0\"\n",
             root.path().join("archive"),
             root.path().join("state"),
             addresses[0].to_string(),

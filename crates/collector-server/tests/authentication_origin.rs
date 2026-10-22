@@ -71,7 +71,7 @@ async fn numeric_origins_start_with_password_login_and_preserve_state_across_dns
     let mut original_certificate = None;
     for (index, origin) in origins.iter().enumerate() {
         fs::write(&config, format!(
-            "archive = {:?}\nstate = {:?}\npublic_bind = {:?}\nprivate_bind = {:?}\nlan_bind = {:?}\nauthentication_origin = {:?}\nallowed_origins = [{:?}]\ntls_names = [\"127.0.0.1\", \"localhost\"]\n",
+            "archive = {:?}\nstate = {:?}\npublic_bind = {:?}\nprivate_bind = {:?}\nlan_bind = {:?}\nlocal_playback_bind = \"127.0.0.1:0\"\nauthentication_origin = {:?}\nallowed_origins = [{:?}]\ntls_names = [\"127.0.0.1\", \"localhost\"]\n",
             root.path().join("archive"), root.path().join("state"), addresses[0].to_string(), addresses[1].to_string(), addresses[2].to_string(), origin, base)).unwrap();
         cli(&config, "setup");
         cli(&config, "doctor");

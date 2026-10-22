@@ -11,32 +11,32 @@ updating remains an operator check, distinct from publication acceptance.
 See [publication evidence](validation/container-beta3-publication-2026-10-22.md)
 and [release notes and update behavior](releases/v0.1.0-beta.3.md).
 
-## Home LAN playback, HTTPS relay and native switching — 2026-10-22 plan only
+## Automatic private playback — 2026-10-22 source delivery
 
-The requested [concrete delivery plan](https-relay-and-lan-switching.md) records
-current library options, dated relay costs, an Iroh integration decision gate,
-the proposed `junk-libs-net` boundary and end-to-end acceptance. Normal manual
-HTTPS enrollment and bounded validated ranges exist; automatic discovery,
-per-endpoint trust, live route selection and playback failover remain unimplemented.
-No infrastructure was provisioned, live configuration changed or sibling code
-extracted for this planning work. HL-12 is the sole tracking entry; certificate
-rotation stays separately deferred and current release gates are unchanged.
+The [production implementation](automatic-private-playback.md) now covers web and
+Trash Amp together: authenticated private endpoint/pin discovery, software-managed
+short-lived certificates, pinned browser WebTransport with a streaming worker,
+and native HTTPS route selection through the shared range reader. Saved account,
+connection, queue and cache identities remain stable. Each range checks current
+authorization. Public media fallback defaults to disabled; ordinary control/login
+access remains. No Tailscale integration or configuration is involved.
 
-The later [home-listening plan](lan-playback-first.md) selects an earlier useful
-milestone: local DNS for the existing HTTPS hostname, with a browser-trusted
-home proxy to the public/client listener. The user can configure local DNS; this
-can serve both current clients without changing the player or enrolled origin.
-It remains unconfigured/unqualified and does not promise mid-stream handoff.
-Bounded native endpoint selection is the fallback if deployment prevents this
-route. Home listening need not wait for the Iroh trial or a new remote relay;
-application-managed cross-origin browser media remains deferred.
+See [dated source acceptance](validation/automatic-private-playback-2026-10-22.md)
+for actual playback/seek, trust, revocation, rollover and regression results and
+remaining device/deployment limits. Private reachability does not establish a
+physical LAN path or zero ISP upload. No new source is deployed to the NAS by
+this delivery. The personal `collector-lan.awkwardexplorer.com` address remains the
+accepted **manual stopgap** until the updated server and clients are installed.
 
-Work-machine listening on macOS and Windows with required Palo Alto GlobalProtect
-was added to this plan.
-Its DNS selection and direct NAS reachability are unknown; router split DNS and
-native endpoint selection cannot yet be claimed to satisfy that client. Qualify
-the actual VPN-connected machine separately before treating home listening as
-complete for the user's devices.
+Earlier feasibility records remain dated history: [primitive transports](validation/direct-transports-2026-10-22.md),
+[actual NAS player](validation/webtransport-lan-2026-10-22.md) and
+[work-Mac public-origin permission/CSP trial](validation/public-origin-webtransport-2026-10-22.md).
+The operator confirmed Chrome playback and forward/back seeks under GlobalProtect,
+and both clients using the [manual HTTPS stopgap](validation/lan-https-2026-10-22.md).
+Those tests do not qualify every managed VPN, Safari, the new build on a second
+device, physical-path billing or the deferred relay/Iroh work. HL-12 retains those
+limits; the manual certificate renewal task is separate from automatic ephemeral
+media certificate rotation. Existing public hosting/certificate choices are unchanged.
 
 ## Automatic multidisc album grouping — 2026-10-22 source delivery
 

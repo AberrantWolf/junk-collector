@@ -19,6 +19,7 @@
     "test:fx05": "node tests/fx05.mjs",
     "test:fx06": "node tests/fx06.mjs",
     "test:fx04-review": "node tests/fx04-review.mjs",
+    "test:local-playback": "node tests/local-playback.mjs",
     "test:queue": "node tests/music-queue.mjs",
     "test:lists": "node tests/collection-list-chooser.mjs",
     "test:context": "node tests/work-context.mjs",

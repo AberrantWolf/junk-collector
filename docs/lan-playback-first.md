@@ -1,12 +1,117 @@
-# Automatic home LAN playback before the relay/Iroh work
+# Home LAN playback before the relay/Iroh work
 
-Planning record, 2026-10-22. **Not deployed or qualified.** The user can configure
+**Source update, 2026-10-22:** [automatic private playback](automatic-private-playback.md)
+is now implemented for web and Trash Amp. See [dated acceptance](validation/automatic-private-playback-2026-10-22.md)
+and the [sole queue](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation)
+for deployment/device limits and deferred public relay work. The manual LAN URL
+remains the deployed stopgap. The older planning/feasibility statements below
+are retained as dated history, not current implementation status.
+
+## Current delivery: explicit LAN hostname — 2026-10-22
+
+**Accepted stopgap, not the real solution.** The intended outcome remains
+automatic detection of and connection to the trusted local server in **both the
+browser and Trash Amp**, with remote access when LAN is unavailable. It remains
+open under [HL-12](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation).
+Manual URL selection and Trash Amp re-enrollment do not satisfy that outcome.
+
+The [expanded route policy and browser plan](https-relay-and-lan-switching.md#route-policy-trust-reachability-and-transfer-cost)
+prioritizes avoiding Cloudflare media, listener simplicity and actual LAN egress
+savings. Existing authorized private routes can work generically, with no Tailscale
+integration, discovery or configuration work. Private reachability alone is not
+proof of a local physical path or avoided ISP upload. The unresolved Cloudflare
+media route must not become an automatic fallback when a local probe fails.
+
+The user further clarified that the general private experience should avoid this
+manual certificate/DNS/proxy procedure. Public hosts retain their own hosting
+choices. The [minimal-setup plan](https-relay-and-lan-switching.md#minimize-private-setup-keep-public-hosting-independent)
+evaluates software-managed native trust, pinned WebTransport and WebRTC data
+channels; [loopback primitive tests](validation/direct-transports-2026-10-22.md)
+have passed without certificate imports in Firefox and Chrome. That is promising
+transport evidence, not a replacement already implemented for this stopgap.
+
+The later [actual NAS/LAN test](validation/webtransport-lan-2026-10-22.md) uses the
+real player with a disposable Collector: pinned transport, exact ranged bytes,
+authorization and revocation pass. The operator now confirms Chrome playback and
+forward/backward seeking on the work Mac under the requested GlobalProtect test
+conditions, with no errors or unexpected prompts noticed. Saved diagnostics
+corroborate ranged seeks and superseded stream cancellation. The personal Mac's
+unavailable audio output remains a separate device limit.
+This experiment has not changed the accepted stopgap or implemented detection.
+The subsequent [public-origin trial](validation/public-origin-webtransport-2026-10-22.md)
+also passes Chrome playback/scrubbing, permission deny/allow, trust/authorization
+and CSP controls from the normal origin. It used a temporary scoped test path,
+now retired to 404 with its fixtures stopped; the real automatic feature remains
+unimplemented.
+
+After trusted direct NAS HTTPS succeeded on the work Mac with GlobalProtect
+connected, normal hostname resolution still reached Cloudflare. The user chose
+manual home access at **https://collector-lan.awkwardexplorer.com/** for browser
+and Trash Amp, without installing a Mac helper. This is the current temporary
+deployment; automatic home/away selection for both clients remains the real
+solution to implement.
+
+The dedicated name has a DNS-only public A record for the reserved NAS address,
+`192.168.1.106`, so a VPN resolver can look it up without using home DNS. No WAN
+forwarding is added; the private address is useful only where the NAS is reachable.
+Home DNS also serves this name explicitly, avoiding upstream private-address
+filtering without disabling rebinding protection. The operator confirmed both
+clients work on the actual work Mac with GlobalProtect connected; this does not
+qualify other managed machines or profiles.
+
+A separate production DNS-01 certificate is installed and assigned to the NAS
+proxy, forwarding only to `127.0.0.1:9841`. Collector's exact
+`allowed_origins` now includes the new HTTPS origin, with a configuration backup,
+successful doctor check and container restart. The existing authentication origin
+is retained: use the existing account password at the LAN origin; existing passkeys
+remain on the original authentication hostname. No new account is needed.
+
+Trash Amp uses the LAN URL with system HTTPS trust and browser-approved enrollment.
+Its current persistence stores one endpoint/credential per server/account, so
+reconnecting through this URL updates that saved connection; it does not add an
+independent second connection for the same account. Returning to remote access
+requires reconnecting at the remote URL. Existing offline data is keyed to the
+same server/account, not to a second LAN catalog.
+
+Ordinary DNS-based HTTPS now reaches `192.168.1.106` with normal CA/hostname
+validation, the exact issued certificate and expected ServerId. Firefox renders
+the login page with Let's Encrypt trust. The operator confirmed work-Mac browser
+password login, playback and scrubbing, and confirmed the requested Trash Amp
+enrollment/playback/seek workflow works with GlobalProtect connected. This bounded
+manual home-listening stopgap is accepted. Unattended certificate renewal remains
+outstanding. The earlier same-origin plan and its broader matrix below
+remain a dated design record, not claims that this manual route switches
+automatically. See [deployment evidence](validation/lan-https-2026-10-22.md).
+
+### Use the LAN address
+
+1. On the home LAN, open **https://collector-lan.awkwardexplorer.com/** and sign in
+   with the existing Collector password. Do not use the passkey button on this
+   alternate origin; passkeys retain the configured original hostname.
+2. In Trash Amp, open **Settings → Servers**, enter that URL, leave the
+   owner-provided trust file empty, and choose **Connect/Reconnect**. Approve the
+   pairing code in the browser using the same Collector account. This updates
+   the saved address for that server/account to the LAN URL.
+3. Play and seek in each client. Keep required GlobalProtect settings in place
+   on the work machine. Away from home, use the original browser URL and reconnect
+   Trash Amp there when remote access is needed; this manual LAN route has no
+   automatic fallback.
+
+## Earlier same-origin plan and deployment
+
+Planning record, 2026-10-22. **Live setup started; not yet qualified.** The user can configure
 local DNS and wants browser and Trash Amp listening at home while remote transport
 is investigated. This selects an earlier, independently useful delivery within
 [HL-12](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation),
 with installation acceptance under HL-04/05. It is not a second work queue.
-This request authorizes planning; no live DNS, certificates, services or clients
-were changed. Preserve unrelated implementation and staged sibling release work.
+The initial request authorized planning only. Later explicit assignments authorized
+router SSH-key setup, NAS HTTPS and the router reservation/DNS override; see the
+[dated partial setup](validation/lan-https-2026-10-22.md). The production certificate
+is installed and assigned; direct local HTTPS validates normally against the
+expected ServerId. Home DNS now returns the reserved NAS address and suppresses
+public IPv6/HTTPS/SVCB answers for Collector. Unattended renewal and trusted playback
+acceptance remain pending. Preserve unrelated implementation and staged sibling
+release work.
 
 ## Selected approach: the same HTTPS origin over local DNS
 
@@ -76,18 +181,21 @@ Record the GlobalProtect version on each work OS, inspect effective hostname
 resolution with the VPN connected, and test connectivity to the known NAS
 address/HTTPS port separately. On macOS, use the system resolver via
 `dscacheutil -q host -a name collector.awkwardexplorer.com`; on Windows use
-`Resolve-DnsName collector.awkwardexplorer.com`. The override is not installed yet,
-so Cloudflare answers are currently expected and do not prove VPN DNS bypass.
-Repeat resolution checks after the local override is installed.
+`Resolve-DnsName collector.awkwardexplorer.com`. The home override is now installed:
+clients using it should receive only `192.168.1.106`, with no public AAAA or HTTPS
+address hints. Cloudflare answers on a client require checking effective resolver
+selection and caches. The current personal Mac still reaches Cloudflare with
+Tailscale DNS active; this is not evidence about the work machine's GlobalProtect.
 
 For an initial HTTPS data-path check, use `curl -I --connect-timeout 5 --max-time 10
 https://192.168.1.106/` (Windows: `curl.exe`). This unauthenticated check makes no
-configuration changes. The NAS currently presents its default Synology certificate,
-so an issuer/name validation failure is expected and only establishes that a TLS
-endpoint responded; identify it before attributing it to the NAS. A timeout,
+configuration changes. A direct-IP request still does not test Collector's hostname
+certificate. The operator reported a certificate error from this preliminary test
+before Collector HTTPS was installed; it only establishes that a TLS endpoint
+responded. A timeout,
 corporate block response or connection refusal needs separate diagnosis.
 TCP connection success alone is not sufficient: Palo Alto documents that its
-endpoint enforcement bypasses TCP handshakes. Once local HTTPS is ready, verify
+endpoint enforcement bypasses TCP handshakes. Local Collector HTTPS is now ready; verify
 the actual browser and Trash Amp
 route, trusted TLS and real playback; a successful DNS utility query alone does
 not establish which resolver a managed browser uses. Keep required VPN settings
@@ -97,7 +205,17 @@ supported configuration, rather than silently editing hosts files or VPN policy.
 Do not count the current personal Mac's Tailscale settings as evidence about the
 work machine. The native fallback below only helps where LAN connectivity is
 available; Iroh does not confer permission or reachability through a blocked local
-route. An allowed remote route can still serve the work machine, but the existing
+route. The operator has now reported successful trusted direct NAS HTTPS with
+GlobalProtect connected, while normal resolution still takes the public route.
+A supported split-DNS exception could therefore enable this topology. If the user
+can administer local hostname configuration, another bounded deployment option is
+a Mac helper managing only its own exact hostname mapping: probe the NAS using
+the existing hostname with normal TLS validation and verify expected ServerId;
+enable the mapping when reachable, remove it when unavailable, preserve unrelated
+host entries, and verify browser/native resolver and connection-cache behavior.
+This requires an actual implementation, installation and home/away acceptance;
+none is installed. A permanent static mapping alone is insufficient for roaming.
+An allowed remote route can still serve the work machine, but the existing
 Cloudflare media concern remains unresolved. The 0.5–1.5 day estimate below is
 conditional on usable client DNS/LAN behavior and excludes corporate IT changes.
 
@@ -238,7 +356,7 @@ would satisfy automatic native selection; it would not complete mDNS discovery o
 live LAN/remote failover in the wider plan.
 
 **Separate public-page/browser LAN media selection is the expensive option.** A
-browser cannot install Collector's native certificate pin or perform general
+browser cannot apply Collector's native certificate pin to ordinary fetch/audio or perform general
 Bonjour discovery. A separate LAN origin needs browser-trusted HTTPS, explicit
 endpoint authority, cross-origin authentication suitable for media elements,
 restricted CORS/Origin handling, HEAD/range/seek behavior, revocation and browser
@@ -251,10 +369,14 @@ Chrome gates public-site requests to local destinations behind Local Network
 Access permission; current guidance supersedes its older PNA-preflight proposal.
 Safari and other browsers need their own real qualification, including cookie
 restrictions and autoplay after recovery. See [Chrome LNA guidance](https://developer.chrome.com/blog/local-network-access).
-This is why split DNS is selected for the browser. If an application-managed
-cross-origin path is later requested, first run a bounded Chrome/Safari feasibility
-spike and write its authentication contract; it is not part of getting home
-listening working now.
+Split DNS was the earlier browser deployment choice; the VPN bypass and manual
+hostname led to the accepted stopgap above. The user's subsequent clarification
+requires proper browser automatic LAN detection as part of the real solution.
+Run a bounded browser feasibility step and define the HTTPS/origin/authentication
+contract before choosing a mechanism. A cross-origin pipeline is one possible
+design, not a preselected implementation or grounds to defer the browser outcome.
+The browser and native mechanisms may differ; both need real local/remote
+selection acceptance. This does not require replacing the existing audio pipeline.
 
 ## Relationship to the remote plan and validation
 

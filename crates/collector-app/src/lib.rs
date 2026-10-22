@@ -1,5 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
 mod disc_audio;
+mod local_playback;
 pub use disc_audio::game_audio_search_projection;
 mod file_music;
 pub use file_music::{
@@ -1586,6 +1587,7 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
 
 #[derive(Clone)]
 pub struct CollectionService {
+    browser_media_grants: Arc<local_playback::BrowserMediaGrants>,
     reader: Arc<dyn CollectionReadPort>,
     writer: Arc<dyn CollectionWritePort>,
     guided_transitions: Arc<std::sync::Mutex<()>>,
@@ -2349,6 +2351,7 @@ impl CollectionService {
         let lists: Arc<dyn CollectionListPort> = catalog.clone();
         Self {
             reader,
+            browser_media_grants: Arc::new(Default::default()),
             writer,
             guided_transitions: Arc::new(std::sync::Mutex::new(())),
             access,

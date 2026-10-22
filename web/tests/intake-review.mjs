@@ -41,7 +41,7 @@ const provider=createServer((request,response)=>{
 });
 await new Promise((resolve,reject)=>{provider.once('error',reject);provider.listen(19874,'127.0.0.1',resolve);});
 await mkdir(path.join(scratch,'inbox'));
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19871"\nprivate_bind = "127.0.0.1:19872"\nlan_bind = "127.0.0.1:19873"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${scratch}/inbox"\n[providers]\nmusicbrainz_user_agent = "collector-intake-review/0.1 (fixture@example.invalid)"\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19871"\nprivate_bind = "127.0.0.1:19872"\nlan_bind = "127.0.0.1:19873"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${scratch}/inbox"\n[providers]\nmusicbrainz_user_agent = "collector-intake-review/0.1 (fixture@example.invalid)"\n`);
 if(process.env.INGEST_WORKERS)await writeFile(config,(await readFile(config,'utf8'))+`\n[jobs]\nprocessing_workers = ${Number(process.env.INGEST_WORKERS)}\ncopy_workers = 1\n`);
 const binary=path.join(root,'target/debug/collector-server');
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
