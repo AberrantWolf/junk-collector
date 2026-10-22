@@ -1,23 +1,22 @@
 # Remaining work — home-lab priorities
 
-**Active authorized follow-up — build once, promote validated images (2026-10-22):**
-source implementation is on `codex/publish-validated-images`; local provenance,
-archive identity and failure/recovery tests pass. The first CI run exposed and
-corrected a Docker/containerd ID assumption. The next passed both native smokes
-and exposed a rootless archive-directory issue, now reproduced/fixed locally;
-fresh full validation is required. Complete the actual native
-nonpublishing validation and same-source reuse rehearsal before declaring this
-delivery complete. Keep beta.4/`preview`, the NAS and Tailscale unchanged. See
-[contract](container-release-pipeline.md) and [pending acceptance](validation/container-promotion-2026-10-22.md).
+**Completed authorized follow-up — build once, promote validated images (2026-10-22):**
+`codex/publish-validated-images` now passes full native/source/container acceptance
+and the same-source nonpublishing reuse rehearsal. Publication restores exact
+validated OCI bytes instead of recompiling or rebuilding, with provenance,
+expiry/failure checks, anonymous pull gates, channel safeguards and installation
+assets retained. Beta.4/preview, the NAS and Tailscale are unchanged. See the
+[operator contract](container-release-pipeline.md) and [accepted evidence with
+qualification limits](validation/container-promotion-2026-10-22.md). This closes
+the user's post-beta.4 pipeline assignment; no new release/deployment is required.
 
 **Beta.4 published — 2026-10-22:** the automatic private playback image is verified
 ready on `ghcr.io/aberrantwolf/junk-collector:preview`. Both native architectures,
 container smoke, anonymous pulls, source labels and pinned installation bundle
 passed. See [publication evidence](validation/container-beta4-publication-2026-10-22.md)
 and [update/client requirements](releases/v0.1.0-beta.4.md). No NAS deployment was
-performed; Trash Amp needs its matching new client build. The user authorized
-replacing redundant publication rebuilds with promotion of validated images;
-that pipeline improvement follows this completed release.
+performed; Trash Amp needs its matching new client build. The subsequent [build-once pipeline delivery](validation/container-promotion-2026-10-22.md)
+now reuses validated images for future publication.
 
 Beta.3 is published 2026-10-22 for the reviewed worker/progress/grouping delivery.
 Both native architectures, anonymous pulls, `preview` and pinned bundle checks

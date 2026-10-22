@@ -149,7 +149,7 @@ is the packaged local area; full backup remains explicit and includes media. No
 scheduler or lightweight catalog-only mode is implemented. The post-alpha.3
 optional backup-age reminder below reads bounded completion receipts.
 
-Build-once publication (2026-10-22, after beta.4; CI qualification pending): validation builds
+Build-once publication (2026-10-22, after beta.4; native validation and reuse qualified): validation builds
 one labelled OCI export per native architecture, imports that exact runtime image
 for smoke acceptance, merges/verifies exports and retains immutable GitHub Actions
 artifacts. Publication is a separate consumer: a successful same-repository,
@@ -161,7 +161,7 @@ mechanisms; existing release policy, anonymous verification, channel safeguards
 and bundle assembly stay in `scripts/container_release.py`. These are deployment
 adapters, with no application/domain changes. The completed beta.4 tag and image
 are immutable. A nonpublishing reuse rehearsal qualifies this boundary without
-publishing another release or changing `preview`.
+publishing another release or changing `preview`; see [dated acceptance](validation/container-promotion-2026-10-22.md).
 
 Release planning/OCI verification/bundle assembly (HL-07D, 2026-10-20)
 live in `scripts/container_release.py` and the existing workflow, outside application
