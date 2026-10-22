@@ -209,6 +209,7 @@ impl BulkLibraryPort for Store {
         Ok(Page { items, next_cursor })
     }
     fn accept_bulk_library(&self, user: UserId, id: JobId) -> Result<BulkLibrarySummary> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         let mut record = read(&tx, user, id)?;

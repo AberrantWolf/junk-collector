@@ -1432,7 +1432,40 @@ impl CollectionService {
         } else {
             None
         };
+        let mut work = self
+            .provisional_imports
+            .import_work_records(view.id, actor.user_id)?
+            .into_iter()
+            .filter_map(|job| {
+                let state = match job.state {
+                    JobState::CancelRequested => IngestWorkState::Cancelling,
+                    JobState::Queued | JobState::Running
+                        if job.phase.starts_with("waiting_")
+                            || matches!(job.phase.as_str(), "awaiting_source" | "staging") =>
+                    {
+                        IngestWorkState::Waiting
+                    }
+                    JobState::Running => IngestWorkState::Running,
+                    JobState::Queued => IngestWorkState::Queued,
+                    _ => return None,
+                };
+                Some(IngestWork {
+                    shared: job.shared,
+                    state,
+                    kind: job.kind,
+                    phase: job.phase,
+                    jobs: job.jobs,
+                })
+            })
+            .collect::<Vec<_>>();
+        work.sort_by_key(|entry| match entry.state {
+            IngestWorkState::Running => 0,
+            IngestWorkState::Cancelling => 1,
+            IngestWorkState::Waiting => 2,
+            IngestWorkState::Queued => 3,
+        });
         Ok(IngestSummary {
+            work,
             import_id: view.id,
             collection_id: view.collection_id,
             package_name: view.source.package_name.clone(),

@@ -1492,6 +1492,7 @@ impl CollectionService {
             frozen.collection_id,
             frozen.recipe.source_fingerprint.source,
         )?;
+        self.report_processing_phase(claim, "validating_source")?;
         if self.fingerprint_inventory_checked(&inventory, &mut || checkpoint())?
             != frozen.recipe.source_fingerprint
         {
@@ -1552,6 +1553,7 @@ impl CollectionService {
             claim_token: claim.claim_token.clone(),
         };
         let mut scratch = self.processing.conversion_scratch()?;
+        self.report_processing_phase(claim, "preparing_audio")?;
         let validation = converter.convert(
             &frozen.recipe,
             pcm.reader.as_mut(),
@@ -1561,11 +1563,13 @@ impl CollectionService {
         checkpoint()?;
         let validation = validation?;
         validation.validate_recipe(&frozen.recipe)?;
+        self.report_processing_phase(claim, "rechecking_source")?;
         if self.fingerprint_inventory_checked(&inventory, &mut || checkpoint())?
             != frozen.recipe.source_fingerprint
         {
             return Err(Error::Conflict);
         }
+        self.report_processing_phase(claim, "publishing")?;
         self.processing.publish_derivative(
             claim,
             frozen,
@@ -1597,7 +1601,7 @@ fn matching_musicbrainz_medium<'a>(
     resolve_music_medium(Some(release), disc_id, None, Some(&positions)).0
 }
 
-fn resolve_music_medium<'a>(
+pub(crate) fn resolve_music_medium<'a>(
     release: Option<&'a collector_modules::music::MusicBrainzReleaseObservation>,
     disc_id: Option<&str>,
     assignment: Option<&collector_modules::music::MusicDiscAssignment>,

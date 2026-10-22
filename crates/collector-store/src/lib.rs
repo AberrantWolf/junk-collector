@@ -74,6 +74,7 @@ pub struct Store {
     pub(crate) writer: Arc<Mutex<()>>,
     pub(crate) uploads: Arc<Mutex<()>>,
     pub(crate) job_publication_gate: Arc<Mutex<()>>,
+    pub(crate) job_dispatch: Arc<Mutex<collector_app::JobDispatchPolicy>>,
     recovery_report: RecoveryReport,
     catalog_reused: bool,
     receipt: Option<collector_app::CommandReceipt>,
@@ -176,6 +177,14 @@ struct CollectionCreateRecovery {
     relative_path: String,
 }
 impl Store {
+    /// Startup configuration shared by all Store/command clones. Pending Jobs
+    /// and their durable claims are preserved when limits change after restart.
+    pub fn with_job_settings(self, settings: collector_app::JobSettings) -> Result<Self> {
+        settings.validate()?;
+        lock(&self.job_dispatch)?.settings = settings;
+        Ok(self)
+    }
+
     pub fn open(archive: impl AsRef<Path>, state: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_dependencies(
             archive,
@@ -297,6 +306,7 @@ impl Store {
             writer: Arc::new(Mutex::new(())),
             uploads: Arc::new(Mutex::new(())),
             job_publication_gate: Arc::new(Mutex::new(())),
+            job_dispatch: Arc::new(Mutex::new(collector_app::JobDispatchPolicy::default())),
             recovery_report,
             catalog_reused: false,
             receipt: None,
@@ -1374,6 +1384,9 @@ impl ImportPort for Store {
 }
 
 impl JobPort for Store {
+    fn job_settings(&self) -> Result<collector_app::JobSettings> {
+        Ok(lock(&self.job_dispatch)?.settings)
+    }
     fn work_job_records(
         &self,
         user: UserId,

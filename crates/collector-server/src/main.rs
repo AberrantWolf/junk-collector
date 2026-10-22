@@ -152,6 +152,7 @@ struct Config {
     dat_sources: std::collections::BTreeMap<String, DatSourceConfig>,
     providers: ProviderConfig,
     encoders: EncoderConfig,
+    jobs: collector_app::JobSettings,
     backup_reminder: Option<collector_app::BackupReminderSettings>,
     tls_names: Vec<String>,
     allowed_origins: Vec<String>,
@@ -207,6 +208,7 @@ impl Default for Config {
             dat_sources: std::collections::BTreeMap::new(),
             providers: ProviderConfig::default(),
             encoders: EncoderConfig::default(),
+            jobs: collector_app::JobSettings::default(),
             backup_reminder: None,
             tls_names: vec![
                 "localhost".into(),
@@ -237,6 +239,10 @@ fn metadata_readiness(config: &ProviderConfig) {
 }
 
 fn instructions(config: &Config, path: &std::path::Path) {
+    println!(
+        "Background jobs: {} processing workers; inbox copy limit {}; provider limit 1. Limits apply after restart.",
+        config.jobs.processing_workers, config.jobs.copy_workers
+    );
     println!(
         "\nLocal management: {} (open this exact address on the server computer)",
         local_origin(config)
@@ -718,6 +724,7 @@ async fn main() -> Result<()> {
     } else {
         Config::default()
     };
+    config.jobs.validate()?;
     if let Some(reminder) = &config.backup_reminder {
         reminder.validate()?;
     }
@@ -798,7 +805,8 @@ async fn main() -> Result<()> {
     if !cli.config.exists() && !matches!(cli.command, Command::Setup { .. }) {
         bail!("Configuration missing. Run setup first.");
     }
-    let store = Arc::new(Store::open(&config.archive, &config.state)?);
+    let store =
+        Arc::new(Store::open(&config.archive, &config.state)?.with_job_settings(config.jobs)?);
     match cli.command {
         Command::Doctor => unreachable!(),
         Command::Setup { username } => {
@@ -1038,7 +1046,7 @@ async fn main() -> Result<()> {
             state.passkeys = passkeys
                 .take()
                 .expect("serve validates passkey configuration before opening storage");
-            let _job_runtime = collector_server::start_job_workers(state.clone());
+            let _job_runtime = collector_server::start_job_workers(state.clone())?;
             let public = router(state.clone());
             let lan = router(state.clone());
             state.ingress = Ingress::Private;

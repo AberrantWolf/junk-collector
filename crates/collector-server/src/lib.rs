@@ -114,7 +114,8 @@ impl Drop for JobRuntime {
     }
 }
 
-pub fn start_job_workers(state: AppState) -> JobRuntime {
+pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> {
+    let settings = state.service.job_settings()?;
     let worker_instance = ServerId::new().to_string();
     let mut workers = Vec::new();
     let recovery_state = state.clone();
@@ -122,11 +123,17 @@ pub fn start_job_workers(state: AppState) -> JobRuntime {
         loop {
             let state = recovery_state.clone();
             match tokio::task::spawn_blocking(move || {
-                state.service.reconcile_provider_acquisitions()?;
-                recover_guided_inbox_staging(&state)?;
-                state.service.resume_bulk_intakes()?;
-                state.service.resume_bulk_library()?;
-                state.service.resume_guided_ingests()
+                let recovery = (|| {
+                    state.service.reconcile_provider_acquisitions()?;
+                    recover_guided_inbox_staging(&state)?;
+                    state.service.resume_bulk_intakes()?;
+                    state.service.resume_bulk_library()?;
+                    state.service.resume_guided_ingests()
+                })();
+                // An unrelated recovery error must not suppress grouping, nor
+                // may a grouping failure prevent ordinary workflow recovery.
+                let grouping = state.service.reconcile_automatic_album_groups();
+                recovery.and(grouping)
             })
             .await
             {
@@ -137,7 +144,7 @@ pub fn start_job_workers(state: AppState) -> JobRuntime {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }));
-    for worker_index in 0..3 {
+    for worker_index in 0..settings.execution_loops() {
         let service = state.service.clone();
         let worker_instance = worker_instance.clone();
         workers.push(tokio::spawn(async move {
@@ -161,7 +168,7 @@ pub fn start_job_workers(state: AppState) -> JobRuntime {
             }
         }));
     }
-    JobRuntime(workers)
+    Ok(JobRuntime(workers))
 }
 
 pub trait RateLimitClock: Send + Sync {

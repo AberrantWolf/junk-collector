@@ -1,5 +1,144 @@
 # Implementation status
 
+## Home LAN playback, HTTPS relay and native switching — 2026-10-22 plan only
+
+The requested [concrete delivery plan](https-relay-and-lan-switching.md) records
+current library options, dated relay costs, an Iroh integration decision gate,
+the proposed `junk-libs-net` boundary and end-to-end acceptance. Normal manual
+HTTPS enrollment and bounded validated ranges exist; automatic discovery,
+per-endpoint trust, live route selection and playback failover remain unimplemented.
+No infrastructure was provisioned, live configuration changed or sibling code
+extracted for this planning work. HL-12 is the sole tracking entry; certificate
+rotation stays separately deferred and current release gates are unchanged.
+
+The later [home-listening plan](lan-playback-first.md) selects an earlier useful
+milestone: local DNS for the existing HTTPS hostname, with a browser-trusted
+home proxy to the public/client listener. The user can configure local DNS; this
+can serve both current clients without changing the player or enrolled origin.
+It remains unconfigured/unqualified and does not promise mid-stream handoff.
+Bounded native endpoint selection is the fallback if deployment prevents this
+route. Home listening need not wait for the Iroh trial or a new remote relay;
+application-managed cross-origin browser media remains deferred.
+
+Work-machine listening on macOS and Windows with required Palo Alto GlobalProtect
+was added to this plan.
+Its DNS selection and direct NAS reachability are unknown; router split DNS and
+native endpoint selection cannot yet be claimed to satisfy that client. Qualify
+the actual VPN-connected machine separately before treating home listening as
+complete for the user's devices.
+
+## Automatic multidisc album grouping — 2026-10-22 source delivery
+
+Clear accepted MusicBrainz matches now group existing entries automatically in
+the same collection. Every preserved source must have a recorded disc ID that
+maps uniquely to a medium; medium layouts must agree across accepted release
+variants, and positions must be distinct across entries. Same album/language
+variants with coherent positions are allowed. Duplicate positions, incomplete or
+conflicting matches, conflicting explicit metadata and unknown inventory/authority
+data stay available for reviewed grouping. Filename/artwork similarity is not a
+basis for the decision.
+
+Startup and five-second reconciliation traverse all pages of the accepted-album
+projection, including metadata accepted before this change. Busy affected imports,
+Jobs and accepted bulk members defer a merge; admission/retry and publication
+share fences. Existing atomic group publication preserves originals, physical-copy
+records, captures, artwork and meaningful evidence. Larger existing destinations
+remain stable as later discs arrive. No physical-copy assembly is inferred.
+
+The UI identifies automatic groups and offers existing guarded undo. Metadata
+views follow background merges and refresh undo eligibility after choices. Undo retains
+a portable separation preference across restart/reindex. Old metadata links follow
+the combined entry. Metadata proposals remain available for ambiguous cases.
+Capture/artwork identity ordering is now canonical when a group is frozen, fixing
+false undo conflicts after hydration/reindex. This supersedes the confirmation-only
+behavior in the dated 2026-10-21 delivery below. See
+[automatic-grouping acceptance](validation/automatic-album-grouping-2026-10-22.md).
+
+The ambiguity follow-up separates membership from metadata. Entries group when
+all viable MusicBrainz album options agree about their membership and distinct
+disc positions, retaining unresolved alternatives as tentative metadata. Equivalent
+explicit releases/versions no longer conflict solely because their candidate IDs
+differ; a stable manual display choice and every original choice/history survive.
+An accepted or manually chosen album can admit unresolved siblings when it is the
+unique compatible established target. Competing targets and overlapping option
+sets retain review. A compatibility graph prioritizes accepted
+subsets before unresolved attachments, without letting one conflicting/ambiguous
+peer veto the component or choosing arbitrary duplicate copies.
+
+The commit review preserves incomplete/conflicting alternatives as unproven
+instead of dropping them to justify a merge. Grouping also honors the same
+automatic-metadata reset markers as display; retained history cannot silently
+reactivate cleared metadata. Explicit later selection remains supported.
+Removed-item recovery preserves already settled import outcomes after grouping,
+while continuing to stop unfinished work.
+
+The album-option index is many-to-many (catalog schema 15). Older disposable
+catalogs rebuild from archive records while preserving private Jobs/access and
+originals. Every assessed neighbor is fenced at publication, including newly
+appearing competitors. Bounds remain 200 related entries/32 MiB of metadata per
+assessment, 32 entries per publication and 128 preserved sources per entry; larger
+or incomplete proofs retain manual review. The reconciler publishes one safe class
+per connected component/pass, then reassesses remaining entries on the next pass.
+See [follow-up acceptance](validation/automatic-album-grouping-2026-10-22.md#ambiguity-follow-up--2026-10-22).
+
+## Configurable workers, metadata priority and Activity navigation — 2026-10-21 delivered in source
+
+Startup `[jobs]` configuration defaults to four processing workers (allowed 1–8)
+and independently caps inbox copying at one (allowed 1 through the processing
+limit). Provider concurrency stays one. The execution-loop count and atomic Store
+claim limits use the same application settings. Setup and doctor report limits;
+invalid values fail before storage opens. Existing pending Jobs and claim fences
+survive restart with a reduced limit.
+
+Ready discs get bounded preference for analysis and original publication. With
+one worker, that normally completes a disc's originals before the next copy;
+provider waits, failures and optional encoding cannot pin a worker. Two processing
+admissions offer copying its next turn, allowing one ready publication to finish
+a just-analyzed disc first. Other processing receives normal FIFO opportunities
+after two preferred continuations. Multiple slots leave room for both waiting
+classes; copying keeps its cap even when processing is idle.
+Metadata resolution now overtakes an encoding/ordinary-processing backlog for
+at most two preferred admissions, shared with ready-disc continuations, before
+returning to other processing. It starts after
+original publication for its destination album group, without waiting for unrelated
+intake members. Album text
+and identity commit before optional artwork. Existing accepted album identities
+produce grouping suggestions in Metadata → Grouping proposals; combining existing
+entries requires review/confirmation and is not an automatic title-based merge.
+
+Work & history now uses aligned compact filters, a collapsible collection chooser,
+and selection-dependent bulk commands. Activity Back clears the selected work and
+restores its list/filter state; Back/Forward and reload retain their recorded
+return context without opening a duplicate modal. Existing library return behavior
+is retained. See [configuration](configuration.md#background-workers) and
+[dated acceptance and limits](validation/configurable-workers-2026-10-21.md).
+
+## Import queue and active stages — 2026-10-21 delivered in source
+
+The 2026-10-22 commit review also gates import source/review controls on restored
+draft state, preventing a late IndexedDB load from overwriting an immediate choice.
+
+The Imports album rows and focused import details distinguish active execution,
+queued tasks, provider/upload waits and cancellation. Current stage labels include
+inbox copying, source checks, file analysis, original publication, metadata/artwork
+lookup and audio preparation; concurrent stages and grouped task counts remain
+visible. Shared provider downloads expose the actual provider state and are marked
+shared. Track jobs remain visible after their admission batch completes. Existing
+two-second polling resumes after reload and continues through optional work.
+Inbox step labels say “Copy files from inbox,” rather than “Uploading files,”
+and browser upload/resume controls stay out of inbox-only batches. Intake member
+rows remain visible on narrow screens, independently of library-detail hiding.
+
+The authorized application summary projects durable Job ownership without payload
+reads or integrity scans. Overall failure/completion remains separate from active
+work. No import state/storage conversion or worker-capacity change is required.
+The initial two-slot dispatch repair is superseded by the configurable-worker
+follow-up above; the original two-slot acceptance remains dated evidence. Existing active work finishes before a newly
+waiting lane receives its released slot. Provider capacity, cancellation and claim
+fencing remain in force. The dispatch preference is transient; no stored-format
+conversion is required. Source acceptance and deployment limits are recorded in
+[the dated validation](validation/ingest-progress-2026-10-21.md).
+
 ## Beta.2 correction — 2026-10-21
 
 **An existing installation was updated to beta.2.** [Update checks](validation/live-beta2-upgrade-2026-10-21.md).
@@ -829,7 +968,8 @@ The full first release, native clients and public deployment remain later target
 - Client trust construction, route selection/hysteresis and cache eviction policy. A TLS integration test enrolls through same-user browser approval, persists a native credential through the storage port, proves authenticated ranged downloads over loopback LAN without any public route, and rejects an unrelated certificate or credential-bearing cross-origin route.
 - Configured server inbox inventory/import API using the same source-retaining staging and evidence path; background upload errors persist as failed jobs.
 - P02.1/P02.2 advance private state to schema v8 and implement typed durable jobs
-  plus a local executable scheduler. Transactional FIFO claiming enforces a
+  plus a local executable scheduler. Its initial two-processing/one-provider limits
+  are superseded by the configurable dispatch above. Transactional claiming initially enforced
   two processing executions plus one reserved provider acquisition globally,
   including two same-account processing Jobs; 30-second leases,
   five-second heartbeats, claim-token fencing, restart takeover, and bounded
@@ -1616,7 +1756,8 @@ inside a parent dialog; validation outcomes are recorded separately.
 
 ## Concurrent processing and response reuse — 2026-10-10
 
-Implemented: two global processing slots plus one reserved provider-download slot,
+Initial 2026-10-10 implementation (superseded by the configurable-worker follow-up
+above): two global processing slots plus one reserved provider-download slot,
 including two processing Jobs from the same account. Direct, guided and metadata
 work use durable collection-scoped shared acquisitions with private requester Jobs,
 independent cancellation and committed-result recovery. Reconciliation runs every

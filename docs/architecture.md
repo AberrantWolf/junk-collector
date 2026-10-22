@@ -1,5 +1,28 @@
 # Architecture
 
+## Planned HTTPS relay and native route selection — 2026-10-22
+
+The requested [relay and LAN-switching plan](https-relay-and-lan-switching.md)
+is design only. The later [LAN-first plan](lan-playback-first.md) selects local
+DNS for the existing HTTPS origin and a trusted home proxy to `public_bind`,
+enabling browser and system-HTTPS Trash Amp home listening before the Iroh trial.
+It changes network destination without changing browser origin or enrollment;
+it is not active-stream failover. No home DNS/proxy changes are deployed yet.
+The required work-machine VPN may override DNS or deny direct LAN access; both
+must be tested independently before this topology is qualified for that client.
+A normal remote HTTPS frontend forwards through an authenticated outbound
+home connector to the existing public/client listener; it must never expose the
+private management listener. Browsers keep same-origin HTTPS. Native transport
+selection follows a bounded Iroh integration trial before implementing a general
+HTTPS route/resume manager. Reusable trust/stream/range mechanisms belong in a narrow
+planned `junk-libs-net` infrastructure crate; Collector retains enrollment,
+endpoint authority, account/collection policy and receipts, and Trash Amp retains
+Keychain, playback and presentation. Per-endpoint trust must precede credential
+use, and resumed reads must retain immutable byte identity. No relay deployment,
+shared-crate extraction, automatic discovery or live failover is implemented by
+this plan. HL-12 tracks the requested delivery without replacing the active queue
+assignment or adding a universal release gate.
+
 Catalog startup replaces obsolete projection databases before replaying archive records.
 It also detects beta.1's incorrectly stamped music-search table. Old catalog files
 are retained for diagnosis; private state and archive records are separate.
@@ -227,6 +250,52 @@ not emulate an atomic merge. Private batch selection/ownership and paginated
 recovery reuse existing worker/publication policies. This section records the
 implemented BL1–BL3 contract; local acceptance is recorded in
 [bulk validation](validation/bulk-library.md).
+
+Automatic multidisc grouping (2026-10-22 delivery): application policy assesses
+accepted MusicBrainz album identities and recorded source layouts, never titles,
+artwork or new payload hashing. All preserved disc sources must map uniquely to
+consistent medium positions; duplicate positions across entries, incompatible
+release media, manual/unknown-data conflicts and explicit separation remain review
+cases. Album-level grouping retains distinct physical copies and every Capture,
+Asset, evidence reference and source; it does not infer physical-set ownership.
+The existing group publication/journal and graph projection perform the atomic
+merge. Automatic results identify their basis and retain guarded undo; undo writes
+a portable automatic-grouping opt-out so periodic recovery honors that decision.
+A paginated adapter query over the accepted-album projection supplies authorized
+candidate cohorts, including preexisting metadata on startup and periodic recovery.
+Busy entries wait for their guided imports, item Jobs and accepted bulk members to
+settle. The adapter rechecks this under the existing writer/publication gates;
+Job admission/retry share that gate so grouping cannot invalidate admitted work.
+No frontend orchestrates a merge and no new provider or payload path is introduced.
+
+Ambiguity-aware grouping (2026-10-22 follow-up): application policy separates
+album membership from the displayed metadata choice. A rebuildable many-to-many
+album-option projection includes viable current MusicBrainz alternatives as well
+as accepted/manual choices. Conditional grouping requires the same viable album
+options and consistent distinct recorded disc positions under every option;
+overlapping options alone do not establish membership. A uniquely compatible
+accepted target can admit unresolved siblings without overriding another accepted
+album choice. Multiple compatible established targets remain ambiguous.
+Incomplete or contradictory layout coverage leaves its album option unproven;
+it cannot silently eliminate that alternative. Membership and display share the
+inventory-reset policy for current candidates, retaining cleared candidates only
+as history unless deliberately selected again.
+
+Build a bounded compatibility graph of eligible entries. Only entries with the
+same closed compatibility neighborhood merge, with accepted subsets taking
+precedence over unresolved attachments. This avoids arbitrary choices between
+competing subsets; invalid/busy/explicitly separated entries do not veto an
+independent safe subset. Equivalent manual candidate versions/releases are
+compatible by album identity and placement; a stable explicit display choice is
+retained and all original choices remain in group history. Unresolved alternatives
+remain current after merging, rather than becoming an invented accepted identity.
+Current alternatives are the intersection supported by every merged source;
+historical/unmatched candidates remain selectable history. Temporary publication
+guards fence every assessed neighbor's inventory/metadata as well as the affected
+entries, so concurrent choices cannot invalidate a membership proof. The existing
+atomic publisher, permission/busy fences and guarded undo remain the only writer.
+Catalog projection evolution rebuilds the disposable index from preserved archive
+records; private state, credentials, Jobs and original payloads are retained.
 
 Grouped-disc publication revision recovery (2026-10-19): under the archive writer,
 the adapter validates the frozen/current Item archive records and resolves added
@@ -770,7 +839,7 @@ Durable publication journals contain transaction/entity identities, expected/tar
 
 Collection creation writes an immutable collection manifest and a private recovery intent for the owner grant before archive mutation. Startup completes the intended grant when the collection commit exists or removes the abandoned intent when it does not. Copying only the archive never reconstructs a grant.
 
-SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v14 and `private.sqlite` is schema v21. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness; v12 adds portable collection-list projections and v13 song-search projections; v14 binds song-search rows and cursors to optional source representations for game audio. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Private v19 permits native enrollment requests awaiting account approval; v20 adds shared acquisition ownership, specific pending dependencies and requester snapshot/generation bindings; v21 adds durable opt-in inbox source cleanup claims, frozen filesystem observations and deletion progress. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
+SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v15 and `private.sqlite` is schema v21. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness; v12 adds portable collection-list projections and v13 song-search projections; v14 binds song-search rows and cursors to optional source representations for game audio; v15 indexes all viable album options per entry for ambiguity-aware grouping. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Private v19 permits native enrollment requests awaiting account approval; v20 adds shared acquisition ownership, specific pending dependencies and requester snapshot/generation bindings; v21 adds durable opt-in inbox source cleanup claims, frozen filesystem observations and deletion progress. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
 
 P06 reuses the incrementally maintained catalog at startup when a checkpoint matches the canonical archive path, projection epoch and complete filesystem observation inventory. Observations cover metadata revisions, snapshot files and migration checkpoints using file size, modification time, and on Unix inode/device/change time; payload trees are pruned. This is a change hint, not byte integrity or catalog verification. Warm startup still walks metadata names/stats and runs SQLite quick_check; it does not parse archive records, revisit completed migration records, or hash snapshot/media bytes.
 
@@ -807,6 +876,24 @@ programs must finish writing before opting in; filesystem permissions and identi
 change checks do not revoke already-open external write handles. Archive masters
 are never cleanup targets. This is not general archive pruning or automatic inbox
 deletion, and inbox cleanup recovery directories remain external to full backups.
+
+### Ingest execution visibility — 2026-10-21
+
+Application-owned `IngestSummary.work` describes current running, queued, waiting
+and cancelling stages independently of the overall workflow outcome. The private
+adapter groups active Job rows using the import's durable ownership, preparation
+member links and the requester's current acquisition wait. A provider wait exposes
+the actual shared provider execution state, marked when shared; a completed batch
+admission still exposes its unfinished track jobs. Item identity alone never
+selects related work. The projection reads no media bytes or frozen source inputs,
+adds no stored-state migration, and retains requester/collection authorization.
+
+Import rows and focused details show every concurrent stage/count and keep polling
+through enrichment/preparation. Missing jobs between reconciliation passes mean
+waiting for the next stage; incomplete browser uploads remain waiting for upload.
+Analysis and audio workers report source checking, computation/conversion,
+rechecking and publication boundaries without invented completion percentages.
+See [local acceptance](validation/ingest-progress-2026-10-21.md).
 
 ### Focused intake and work navigation
 
@@ -1119,6 +1206,36 @@ Development builds optimize the shared disc/AccurateRip mechanisms; algorithm,
 reference identity, offset coverage and validation rules are unchanged.
 
 
+### Configurable dispatch — 2026-10-21
+
+Startup `[jobs]` settings expose 1–8 processing workers
+(default four), with an independent inbox-copy cap (default one, no larger than
+the processing limit). Provider concurrency remains one. Application policy owns
+validated limits and a bounded preference for ready Import analysis/publication;
+Store enforces capacity, copy caps, fairness and existing claim fences atomically.
+Server execution-loop count reads the same settings through the application port.
+Invalid configuration must fail before opening storage. No stored format changes.
+
+Prefer finishing a copied disc through analysis and original publication before
+starting another copy, especially with one worker. This is a bounded scheduling
+preference, not permanent worker ownership: provider waits, failures and optional
+track preparation cannot pin capacity. Two processing admissions precede a copy
+turn, with one ready publication allowed to finish the just-analyzed disc first;
+multiple slots leave space for both waiting classes. The bounded preference stores at most eight account/import keys in memory; after
+two preferred continuations, normal FIFO has an opportunity within processing.
+Only ready work participates: no worker/claim is pinned across dependencies.
+Ready metadata resolution (including applying an existing snapshot) outranks
+optional encoding and ordinary processing. Metadata and ready-disc continuations
+share at most two preferred admissions before an ordinary processing turn, so
+alternating priority classes cannot starve older work. Copy turns and the ready-publication
+exception still apply. Guided metadata begins once originals for its destination album group are
+published; unrelated intake members do not block it. Text/album identity commits
+before optional artwork. Accepted MusicBrainz album
+identities feed automatic distinct-disc grouping under the 2026-10-22 policy above;
+ambiguous/conflicting cases retain reviewed grouping proposals.
+See [configuration](configuration.md#background-workers) and
+[acceptance](validation/configurable-workers-2026-10-21.md).
+
 ### Concurrent processing and shared acquisition — 2026-10-10
 
 The application owns provider equivalence and requester authorization. The private
@@ -1129,10 +1246,16 @@ operation, normalized query, source fingerprint and response limits identify act
 work. Item generations and metadata preferences belong to requesters. MusicBrainz
 cache bypass is operational and does not split equivalent active work.
 
-Three execution loops share one process-instance identity and existing fenced
-leases. Transactional claims permit two processing executions and one provider
-execution globally; a single account can use both processing slots. FIFO applies
-within each class. Waiting workflows release processing claims. The specific pending
+The execution loops share one process-instance identity and existing fenced
+leases. Configured processing capacity (default four, range 1–8) plus one provider
+slot determine both loop count and transactional admission. Inbox staging has a
+separate cap (default one), including the older combined inbox-import command.
+Bounded ready-disc priority and capacity reservation keep copying and processing
+moving; inactive capacity is available to processing while copying remains capped.
+Running jobs are not preempted. The application owns limits/preference policy;
+Store enforces it under the claim transaction. Transient preferences may reset on
+restart without changing pending Job identities or recovery. Waiting workflows
+release processing claims. The specific pending
 acquisition is durable, its outcome commits first, and an independent five-second
 reconciliation loop visits all workflow pages even while processing is occupied.
 Cancellation retains running capacity until work stops; existing subprocess group
@@ -1209,3 +1332,15 @@ completion and record started/failed/completed outcomes; only final successful
 validation advances the completion date. Abrupt interruption stays unconfirmed.
 External reports are labelled unobserved and never called Collector validation.
 This adds no scheduler, automatic backup, catalog-only backup or destination scan.
+
+### Work navigation and filter layout — 2026-10-21
+
+Work links record their immediate return URL in browser history alongside the
+existing library depth. Activity owns its embedded Work view; normal Activity
+work links never open a second modal. Back clears the selected detail when the
+restored URL has no work target; reload and Forward reuse the recorded context.
+Direct links keep explicit list fallbacks. Collection filters use a compact
+searchable disclosure; normal-height controls align at the top and bulk commands
+appear after selection. These are frontend observation/navigation changes, with
+existing application authorization and polling unchanged. See
+[acceptance](validation/configurable-workers-2026-10-21.md).

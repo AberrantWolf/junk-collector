@@ -13,7 +13,7 @@ import MusicPlayer from './music-player';
 import CollectionLists from './collection-lists';
 import CollectionListChooser from './collection-list-chooser';
 import {setMusicQueueUser,addMusicTracks,audioMediaType} from './music-queue';
-import {useBrowseNavigation,type BrowseLocation} from './browse-navigation';
+import {readLocation,useBrowseNavigation,type BrowseLocation} from './browse-navigation';
 import {pushWorkLocation} from './work-navigation';
 import type {Props as PreparationPageProps} from './library-preparation';
 import type {Props as ActivityPageProps} from './library-activity';
@@ -176,8 +176,8 @@ function App(){
  useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{item:string;collection:string}>).detail;setManagement(null);navigate({page:'metadata',item:detail.item,collection:detail.collection});};window.addEventListener('collector-open-metadata',open);return()=>window.removeEventListener('collector-open-metadata',open);},[route]);
  useEffect(()=>{const open=()=>void openManagement('work-history');window.addEventListener('collector-open-work',open);return()=>window.removeEventListener('collector-open-work',open);},[collections,route.item,collection]);
  const openedWorkLink=useRef(false);
- useEffect(()=>{if(actor&&collectionsReady&&features?.curation&&new URL(location.href).searchParams.has('work')&&!openedWorkLink.current){openedWorkLink.current=true;void openManagement('work-history');}},[actor,collectionsReady,features?.curation]);
- useEffect(()=>{const reopen=()=>{if(actor&&collectionsReady&&features?.curation&&!management&&new URL(location.href).searchParams.has('work'))void openManagement('work-history');};window.addEventListener('popstate',reopen);return()=>window.removeEventListener('popstate',reopen);},[actor,collectionsReady,features?.curation,management,collections,route.item,collection]);
+ useEffect(()=>{if(actor&&collectionsReady&&features?.curation&&(route.page!=='activity'||!!route.batch)&&new URL(location.href).searchParams.has('work')&&!openedWorkLink.current){openedWorkLink.current=true;void openManagement('work-history');}},[actor,collectionsReady,features?.curation]);
+ useEffect(()=>{const reopen=()=>{const current=readLocation();if(actor&&collectionsReady&&features?.curation&&!management&&(current.page!=='activity'||!!current.batch)&&new URL(location.href).searchParams.has('work'))void openManagement('work-history');};window.addEventListener('popstate',reopen);return()=>window.removeEventListener('popstate',reopen);},[actor,collectionsReady,features?.curation,management,collections,route.item,collection]);
  async function signOut(){
   try{await api('/auth/logout',{method:'POST'});clearSession('');}
   catch(e){if(isApiRequestError(e)&&e.code==='unauthenticated')clearSession('');else handleFailure(e);}

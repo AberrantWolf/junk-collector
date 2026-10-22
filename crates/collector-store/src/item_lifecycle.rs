@@ -54,7 +54,7 @@ impl Store {
                 .prepare(
                     "SELECT id FROM items WHERE id>? AND deleted=1 AND (
                    EXISTS(SELECT 1 FROM private.guided_ingest_intents g
-                          WHERE g.target_item_id=items.id AND g.cancelled=0)
+                          WHERE g.target_item_id=items.id AND g.cancelled=0 AND g.settled=0)
                    OR EXISTS(SELECT 1 FROM private.imports p
                           WHERE p.item_id=items.id AND p.phase NOT IN ('published','cancelled'))
                    OR EXISTS(SELECT 1 FROM private.jobs j
@@ -113,7 +113,7 @@ impl Store {
         .map_err(storage)?;
         tx.execute(
             "UPDATE private.guided_ingest_intents
-             SET cancelled=1,settled=1,updated_at=? WHERE target_item_id=? AND cancelled=0",
+             SET cancelled=1,settled=1,updated_at=? WHERE target_item_id=? AND cancelled=0 AND settled=0",
             params![now, id.to_string()],
         )
         .map_err(storage)?;

@@ -2584,17 +2584,8 @@ pub fn resolve_record_metadata(
     history: &[MetadataCandidateObservation],
 ) -> Result<ResolvedMetadataDisplay> {
     let authority = metadata_authority_for_inventory(item, record)?;
-    let current = current_metadata_candidates(
-        &authority,
-        history,
-        if record.revision.0 <= item.lifecycle.automatic_metadata_through
-            && item.lifecycle.automatic_metadata_through > 0
-        {
-            Some(&[])
-        } else {
-            record.current_candidates.as_deref()
-        },
-    )?;
+    let current =
+        current_metadata_candidates(&authority, history, record_current_candidates(item, record))?;
     resolve_metadata_display(
         item,
         &authority,
@@ -2604,6 +2595,19 @@ pub fn resolve_record_metadata(
             .as_ref()
             .map_or("en", LanguageTag::as_str),
     )
+}
+
+fn record_current_candidates<'a>(
+    item: &Item,
+    record: &'a MetadataAuthorityRecord,
+) -> Option<&'a [MetadataCandidateIdentity]> {
+    if record.revision.0 <= item.lifecycle.automatic_metadata_through
+        && item.lifecycle.automatic_metadata_through > 0
+    {
+        Some(&[])
+    } else {
+        record.current_candidates.as_deref()
+    }
 }
 
 pub(crate) fn current_metadata_candidates(
@@ -3261,6 +3265,80 @@ pub fn accepted_album_group_key(
         .ok()
         .filter(|release| release.validate().is_ok())
         .and_then(|release| release.release_group_id))
+}
+
+/// Current alternatives relevant to album membership. An explicit/accepted
+/// decision restricts identity; otherwise retain all equally strong identities.
+pub fn music_membership_candidates(
+    item: &Item,
+    record: &MetadataAuthorityRecord,
+    history: &[MetadataCandidateObservation],
+) -> Result<Vec<MetadataCandidateObservation>> {
+    let authority = metadata_authority_for_inventory(item, record)?;
+    let current =
+        current_metadata_candidates(&authority, history, record_current_candidates(item, record))?;
+    if let Some(selected) = &authority.selected_candidate {
+        return Ok(current
+            .into_iter()
+            .filter(|candidate| &candidate.identity == selected)
+            .collect());
+    }
+    if let Some(accepted) = authority
+        .automatic_candidate
+        .as_ref()
+        .and_then(|id| current.iter().find(|candidate| &candidate.identity == id))
+    {
+        return Ok(current
+            .iter()
+            .filter(|candidate| {
+                candidate.complete_identity && same_metadata_album(accepted, candidate)
+            })
+            .cloned()
+            .collect());
+    }
+    let eligible = current
+        .into_iter()
+        .filter(|candidate| {
+            candidate.complete_identity && candidate.strength != MatchStrength::Name
+        })
+        .collect::<Vec<_>>();
+    let Some(best) = eligible
+        .iter()
+        .max_by(|left, right| compare_candidate(left, right, "en"))
+    else {
+        return Ok(vec![]);
+    };
+    let (strength, priority) = (best.strength, best.provider_priority);
+    Ok(eligible
+        .into_iter()
+        .filter(|candidate| {
+            candidate.strength == strength && candidate.provider_priority == priority
+        })
+        .collect())
+}
+
+pub fn music_membership_album_keys(
+    item: &Item,
+    record: &MetadataAuthorityRecord,
+    history: &[MetadataCandidateObservation],
+) -> Result<BTreeSet<String>> {
+    Ok(music_membership_candidates(item, record, history)?
+        .into_iter()
+        .filter(|candidate| {
+            candidate.identity.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+        })
+        .filter_map(|candidate| {
+            candidate
+                .observation
+                .parse::<collector_modules::music::MusicBrainzReleaseObservation>()
+                .ok()
+                .filter(|release| {
+                    release.validate().is_ok()
+                        && release.release_id == candidate.identity.provider_record_id
+                })
+                .and_then(|release| release.release_group_id)
+        })
+        .collect())
 }
 
 #[cfg(test)]

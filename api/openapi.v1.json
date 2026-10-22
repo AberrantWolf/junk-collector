@@ -8381,6 +8381,9 @@
           "sources"
         ],
         "properties": {
+          "automatic": {
+            "type": "boolean"
+          },
           "destination": {
             "$ref": "#/components/schemas/ItemId"
           },
@@ -12392,6 +12395,7 @@
       "IngestSummary": {
         "type": "object",
         "required": [
+          "work",
           "import_id",
           "collection_id",
           "package_name",
@@ -12464,8 +12468,53 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "work": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestWork"
+            }
           }
         }
+      },
+      "IngestWork": {
+        "type": "object",
+        "required": [
+          "shared",
+          "state",
+          "kind",
+          "phase",
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IngestWorkState"
+          }
+        }
+      },
+      "IngestWorkState": {
+        "type": "string",
+        "description": "Current execution only; workflow outcome and preservation are independent.",
+        "enum": [
+          "running",
+          "queued",
+          "waiting",
+          "cancelling"
+        ]
       },
       "IntakeDestination": {
         "oneOf": [
@@ -12910,6 +12959,10 @@
           "reset_artwork_through"
         ],
         "properties": {
+          "automatic_grouping_disabled": {
+            "type": "boolean",
+            "description": "An explicit group undo preserves the user's choice to keep entries apart."
+          },
           "automatic_metadata_through": {
             "type": "integer",
             "format": "int64",
@@ -16375,6 +16428,7 @@
             "items": {
               "type": "object",
               "required": [
+                "work",
                 "import_id",
                 "collection_id",
                 "package_name",
@@ -16447,6 +16501,12 @@
                 "updated_at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "work": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestWork"
+                  }
                 }
               }
             }

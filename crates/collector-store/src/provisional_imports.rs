@@ -948,6 +948,67 @@ impl ProvisionalImportPort for Store {
         Ok(Page { items, next_cursor })
     }
 
+    fn import_work_records(
+        &self,
+        id: ImportId,
+        user: UserId,
+    ) -> Result<Vec<collector_app::IngestWorkRecord>> {
+        // Only durable ownership links select descendants. An album/item match
+        // alone could include unrelated imports or another requester's work.
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "WITH owned AS (
+                SELECT j.id FROM private.jobs j
+                WHERE j.user_id=?1 AND json_extract(j.request,'$.import_id')=?2
+                  AND j.kind!='inbox_cleanup'
+                UNION
+                SELECT m.job_id FROM private.preparation_members m
+                JOIN private.guided_ingest_intents g ON g.preparation_batch_id=m.batch_id
+                JOIN private.jobs parent ON parent.id=m.batch_id
+                JOIN private.jobs child ON child.id=m.job_id
+                WHERE g.user_id=?1 AND g.import_id=?2
+                  AND (parent.cancellation_requested=0 OR child.state='cancel_requested')
+            ), current_work AS (
+                SELECT j.kind, COALESCE(a.state,j.state) AS state,
+                       COALESCE(a.phase,j.phase) AS phase,
+                       (a.id IS NOT NULL AND j.phase='waiting_shared_provider') AS shared
+                FROM owned o JOIN private.jobs j ON j.id=o.id
+                LEFT JOIN private.acquisition_waits w ON w.owner_job=j.id
+                    AND j.phase IN ('waiting_provider','waiting_shared_provider')
+                    AND j.state='queued'
+                LEFT JOIN private.jobs a ON a.id=w.acquisition_job
+                    AND a.state IN ('queued','running','cancel_requested')
+                WHERE j.user_id=?1 AND j.state IN ('queued','running','cancel_requested')
+            )
+            SELECT kind,state,phase,COUNT(*),shared FROM current_work
+            GROUP BY kind,state,phase,shared ORDER BY kind,state,phase,shared",
+            )
+            .map_err(storage)?;
+        let rows = statement
+            .query_map(params![user.to_string(), id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, u32>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            })
+            .map_err(storage)?;
+        rows.map(|row| {
+            let (kind, state, phase, jobs, shared) = row.map_err(storage)?;
+            Ok(collector_app::IngestWorkRecord {
+                shared,
+                kind,
+                state: parse_job_state(&state)?,
+                phase,
+                jobs,
+            })
+        })
+        .collect()
+    }
+
     fn import_job_records(
         &self,
         id: ImportId,

@@ -5055,29 +5055,200 @@ fn durable_claims_fence_stale_workers_and_allow_same_user_parallelism() {
 
 #[test]
 fn durable_claims_enforce_the_global_limit_in_storage() {
-    let root = tempfile::tempdir().unwrap();
-    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
-    let jobs = (0..3)
-        .map(|fixture| JobSpec {
-            frozen_input: None,
-            id: JobId::new(),
-            user_id: UserId::new(),
-            collection_id: None,
-            item_id: None,
-            kind: format!("test.{fixture}"),
-            phase: "queued".into(),
-            total_units: 1,
-            request: serde_json::json!({"fixture":fixture}),
-        })
-        .collect::<Vec<_>>();
-    for job in &jobs {
-        store.enqueue_job(job.clone()).unwrap();
+    for count in 1..=8 {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().join("archive"), root.path().join("state"))
+            .unwrap()
+            .with_job_settings(collector_app::JobSettings {
+                processing_workers: count,
+                copy_workers: 1,
+            })
+            .unwrap();
+        for _ in 0..count + 1 {
+            store
+                .enqueue_job(JobSpec {
+                    id: JobId::new(),
+                    user_id: UserId::new(),
+                    collection_id: None,
+                    item_id: None,
+                    kind: "test.processing".into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({}),
+                    frozen_input: None,
+                })
+                .unwrap();
+        }
+        for _ in 0..count {
+            store.claim_job("server-a", 30).unwrap().unwrap();
+        }
+        assert!(
+            store.claim_job("server-a", 30).unwrap().is_none(),
+            "limit {count}"
+        );
+        for _ in 0..2 {
+            store
+                .enqueue_job(JobSpec {
+                    id: JobId::new(),
+                    user_id: UserId::new(),
+                    collection_id: None,
+                    item_id: None,
+                    kind: "provider_acquisition".into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({}),
+                    frozen_input: None,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            store.claim_job("server-a", 30).unwrap().unwrap().kind,
+            "provider_acquisition"
+        );
+        assert!(
+            store.claim_job("server-a", 30).unwrap().is_none(),
+            "provider capacity remains one at limit {count}"
+        );
     }
+}
 
-    let first = store.claim_job("server-a", 30).unwrap().unwrap();
-    let second = store.claim_job("server-a", 30).unwrap().unwrap();
-    assert_ne!(first.user_id, second.user_id);
-    assert!(store.claim_job("server-a", 30).unwrap().is_none());
+#[test]
+fn inbox_copy_and_ready_processing_share_capacity_without_either_monopolizing() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Store::open_with_clock(
+        root.path().join("archive"),
+        root.path().join("state"),
+        clock.clone(),
+    )
+    .unwrap()
+    .with_job_settings(collector_app::JobSettings {
+        processing_workers: 2,
+        copy_workers: 2,
+    })
+    .unwrap();
+    let enqueue = |kind: &str| {
+        let id = JobId::new();
+        store
+            .enqueue_job(JobSpec {
+                id,
+                user_id: UserId::new(),
+                collection_id: None,
+                item_id: None,
+                kind: kind.into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+        clock.advance(1);
+        id
+    };
+    // Copies are older than every analysis request, just as in a large inbox batch.
+    for _ in 0..5 {
+        enqueue("import_staging");
+    }
+    for _ in 0..5 {
+        enqueue("import_analysis");
+    }
+    let claim = || store.claim_job("same-process", 30).unwrap().unwrap();
+    let finish = |job: &collector_app::JobClaim| {
+        store
+            .complete_job(job.id, &job.claim_token, serde_json::json!({}))
+            .unwrap()
+    };
+    let work = claim();
+    assert_eq!(
+        work.kind, "import_analysis",
+        "ready work must advance ahead of an older copy backlog"
+    );
+    let copy = claim();
+    assert_eq!(copy.kind, "import_staging");
+    assert!(store.claim_job("same-process", 30).unwrap().is_none());
+    // Keep analysis occupied: another copy can start as soon as copying finishes.
+    finish(&copy);
+    let next_copy = claim();
+    assert_eq!(next_copy.kind, "import_staging");
+    // Keep copying occupied: another analysis can start as soon as analysis finishes.
+    finish(&work);
+    let next_work = claim();
+    assert_eq!(next_work.kind, "import_analysis");
+    finish(&next_copy);
+    finish(&next_work);
+    let mut kinds = Vec::new();
+    for _ in 0..6 {
+        let job = claim();
+        kinds.push(job.kind.clone());
+        finish(&job);
+    }
+    for window in kinds.windows(3) {
+        assert!(window.iter().any(|kind| kind == "import_staging"));
+        assert!(window.iter().any(|kind| kind == "import_analysis"));
+    }
+}
+
+#[test]
+fn inbox_dispatch_borrows_idle_capacity_and_keeps_cancelling_claims_accounted() {
+    for kind in ["import_staging", "import_analysis"] {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().join("archive"), root.path().join("state"))
+            .unwrap()
+            .with_job_settings(collector_app::JobSettings {
+                processing_workers: 2,
+                copy_workers: 2,
+            })
+            .unwrap();
+        let enqueue = |kind: &str| {
+            let id = JobId::new();
+            let user = UserId::new();
+            store
+                .enqueue_job(JobSpec {
+                    id,
+                    user_id: user,
+                    collection_id: None,
+                    item_id: None,
+                    kind: kind.into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({}),
+                    frozen_input: None,
+                })
+                .unwrap();
+            (id, user)
+        };
+        for _ in 0..3 {
+            enqueue(kind);
+        }
+        let first = store.claim_job("same-process", 30).unwrap().unwrap();
+        let second = store.claim_job("same-process", 30).unwrap().unwrap();
+        assert_eq!(first.kind, kind);
+        assert_eq!(
+            second.kind, kind,
+            "idle capacity remains usable by either lane"
+        );
+        let opposite = if kind == "import_staging" {
+            "import_analysis"
+        } else {
+            "import_staging"
+        };
+        let (waiting, _) = enqueue(opposite);
+        store
+            .request_job_cancellation(first.id, first.user_id)
+            .unwrap();
+        assert!(
+            store.claim_job("same-process", 30).unwrap().is_none(),
+            "cancellation retains capacity until acknowledged"
+        );
+        store
+            .cancel_claimed_job(first.id, &first.claim_token)
+            .unwrap();
+        let resumed = store.claim_job("same-process", 30).unwrap().unwrap();
+        assert_eq!(
+            resumed.id, waiting,
+            "new opposite-lane demand gets the next released slot"
+        );
+    }
 }
 
 #[test]
@@ -7815,6 +7986,119 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
 }
 
 #[test]
+fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
+    use collector_app::IngestWorkState;
+    let (_root, store, actor, service, collection) = setup();
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Activity package".into(),
+                    },
+                    files: vec![UploadFile {
+                        visibility: Default::default(),
+                        name: "original.bin".into(),
+                        bytes: ByteLength(4),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, b"ab")
+        .unwrap();
+    let waiting = service.ingest_detail(&actor, id).unwrap();
+    assert!(
+        waiting.summary.work.is_empty(),
+        "An incomplete browser upload must not look like active server work"
+    );
+    assert!(waiting.summary.permissions.can_resume_upload);
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 2, b"cd")
+        .unwrap();
+    let queued = service.ingest_detail(&actor, id).unwrap();
+    assert!(
+        queued
+            .summary
+            .work
+            .iter()
+            .any(|work| work.kind == "import_publication" && work.state == IngestWorkState::Queued)
+    );
+    let claim = store.claim_job("activity-worker", 30).unwrap().unwrap();
+    store
+        .heartbeat_job(claim.id, &claim.claim_token, "verifying_integrity", 0, 30)
+        .unwrap();
+    let active = service.ingest_detail(&actor, id).unwrap();
+    assert!(
+        active
+            .summary
+            .work
+            .iter()
+            .any(|work| work.state == IngestWorkState::Running
+                && work.phase == "verifying_integrity")
+    );
+    let outsider = Principal {
+        user_id: UserId::new(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(service.ingest_detail(&outsider, id).is_err());
+    assert!(
+        store
+            .import_work_records(id, outsider.user_id)
+            .unwrap()
+            .is_empty()
+    );
+    service
+        .cancel_ingest(&actor, id, active.import.revision, &command())
+        .unwrap();
+    assert!(
+        service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .summary
+            .work
+            .iter()
+            .any(|work| work.state == IngestWorkState::Cancelling)
+    );
+    store
+        .cancel_claimed_job(claim.id, &claim.claim_token)
+        .unwrap();
+    assert!(
+        service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .summary
+            .work
+            .is_empty()
+    );
+}
+
+#[test]
 fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
     let (root, store, actor, service, collection) = setup();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
@@ -8014,6 +8298,9 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
     service
         .stage_provisional_import_chunk(&actor, id, 2, 0, toc)
         .unwrap();
+    let queued = service.ingest_detail(&actor, id).unwrap().summary.work;
+    assert!(queued.iter().any(|work| work.kind == "import_analysis"
+        && work.state == collector_app::IngestWorkState::Queued));
     assert!(service.run_next_job("guided-preparation-analysis").unwrap());
     assert!(
         service
@@ -8033,9 +8320,38 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         .unwrap();
     assert_eq!(preparation.state, collector_app::IngestStepState::Active);
     assert!(preparation.job_id.is_some());
+    assert!(
+        during
+            .summary
+            .work
+            .iter()
+            .any(|work| work.kind == "music_derivative"
+                && work.state == collector_app::IngestWorkState::Queued
+                && work.jobs == 1),
+        "A completed batch admission must still expose its queued track: {:?}",
+        during.summary.work
+    );
+    let observing_service = service.clone();
+    let observing_actor = actor.clone();
+    *encoder.after_encode.lock().unwrap() = Some(Box::new(move || {
+        let working = observing_service
+            .ingest_detail(&observing_actor, id)
+            .unwrap();
+        assert!(
+            working
+                .summary
+                .work
+                .iter()
+                .any(|work| work.kind == "music_derivative"
+                    && work.state == collector_app::IngestWorkState::Running
+                    && work.phase == "preparing_audio"
+                    && work.jobs == 1)
+        );
+    }));
     assert!(service.run_next_job("guided-preparation-track").unwrap());
     service.resume_guided_ingests().unwrap();
     let completed = service.ingest_detail(&actor, id).unwrap();
+    assert!(completed.summary.work.is_empty());
     assert_eq!(
         completed.summary.outcome,
         collector_app::IngestStepState::Succeeded
@@ -21310,7 +21626,7 @@ fn shared_provider_download_has_reserved_capacity_and_private_cross_user_ownersh
         device_id: None,
     };
     let mut processing = Vec::new();
-    for _ in 0..2 {
+    for _ in 0..store.job_settings().unwrap().processing_workers {
         let id = JobId::new();
         store
             .enqueue_job(JobSpec {
@@ -21348,7 +21664,7 @@ fn shared_provider_download_has_reserved_capacity_and_private_cross_user_ownersh
     assert!(service.job(&actor, second).is_err());
     assert!(
         service.run_next_job("shared-provider-test").unwrap(),
-        "provider slot stays available with two same-user processing jobs"
+        "provider slot stays available with all processing slots occupied"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -22039,6 +22355,11 @@ fn expired_processing_claim_cannot_exceed_capacity_after_older_waiters_resume() 
         root.path().join("state"),
         clock.clone(),
     )
+    .unwrap()
+    .with_job_settings(collector_app::JobSettings {
+        processing_workers: 2,
+        copy_workers: 1,
+    })
     .unwrap();
     let input = |phase: &str| JobSpec {
         id: JobId::new(),
@@ -24781,4 +25102,1053 @@ fn backup_reminder_records_validated_completion_preserves_failures_and_reads_bou
             0o600
         );
     }
+}
+
+// Actual preserved CUE sources, with accepted offline MusicBrainz observations.
+fn automatic_group_sources(
+    store: &Store,
+    actor: &Principal,
+    service: &CollectionService,
+    collection: CollectionId,
+    sectors: &[usize],
+) -> (
+    Vec<Item>,
+    collector_modules::music::MusicBrainzReleaseObservation,
+) {
+    let mut items = Vec::new();
+    let mut media = Vec::new();
+    for (index, sectors) in sectors.iter().enumerate() {
+        let imported = derivative_import_sectors(service, actor, collection, index as u8, *sectors);
+        let mut inventory = item(collection);
+        inventory.title = format!("Provisional folder {index}");
+        inventory.wishlist = false;
+        inventory.specimens.push(Specimen {
+            id: SpecimenId::new(),
+            label: format!("Physical copy {index}"),
+            condition: Condition::Good,
+            ownership: Ownership::Owned,
+            possession: Possession::Present,
+            components: vec![],
+            acquisition: None,
+            private_notes: Some(format!("Retain note {index}")),
+            loans: vec![],
+        });
+        let saved = Catalog::save(store, inventory, Revision(0)).unwrap();
+        let mut capture = Catalog::capture(store, imported.capture_id).unwrap();
+        let revision = capture.revision;
+        capture.association.item_id = Some(saved.id);
+        Catalog::save_capture(store, capture, revision).unwrap();
+        let inventory = Catalog::item(store, saved.id).unwrap();
+        let disc = service
+            .music_album_coverage(actor, saved.id)
+            .unwrap()
+            .sources[0]
+            .recorded_disc_id
+            .clone()
+            .unwrap();
+        media.push(collector_modules::music::MusicBrainzMediumObservation {
+            position: index as u16 + 1,
+            disc_ids: vec![disc],
+            tracks: vec![
+                collector_modules::music::MusicBrainzTrackObservation {
+                    position: 1,
+                    title: "Opening".into(),
+                },
+                collector_modules::music::MusicBrainzTrackObservation {
+                    position: 2,
+                    title: "Finale".into(),
+                },
+            ],
+        });
+        items.push(inventory);
+    }
+    (
+        items,
+        collector_modules::music::MusicBrainzReleaseObservation {
+            release_id: "11111111-1111-4111-8111-111111111111".into(),
+            release_group_id: Some("55555555-5555-4555-8555-555555555555".into()),
+            title: "Multidisc soundtrack".into(),
+            disambiguation: None,
+            language: Some("en".into()),
+            script: None,
+            artist_credit: Some("Ensemble".into()),
+            artist_ids: vec![],
+            disc_ids: media
+                .iter()
+                .flat_map(|medium| medium.disc_ids.clone())
+                .collect(),
+            media,
+        },
+    )
+}
+fn automatic_group_metadata(
+    service: &CollectionService,
+    actor: &Principal,
+    item: &Item,
+    release: &collector_modules::music::MusicBrainzReleaseObservation,
+) {
+    automatic_group_metadata_options(service, actor, item, std::slice::from_ref(release));
+}
+fn automatic_group_metadata_options(
+    service: &CollectionService,
+    actor: &Principal,
+    item: &Item,
+    releases: &[collector_modules::music::MusicBrainzReleaseObservation],
+) -> Vec<MetadataCandidateIdentity> {
+    let candidates = releases
+        .iter()
+        .map(|release| MetadataCandidateObservation {
+            identity: MetadataCandidateIdentity {
+                provider: ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+                provider_record_id: release.release_id.clone(),
+                provider_record_version: Some(
+                    Digest::sha256(&serde_json::to_vec(release).unwrap()).hex,
+                ),
+            },
+            title: MetadataText {
+                value: release.title.clone(),
+                language: Some(LanguageTag::new("en").unwrap()),
+            },
+            subtitle: None,
+            artwork: None,
+            complete_identity: true,
+            strength: MatchStrength::Identifier,
+            provider_priority: 1,
+            observation: RawJson::from_value(serde_json::to_value(release).unwrap()),
+        })
+        .collect::<Vec<_>>();
+    let identities = candidates
+        .iter()
+        .map(|candidate| candidate.identity.clone())
+        .collect();
+    let mut record = service
+        .refresh_metadata(
+            actor,
+            item.id,
+            RefreshMetadataCommand {
+                source_import: None,
+                expected_revision: Revision(0),
+                observation: MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates,
+                    raw_observation: RawJson::from_value(
+                        serde_json::json!({"fixture":"accepted MusicBrainz"}),
+                    ),
+                    observed_at: chrono::Utc::now(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    for field in [MetadataField::Title, MetadataField::Subtitle] {
+        record = service
+            .update_metadata_authority(
+                actor,
+                item.id,
+                UpdateMetadataAuthorityCommand {
+                    expected_revision: record.revision,
+                    change: MetadataAuthorityChange::ClearFieldOverride { field },
+                },
+                &command(),
+            )
+            .unwrap();
+    }
+    identities
+}
+#[test]
+fn automatic_disc_grouping_recovers_existing_metadata_preserves_inventory_and_honors_undo() {
+    let (root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7]);
+    for inventory in &items[..2] {
+        automatic_group_metadata(&service, &actor, inventory, &release);
+    }
+    // A newly admitted request must settle before a background merge can move its inputs.
+    let work = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: work,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(items[0].id),
+            kind: "fixture.busy".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert!(!store.item(items[0].id).unwrap().deleted);
+    let claim = store
+        .claim_job("finish-before-grouping", 30)
+        .unwrap()
+        .unwrap();
+    store
+        .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+        .unwrap();
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service.reconcile_automatic_album_groups().unwrap();
+    let destination = items[..2]
+        .iter()
+        .map(|item| store.item(item.id).unwrap())
+        .find(|item| !item.deleted)
+        .unwrap();
+    assert_eq!(destination.captures.len(), 2);
+    let group = service
+        .album_group_undo(&actor, destination.lifecycle.merge_group.unwrap())
+        .unwrap();
+    assert!(
+        group.group.automatic && group.can_undo,
+        "{:?}",
+        group.reason
+    );
+    assert_eq!(destination.specimens.len(), 2);
+    assert!(destination.specimens.iter().all(|copy| {
+        copy.private_notes
+            .as_deref()
+            .unwrap()
+            .starts_with("Retain note")
+    }));
+    let original_files = items
+        .iter()
+        .flat_map(|item| {
+            item.captures
+                .iter()
+                .flat_map(|capture| capture.representations.clone())
+        })
+        .collect::<Vec<_>>();
+    // A later disc joins the existing destination rather than creating a second album.
+    automatic_group_metadata(&service, &actor, &items[2], &release);
+    service.reconcile_automatic_album_groups().unwrap();
+    let album = store.item(destination.id).unwrap();
+    assert_eq!(album.captures.len(), 3);
+    assert_eq!(album.specimens.len(), 3);
+    let revision = album.revision;
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(store.item(album.id).unwrap().revision, revision);
+    for source in original_files {
+        let current = album
+            .captures
+            .iter()
+            .flat_map(|capture| &capture.representations)
+            .find(|r| r.id == source.id)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(current).unwrap(),
+            serde_json::to_value(source).unwrap()
+        );
+    }
+    store.reindex().unwrap();
+    let group = album.lifecycle.merge_group.unwrap();
+    let undo = service.album_group_undo(&actor, group).unwrap();
+    assert!(undo.can_undo, "{:?}", undo.reason);
+    service.undo_album_group(&actor, group, &command()).unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(store.item(album.id).unwrap().captures.len(), 2);
+    assert!(
+        store
+            .item(items[2].id)
+            .unwrap()
+            .lifecycle
+            .automatic_grouping_disabled
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service.reconcile_automatic_album_groups().unwrap();
+    assert!(!store.item(items[2].id).unwrap().deleted);
+}
+
+#[test]
+fn automatic_disc_grouping_leaves_duplicates_conflicts_and_incomplete_matches_for_review() {
+    for problem in [
+        "duplicate",
+        "disc-conflict",
+        "layout",
+        "manual",
+        "unknown",
+        "release-group",
+    ] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, mut release) = automatic_group_sources(
+            &store,
+            &actor,
+            &service,
+            collection.id,
+            if problem == "duplicate" {
+                &[5, 5]
+            } else {
+                &[5, 6]
+            },
+        );
+        if problem == "disc-conflict" {
+            let duplicate = release.media[0].disc_ids[0].clone();
+            release.media[1].disc_ids.push(duplicate);
+        }
+        if problem == "duplicate" {
+            release.media[1].disc_ids = vec!["OtherDiscId".into()];
+        }
+        if problem == "layout" {
+            release.media[1].tracks.pop();
+        }
+        automatic_group_metadata(&service, &actor, &items[0], &release);
+        if problem == "release-group" {
+            release.release_group_id = Some("66666666-6666-4666-8666-666666666666".into());
+        }
+        automatic_group_metadata(&service, &actor, &items[1], &release);
+        if problem == "manual" {
+            for (index, item) in items.iter().enumerate() {
+                let record = store
+                    .metadata_authority(collection.id, item.id)
+                    .unwrap()
+                    .unwrap();
+                service
+                    .update_metadata_authority(
+                        &actor,
+                        item.id,
+                        UpdateMetadataAuthorityCommand {
+                            expected_revision: record.revision,
+                            change: MetadataAuthorityChange::SetFieldOverride {
+                                field: MetadataField::Title,
+                                value: format!("My title {index}"),
+                                language: None,
+                            },
+                        },
+                        &command(),
+                    )
+                    .unwrap();
+            }
+        }
+        if problem == "unknown" {
+            let mut item = store.item(items[1].id).unwrap();
+            let revision = item.revision;
+            item.domain.payload = RawJson::from_json(r#"{"future":{"ordered":[2,1]}}"#).unwrap();
+            Catalog::save(&*store, item, revision).unwrap();
+        }
+        service.reconcile_automatic_album_groups().unwrap();
+        assert!(
+            items
+                .iter()
+                .all(|item| !store.item(item.id).unwrap().deleted),
+            "unsafe auto-group for {problem}"
+        );
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_accepts_coherent_release_variants_and_keeps_manual_authority() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, mut release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    automatic_group_metadata(&service, &actor, &items[0], &release);
+    release.release_id = "22222222-2222-4222-8222-222222222222".into();
+    release.title = "Soundtrack title in another language".into();
+    automatic_group_metadata(&service, &actor, &items[1], &release);
+    let record = store
+        .metadata_authority(collection.id, items[1].id)
+        .unwrap()
+        .unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            items[1].id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: record.revision,
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "My soundtrack title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    let album = items
+        .iter()
+        .map(|item| store.item(item.id).unwrap())
+        .find(|item| !item.deleted)
+        .unwrap();
+    assert_eq!(album.captures.len(), 2);
+    assert_eq!(
+        service.item_presented(&actor, album.id).unwrap().title,
+        "My soundtrack title"
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service.item_presented(&actor, album.id).unwrap().title,
+        "My soundtrack title"
+    );
+}
+
+#[test]
+fn automatic_group_candidates_are_paged_and_require_a_current_curator() {
+    use collector_app::AlbumGroupingPort;
+    let (_root, store, actor, service, collection) = setup();
+    for index in 0..2 {
+        let (items, mut release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+        if index == 1 {
+            release.release_group_id = Some("77777777-7777-4777-8777-777777777777".into());
+        }
+        for item in &items {
+            automatic_group_metadata(&service, &actor, item, &release);
+        }
+    }
+    let curator = store
+        .create_user("automatic-curator", "a long test password", false)
+        .unwrap();
+    AccessPort::set_grant(
+        &*store,
+        collection.id,
+        curator,
+        Revision(0),
+        Some(Role::Curator),
+    )
+    .unwrap();
+    let first = store.automatic_album_group_candidates(None, 1).unwrap();
+    assert_eq!(first.len(), 1);
+    let second = store
+        .automatic_album_group_candidates(Some(first[0].item_id), 1)
+        .unwrap();
+    assert_eq!(second.len(), 1);
+    assert_ne!(first[0].item_id, second[0].item_id);
+    assert!(
+        store
+            .automatic_album_group_candidates(Some(second[0].item_id), 1)
+            .unwrap()
+            .is_empty()
+    );
+    let grant = store
+        .grant_for_user(collection.id, curator)
+        .unwrap()
+        .unwrap();
+    AccessPort::set_grant(
+        &*store,
+        collection.id,
+        curator,
+        grant.revision,
+        Some(Role::Viewer),
+    )
+    .unwrap();
+    let current = store.automatic_album_group_candidates(None, 10).unwrap();
+    assert_eq!(current.len(), 2);
+    assert!(
+        current
+            .iter()
+            .all(|candidate| candidate.user_id == actor.user_id)
+    );
+    service.reconcile_automatic_album_groups().unwrap();
+}
+
+fn automatic_group_select(
+    service: &CollectionService,
+    actor: &Principal,
+    item: &Item,
+    candidate: &MetadataCandidateIdentity,
+) {
+    let record = service.metadata_view(actor, item.id).unwrap();
+    service
+        .update_metadata_authority(
+            actor,
+            item.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: record.revision,
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: candidate.clone(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+}
+fn automatic_group_live(store: &Store, items: &[Item]) -> Vec<Item> {
+    items
+        .iter()
+        .map(|item| store.item(item.id).unwrap())
+        .filter(|item| !item.deleted)
+        .collect()
+}
+fn automatic_group_alternative(
+    release: &collector_modules::music::MusicBrainzReleaseObservation,
+) -> collector_modules::music::MusicBrainzReleaseObservation {
+    let mut other = release.clone();
+    other.release_id = "22222222-2222-4222-8222-222222222222".into();
+    other.release_group_id = Some("66666666-6666-4666-8666-666666666666".into());
+    other.title = "Another possible album".into();
+    other
+}
+
+#[test]
+fn automatic_disc_grouping_keeps_unproven_alternatives_until_an_album_is_chosen() {
+    for conflicting in [false, true] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+        let mut alternative = automatic_group_alternative(&release);
+        if conflicting {
+            let duplicate = alternative.media[0].disc_ids[0].clone();
+            alternative.media[1].disc_ids.push(duplicate);
+        } else {
+            // An advertised album option lacks the track coverage needed to
+            // prove membership. Missing coverage cannot eliminate that option.
+            for medium in &mut alternative.media {
+                medium.tracks.pop();
+            }
+        }
+        let mut choices = Vec::new();
+        for item in &items {
+            choices.push(automatic_group_metadata_options(
+                &service,
+                &actor,
+                item,
+                &[release.clone(), alternative.clone()],
+            ));
+        }
+        service.reconcile_automatic_album_groups().unwrap();
+        assert_eq!(automatic_group_live(&store, &items).len(), 2);
+        for item in &items {
+            let view = service.metadata_view(&actor, item.id).unwrap();
+            assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
+            assert_eq!(view.current_candidates.len(), 2);
+        }
+        // An explicit choice can still establish a unique compatible target;
+        // the other entry's incomplete alternative must not veto that choice.
+        automatic_group_select(&service, &actor, &items[0], &choices[0][0]);
+        service.reconcile_automatic_album_groups().unwrap();
+        assert_eq!(automatic_group_live(&store, &items).len(), 1);
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_keeps_unresolved_album_options_through_group_reindex_and_undo() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7]);
+    let alternative = automatic_group_alternative(&release);
+    for item in &items {
+        automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+        assert_eq!(
+            service
+                .metadata_view(&actor, item.id)
+                .unwrap()
+                .display
+                .resolution,
+            MetadataResolutionKind::Tentative
+        );
+    }
+    // A/B is still unresolved, but all three discs fit together under either choice.
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let album = &albums[0];
+    assert_eq!(album.captures.len(), 3);
+    for _ in 0..2 {
+        let view = service.metadata_view(&actor, album.id).unwrap();
+        assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
+        assert!(view.authority.selected_candidate.is_none());
+        assert!(view.authority.automatic_candidate.is_none());
+        assert_eq!(view.current_candidates.len(), 2);
+        store.reindex().unwrap();
+    }
+    let group = album.lifecycle.merge_group.unwrap();
+    assert!(service.album_group_undo(&actor, group).unwrap().can_undo);
+    service.undo_album_group(&actor, group, &command()).unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 3);
+    for item in &items {
+        assert_eq!(
+            service
+                .metadata_view(&actor, item.id)
+                .unwrap()
+                .display
+                .resolution,
+            MetadataResolutionKind::Tentative
+        );
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_accepts_equivalent_manual_release_and_version_choices() {
+    for different_release in [false, true] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+        let mut other = release.clone();
+        if different_release {
+            other.release_id = "22222222-2222-4222-8222-222222222222".into();
+        }
+        other.title = "Chosen translated title".into();
+        other.language = Some("ja".into());
+        let first = automatic_group_metadata_options(&service, &actor, &items[0], &[release]);
+        let second = automatic_group_metadata_options(&service, &actor, &items[1], &[other]);
+        automatic_group_select(&service, &actor, &items[0], &first[0]);
+        automatic_group_select(&service, &actor, &items[1], &second[0]);
+        service.reconcile_automatic_album_groups().unwrap();
+        let albums = automatic_group_live(&store, &items);
+        assert_eq!(albums.len(), 1);
+        let view = service.metadata_view(&actor, albums[0].id).unwrap();
+        let selected = view.authority.selected_candidate.unwrap();
+        assert!(selected == first[0] || selected == second[0]);
+        assert_eq!(view.display.resolution, MetadataResolutionKind::Selected);
+        assert!(
+            view.candidates
+                .iter()
+                .any(|candidate| candidate.identity == first[0])
+        );
+        assert!(
+            view.candidates
+                .iter()
+                .any(|candidate| candidate.identity == second[0])
+        );
+        store.reindex().unwrap();
+        assert_eq!(
+            service
+                .metadata_view(&actor, albums[0].id)
+                .unwrap()
+                .authority
+                .selected_candidate,
+            Some(selected)
+        );
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_reassesses_unresolved_siblings_after_a_manual_choice() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let alternative = automatic_group_alternative(&release);
+    let choices = automatic_group_metadata_options(
+        &service,
+        &actor,
+        &items[0],
+        &[release.clone(), alternative.clone()],
+    );
+    automatic_group_metadata_options(&service, &actor, &items[1], &[release, alternative]);
+    automatic_group_select(&service, &actor, &items[0], &choices[0]);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let view = service.metadata_view(&actor, albums[0].id).unwrap();
+    assert_eq!(view.authority.selected_candidate, Some(choices[0].clone()));
+    assert_eq!(view.current_candidates, vec![choices[0].clone()]);
+    assert!(
+        view.candidates
+            .iter()
+            .any(|candidate| candidate.identity == choices[1])
+    );
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_steal_an_unresolved_disc_from_competing_accepted_albums() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7, 8]);
+    let alternative = automatic_group_alternative(&release);
+    automatic_group_metadata(&service, &actor, &items[0], &release);
+    automatic_group_metadata(&service, &actor, &items[1], &release);
+    automatic_group_metadata(&service, &actor, &items[2], &alternative);
+    automatic_group_metadata_options(&service, &actor, &items[3], &[release, alternative]);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 3);
+    assert!(albums.iter().any(|album| album.captures.len() == 2));
+    assert!(!store.item(items[2].id).unwrap().deleted);
+    assert!(!store.item(items[3].id).unwrap().deleted);
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[3].id)
+            .unwrap()
+            .display
+            .resolution,
+        MetadataResolutionKind::Tentative
+    );
+    // A later explicit choice identifies a unique target and triggers attachment.
+    let view = service.metadata_view(&actor, items[3].id).unwrap();
+    let selected = view
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.identity.provider_record_id == "11111111-1111-4111-8111-111111111111"
+        })
+        .unwrap()
+        .identity
+        .clone();
+    automatic_group_select(&service, &actor, &items[3], &selected);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 2);
+    assert!(albums.iter().any(|album| album.captures.len() == 3));
+}
+
+#[test]
+fn automatic_disc_grouping_ambiguous_duplicates_and_incompatible_metadata_do_not_veto_a_safe_subset()
+ {
+    for conflict in ["duplicate", "manual", "unknown", "placement"] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, mut release) = automatic_group_sources(
+            &store,
+            &actor,
+            &service,
+            collection.id,
+            if conflict == "duplicate" {
+                &[5, 5, 6, 7]
+            } else {
+                &[5, 6, 7, 8]
+            },
+        );
+        if conflict == "duplicate" {
+            release.media.remove(1);
+        }
+        for (index, item) in items.iter().enumerate() {
+            let mut releases = vec![release.clone()];
+            if conflict == "placement" && index < 2 {
+                let mut other = release.clone();
+                other.release_id = "22222222-2222-4222-8222-222222222222".into();
+                other.media[0].disc_ids = release.media[1].disc_ids.clone();
+                other.media[1].disc_ids = release.media[0].disc_ids.clone();
+                releases.push(other);
+            }
+            automatic_group_metadata_options(&service, &actor, item, &releases);
+            if conflict == "manual" && index < 2 {
+                let view = service.metadata_view(&actor, item.id).unwrap();
+                service
+                    .update_metadata_authority(
+                        &actor,
+                        item.id,
+                        UpdateMetadataAuthorityCommand {
+                            expected_revision: view.revision,
+                            change: MetadataAuthorityChange::SetFieldOverride {
+                                field: MetadataField::Title,
+                                value: format!("Different manual choice {index}"),
+                                language: None,
+                            },
+                        },
+                        &command(),
+                    )
+                    .unwrap();
+            }
+            if conflict == "unknown" && index < 2 {
+                let mut item = store.item(item.id).unwrap();
+                let revision = item.revision;
+                item.domain.payload = RawJson::from_value(serde_json::json!({"future":index}));
+                Catalog::save(&*store, item, revision).unwrap();
+            }
+        }
+        service.reconcile_automatic_album_groups().unwrap();
+        let albums = automatic_group_live(&store, &items);
+        assert_eq!(albums.len(), 3, "{conflict}");
+        assert!(
+            albums.iter().any(|album| album.captures.len() == 2),
+            "{conflict}"
+        );
+        for item in &items[..2] {
+            assert!(!store.item(item.id).unwrap().deleted, "{conflict}");
+        }
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_infer_membership_from_overlapping_options() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let b = automatic_group_alternative(&release);
+    let mut c = b.clone();
+    c.release_id = "33333333-3333-4333-8333-333333333333".into();
+    c.release_group_id = Some("77777777-7777-4777-8777-777777777777".into());
+    automatic_group_metadata_options(&service, &actor, &items[0], &[release.clone(), b]);
+    automatic_group_metadata_options(&service, &actor, &items[1], &[release, c]);
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+}
+
+#[test]
+fn automatic_disc_grouping_rebuilds_single_identity_catalog_without_resetting_private_work() {
+    use collector_app::LibraryCarePort;
+    let (root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let alternative = automatic_group_alternative(&release);
+    for item in &items {
+        automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+    }
+    let pending = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: pending,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(items[0].id),
+            kind: "fixture.busy".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({"retain":"pending"}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let originals = items
+        .iter()
+        .map(|item| serde_json::to_value(item).unwrap())
+        .collect::<Vec<_>>();
+    drop(service);
+    drop(store);
+    let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+    db.execute_batch("DROP TABLE album_group_members; CREATE TABLE album_group_members(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,album_id TEXT NOT NULL); PRAGMA user_version=14;").unwrap();
+    drop(db);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    assert!(!store.catalog_reused_at_startup());
+    for (item, original) in items.iter().zip(originals) {
+        assert_eq!(
+            serde_json::to_value(store.item(item.id).unwrap()).unwrap(),
+            original
+        );
+    }
+    let peers = store
+        .album_group_proposals(actor.user_id, items[0].id, None, 10)
+        .unwrap();
+    assert_eq!(
+        peers.items.len(),
+        1,
+        "Multiple shared options must not duplicate proposal rows"
+    );
+    assert!(peers.next_cursor.is_none());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert!(service.item_presented(&actor, items[0].id).is_ok());
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+    let claim = store
+        .claim_job("after-catalog-upgrade", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.id, pending);
+    store
+        .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 1);
+}
+
+#[test]
+fn automatic_disc_grouping_allows_option_dependent_disc_numbers_without_selecting_metadata() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let mut alternative = automatic_group_alternative(&release);
+    alternative.media[0].position = 2;
+    alternative.media[1].position = 1;
+    for item in &items {
+        automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+    }
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let view = service.metadata_view(&actor, albums[0].id).unwrap();
+    assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
+    assert!(
+        view.authority.domain_overrides.is_none(),
+        "Grouping must not invent a fixed disc assignment across unresolved choices"
+    );
+}
+
+#[test]
+fn automatic_disc_grouping_fences_changed_or_new_competing_neighbors_before_publication() {
+    use collector_app::{
+        AlbumGroupPublication, AlbumGroupResult, AlbumGroupingPort, GroupedItemRevision,
+    };
+    for change in ["inventory", "metadata", "new-peer"] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7]);
+        let alternative = automatic_group_alternative(&release);
+        for item in &items[..2] {
+            automatic_group_metadata(&service, &actor, item, &release);
+        }
+        if change != "new-peer" {
+            automatic_group_metadata_options(
+                &service,
+                &actor,
+                &items[2],
+                &[release.clone(), alternative],
+            );
+        }
+        let mut entries = vec![];
+        let mut guards = vec![];
+        for (index, original) in items.iter().enumerate() {
+            let before = store.item(original.id).unwrap();
+            let metadata = store.metadata_authority(collection.id, before.id).unwrap();
+            if index < 2 || change != "new-peer" {
+                guards.push((
+                    before.id,
+                    Digest::sha256(&serde_json::to_vec(&before).unwrap()),
+                    Digest::sha256(&serde_json::to_vec(&metadata).unwrap()),
+                ));
+            }
+            if index < 2 {
+                let mut after = before.clone();
+                after.revision = Revision(before.revision.0 + 1);
+                entries.push(GroupedItemRevision {
+                    before,
+                    after,
+                    metadata_before: metadata,
+                    metadata_after: None,
+                });
+            }
+        }
+        let publication = AlbumGroupPublication {
+            result: AlbumGroupResult {
+                group_id: TransactionId::new(),
+                destination: items[0].id,
+                sources: vec![items[1].id],
+                automatic: true,
+            },
+            entries,
+            undo_of: None,
+            membership_guards: guards,
+            membership_groups: vec![release.release_group_id.clone().unwrap()],
+        };
+        match change {
+            "inventory" => {
+                let mut peer = store.item(items[2].id).unwrap();
+                let revision = peer.revision;
+                peer.title = "Concurrent edit".into();
+                Catalog::save(&*store, peer, revision).unwrap();
+            }
+            "metadata" => {
+                let view = service.metadata_view(&actor, items[2].id).unwrap();
+                automatic_group_select(&service, &actor, &items[2], &view.candidates[0].identity);
+            }
+            "new-peer" => automatic_group_metadata(&service, &actor, &items[2], &release),
+            _ => unreachable!(),
+        }
+        assert!(
+            matches!(
+                store.publish_album_group(actor.user_id, publication),
+                Err(Error::Conflict)
+            ),
+            "{change}"
+        );
+        for original in &items[..2] {
+            assert_eq!(
+                store.item(original.id).unwrap().revision,
+                original.revision,
+                "{change}"
+            );
+        }
+        assert_eq!(automatic_group_live(&store, &items).len(), 3);
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_established_subset_precedes_an_unresolved_duplicate() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, mut release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 5]);
+    release.media.pop();
+    let alternative = automatic_group_alternative(&release);
+    for item in &items[..2] {
+        automatic_group_metadata(&service, &actor, item, &release);
+    }
+    automatic_group_metadata_options(&service, &actor, &items[2], &[release, alternative]);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 2);
+    assert!(albums.iter().any(|album| album.captures.len() == 2));
+    assert!(!store.item(items[2].id).unwrap().deleted);
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_reuse_automatically_cleared_metadata() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    for item in &items {
+        automatic_group_metadata(&service, &actor, item, &release);
+    }
+    let record = store
+        .metadata_authority(collection.id, items[0].id)
+        .unwrap()
+        .unwrap();
+    let mut current = store.item(items[0].id).unwrap();
+    let revision = current.revision;
+    current.lifecycle.automatic_metadata_through = record.revision.0;
+    Catalog::save(&*store, current, revision).unwrap();
+    let view = service.metadata_view(&actor, items[0].id).unwrap();
+    assert!(view.display.candidate.is_none());
+    assert!(
+        !view.candidates.is_empty(),
+        "historical evidence is retained"
+    );
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+    // A later deliberate choice can use retained history again.
+    automatic_group_select(&service, &actor, &items[0], &view.candidates[0].identity);
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 1);
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_restore_explicit_choices_cleared_by_inventory_reset() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let alternative = automatic_group_alternative(&release);
+    for item in &items {
+        let choices = automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+        automatic_group_select(&service, &actor, item, &choices[0]);
+        let record = store
+            .metadata_authority(collection.id, item.id)
+            .unwrap()
+            .unwrap();
+        let mut current = store.item(item.id).unwrap();
+        let revision = current.revision;
+        current.lifecycle.reset_fields_through = record.revision.0;
+        Catalog::save(&*store, current, revision).unwrap();
+        assert_eq!(
+            service
+                .metadata_view(&actor, item.id)
+                .unwrap()
+                .display
+                .resolution,
+            MetadataResolutionKind::Tentative
+        );
+    }
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let view = service.metadata_view(&actor, albums[0].id).unwrap();
+    assert!(view.authority.selected_candidate.is_none());
+    assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
 }

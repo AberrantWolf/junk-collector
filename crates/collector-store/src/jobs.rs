@@ -322,6 +322,7 @@ impl Store {
     }
 
     pub(crate) fn retry_preparation_batch_record(&self, id: JobId, user: UserId) -> Result<()> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -567,6 +568,7 @@ impl Store {
         batch: Option<(JobId, &str)>,
         bulk: Option<(JobId, &str, u32)>,
     ) -> Result<JobId> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
         if spec.kind.is_empty()
             || spec.kind.len() > 120
             || spec.phase.is_empty()
@@ -901,25 +903,61 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        let mut dispatch = lock(&self.job_dispatch)?;
         let candidate: Option<String> = tx
             .query_row(
-                "SELECT candidate.id FROM private.jobs candidate
+                "WITH active AS (
+                   SELECT id,kind,(kind=?3 OR (kind='preservation_import'
+                     AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
+                   FROM private.jobs WHERE state IN ('running','cancel_requested') AND lease_expires>?2
+                 ), runnable AS (
+                   SELECT id,kind,created_at,user_id,json_extract(request,'$.import_id') AS import_id,
+                     (kind=?3 OR (kind='preservation_import' AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
+                   FROM private.jobs
+                   WHERE (state='queued' AND phase='queued') OR
+                     (state='running' AND claim_token IS NOT NULL AND
+                       (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2))
+                 )
+                 SELECT candidate.id FROM runnable candidate
                  WHERE (
-                   (candidate.state='queued' AND candidate.phase='queued') OR
-                   (candidate.state='running' AND
-                     candidate.claim_token IS NOT NULL AND
-                     (candidate.worker_instance IS NULL OR candidate.worker_instance<>? OR candidate.lease_expires<=?))
-                 )
-                 AND (
-                   (SELECT COUNT(*) FROM private.jobs active
+                   (SELECT COUNT(*) FROM active
                     WHERE active.id<>candidate.id
-                      AND active.state IN ('running','cancel_requested')
-                      AND active.lease_expires>?
                       AND (active.kind='provider_acquisition')=(candidate.kind='provider_acquisition'))
-                      < CASE WHEN candidate.kind='provider_acquisition' THEN 1 ELSE 2 END
+                      < CASE WHEN candidate.kind='provider_acquisition' THEN ?5 ELSE ?6 END
                  )
-                 ORDER BY candidate.created_at,candidate.id LIMIT 1",
-                params![worker_instance, now, now],
+                 AND (NOT candidate.is_copy OR (
+                   (SELECT COUNT(*) FROM active
+                    WHERE active.id<>candidate.id AND active.is_copy)< ?7
+                 ))
+                 AND (
+                   candidate.kind='provider_acquisition'
+                   OR NOT EXISTS (
+                     SELECT 1 FROM runnable waiting
+                     WHERE waiting.kind!='provider_acquisition'
+                       AND waiting.is_copy!=candidate.is_copy
+                   )
+                   OR (
+                     SELECT COUNT(*) FROM active
+                     WHERE active.id<>candidate.id
+                       AND active.kind!='provider_acquisition'
+                       AND active.is_copy=candidate.is_copy
+                   ) < MAX(1,?6-1)
+                 )
+                 ORDER BY CASE WHEN candidate.kind='import_publication'
+                     AND candidate.user_id||':'||candidate.import_id=?9 THEN 0
+                   WHEN candidate.kind='provider_acquisition'
+                     OR candidate.is_copy=?4 THEN 1 ELSE 2 END,
+                   CASE WHEN candidate.kind IN ('metadata_resolution','metadata_existing') THEN
+                     CASE WHEN ?10 THEN -1 ELSE 10 END
+                     WHEN candidate.kind IN ('import_analysis','import_publication') THEN
+                     COALESCE((SELECT CAST(key AS INTEGER) FROM json_each(?8)
+                       WHERE value=candidate.user_id||':'||candidate.import_id),9) ELSE 9 END,
+                   candidate.created_at,candidate.id LIMIT 1",
+                params![worker_instance, now, collector_app::IMPORT_COPY_JOB_KIND,
+                    dispatch.prefers_copy(), collector_app::PROVIDER_JOB_SLOTS,
+                    dispatch.settings.processing_workers, dispatch.settings.copy_workers,
+                    serde_json::to_string(&dispatch.preferred_imports()).map_err(storage)?,
+                    dispatch.preferred_publication(), dispatch.prefers_metadata()],
                 |row| row.get(0),
             )
             .optional()
@@ -981,6 +1019,11 @@ impl Store {
             .optional()
             .map_err(storage)?;
         tx.commit().map_err(storage)?;
+        dispatch.admitted(
+            &row.3,
+            row.0.parse().map_err(storage)?,
+            &serde_json::from_str::<serde_json::Value>(&row.4).map_err(storage)?,
+        );
         let created_at = chrono::DateTime::from_timestamp(row.8, 0)
             .ok_or_else(|| Error::Storage("job creation timestamp is invalid".into()))?;
         Ok(Some(JobClaim {
@@ -1393,6 +1436,7 @@ impl Store {
         }
     }
     pub(crate) fn retry_failed_job_record(&self, id: JobId, user: UserId) -> Result<JobId> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)

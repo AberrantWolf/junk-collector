@@ -27,6 +27,8 @@ mod bulk_intake;
 pub use bulk_intake::*;
 mod album_grouping;
 pub use album_grouping::*;
+mod automatic_album_grouping;
+pub use automatic_album_grouping::AutomaticAlbumGroupCandidate;
 mod album_preparation;
 pub use album_preparation::*;
 mod collection_types;
@@ -718,8 +720,40 @@ pub struct IngestPermissions {
     pub can_correct_association: bool,
 }
 
+/// Current execution only; workflow outcome and preservation are independent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestWorkState {
+    Running,
+    Queued,
+    Waiting,
+    Cancelling,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestWork {
+    pub shared: bool,
+    pub state: IngestWorkState,
+    pub kind: String,
+    pub phase: String,
+    pub jobs: u32,
+}
+
+/// Mechanism projection, grouped without reading payloads or frozen media inputs.
+pub struct IngestWorkRecord {
+    pub shared: bool,
+    pub state: JobState,
+    pub kind: String,
+    pub phase: String,
+    pub jobs: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestSummary {
+    // Older completed admission receipts have no transient execution projection.
+    #[serde(default)]
+    #[schema(required = true)]
+    pub work: Vec<IngestWork>,
     pub import_id: ImportId,
     pub collection_id: CollectionId,
     pub package_name: String,
@@ -840,6 +874,7 @@ pub trait ProvisionalImportPort: Send + Sync {
         limit: u16,
     ) -> Result<Page<ImportRecord>>;
     fn import_job_records(&self, id: ImportId, user: UserId) -> Result<Vec<JobRecord>>;
+    fn import_work_records(&self, id: ImportId, user: UserId) -> Result<Vec<IngestWorkRecord>>;
     fn discard_guided_import(
         &self,
         id: ImportId,
@@ -1089,7 +1124,11 @@ fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<Job
     })
 }
 
+mod job_dispatch;
+pub use job_dispatch::{IMPORT_COPY_JOB_KIND, JobDispatchPolicy, JobSettings, PROVIDER_JOB_SLOTS};
+
 pub trait JobPort: Send + Sync {
+    fn job_settings(&self) -> Result<JobSettings>;
     fn work_job_records(&self, user: UserId, query: &WorkJobsQuery) -> Result<Page<JobRecord>>;
     fn work_page(&self, user: UserId, query: &WorkQuery) -> Result<Page<WorkEntry>>;
     fn work_entry(&self, user: UserId, target: &WorkTarget) -> Result<WorkEntry>;
@@ -4268,6 +4307,7 @@ impl CollectionService {
             .processing
             .package_inventory(frozen.collection_id, frozen.source)?;
         frozen.source_fingerprint.validate_inventory(&inventory)?;
+        self.report_processing_phase(claim, "validating_source")?;
         if self.fingerprint_inventory_checked(&inventory, &mut || {
             if self
                 .jobs
@@ -4281,6 +4321,7 @@ impl CollectionService {
         {
             return Err(Error::Conflict);
         }
+        self.report_processing_phase(claim, "processing_files")?;
         let host = ProcessingHost {
             port: self.processing.as_ref(),
             access: PackageAccess {
@@ -4369,6 +4410,7 @@ impl CollectionService {
         {
             return Err(Error::Conflict);
         }
+        self.report_processing_phase(claim, "rechecking_source")?;
         if self.fingerprint_inventory_checked(&inventory, &mut || {
             if self
                 .jobs
@@ -4401,6 +4443,7 @@ impl CollectionService {
                 .map_or_else(|| self.authentication.now(), |prior| prior.created_at),
         };
         observation.validate()?;
+        self.report_processing_phase(claim, "recording_check")?;
         self.processing
             .save_provisional_observation(id, claim.id, &observation)?;
         record.view.analysis_job_id = Some(claim.id);
@@ -5301,6 +5344,10 @@ impl CollectionService {
         }
     }
 
+    pub fn job_settings(&self) -> Result<JobSettings> {
+        self.jobs.job_settings()
+    }
+
     pub fn run_next_job(&self, worker_instance: &str) -> Result<bool> {
         self.jobs.reconcile_game_scans()?;
         self.jobs.reconcile_acquisitions()?;
@@ -5826,6 +5873,7 @@ impl CollectionService {
             .streaming_providers
             .get(&frozen.request.provider.0)
             .ok_or_else(|| Error::Unavailable("configured provider is unavailable".into()))?;
+        self.report_processing_phase(claim, "acquiring")?;
         let mut response = provider.acquire_stream(&frozen.request, &mut execution)?;
         let snapshot = SnapshotRecord {
             acquisition_key: Some(acquisition_key(frozen)?),

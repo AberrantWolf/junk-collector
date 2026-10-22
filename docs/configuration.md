@@ -75,6 +75,42 @@ musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
 rips = "/srv/incoming"
 ```
 
+### Background workers
+
+```toml
+[jobs]
+processing_workers = 4
+copy_workers = 1
+```
+
+`processing_workers` accepts 1–8 and includes inbox copying, analysis, original
+publication and audio preparation. `copy_workers` independently caps concurrent
+inbox staging (including the older combined inbox import command); it accepts
+1 through `processing_workers` and defaults to one. Provider downloads always have
+one additional, separate slot. `doctor` and startup report the effective limits.
+Omitting `[jobs]` uses four processing workers and one copy. Restart to apply edits;
+invalid settings are rejected before opening storage.
+
+Ready copied discs get bounded priority for analysis and original publication.
+With one worker this normally finishes one disc's originals before the next copy.
+Workers are not permanently assigned to a disc: provider waits and unavailable or
+failed steps cannot hold a slot. Other processing is offered FIFO service after
+two preferred continuations. Copying gets a turn after two processing admissions
+when both are runnable, allowing one ready save to finish a just-analyzed disc
+before that copy turn. With multiple workers, the scheduler leaves
+room for both waiting classes, and processing can use all available slots when
+copying is idle. The copy cap still applies when processing is idle. Running jobs
+finish or acknowledge cancellation before their capacity is reused.
+Metadata resolution gets priority over queued encoding and ordinary processing,
+sharing at most two preferred admissions with ready-disc continuations before
+another processing turn.
+It starts after originals are saved; copying keeps its own scheduling turns.
+
+More workers can increase CPU, memory and storage contention. Four is the default;
+eight is available for operator tuning, not a throughput guarantee. Original
+publication still uses the existing archive writer. These settings do not remove
+the extra inbox-to-private-staging-to-archive copy.
+
 ### Audio encoders
 
 | Option | Effect |

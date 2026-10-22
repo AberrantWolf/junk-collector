@@ -234,3 +234,7 @@
 @media(max-width:700px){.intake-review-row{grid-template-columns:minmax(0,1fr)}.intake-review-row>label{margin:0}.intake-actions{align-items:start;flex-direction:column}}
 
 .inbox-cleanup code{overflow-wrap:anywhere;white-space:normal}
+
+.ingest-work small{display:block;margin-top:4px}.ingest-work-running{color:var(--green)}.ingest-work-queued,.ingest-work-waiting{color:var(--muted)}
+
+.intake-members .row-text{overflow-wrap:anywhere}@media(max-width:700px){.intake-members .care-row{flex-wrap:wrap;gap:10px}.intake-members .row-text{flex-basis:100%}}

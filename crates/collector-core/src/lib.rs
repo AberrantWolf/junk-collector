@@ -549,6 +549,9 @@ pub struct ItemLifecycle {
     pub merged_into: Option<ItemId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_group: Option<TransactionId>,
+    /// An explicit group undo preserves the user's choice to keep entries apart.
+    #[serde(default)]
+    pub automatic_grouping_disabled: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ItemReimport {

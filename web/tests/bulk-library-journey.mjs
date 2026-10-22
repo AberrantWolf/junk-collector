@@ -34,7 +34,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  await imports.getByLabel('Reselect original folder to resume the complete batch').setInputFiles(folder);
  await expect.poll(()=>page.evaluate(async id=>{const r=await fetch(`/api/v1/intakes/${id}`);if(!r.ok)return 0;return (await r.json()).preserved;},intakeId),{timeout:60000}).toBe(2);
  const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);
- const ids=members.map(m=>m.import.target_item_id);assert.equal(new Set(ids).size,2,'Unconfirmed albums were combined without review');
+ const ids=members.map(m=>m.import.target_item_id);assert.equal(new Set(ids).size,2,'Conflicting release disc placements must remain available for reviewed grouping');
  await expect.poll(()=>page.evaluate(async ids=>Promise.all(ids.map(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title)),ids),{timeout:60000}).toEqual(['Bulk resolved album','Bulk resolved album']);
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,intakeId),{timeout:60000}).toBe('completed');
  await nav.getByRole('button',{name:'Metadata',exact:true}).click();

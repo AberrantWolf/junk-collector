@@ -78,6 +78,8 @@ pub struct AlbumGroupPreview {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AlbumGroupResult {
+    #[serde(default)]
+    pub automatic: bool,
     pub group_id: TransactionId,
     pub destination: ItemId,
     pub sources: Vec<ItemId>,
@@ -100,8 +102,19 @@ pub struct AlbumGroupPublication {
     pub result: AlbumGroupResult,
     pub entries: Vec<GroupedItemRevision>,
     pub undo_of: Option<TransactionId>,
+    /// Read-set guards used before commit only, not retained as duplicate history.
+    #[serde(skip)]
+    pub membership_guards: Vec<(ItemId, Digest, Digest)>,
+    #[serde(skip)]
+    pub membership_groups: Vec<String>,
 }
 pub trait AlbumGroupingPort: Send + Sync {
+    fn automatic_album_group_candidates(
+        &self,
+        after: Option<ItemId>,
+        limit: u16,
+    ) -> Result<Vec<AutomaticAlbumGroupCandidate>>;
+    fn automatic_album_group_idle(&self, items: &[ItemId]) -> Result<bool>;
     fn publish_album_group(
         &self,
         user: UserId,
@@ -118,7 +131,7 @@ fn identical<T: Serialize>(left: &T, right: &T) -> Result<bool> {
 }
 
 impl CollectionService {
-    fn album_group_records(
+    pub(crate) fn album_group_records(
         &self,
         actor: &Principal,
         command: &PreviewAlbumGroup,
@@ -194,7 +207,7 @@ impl CollectionService {
         }
         Ok(records)
     }
-    fn automatic_group_positions(
+    pub(crate) fn automatic_group_positions(
         &self,
         actor: &Principal,
         records: &[(Item, Option<MetadataAuthorityRecord>)],
@@ -316,7 +329,7 @@ impl CollectionService {
             effects.publish_album_group(actor.user_id, publication)
         })
     }
-    fn compose_album_group(
+    pub(crate) fn compose_album_group(
         &self,
         records: &[(Item, Option<MetadataAuthorityRecord>)],
         command: &PreviewAlbumGroup,
@@ -549,6 +562,9 @@ impl CollectionService {
                 capture
             })
             .collect();
+        // Reads hydrate these identity sets in ID order. Freeze that same order
+        // so guarded undo still recognizes the group after reads/reindex.
+        result.captures.sort_by_key(|capture| capture.id);
         result.assets = records
             .iter()
             .flat_map(|(item, _)| item.assets.clone())
@@ -579,6 +595,7 @@ impl CollectionService {
         });
         let mut asset_ids = BTreeSet::new();
         result.assets.retain(|value| asset_ids.insert(value.id));
+        result.assets.sort_by_key(|asset| asset.id);
         result.lifecycle.historical_captures = records
             .iter()
             .flat_map(|(item, _)| item.lifecycle.historical_captures.clone())
@@ -637,12 +654,15 @@ impl CollectionService {
         Ok((
             AlbumGroupPublication {
                 result: AlbumGroupResult {
+                    automatic: false,
                     group_id: group,
                     destination: result.id,
                     sources,
                 },
                 entries,
                 undo_of: None,
+                membership_guards: vec![],
+                membership_groups: vec![],
             },
             conflicts,
         ))
@@ -703,23 +723,30 @@ impl CollectionService {
                 });
             }
         }
-        if let Some(source) = command.choices.artwork_from {
-            authority.artwork_choice = chosen(Some(source))?
-                .1
+        let source_authority = |id| -> Result<Option<MetadataAuthority>> {
+            let (item, record) = chosen(Some(id))?;
+            record
                 .as_ref()
-                .and_then(|record| record.authority.artwork_choice);
+                .map(|record| metadata_authority_for_inventory(item, record))
+                .transpose()
+        };
+        if let Some(source) = command.choices.artwork_from {
+            authority.artwork_choice =
+                source_authority(source)?.and_then(|value| value.artwork_choice);
         }
         if let Some(source) = command.choices.domain_from {
-            authority.domain_overrides = chosen(Some(source))?
-                .1
-                .as_ref()
-                .and_then(|record| record.authority.domain_overrides.clone());
+            authority.domain_overrides =
+                source_authority(source)?.and_then(|value| value.domain_overrides);
         }
         if let Some(source) = command.choices.identity_from {
-            let selected = chosen(Some(source))?.1.as_ref().map(|r| &r.authority);
-            authority.selected_candidate = selected.and_then(|a| a.selected_candidate.clone());
-            authority.automatic_candidate = selected.and_then(|a| a.automatic_candidate.clone());
-            authority.automatic_language = selected.and_then(|a| a.automatic_language.clone());
+            let selected = source_authority(source)?;
+            authority.selected_candidate = selected
+                .as_ref()
+                .and_then(|value| value.selected_candidate.clone());
+            authority.automatic_candidate = selected
+                .as_ref()
+                .and_then(|value| value.automatic_candidate.clone());
+            authority.automatic_language = selected.and_then(|value| value.automatic_language);
         }
         let mut candidates = BTreeMap::new();
         for (source, _) in records {
@@ -859,6 +886,9 @@ impl CollectionService {
                         .ok_or(Error::Conflict)?,
                 );
                 entry.after.updated_at = self.authentication.now();
+                if original.result.automatic {
+                    entry.after.lifecycle.automatic_grouping_disabled = true;
+                }
                 let current = entry
                     .metadata_after
                     .clone()

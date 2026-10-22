@@ -28,8 +28,9 @@ request ownership and bounded rolling admission.
 
 Defaults: metadata automatic, prepare-after-import explicit and unchecked,
 FLAC only, music plus existing DAT sources, originals preserved before review,
-copies kept distinct unless explicitly mapped, same-collection merges, confirmed
-entry combination even where matching is authoritative. Language variants of one
+copies kept distinct unless explicitly mapped and same-collection merges. The
+2026-10-22 user direction below supersedes confirmation for clear distinct-disc
+MusicBrainz matches; ambiguous combinations retain reviewed confirmation. Language variants of one
 album are not ambiguity. Filename/text-search matches remain suggestions. A disc
 ID identifying genuinely different albums requires review.
 
@@ -131,3 +132,21 @@ reviewed matching physical-copy labels mean one purchased copy, distinct labels
 mean separate copies. Known new-intake Synology/macOS housekeeping is excluded at
 chooser, planning and staging; unknown files and older accepted inventories survive.
 See [validation](validation/intake-review-2026-10-19.md). Source cleanup stays HL-09.
+
+### Automatic multidisc grouping — 2026-10-22
+
+The user explicitly requested automatic grouping when MusicBrainz clearly
+identifies different discs of the same album. Application policy now reconciles
+accepted album peers and recorded disc-to-medium matches, reusing the portable
+atomic group publisher and undo. Coherent release/language variants are accepted;
+conflicting/manual/incomplete/duplicate-position cases retain review. Active work
+is fenced and deferred; originals and physical-copy records are preserved. Undo
+records separation so automatic reconciliation respects the choice after restart.
+See [current acceptance and limits](validation/automatic-album-grouping-2026-10-22.md).
+
+The ambiguity follow-up also groups invariant membership across unresolved album
+options, keeps those metadata alternatives tentative, accepts equivalent manual
+release/version selections and reassesses unresolved siblings after a choice.
+Competing accepted targets remain reviewed; independent safe subsets can group.
+Catalog v15 indexes multiple viable album options per entry; publication fences
+all assessed neighbors and new competitors. See the same dated acceptance record.

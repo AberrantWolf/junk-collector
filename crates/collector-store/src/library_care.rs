@@ -6,7 +6,7 @@ use collector_app::{
 
 pub(crate) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS metadata_health(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,title_key TEXT NOT NULL,missing_name INTEGER NOT NULL,missing_artwork INTEGER NOT NULL,album_ambiguity INTEGER NOT NULL,incomplete_provider_information INTEGER NOT NULL,no_match INTEGER NOT NULL,manual_conflict INTEGER NOT NULL,needs_attention INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS album_group_members(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,album_id TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS album_group_members(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,album_id TEXT NOT NULL,PRIMARY KEY(item_id,album_id));
     CREATE INDEX IF NOT EXISTS album_group_matches ON album_group_members(collection_id,album_id,item_id);
     CREATE TABLE IF NOT EXISTS preparation_readiness(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,total_tracks INTEGER NOT NULL,ready_tracks INTEGER NOT NULL,source_count INTEGER NOT NULL,needs_attention INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS preparation_readiness_attention ON preparation_readiness(needs_attention,collection_id,item_id);
@@ -151,7 +151,7 @@ impl LibraryCarePort for Store {
             return Err(Error::Invalid("Use a 1–200 proposal page.".into()));
         }
         let db = lock(&self.db)?;
-        let mut stmt=db.prepare("SELECT i.record FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items i ON i.id=peer.item_id JOIN private.grants g ON g.user_id=?1 AND g.collection_id=i.collection_id AND g.role>=1 WHERE own.item_id=?2 AND i.deleted=0 AND (?3 IS NULL OR i.id>?3) ORDER BY i.id LIMIT ?4").map_err(storage)?;
+        let mut stmt=db.prepare("SELECT DISTINCT i.id,i.record FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items i ON i.id=peer.item_id JOIN private.grants g ON g.user_id=?1 AND g.collection_id=i.collection_id AND g.role>=1 WHERE own.item_id=?2 AND i.deleted=0 AND (?3 IS NULL OR i.id>?3) ORDER BY i.id LIMIT ?4").map_err(storage)?;
         let mut items = stmt
             .query_map(
                 params![
@@ -160,7 +160,7 @@ impl LibraryCarePort for Store {
                     after.map(|v| v.to_string()),
                     u32::from(page_limit) + 1
                 ],
-                |r| r.get::<_, String>(0),
+                |r| r.get::<_, String>(1),
             )
             .map_err(storage)?
             .map(|raw| serde_json::from_str::<Item>(&raw.map_err(storage)?).map_err(storage))
@@ -365,9 +365,11 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
             })
             .cloned()
             .collect::<Vec<_>>();
-        if !item.deleted
-            && let Some(album) = collector_app::accepted_album_group_key(item, &record, &history)?
-        {
+        for album in if item.deleted {
+            Default::default()
+        } else {
+            collector_app::music_membership_album_keys(item, &record, &history)?
+        } {
             db.execute(
                 "INSERT INTO album_group_members VALUES(?,?,?)",
                 params![item.id.to_string(), item.collection_id.to_string(), album],

@@ -1,7 +1,9 @@
 //! Group publication adapter: stage every affected revision, commit one marker,
 //! then update ownership and all projections in one checkpoint-sealed transaction.
 use super::*;
-use collector_app::{AlbumGroupPublication, AlbumGroupResult, AlbumGroupingPort};
+use collector_app::{
+    AlbumGroupPublication, AlbumGroupResult, AlbumGroupingPort, AutomaticAlbumGroupCandidate,
+};
 use std::collections::BTreeSet;
 
 #[allow(clippy::too_many_arguments)]
@@ -47,6 +49,46 @@ fn same<T: Serialize>(left: &T, right: &T) -> Result<bool> {
     Ok(serde_json::to_vec(left).map_err(storage)? == serde_json::to_vec(right).map_err(storage)?)
 }
 impl AlbumGroupingPort for Store {
+    fn automatic_album_group_candidates(
+        &self,
+        after: Option<ItemId>,
+        limit: u16,
+    ) -> Result<Vec<AutomaticAlbumGroupCandidate>> {
+        if !(1..=200).contains(&limit) {
+            return Err(Error::Invalid(
+                "Use a 1–200 automatic grouping page.".into(),
+            ));
+        }
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("WITH cohorts AS (
+            SELECT MIN(m.item_id) AS anchor,m.collection_id FROM album_group_members m
+            JOIN items i ON i.id=m.item_id AND i.deleted=0
+            GROUP BY m.collection_id,m.album_id HAVING COUNT(*)>1
+          ) SELECT anchor,(SELECT MIN(g.user_id) FROM private.grants g JOIN private.users u ON u.id=g.user_id
+              WHERE g.collection_id=c.collection_id AND g.role>=1 AND u.enabled=1)
+          FROM cohorts c WHERE (?1 IS NULL OR anchor>?1) AND EXISTS(
+            SELECT 1 FROM private.grants g JOIN private.users u ON u.id=g.user_id
+            WHERE g.collection_id=c.collection_id AND g.role>=1 AND u.enabled=1)
+          ORDER BY anchor LIMIT ?2").map_err(storage)?;
+        statement
+            .query_map(params![after.map(|id| id.to_string()), limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(storage)?
+            .map(|row| {
+                let (item, user) = row.map_err(storage)?;
+                Ok(AutomaticAlbumGroupCandidate {
+                    item_id: item.parse().map_err(storage)?,
+                    user_id: user.parse().map_err(storage)?,
+                })
+            })
+            .collect()
+    }
+
+    fn automatic_album_group_idle(&self, items: &[ItemId]) -> Result<bool> {
+        automatic_group_idle(&*lock(&self.db)?, items)
+    }
+
     fn album_group_publication(&self, group: TransactionId) -> Result<AlbumGroupPublication> {
         let db = lock(&self.db)?;
         let mut statement = db
@@ -253,10 +295,51 @@ impl AlbumGroupingPort for Store {
         }
         let guard = || -> Result<()> {
             let db = lock(&self.db)?;
+            if publication.result.automatic
+                && !automatic_group_idle(
+                    &db,
+                    &publication
+                        .entries
+                        .iter()
+                        .map(|entry| entry.before.id)
+                        .collect::<Vec<_>>(),
+                )?
+            {
+                return Err(Error::Conflict);
+            }
             let allowed:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=? AND u.enabled=1 AND g.collection_id=? AND g.role>=1)",params![user.to_string(),collection.to_string()],|row|row.get(0)).map_err(storage)?;
+            if publication.membership_guards.len() > 200 {
+                return Err(Error::Invalid(
+                    "automatic grouping read set exceeds its limit".into(),
+                ));
+            }
+            if publication.result.automatic {
+                let guard_ids = publication
+                    .membership_guards
+                    .iter()
+                    .map(|(id, _, _)| id.to_string())
+                    .collect::<Vec<_>>();
+                let unseen: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM album_group_members m JOIN items i ON i.id=m.item_id AND i.deleted=0 WHERE m.collection_id=?1 AND m.album_id IN(SELECT value FROM json_each(?2)) AND m.item_id NOT IN(SELECT value FROM json_each(?3)))",
+                    params![collection.to_string(), serde_json::to_string(&publication.membership_groups).map_err(storage)?, serde_json::to_string(&guard_ids).map_err(storage)?], |row| row.get(0)).map_err(storage)?;
+                if unseen {
+                    return Err(Error::Conflict);
+                }
+            }
             drop(db);
             if !allowed {
                 return Err(Error::Forbidden);
+            }
+            for (id, item_digest, metadata_digest) in &publication.membership_guards {
+                let item = Catalog::item(self, *id)?;
+                let metadata =
+                    collector_app::ProcessingPort::metadata_authority(self, collection, *id)?;
+                if item.collection_id != collection
+                    || Digest::sha256(&serde_json::to_vec(&item).map_err(storage)?) != *item_digest
+                    || Digest::sha256(&serde_json::to_vec(&metadata).map_err(storage)?)
+                        != *metadata_digest
+                {
+                    return Err(Error::Conflict);
+                }
             }
             for entry in &publication.entries {
                 if !same(&Catalog::item(self, entry.before.id)?, &entry.before)? {
@@ -389,4 +472,17 @@ impl AlbumGroupingPort for Store {
         finish_v3_publication(self, publication.result.group_id)?;
         Ok(publication.result)
     }
+}
+
+fn automatic_group_idle(db: &Connection, items: &[ItemId]) -> Result<bool> {
+    let ids = serde_json::to_string(items).map_err(storage)?;
+    let busy: bool = db.query_row("SELECT
+      EXISTS(SELECT 1 FROM private.jobs WHERE item_id IN (SELECT value FROM json_each(?1))
+        AND state IN ('queued','running','cancel_requested')) OR
+      EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE target_item_id IN (SELECT value FROM json_each(?1))
+        AND settled=0 AND cancelled=0) OR
+      EXISTS(SELECT 1 FROM private.bulk_library_members m JOIN private.bulk_library b ON b.id=m.batch_id
+        WHERE m.item_id IN (SELECT value FROM json_each(?1)) AND b.state='accepted' AND m.state IN ('ready','queued','running'))",
+      [ids], |row| row.get(0)).map_err(storage)?;
+    Ok(!busy)
 }

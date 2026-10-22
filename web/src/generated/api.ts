@@ -2503,6 +2503,7 @@ export interface components {
             token: string;
         };
         AlbumGroupResult: {
+            automatic?: boolean;
             destination: components["schemas"]["ItemId"];
             group_id: components["schemas"]["TransactionId"];
             sources: components["schemas"]["ItemId"][];
@@ -3480,7 +3481,21 @@ export interface components {
             total_bytes: components["schemas"]["ByteLength"];
             /** Format: date-time */
             updated_at: string;
+            work: components["schemas"]["IngestWork"][];
         };
+        IngestWork: {
+            /** Format: int32 */
+            jobs: number;
+            kind: string;
+            phase: string;
+            shared: boolean;
+            state: components["schemas"]["IngestWorkState"];
+        };
+        /**
+         * @description Current execution only; workflow outcome and preservation are independent.
+         * @enum {string}
+         */
+        IngestWorkState: "running" | "queued" | "waiting" | "cancelling";
         IntakeDestination: {
             /** @enum {string} */
             destination: "separate";
@@ -3590,6 +3605,8 @@ export interface components {
         };
         /** @description Archive-owned current workflow and capture selection. Historical captures stay addressable. */
         ItemLifecycle: {
+            /** @description An explicit group undo preserves the user's choice to keep entries apart. */
+            automatic_grouping_disabled?: boolean;
             /** Format: int64 */
             automatic_metadata_through: number;
             /** Format: int64 */
@@ -4422,6 +4439,7 @@ export interface components {
                 total_bytes: components["schemas"]["ByteLength"];
                 /** Format: date-time */
                 updated_at: string;
+                work: components["schemas"]["IngestWork"][];
             }[];
             next_cursor?: string | null;
         };

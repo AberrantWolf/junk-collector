@@ -16,6 +16,46 @@ See [publication acceptance](validation/container-beta2-publication-2026-10-21.m
 Remaining device, network and owned-format checks keep their limits below.
 Completed milestones retain their existing numbers and dated evidence.
 
+## Completed source delivery — automatic multidisc grouping, 2026-10-22
+
+Clear accepted MusicBrainz album/disc matches now group existing music entries
+automatically. Conflicting/incomplete/duplicate-position cases retain reviewed
+grouping. Atomic publication preserves originals, physical-copy records, manual
+and unknown data; busy work is fenced/deferred, and undo preserves separation
+across restart/reindex. Existing metadata is covered through paginated recovery.
+See [dated acceptance](validation/automatic-album-grouping-2026-10-22.md). This
+supersedes the confirmation-only policy in the dated delivery below. Source-only:
+no live collection merge, image publication or NAS restart was performed.
+
+## Completed source delivery — ambiguity-aware grouping, 2026-10-22
+
+Disc membership is assessed across viable album options, independently of choosing
+album metadata. Equivalent manual release/version selections remain compatible;
+unresolved alternatives survive grouping and can be reviewed later. A unique
+accepted/manual target admits unresolved siblings; competing established targets
+remain separate. Safe compatible subsets proceed without an ambiguous/conflicting
+peer vetoing the entire cohort. Existing atomic preservation, busy/permission
+fences and explicit undo separation remain in force. Catalog schema 15 rebuilds
+older disposable indexes without resetting private work or archive data.
+See [follow-up acceptance and limits](validation/automatic-album-grouping-2026-10-22.md#ambiguity-follow-up--2026-10-22).
+This closes the audited grouping gaps; source-only, without NAS deployment.
+The 2026-10-22 commit review additionally fences incomplete/conflicting album
+alternatives and cleared automatic metadata; see the same dated validation record.
+It also retains completed import outcomes when merged source entries are retired.
+Import source/review controls wait for draft restoration, preventing an immediate
+source choice from being overwritten by an older asynchronous load.
+
+## Completed source delivery — workers, metadata priority and Activity, 2026-10-21
+
+Configurable 1–8 processing workers (default four), a separate copy cap and one
+provider execution now use bounded scheduling preference for finishing ready discs.
+Ready metadata resolution overtakes optional encoding without monopolizing other
+processing or copy turns. The compact Work filters and contextual Activity Back
+repair are included. Existing album grouping proposes accepted matching identities;
+combining existing entries requires confirmation. See [dated validation](validation/configurable-workers-2026-10-21.md).
+Source changes do not restart or publish the active NAS installation. Extra inbox
+copy elimination remains the separate HL-09 follow-up below.
+
 ## Prioritization and execution
 
 Optimize for one home server, a few trusted users, valuable originals, ordinary
@@ -758,6 +798,15 @@ Existing passing HL-07A imports do not require cleanup.
 
 #### Collection convenience and performance follow-ups
 
+- Inbox import I/O, reported 2026-10-21: the current path copies inbox files to
+  private import staging, then copies into archive-local publication staging before
+  rename. Review a single archive-local staging copy for inbox imports, with safe
+  source currency, cancellation, restart, retry and cross-filesystem behavior.
+  Preserve the source inbox and existing accepted imports. The separate dispatch
+  starvation finding is repaired in the deliveries above: copying and ready
+  processing now share configurable capacity fairly. Removing the extra copy
+  remains a follow-up; the dispatch repair does not change publication I/O.
+
 Completed 2026-10-18: Library “Back to results” now returns through nested Work &
 history entries to the original list, preserving loaded pages, scroll and focus.
 Intentional browser Back/Forward work restoration and direct-link returns remain
@@ -921,10 +970,45 @@ Native/offline gaps apply to the actual supported client, Trash Amp.
 
 ## 4. Deferred advanced capabilities and retained long-term requirements
 
-### HL-12 — Automatic certificate rotation, discovery and route failover
+### HL-12 — HTTPS relay, LAN switching and deferred certificate rotation
 
-**State:** S04/C02 unimplemented; manual trusted endpoints work. The design below is
-a reference to reassess, not a fixed contract.
+**State:** requested delivery plan recorded 2026-10-22; implementation and external
+acceptance remain unstarted. Manual trusted endpoints work; S04/C02 remain
+unimplemented. This planning request does not replace the active implementation
+assignment above or authorize paid provisioning/live configuration changes.
+
+**Later home-listening request, 2026-10-22:** the user can configure local DNS.
+First deliver the [LAN-first milestone](lan-playback-first.md): the existing
+HTTPS origin resolves locally to a trusted home proxy for browser and Trash Amp.
+Qualify actual playback/seek/download and restart with WAN disconnected, normal
+trust/login and unchanged public-surface permissions. This is network routing at
+connection time, not active-stream failover. Allow about 0.5–1.5 engineering days
+if the existing resolver/proxy fit. If blocked, the bounded native-selection
+fallback is about 3–6 days across trust, reads, UI and actual acceptance. Both are
+plans, not implementation claims. This milestone may finish before the Iroh trial
+and remote relay; it does not authorize changes to the live installation here.
+The user's macOS and Windows work machines must retain Palo Alto GlobalProtect.
+First qualify their effective DNS and direct NAS reachability separately; the
+estimate assumes a usable local path. Native
+endpoint selection addresses DNS/discovery only when that path is reachable.
+Record an allowed remote route or supported IT exception if the VPN prevents it;
+personal-device split-DNS success does not qualify this work-machine requirement.
+
+The [HTTPS relay and LAN-switching plan](https-relay-and-lan-switching.md) owns
+the concrete listener-without-VPN outcome: normal browser/native remote HTTPS,
+automatic verified native local connections and recovery, a bounded Iroh trial
+before writing a general native route/resume manager, and extraction of reusable
+mechanisms into `junk-libs-net`. It includes dated VM/transfer estimates for geographically spread
+listeners and changes across deployment, Collector, shared transport and Trash Amp.
+Keep this as one complete delivery with its dependencies and actual native/output
+acceptance; do not split implementation into independent layer handoffs. It is
+not a new prerequisite for already supported manual single-route use or release.
+
+**Done when:** the plan's remote enrollment/listening, offline LAN, route-loss/
+recovery, identity/access denial, exact byte continuity and affected-sibling checks
+are qualified on named real clients, with deployed costs/capacity and rollback
+recorded. Update this entry, plan, architecture and status together. The following
+certificate-rotation ideas remain conditional and outside that first delivery.
 
 Automatic authenticated local-identity rotation with generations, old/new grace
 listeners, offline transitions, atomic trust storage and restart recovery is substantial
@@ -932,12 +1016,12 @@ work. Ordinary HTTPS renewal and explicit re-enrollment guidance belong to HL-05
 Prioritize this machinery only if expiry/recovery burden or a concrete threat warrants
 it. Never accept unexpected keys or bypass certificate validation in the meantime.
 
-mDNS, health probing, LAN preference/hysteresis and verified ranged failover are
-conveniences for multi-route use, not prerequisites for manually configured encrypted
-LAN or public access. Inspect C01 gaps in the actual consumers first; verified trust
-must precede credentials, and resumed bytes must bind to immutable content. Re-run
-backup qualification if rotation adds durable state. Actual LAN/tailnet tests remain
-required before claiming these capabilities.
+mDNS, health probing, LAN preference/hysteresis and verified ranged failover now
+have the requested bounded design above. They remain unnecessary for manually
+configured encrypted single-route access. Verified trust must precede credentials,
+and resumed bytes must bind to immutable content. Re-run affected backup/trust
+state qualification when durable state changes. Actual LAN/remote tests remain
+required before claiming automatic routing.
 
 Potential rotation design, if needed: authenticate new trust through an already
 trusted route; bind old/new certificate fingerprints and increasing generation to
@@ -1030,6 +1114,18 @@ unlimited future-retention requirement.
 
 The disabled DAT-o-MATIC downloader stays disabled. Manual download/upload is
 implemented; provider-access restoration or automated scraping is not an open task.
+
+## Completed requested import visibility — 2026-10-21
+
+Live-use follow-up: Imports now distinguishes albums with active work from queued
+and waiting albums, and shows actual ingest stages, concurrent task counts and
+shared provider execution. It includes unfinished audio tracks after batch
+admission and retains polling through metadata/artwork/preparation and reload.
+Copying and ready processing now advance fairly within the existing two processing
+slots; neither backlog monopolizes dispatch and either can borrow idle capacity.
+This is a source delivery; it does not update the running NAS or publish a new
+image. See [implementation](implementation-status.md#import-queue-and-active-stages--2026-10-21-delivered-in-source)
+and [local acceptance](validation/ingest-progress-2026-10-21.md).
 
 ## Completed beta release — 2026-10-21
 

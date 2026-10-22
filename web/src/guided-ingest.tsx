@@ -1,5 +1,6 @@
 import {loadDraft,saveDraft} from './intake-drafts';
 import PurchaseFields from './purchase-fields';
+import IngestStatus from './ingest-status';
 import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
 import {uploadPackage,type UploadProgress} from './package-upload';
@@ -166,8 +167,9 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   <button disabled={busy} onClick={()=>window.dispatchEvent(new Event('collector-open-work'))}>Open work &amp; history</button>
   </>}
   {detail&&<details className="ingest-detail" open={detailOpen} onToggle={event=>setDetailOpen(event.currentTarget.open)}><summary>Details: {detail.summary.package_name}</summary>
+   <IngestStatus summary={detail.summary}/>
    {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {target?.id===detail.import.association.item_id?target.title:'its saved collection entry'}. Other discs attached to that entry are retained.</p>}
-   {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label={detail.import.source.kind==='browser'?'Upload progress':'Copying original files'} completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Uploaded files are saved on the server."/>}
+   {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label={detail.import.source.kind==='browser'?'Upload progress':'Original files copied'} completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Uploaded files are saved on the server."/>}
    {detail.import.source.kind==='inbox'&&<section aria-label="Inbox source cleanup" className="notice inbox-cleanup">
     <strong>Inbox source files</strong>
     <p>Originals stay in the inbox unless you explicitly remove them here. Cleanup is available after preservation succeeds and requested processing finishes. Optional metadata or preparation failures can still be retried from the archive. Finish other inbox imports first; new inbox imports pause while cleanup runs.</p>
@@ -187,7 +189,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
    {detail.cleanup&&<p role="status">Temporary files cleared: {bytes(detail.cleanup.reclaimed_bytes)} · Remaining: {bytes(detail.cleanup.pending_bytes)}{detail.cleanup.cleanup_pending?' · cleanup pending':' · cleanup complete'}</p>}
    {detail.attempts.length>0&&<details><summary>Technical details: previous attempts</summary>{detail.attempts.map((attempt,index)=><p key={`${attempt.job_id}:${attempt.attempt}:${index}`}><strong>{stateLabel(attempt.step)} · attempt {attempt.attempt}</strong> — {stateLabel(attempt.state)}{attempt.diagnostic&&<> · {attempt.diagnostic}</>}</p>)}</details>}
    {detail.summary.capture_id&&<details><summary>Technical details</summary><p>Import ID: {detail.summary.import_id}</p><p>Capture ID: {detail.summary.capture_id}</p></details>}
-   <div className="ingest-steps">{detail.steps.map(step=><div key={step.step}><strong>{stateLabel(step.step)}</strong><span>{stateLabel(step.state)}</span>{step.message&&<p>{step.message}</p>}{step.state==='active'&&<WorkProgress label={`${stateLabel(step.step)} in progress`} detail="The server is working; this view refreshes automatically."/>}{step.retryable&&<button disabled={busy} onClick={()=>void retry(step.job_id)}>Retry this step</button>}</div>)}</div>
+   <div className="ingest-steps">{detail.steps.map(step=><div key={step.step}><strong>{step.step==='staging'&&detail.import.source.kind==='inbox'?'Copy files from inbox':stateLabel(step.step)}</strong><span>{stateLabel(step.state)}</span>{step.message&&<p>{step.message}</p>}{step.retryable&&<button disabled={busy} onClick={()=>void retry(step.job_id)}>Retry this step</button>}</div>)}</div>
    {!uploadProgress&&detail.summary.permissions.can_resume_upload&&<form aria-label="Resume guided package" onSubmit={event=>{event.preventDefault();void resume();}}><p>Select the original folder or files. Received bytes will be checked before the upload continues.</p><label>Original folder<input type="file" multiple {...{webkitdirectory:''}} disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><label>Original files<input aria-label="Resume original package files" type="file" multiple disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><button disabled={busy||!resumeFiles.length}>Resume upload</button></form>}
    {detail.summary.permissions.can_cancel&&<button disabled={busy} onClick={()=>void cancel()}>Cancel remaining work</button>}{detail.summary.permissions.can_discard&&<button disabled={busy} onClick={()=>void discard()}>Discard unfinished import</button>}
    {detail.summary.outcome==='failed'&&!detail.steps.some(step=>step.retryable)&&<button disabled={busy} onClick={()=>void retry(null)}>Retry optional processing</button>}
