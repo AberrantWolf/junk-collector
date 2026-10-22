@@ -44,10 +44,16 @@ try{
  assert.equal(direct,200,'worker failed to own media requests');
  // Wrong pin must fail under the browser's ordinary security policy.
  assert.equal(await page.evaluate(async()=>{const descriptor=await(await fetch('/api/v1/playback/routes')).json();const connection=new WebTransport(descriptor.endpoints[0].webtransport_url,{serverCertificateHashes:[{algorithm:'sha-256',value:new Uint8Array(32)}]});try{await Promise.race([connection.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),3000))]);return false;}catch{return true;}finally{connection.close();void connection.closed.catch(()=>{});}}),true);
+ // Server-side logout must stop even already buffered WebTransport playback.
+ const revokedAudio=await page.locator('audio').elementHandle();
+ assert.equal(await page.evaluate(async()=>(await fetch('/api/v1/auth/logout',{method:'POST'})).status),204);
+ await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
+ assert.deepEqual(await revokedAudio.evaluate(audio=>({paused:audio.paused,src:audio.getAttribute('src')})),{paused:true,src:null});await revokedAudio.dispose();
+ await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await player.waitFor();
  // Fail closed when the transport is unavailable: no ordinary HTTP media request.
- await player.getByRole('button',{name:'Pause',exact:true}).click();await page.reload();let mediaRequests=0;page.on('request',request=>{if(request.url().startsWith(origin+fixture.path))mediaRequests++;});
+ await page.reload();let mediaRequests=0;page.on('request',request=>{if(request.url().startsWith(origin+fixture.path))mediaRequests++;});
  await page.evaluate(()=>{window.WebTransport=undefined;});await player.getByRole('button',{name:'Play',exact:true}).click();await player.getByRole('alert').filter({hasText:'does not support secure local playback'}).waitFor();assert.equal(await page.locator('audio').getAttribute('src'),null);assert.equal(mediaRequests,0);
- assert.deepEqual(errors,[]);console.log(`Local playback passed in Chrome ${await browser.version()}: automatic pinned QUIC, actual audio, forward/back seeks, public media refusal, wrong pin and unsupported-transport fail closed.`);
+ assert.deepEqual(errors,[]);console.log(`Local playback passed in Chrome ${await browser.version()}: automatic pinned QUIC, actual audio, forward/back seeks, public media refusal, wrong pin, live logout/source release and unsupported-transport fail closed.`);
 }finally{
  await browser?.close();server.kill('SIGTERM');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(r,4000))]);if(server.exitCode===null){server.kill('SIGKILL');await new Promise(r=>server.once('exit',r));}await rm(scratch,{recursive:true,force:true});
 }

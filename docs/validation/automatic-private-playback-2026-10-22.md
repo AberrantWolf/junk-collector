@@ -20,7 +20,9 @@ is performed by this delivery.
 - An independent HTTP client receives 503 for media on the control listener.
   The worker owns the real media requests. A wrong browser pin rejects. When
   WebTransport is unavailable, the player leaves its source unset, displays an
-  actionable error and emits no ordinary HTTP media request.
+  actionable error and emits no ordinary HTTP media request. Server-side logout during actual
+  WebTransport playback also releases the detached audio element and clears its
+  source; the listener can sign in again with the saved queue intact.
 - Real production HTTPS/QUIC integration covers exact ranged bytes, seeks,
   cancellation, wrong certificate pins, unapproved CONNECT origin, wrong grant,
   wrong target, expired grant, oversized range, browser logout and collection
@@ -50,7 +52,10 @@ smoke test passes actual FLAC playback, pause/resume, seek, queue progression,
 lists, source detachment and grant/session revocation, along with management,
 WebAuthn, imports and mobile layout. This legacy HTTP-media fixture explicitly
 disables the additional transport; the dedicated production test above covers it.
-Affected server tests are rerun after subsequent transport refinements.
+Affected server tests are rerun after subsequent transport refinements. Trash Amp
+passes its full workspace tests, formatting and strict all-target Clippy against
+the resolvable Collector Git pin `14d56ab4cceaf82c09086d56d987484bab46d618`,
+without command-line patches or local path dependencies.
 
 ## Deliberate limits
 
