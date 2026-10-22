@@ -1,5 +1,10 @@
 # Remaining work — home-lab priorities
 
+Beta.3 packaging was authorized 2026-10-22 for the reviewed worker/progress/grouping
+delivery. [Release notes](releases/v0.1.0-beta.3.md) describe catalog rebuild,
+automatic grouping of existing entries and the recovery/update procedure. Image
+publication is pending the release workflow; actual NAS updating remains separate.
+
 Reassessed 2026-10-09 at the user's request. This is the **single authoritative
 queue** for remaining work, including qualification and deferred ideas. It
 supersedes assignment/order sections in earlier plans, the old serial waves and

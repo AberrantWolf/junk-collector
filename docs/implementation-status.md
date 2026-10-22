@@ -1,5 +1,14 @@
 # Implementation status
 
+## Beta.3 packaging — 2026-10-22
+
+The reviewed worker/progress/grouping delivery is being packaged as beta.3 at the
+user's request. Workspace and lockfile versions agree. Rust 1.99.1 remains the
+official current stable toolchain checked on 2026-10-22. Public image readiness
+depends on the Container release workflow's native runtime and anonymous-pull
+verification; packaging alone is not publication or NAS deployment acceptance.
+See [release notes and update behavior](releases/v0.1.0-beta.3.md).
+
 ## Home LAN playback, HTTPS relay and native switching — 2026-10-22 plan only
 
 The requested [concrete delivery plan](https-relay-and-lan-switching.md) records
