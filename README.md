@@ -18,17 +18,18 @@ Each collection contains either games or music.
 | Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
 
-## Beta.2
+## Beta.3
 
-[`v0.1.0-beta.2`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.2)
-packages game-disc CD audio, PDF/text attachments, optional backup-age reminders and
-upload hardening. It also fixes the upgrade bug in withdrawn beta.1.
-Docker images support **linux/amd64** and **linux/arm64**.
-Synology DS1522+ uses AMD64 automatically.
+[`v0.1.0-beta.3`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.3)
+adds configurable workers, current ingest activity and automatic multidisc grouping
+with preserved metadata choices and guarded undo. Docker images support
+**linux/amd64** and **linux/arm64**; publication and anonymous pulls passed.
+Synology DS1522+ uses AMD64 automatically. Actual beta.3 NAS updating is a separate
+operator check. See [publication evidence](docs/validation/container-beta3-publication-2026-10-22.md).
 
 **Back up before updating.** This beta targets personal home-lab use. Storage and
-interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.2.md)
-for update requirements and supported limits.
+interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.3.md)
+for catalog rebuild, existing-entry grouping and update requirements.
 
 ## What it supports
 

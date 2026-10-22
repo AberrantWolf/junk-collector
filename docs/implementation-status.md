@@ -1,13 +1,15 @@
 # Implementation status
 
-## Beta.3 packaging — 2026-10-22
+## Beta.3 published — 2026-10-22
 
-The reviewed worker/progress/grouping delivery is being packaged as beta.3 at the
-user's request. Workspace and lockfile versions agree. Rust 1.99.1 remains the
-official current stable toolchain checked on 2026-10-22. Public image readiness
-depends on the Container release workflow's native runtime and anonymous-pull
-verification; packaging alone is not publication or NAS deployment acceptance.
-See [release notes and update behavior](releases/v0.1.0-beta.3.md).
+The reviewed worker/progress/grouping delivery is published as beta.3 from signed
+tag source `d80013530ff8147f8a534dba819eeaaaa813be1e`. Exact-source checks,
+native AMD64/ARM64 container smoke tests and anonymous public pulls passed.
+The bundle pins the verified multiarch digest; `preview` matches it and stable
+`latest` remains absent. Rust 1.99.1 is unchanged. Actual beta.3 NAS/Portainer
+updating remains an operator check, distinct from publication acceptance.
+See [publication evidence](validation/container-beta3-publication-2026-10-22.md)
+and [release notes and update behavior](releases/v0.1.0-beta.3.md).
 
 ## Home LAN playback, HTTPS relay and native switching — 2026-10-22 plan only
 
