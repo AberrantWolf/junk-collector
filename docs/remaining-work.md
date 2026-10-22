@@ -1,10 +1,13 @@
 # Remaining work — home-lab priorities
 
-**Beta.4 publication pending — 2026-10-22:** the automatic private playback release
-candidate is prepared. Publication and `preview` promotion are authorized after
-container validation. No beta.4 image is ready yet; see [publication tracking](validation/container-beta4-publication-2026-10-22.md)
-and [update/client requirements](releases/v0.1.0-beta.4.md). NAS deployment remains
-separate; Trash Amp needs its updated client build.
+**Beta.4 published — 2026-10-22:** the automatic private playback image is verified
+ready on `ghcr.io/aberrantwolf/junk-collector:preview`. Both native architectures,
+container smoke, anonymous pulls, source labels and pinned installation bundle
+passed. See [publication evidence](validation/container-beta4-publication-2026-10-22.md)
+and [update/client requirements](releases/v0.1.0-beta.4.md). No NAS deployment was
+performed; Trash Amp needs its matching new client build. The user authorized
+replacing redundant publication rebuilds with promotion of validated images;
+that pipeline improvement follows this completed release.
 
 Beta.3 is published 2026-10-22 for the reviewed worker/progress/grouping delivery.
 Both native architectures, anonymous pulls, `preview` and pinned bundle checks
