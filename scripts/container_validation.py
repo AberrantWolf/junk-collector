@@ -126,6 +126,13 @@ def assemble(platform_dir, destination):
             mediaType=index['mediaType'], manifests=[dict(mediaType=index['mediaType'], digest=digest,
             size=len(encoded), annotations={'org.opencontainers.image.ref.name': 'release'})])))
         with tarfile.open(destination, 'w') as output:
+            # OCI readers must not invent parent directories from a root-owned
+            # first file: rootless skopeo then attempts a forbidden parent chown.
+            for name in ('blobs', 'blobs/sha256'):
+                directory = tarfile.TarInfo(name)
+                directory.type = tarfile.DIRTYPE
+                directory.mode = 0o755
+                output.addfile(directory)
             for path in sorted(root.rglob('*')):
                 if path.is_file():
                     info = output.gettarinfo(str(path), arcname=str(path.relative_to(root)))

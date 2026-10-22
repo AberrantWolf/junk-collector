@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 import tarfile
 import tempfile
@@ -170,6 +173,25 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(validation.saved_config_digest(saved), digest(payload))
                 if payload != config_bytes:
                     self.assertNotEqual(validation.saved_config_digest(saved), config)
+
+    @unittest.skipUnless(shutil.which('skopeo') and os.geteuid() != 0, 'requires rootless skopeo')
+    def test_rootless_oci_transport_preserves_merged_digest_and_both_platforms(self):
+        expected = {}
+        for architecture in ('amd64', 'arm64'):
+            index, runtime, _ = fixture(self.root / ('collector-' + architecture + '.oci.tar'), architecture)
+            (self.root / (architecture + '.json')).write_text(json.dumps(dict(digest=index)))
+            expected['linux/' + architecture] = runtime
+        archive = self.root / 'rootless.tar'
+        merged = validation.assemble(self.root, archive)
+        source = 'oci-archive:' + str(archive)
+        raw = subprocess.check_output(['skopeo', 'inspect', '--raw', '--no-creds', source], timeout=30)
+        self.assertEqual(digest(raw), merged)
+        self.assertEqual(release.platforms(json.loads(raw)), expected)
+        destination = 'oci:' + str(self.root / 'copied') + ':release'
+        subprocess.run(['skopeo', 'copy', '--all', '--preserve-digests', source, destination], check=True, timeout=30,
+                       stdout=subprocess.DEVNULL)
+        copied = subprocess.check_output(['skopeo', 'inspect', '--raw', destination], timeout=30)
+        self.assertEqual(digest(copied), merged)
 
     def test_oci_merge_rejects_wrong_native_platform_tamper_and_paths(self):
         for architecture in ('amd64', 'arm64'):

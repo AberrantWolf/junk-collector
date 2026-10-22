@@ -10,7 +10,8 @@ production deployment is authorized for qualification.
 
 Local checks passed:
 
-- Ten provenance/archive/recovery tests in `check_container_validation.py`: full
+- Eleven provenance/archive/recovery tests (ten local tests plus a rootless
+  skopeo integration test enabled where the tool is installed) in `check_container_validation.py`: full
   source/version/run binding; failed/untrusted/rerun identity; expired/mismatched
   immutable artifact metadata; ZIP digest, member/path and expansion controls;
   deterministic real OCI graph assembly with exact native config identity;
@@ -40,3 +41,26 @@ when the inspect ID differs, still requiring the exact OCI config SHA-256. It
 accepts both save layouts and rejects altered config bytes; the regression test
 uses real config blobs, plus classic/manifest-ID controls. This does not waive
 runtime identity or the native smoke. Fresh exact-source CI acceptance is required.
+
+## Rootless OCI reader correction
+
+[Validation at 556a135](https://github.com/AberrantWolf/junk-collector/actions/runs/39790565049)
+passed all source checks and **both native build/identity/smoke jobs**. The merged
+archive then failed rootless skopeo extraction: omitted directory headers caused
+its untar mechanism to create/chown implicit root-owned parents. No reusable
+validation artifact or registry write was admitted.
+
+The archive now includes explicit `blobs` and `blobs/sha256` directory headers.
+A local nonroot Skopeo 1.22.3 run reproduced the original permission failure and
+accepted the corrected layout. The actual native exports from the failed run
+were reassembled and copied with `--all --preserve-digests`; the merged index stayed
+`sha256:122bc599c4787037096d8ffbee11a02204da588437bc6d2dc27bde2b564c9eae`,
+with both runtimes and attestations retained. This used the official Skopeo image
+`quay.io/skopeo/stable@sha256:fb3933825a29be3664abbe5634feb68d1686e8a47460fdcfa3a73bd72455e1d7`
+as UID/GID 1001, disposable containers, and read-only fixture mounts. No Collector
+server was executed or deployed in these local transport checks.
+
+An executable rootless transport regression now checks real OCI inspect/copy and
+preserved digests. The workflow runs it after installing skopeo, before accepting
+candidate exports. Fresh exact-source full validation and reuse rehearsal remain
+required; local reproduction does not make the earlier failed run acceptable.

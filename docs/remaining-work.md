@@ -3,7 +3,9 @@
 **Active authorized follow-up — build once, promote validated images (2026-10-22):**
 source implementation is on `codex/publish-validated-images`; local provenance,
 archive identity and failure/recovery tests pass. The first CI run exposed and
-corrected a Docker/containerd ID assumption; fresh validation is required. Complete the actual native
+corrected a Docker/containerd ID assumption. The next passed both native smokes
+and exposed a rootless archive-directory issue, now reproduced/fixed locally;
+fresh full validation is required. Complete the actual native
 nonpublishing validation and same-source reuse rehearsal before declaring this
 delivery complete. Keep beta.4/`preview`, the NAS and Tailscale unchanged. See
 [contract](container-release-pipeline.md) and [pending acceptance](validation/container-promotion-2026-10-22.md).

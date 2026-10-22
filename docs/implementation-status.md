@@ -14,7 +14,10 @@ without publishing. See [operator contract](container-release-pipeline.md) and
 [qualification record](validation/container-promotion-2026-10-22.md).
 Local policy/failure tests and workflow lint pass. Initial CI passed source
 gates and ARM64 smoke; AMD64 exposed a Docker store ID assumption, now corrected
-without relaxing exact config identity. Fresh full CI acceptance remains pending. Beta.4 and the running NAS are unchanged.
+without relaxing exact config identity. The next run passed both native smokes
+and exposed a rootless archive-directory issue; its fix passes actual local
+rootless OCI copy with unchanged manifest digests. Fresh full CI acceptance
+remains pending. Beta.4 and the running NAS are unchanged.
 
 **Beta.4 published — 2026-10-22:** the automatic private playback image is verified
 ready on `ghcr.io/aberrantwolf/junk-collector:preview`. Both native architectures,
