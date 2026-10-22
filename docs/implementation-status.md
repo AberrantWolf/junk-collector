@@ -1,5 +1,11 @@
 # Implementation status
 
+**Beta.4 publication pending — 2026-10-22:** the automatic private playback release
+candidate is prepared. Publication and `preview` promotion are authorized after
+container validation. No beta.4 image is ready yet; see [publication tracking](validation/container-beta4-publication-2026-10-22.md)
+and [update/client requirements](releases/v0.1.0-beta.4.md). NAS deployment remains
+separate; Trash Amp needs its updated client build.
+
 ## Beta.3 published — 2026-10-22
 
 The reviewed worker/progress/grouping delivery is published as beta.3 from signed
