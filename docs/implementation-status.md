@@ -1,5 +1,21 @@
 # Implementation status
 
+## Direct HTTPS remote media — plan selected, 2026-10-23
+
+The user selected Cloudflare login/authentication/control with a separate direct
+HTTPS media-only endpoint. The [plan](direct-https-media-plan.md) covers shared
+scoped grants for web/native, ordinary HTTP/range delivery, dedicated TLS ingress,
+explicit security boundaries and an actual phone-over-cellular reachability/read
+test. The same-day isolation refinement selects a separate media executable/
+container, read-only content and a narrow core authorization socket; one-origin
+proxy composition remains supported without combining processes. Read-only mounts
+protect integrity but permit disclosure of mounted content, and containers share
+the host kernel. These remote capabilities are **not implemented or deployed**. Current
+private playback and its deployment limits remain below; the existing remote
+fallback flag does not supply a separate approved media origin. No DNS, router,
+NAS, certificates, releases or client configuration changed during planning.
+HL-12 retains delivery and HL-05 retains deployment acceptance.
+
 ## LAN candidate selection — source repair accepted, 2026-10-23
 
 The deployed beta.4 discovery could omit the host LAN address after sorting and

@@ -344,6 +344,14 @@ mechanisms remain useful; do not remove working services just to retire a client
 
 ### HL-05 — Linux, NAS and optional public-Internet deployment
 
+**Requested remote-media deployment design, 2026-10-23:** retain Cloudflare for
+login/authentication/control and use a dedicated direct HTTPS media ingress.
+[HL-12](#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation) owns the
+complete source delivery in the [selected plan](direct-https-media-plan.md);
+this entry owns later authorized DNS/TLS/OpenWrt/NAS installation, certificate
+renewal, public exposure/rollback checks and actual cellular acceptance.
+Planning changes no live infrastructure and does not qualify remote playback.
+
 **State:** Linux ARM64 Docker Desktop runtime/persistence passed locally;
 [Synology x86-64 import/download, recreated-container persistence and full backup/restore](validation/synology-deployment-2026-10-19.md)
 passed on the earlier test installation. The permanent Portainer/Cloudflare setup
@@ -1006,6 +1014,27 @@ Native/offline gaps apply to the actual supported client, Trash Amp.
 ## 4. Deferred advanced capabilities and retained long-term requirements
 
 ### HL-12 — HTTPS relay, LAN switching and deferred certificate rotation
+
+**Selected remote-listening plan, 2026-10-23 — design only:** the user requests
+Cloudflare login/authentication/control plus a separate direct public HTTPS
+media-only endpoint. Follow [the direct-media plan](direct-https-media-plan.md)
+for one complete web/Trash Amp delivery: shared session/device-bound scoped
+grants, ordinary HTTPS/ranges, explicit media/router and process-risk boundaries,
+private-first/direct-remote selection with no Cloudflare music fallback, setup UI
+and an actual phone-over-cellular reachability/read test. A local/hairpin check
+cannot qualify Internet reachability. Public activation requires dedicated proxy
+exposure, certificate renewal and the HL-05 deployment checks. The plan reduces
+exposed operations and now selects the user's same-day separate-executable/
+container refinement: read-only selected content, no core database/credentials,
+socket-only scoped authorize/recheck/release and tested network/mount restrictions.
+Read-only mounted data can still be disclosed by a compromised media process;
+shared-kernel escape is a residual risk. Single-origin path proxying remains
+possible through the same separate process; DNS cannot split Cloudflare/direct
+traffic by URL path. Remote delivery remains unimplemented;
+no release, DNS/firewall/NAS change or new implementation assignment is performed
+by this planning update. This selects direct HTTPS instead of the earlier relay/
+Iroh-first remote ordering; those trials, VPN integration and a mobile Trash Amp
+port are not dependencies. Retain the unrelated active assignment below.
 
 
 **Source delivery, 2026-10-22:** automatic trusted private media selection now

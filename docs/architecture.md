@@ -1,5 +1,35 @@
 # Architecture
 
+## Planned direct HTTPS media with Cloudflare control — 2026-10-23
+
+The user selected a dedicated public HTTPS media origin while retaining the
+existing Cloudflare login/authentication/control origin. The
+[direct-media plan](direct-https-media-plan.md) defines the media-only router,
+application-owned scoped browser/native grants, ordinary HTTPS/range playback,
+explicit endpoint eligibility and a phone-over-cellular reachability/read test.
+This is **design only**, not implemented or deployed. HL-12 owns delivery and
+HL-05 owns installation acceptance; it supersedes relay/Iroh-first ordering for
+this remote outcome without replacing existing private playback.
+
+The media listener must not compose the general client or management router,
+accept login cookies/long-lived native credentials, or enable Cloudflare music
+fallback. Grant issuance remains on the authenticated control connection; live
+account/collection checks remain application policy. The user's isolation follow-up
+selects a planned separate `collector-media` executable/container: read-only selected
+content, no core database/secrets or host network, and a dedicated Unix-socket
+authorize/recheck/release adapter in core. The storage adapter resolves immutable
+file locators; media has no app/store/providers dependency and never parses the
+archive catalog. Read-only mounted content can still be disclosed by a compromised
+media process; existing payload layout is not an audio-only confidentiality boundary.
+Containers share the host kernel. These are planned boundaries, not delivered
+isolation. Single-origin path proxying can use the same separated processes;
+two hostnames are needed for the chosen split Cloudflare/direct ingress, not for
+container isolation itself. DNS cannot split one hostname's traffic by URL path.
+External reachability is confirmed by an outside observer, not a server's
+hairpin request to its own public IP, and never establishes authorization.
+
+## Existing private playback and dated LAN design
+
 The accepted home-listening **stopgap** uses a dedicated manual LAN HTTPS hostname,
 `collector-lan.awkwardexplorer.com`, resolving to the reserved NAS address even
 through public DNS. It serves the same public/client listener and account store;
