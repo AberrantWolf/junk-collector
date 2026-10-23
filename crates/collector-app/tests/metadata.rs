@@ -400,3 +400,14 @@ fn missing_album_identity_is_inconclusive_and_name_search_never_auto_resolves() 
             .is_none()
     );
 }
+
+#[test]
+fn domain_override_command_decodes_nested_payload_from_real_json() {
+    let command:collector_app::UpdateMetadataAuthorityCommand=serde_json::from_str(r#"{"expected_revision":1,"change":{"change":"set_domain_overrides","overrides":{"module":"org.junk.games","schema_version":1,"payload":{"platform":"Sega - Saturn","automatic_platform":false}}}}"#).unwrap();
+    let collector_app::MetadataAuthorityChange::SetDomainOverrides { overrides } = command.change
+    else {
+        panic!("wrong command");
+    };
+    let value: collector_modules::games::GameMetadataOverrides = overrides.payload.parse().unwrap();
+    assert_eq!(value.platform.as_deref(), Some("Sega - Saturn"));
+}

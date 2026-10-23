@@ -4,8 +4,8 @@ import type {components} from './generated/api';
 
 type Summary=components['schemas']['CollectionListSummary'];
 type ListPage={items:Summary[];next_cursor:string|null};
-type Pending={stage:'create';name:string;key:string}|{stage:'append';list:Summary;key:string};
-type Props={userId:string;collectionId:string;itemId:string;label:string;source?:string;track?:number;onClose:()=>void;onOpen:(id:string)=>void;onSessionExpired:()=>void};
+type Pending={stage:'create';name:string;kind:Summary['kind'];key:string}|{stage:'append';list:Summary;key:string};
+type Props={userId:string;collectionId:string;itemId:string;label:string;kind?:Summary['kind'];source?:string;track?:number;onClose:()=>void;onOpen:(id:string)=>void;onSessionExpired:()=>void};
 
 function restorePending(storageKey:string,collectionId:string):Pending|undefined{
  try{
@@ -13,13 +13,14 @@ function restorePending(storageKey:string,collectionId:string):Pending|undefined
   if(!text||text.length>10000)return;
   const value=JSON.parse(text) as Pending;
   if(typeof value.key!=='string')return;
-  if(value.stage==='create'&&typeof value.name==='string')return value;
+  if(value.stage==='create'&&typeof value.name==='string'&&['items','music_tracks'].includes(value.kind))return value;
   if(value.stage==='append'&&value.list?.collection_id===collectionId&&typeof value.list.id==='string'&&typeof value.list.name==='string'&&Number.isSafeInteger(value.list.revision)&&value.list.revision>0)return value;
  }catch{/* A malformed or unavailable browser draft does not authorize a command. */}
 }
 
-export default function CollectionListChooser({userId,collectionId,itemId,label,source,track,onClose,onOpen,onSessionExpired}:Props){
- const storageKey=`collector.list-addition.v1.${userId}/${collectionId}/${itemId}/${source||'album'}/${track||'disc'}`;
+export default function CollectionListChooser({userId,collectionId,itemId,label,kind,source,track,onClose,onOpen,onSessionExpired}:Props){
+ const targetKind=kind||(source?'music_tracks':'items');
+ const storageKey=`collector.list-addition.v1.${userId}/${collectionId}/${itemId}/${source||'album'}/${track||'disc'}/${targetKind}`;
  const [pending,setPending]=useState<Pending|undefined>(()=>restorePending(storageKey,collectionId));
  const [selected,setSelected]=useState<Summary|undefined>(()=>pending?.stage==='append'?pending.list:undefined);
  const [rows,setRows]=useState<Summary[]>([]);
@@ -80,12 +81,12 @@ export default function CollectionListChooser({userId,collectionId,itemId,label,
     if(selected)submission={stage:'append',list:selected,key:crypto.randomUUID()};
     else{
      if(!name.trim())throw new Error('Choose a list or enter a name for a new list.');
-     submission={stage:'create',name:name.trim(),key:crypto.randomUUID()};
+     submission={stage:'create',name:name.trim(),kind:targetKind,key:crypto.randomUUID()};
     }
     remember(submission);
    }
    if(submission.stage==='create'){
-    const list=await attempt.wait(api<Summary>(`/collections/${collectionId}/lists`,{method:'POST',signal:attempt.signal,headers:{'Idempotency-Key':submission.key},body:JSON.stringify({name:submission.name})}));
+    const list=await attempt.wait(api<Summary>(`/collections/${collectionId}/lists`,{method:'POST',signal:attempt.signal,headers:{'Idempotency-Key':submission.key},body:JSON.stringify({name:submission.name,kind:submission.kind||targetKind})}));
     setSelected(list);
     submission={stage:'append',list,key:crypto.randomUUID()};
     remember(submission);
@@ -115,7 +116,7 @@ export default function CollectionListChooser({userId,collectionId,itemId,label,
   <label>Find a list<input type="search" value={search} onChange={e=>setSearch(e.target.value)} maxLength={256}/></label>
   <label>Destination list<select value={selected?.id||''} disabled={busy||!!pending} onChange={e=>{setSelected(rows.find(row=>row.id===e.target.value));setNotice('');}}>
    <option value="">Create a new list</option>
-   {options.filter(row=>row.can_edit||row.id===selected?.id).map(row=><option key={row.id} value={row.id}>{row.name} ({row.entry_count})</option>)}
+   {options.filter(row=>row.kind===targetKind&&(row.can_edit||row.id===selected?.id)).map(row=><option key={row.id} value={row.id}>{row.name} ({row.entry_count})</option>)}
   </select></label>
   {cursor&&<button disabled={loading||busy} onClick={()=>void more()}>More lists</button>}
   {!selected&&<label>New list name<input value={name} maxLength={256} disabled={busy||!!pending} onChange={e=>setName(e.target.value)}/></label>}

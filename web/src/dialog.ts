@@ -22,6 +22,7 @@ export function useDialogDismiss(onClose:()=>void,enabled=true){
   document.body.style.overflow='hidden';element?.querySelector<HTMLButtonElement>('.close')?.focus();
   function keydown(event:KeyboardEvent){
    if(element!==[...document.querySelectorAll('[role="dialog"]')].at(-1))return;
+   if(event.key==='Escape'&&document.querySelector(':popover-open'))return;
    if(event.key==='Escape'&&(event.target as HTMLElement)?.closest('.info-help')?.querySelector('[aria-expanded="true"]'))return;
    if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();latest.current();}
    if(event.key==='Tab'&&element){

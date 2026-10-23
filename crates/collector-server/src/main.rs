@@ -36,6 +36,68 @@ enum Command {
     Doctor,
     Serve,
     Reindex,
+    /// Write a verified complete backup. Stop the server first.
+    Backup {
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    /// Export portable collection records and originals without accounts/config. Stop the server first.
+    ExportArchive {
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    /// Check every portable export byte without opening storage or reading configuration.
+    ValidateArchiveExport {
+        #[arg(long)]
+        export: PathBuf,
+    },
+    /// Copy a portable export into an empty archive; create fresh configuration/accounts afterward.
+    ImportArchive {
+        #[arg(long)]
+        export: PathBuf,
+        #[arg(long)]
+        archive: PathBuf,
+    },
+    /// Validate every backup byte without opening or migrating a database.
+    ValidateBackup {
+        #[arg(long)]
+        backup: PathBuf,
+    },
+    /// Restore into empty roots; --config names a new output configuration.
+    Restore {
+        #[arg(long)]
+        backup: PathBuf,
+        #[arg(long)]
+        archive: PathBuf,
+        #[arg(long)]
+        state: PathBuf,
+        /// Recover archive history with a fresh private identity and explicit grants.
+        #[arg(long)]
+        archive_only: bool,
+    },
+    /// List collections without any Owner grant. Stop the server first.
+    UnownedCollections {
+        #[arg(long, default_value_t = 50)]
+        limit: u16,
+        #[arg(long)]
+        cursor: Option<CollectionId>,
+    },
+    /// Explicitly assign the first Owner of a recovered collection. Stop the server first.
+    RecoverCollectionOwner {
+        #[arg(long)]
+        collection_id: CollectionId,
+        #[arg(long)]
+        username: String,
+    },
+    /// Inspect exact duplicate provider payloads; stop the server first.
+    InspectSnapshotDuplicates,
+    /// Apply the reviewed JSON plan using a verified backup; stop the server first.
+    ApplySnapshotDuplicates {
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        backup: PathBuf,
+    },
     /// Inspect durable collection-type assignment eligibility without changing data.
     InspectCollectionType {
         #[arg(long)]
@@ -83,6 +145,9 @@ struct Config {
     private_bind: SocketAddr,
     private_tls_bind: Option<SocketAddr>,
     lan_bind: SocketAddr,
+    local_playback_bind: Option<SocketAddr>,
+    local_playback_enabled: bool,
+    remote_media_allowed: bool,
     multi_user: bool,
     exposure: Exposure,
     authentication_origin: Option<String>,
@@ -90,6 +155,8 @@ struct Config {
     dat_sources: std::collections::BTreeMap<String, DatSourceConfig>,
     providers: ProviderConfig,
     encoders: EncoderConfig,
+    jobs: collector_app::JobSettings,
+    backup_reminder: Option<collector_app::BackupReminderSettings>,
     tls_names: Vec<String>,
     allowed_origins: Vec<String>,
     endpoints: Vec<String>,
@@ -137,6 +204,9 @@ impl Default for Config {
             private_bind: "127.0.0.1:9842".parse().unwrap(),
             private_tls_bind: None,
             lan_bind: "0.0.0.0:9843".parse().unwrap(),
+            local_playback_bind: Some("0.0.0.0:9845".parse().unwrap()),
+            local_playback_enabled: true,
+            remote_media_allowed: false,
             multi_user: false,
             exposure: Exposure::default(),
             authentication_origin: None,
@@ -144,6 +214,8 @@ impl Default for Config {
             dat_sources: std::collections::BTreeMap::new(),
             providers: ProviderConfig::default(),
             encoders: EncoderConfig::default(),
+            jobs: collector_app::JobSettings::default(),
+            backup_reminder: None,
             tls_names: vec![
                 "localhost".into(),
                 "junk-collector.local".into(),
@@ -160,7 +232,23 @@ impl Default for Config {
 fn local_origin(config: &Config) -> String {
     format!("http://localhost:{}", config.private_bind.port())
 }
+fn metadata_readiness(config: &ProviderConfig) {
+    if config.musicbrainz_user_agent.is_some() {
+        println!(
+            "Optional metadata/artwork: MusicBrainz and Cover Art Archive are configured. A matching release and successful provider responses are still required; this is not a network availability check."
+        );
+    } else {
+        println!(
+            "Optional metadata/artwork: not configured. Set providers.musicbrainz_user_agent with a monitored contact address; a MusicBrainz account is not required. Saving originals and manual metadata/artwork remain available."
+        );
+    }
+}
+
 fn instructions(config: &Config, path: &std::path::Path) {
+    println!(
+        "Background jobs: {} processing workers; inbox copy limit {}; provider limit 1. Limits apply after restart.",
+        config.jobs.processing_workers, config.jobs.copy_workers
+    );
     println!(
         "\nLocal management: {} (open this exact address on the server computer)",
         local_origin(config)
@@ -170,7 +258,7 @@ fn instructions(config: &Config, path: &std::path::Path) {
     );
     if config.tls_names.iter().any(|name| name == "localhost") {
         println!(
-            "Local Phono HTTPS: https://localhost:{} (same computer only; the certificate must be trusted)",
+            "Local client HTTPS: https://localhost:{} (same computer only; the certificate must be trusted)",
             config.lan_bind.port()
         );
     }
@@ -179,6 +267,22 @@ fn instructions(config: &Config, path: &std::path::Path) {
             "Advertised client HTTPS: {endpoint}. Requires working DNS; setup does not create DNS records."
         );
     }
+    if let Some(bind) = config
+        .local_playback_bind
+        .filter(|_| config.local_playback_enabled)
+    {
+        println!(
+            "Automatic private media: {bind} (TCP native HTTPS / UDP browser WebTransport). Trust is supplied through the signed-in/paired connection; no internal certificate import is needed. Allow this port on the private host firewall."
+        );
+    }
+    println!(
+        "Public media fallback: {}. Login/library control remains available.",
+        if config.remote_media_allowed {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     let certificate = config.state.join("tls/cert.pem");
     if let Ok(file) = std::fs::File::open(&certificate) {
         use std::io::Read;
@@ -186,16 +290,19 @@ fn instructions(config: &Config, path: &std::path::Path) {
         if file.take(65_537).read_to_end(&mut bytes).is_ok() && bytes.len() <= 65_536 {
             let location = std::path::absolute(&certificate).unwrap_or(certificate);
             println!("Public certificate: {}", location.display());
-            println!("Phono PEM-file SHA-256: {}", Digest::sha256(&bytes).hex);
+            println!(
+                "Certificate PEM-file SHA-256: {}",
+                Digest::sha256(&bytes).hex
+            );
             println!(
                 "Certificate download and help: sign in at {} → Administration → Server settings → HTTPS certificate.",
                 local_origin(config)
             );
             println!(
-                "For a self-signed certificate on macOS: import cert.pem into Keychain Access (login keychain), open its Trust settings, set Secure Sockets Layer (SSL) to Always Trust, close and authenticate, then restart Phono/browser."
+                "For a self-signed certificate on macOS: import cert.pem into Keychain Access (login keychain), open its Trust settings, set Secure Sockets Layer (SSL) to Always Trust, close and authenticate, then restart Trash Amp and your browser."
             );
             println!(
-                "Phono-only alternative: Add server → owner-provided certificate → import this public PEM, compare the PEM-file SHA-256 above, and confirm trust. This does not establish browser trust; local browser approval can use {}/pair with the approval code.",
+                "Trash Amp: Settings → Servers; enter the Collector server URL. For an owner-provided certificate, independently compare the PEM-file SHA-256 above, then enter its path in Owner-provided trust file and choose Connect / Reconnect. Leave the trust file empty for system-trusted HTTPS. This does not establish browser trust; local browser approval can use {}/pair with the approval code.",
                 local_origin(config)
             );
             println!(
@@ -203,6 +310,7 @@ fn instructions(config: &Config, path: &std::path::Path) {
             );
         }
     }
+    metadata_readiness(&config.providers);
     println!(
         "After sign-in: open Account & security to save recovery codes, then create a collection and import."
     );
@@ -271,6 +379,21 @@ fn probe_optional_encoder(
         }
     }
 }
+async fn shutdown_signal() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .context("install SIGTERM handler")?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.context("wait for interrupt"),
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await.context("wait for interrupt")
+}
+
 fn password() -> Result<String> {
     use std::io::{IsTerminal, Read};
     if std::io::stdin().is_terminal() {
@@ -365,6 +488,188 @@ async fn main() -> Result<()> {
         )
         .init();
     let cli = Cli::parse();
+    if let Command::ValidateArchiveExport { export } = &cli.command {
+        let inventory = collector_store::validate_archive_export(export)?;
+        println!(
+            "Archive export valid: {} files. Checked bytes only; no database was opened.",
+            inventory.files.len()
+        );
+        return Ok(());
+    }
+    if let Command::ImportArchive { export, archive } = &cli.command {
+        collector_store::import_archive(export, archive)?;
+        println!("Archive import complete: {}", archive.display());
+        println!(
+            "Create a configuration pointing archive at this directory and state at a new, separate directory. Run setup, then unowned-collections and recover-collection-owner --collection-id ID --username NAME."
+        );
+        println!(
+            "No accounts, grants, TLS, server identity or pending jobs were copied. Collection records and original files may contain private information."
+        );
+        return Ok(());
+    }
+    if let Command::ExportArchive { destination } = &cli.command {
+        let paths = storage_paths(&cli.config)?;
+        anyhow::ensure!(
+            cli.config.is_file()
+                && paths.archive.is_dir()
+                && paths.state.join("private.sqlite").is_file(),
+            "export requires an existing installation and configuration; check paths before retrying"
+        );
+        let store = Store::open(&paths.archive, &paths.state)?;
+        store.export_archive(destination)?;
+        println!(
+            "Verified portable archive export: {}",
+            destination.display()
+        );
+        println!(
+            "Includes collection records and originals, which may contain private information. No accounts, grants, TLS, server identity, pending jobs or configuration were copied."
+        );
+        return Ok(());
+    }
+    if matches!(
+        cli.command,
+        Command::UnownedCollections { .. } | Command::RecoverCollectionOwner { .. }
+    ) {
+        let paths = storage_paths(&cli.config)?;
+        anyhow::ensure!(
+            cli.config.is_file()
+                && paths.archive.is_dir()
+                && paths.state.join("private.sqlite").is_file(),
+            "ownership recovery requires an existing installation and account state; run setup first"
+        );
+        let store = Arc::new(Store::open(&paths.archive, &paths.state)?);
+        let service = collector_app::LocalOwnershipRecoveryService::new(store);
+        match &cli.command {
+            Command::UnownedCollections { cursor, limit } => {
+                let page = service.unowned_collections(*cursor, *limit)?;
+                for collection in page.items {
+                    println!("{}\t{:?}", collection.id, collection.name);
+                }
+                if let Some(cursor) = page.next_cursor {
+                    println!("More collections: unowned-collections --cursor {cursor}");
+                }
+            }
+            Command::RecoverCollectionOwner {
+                collection_id,
+                username,
+            } => {
+                let grant = service.recover_owner(*collection_id, username)?;
+                println!(
+                    "Owner access confirmed: {:?} for collection {} (grant revision {}).",
+                    grant.username, grant.collection_id, grant.revision.0
+                );
+                println!(
+                    "Sign in to manage this collection and grant other accounts access through its normal controls."
+                );
+            }
+            _ => unreachable!(),
+        }
+        return Ok(());
+    }
+    if let Command::Backup { destination } = &cli.command {
+        let paths = storage_paths(&cli.config)?;
+        anyhow::ensure!(
+            cli.config.is_file()
+                && paths.archive.is_dir()
+                && paths.state.join("private.sqlite").is_file(),
+            "backup requires an existing installation and configuration; check paths before retrying"
+        );
+        let store = Store::open(&paths.archive, &paths.state)?;
+        store.backup(destination, &cli.config)?;
+        println!("Verified backup: {}", destination.display());
+        println!(
+            "Includes private credentials, TLS and pending-work scratch. Keep the backup private."
+        );
+        return Ok(());
+    }
+    if let Command::ValidateBackup { backup } = &cli.command {
+        let inventory = collector_store::validate_backup(backup)?;
+        println!(
+            "Backup valid: {} files; original archive: {}; original private state: {}",
+            inventory.files.len(),
+            inventory.archive_root,
+            inventory.state_root
+        );
+        println!("Validation checked bytes only; no database was opened or migrated.");
+        return Ok(());
+    }
+    if let Command::Restore {
+        backup,
+        archive,
+        state,
+        archive_only,
+    } = &cli.command
+    {
+        let inventory = collector_store::validate_backup(backup)?;
+        let expected = inventory
+            .files
+            .iter()
+            .find(|f| f.path == "collector.toml")
+            .context("configuration missing from backup")?;
+        anyhow::ensure!(
+            expected.bytes.0 <= 4 * 1024 * 1024,
+            "configuration exceeds 4 MiB"
+        );
+        let mut original = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(
+                std::fs::File::open(backup.join("collector.toml"))?,
+                4 * 1024 * 1024 + 1,
+            ),
+            &mut original,
+        )?;
+        anyhow::ensure!(
+            Digest::sha256(&original) == expected.digest,
+            "configuration changed after validation"
+        );
+        let mut value: toml::Value = toml::from_str(std::str::from_utf8(&original)?)?;
+        let archive = std::path::absolute(archive)?;
+        let state = std::path::absolute(state)?;
+        value["archive"] =
+            toml::Value::String(archive.to_str().context("non-UTF8 archive path")?.into());
+        value["state"] = toml::Value::String(state.to_str().context("non-UTF8 state path")?.into());
+        let configuration = toml::to_string_pretty(&value)?;
+        let output = std::path::absolute(&cli.config)?;
+        collector_store::restore_backup(
+            backup,
+            &archive,
+            &state,
+            &output,
+            configuration.as_bytes(),
+            if *archive_only {
+                collector_app::RestoreScope::ArchiveOnly
+            } else {
+                collector_app::RestoreScope::Full
+            },
+        )?;
+        println!("Restore complete. Configuration: {}", output.display());
+        println!(
+            "Archive: {}\nPrivate state: {}",
+            archive.display(),
+            state.display()
+        );
+        println!(
+            "Private directories use mode 0700 and copied files/configuration use mode 0600 on Unix."
+        );
+        if *archive_only {
+            println!(
+                "Fresh private identity required: run setup, then unowned-collections and recover-collection-owner --collection-id ID --username NAME. No accounts, grants, TLS or pending jobs were copied."
+            );
+        } else {
+            println!(
+                "Server identity, credentials and TLS were restored from the backup. Retire the original instance; never run both copies."
+            );
+        }
+        for field in ["inboxes", "dat_sources", "encoders"] {
+            if let Some(paths) = value.get(field) {
+                println!("Review external {field} paths for this host (not copied): {paths}");
+            }
+        }
+        println!(
+            "Review listener addresses, TLS names, allowed origins and endpoints, then run doctor before serve."
+        );
+        return Ok(());
+    }
     if matches!(cli.command, Command::Paths) {
         let paths = storage_paths(&cli.config)?;
         for (label, path) in [
@@ -423,7 +728,7 @@ async fn main() -> Result<()> {
     if let Command::RecoverAccount { state, username } = &cli.command {
         let state = account_storage(&cli.config, state.as_deref())?;
         println!(
-            "Recovering username {username:?} from {}. Browser sessions, apps, pending approvals, recovery codes and passkeys will be revoked. Roles and enabled status are preserved.",
+            "Recovering username {username:?} from {}. Browser sessions, apps, pending approvals, recovery codes and passkeys will be revoked. Roles and enabled status are not affected.",
             std::path::absolute(&state)?.display()
         );
         Store::local_recover(
@@ -441,6 +746,10 @@ async fn main() -> Result<()> {
     } else {
         Config::default()
     };
+    config.jobs.validate()?;
+    if let Some(reminder) = &config.backup_reminder {
+        reminder.validate()?;
+    }
     if !config.public_bind.ip().is_loopback() || !config.private_bind.ip().is_loopback() {
         bail!(
             "HTTP listeners must bind loopback; use a dedicated trusted proxy for public/private access. Direct LAN clients use the TLS listener."
@@ -452,6 +761,24 @@ async fn main() -> Result<()> {
     {
         bail!("private_tls_bind must name an explicit interface address, not a wildcard");
     }
+    let mut passkeys = if matches!(
+        cli.command,
+        Command::Setup { .. } | Command::Doctor | Command::Serve
+    ) {
+        let configuration = collector_server::passkeys::Configuration::from_origin(
+            config.authentication_origin.as_deref(),
+        )?;
+        if let Some(reason) = configuration.unavailable_reason() {
+            println!("{}", reason.message());
+        } else {
+            println!(
+                "Passkeys configured. Browser trust and the exact authentication origin remain required."
+            );
+        }
+        Some(configuration)
+    } else {
+        None
+    };
     if matches!(cli.command, Command::Doctor) {
         println!("Configuration: {}", cli.config.display());
         if !cli.config.exists() {
@@ -469,6 +796,23 @@ async fn main() -> Result<()> {
         {
             bail!("Account state or TLS identity missing. Run setup.");
         }
+        if let Some(settings) = &config.backup_reminder {
+            let history = if settings.externally_managed {
+                None
+            } else {
+                collector_store::read_backup_history(&config.state)
+                    .ok()
+                    .flatten()
+            };
+            println!(
+                "Backup reminder (record only, no revalidation): {}",
+                serde_json::to_string(&collector_app::backup_reminder(
+                    settings,
+                    history.as_ref(),
+                    chrono::Utc::now()
+                ))?
+            );
+        }
         probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());
         probe_optional_encoder(EncoderKind::Opus, config.encoders.opus.as_ref());
         if let Some(user_agent) = &config.providers.musicbrainz_user_agent {
@@ -483,7 +827,8 @@ async fn main() -> Result<()> {
     if !cli.config.exists() && !matches!(cli.command, Command::Setup { .. }) {
         bail!("Configuration missing. Run setup first.");
     }
-    let store = Arc::new(Store::open(&config.archive, &config.state)?);
+    let store =
+        Arc::new(Store::open(&config.archive, &config.state)?.with_job_settings(config.jobs)?);
     match cli.command {
         Command::Doctor => unreachable!(),
         Command::Setup { username } => {
@@ -517,6 +862,39 @@ async fn main() -> Result<()> {
         }
         Command::RecoverAccount { .. } | Command::Accounts { .. } | Command::Paths => {
             unreachable!()
+        }
+        Command::Backup { .. }
+        | Command::ExportArchive { .. }
+        | Command::ValidateArchiveExport { .. }
+        | Command::ImportArchive { .. }
+        | Command::ValidateBackup { .. }
+        | Command::Restore { .. }
+        | Command::UnownedCollections { .. }
+        | Command::RecoverCollectionOwner { .. } => {
+            unreachable!()
+        }
+        Command::InspectSnapshotDuplicates => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&store.inspect_snapshot_duplicates()?)?
+            );
+        }
+        Command::ApplySnapshotDuplicates { plan, backup } => {
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(
+                &mut std::io::Read::take(std::fs::File::open(plan)?, 16 * 1024 * 1024 + 1),
+                &mut bytes,
+            )?;
+            anyhow::ensure!(
+                bytes.len() <= 16 * 1024 * 1024,
+                "conversion plan exceeds 16 MiB"
+            );
+            let plan: collector_store::SnapshotDuplicatePlan = serde_json::from_slice(&bytes)?;
+            store.apply_snapshot_duplicates(&plan, &backup)?;
+            println!(
+                "Conversion complete: {} payload bytes removed, {} reference bytes added; historical snapshot IDs retained.",
+                plan.saved_bytes, plan.reference_bytes
+            );
         }
         Command::Reindex => {
             store.reindex()?;
@@ -561,7 +939,7 @@ async fn main() -> Result<()> {
             instructions(&config, &cli.config);
             let mut pairing = tls(&config, false)?;
             pairing.server_id = store.server_id()?;
-            let mut state = AppState::new(store, pairing);
+            let mut state = AppState::new(store.clone(), pairing);
             state.exposure = config.exposure;
             state.inboxes = Arc::new(config.inboxes.clone());
             let flac = probe_optional_encoder(EncoderKind::Flac, config.encoders.flac.as_ref());
@@ -586,13 +964,16 @@ async fn main() -> Result<()> {
                     )
                 })
                 .collect();
-            let dat_provider = Arc::new(LocalDatProvider::new(dat_sources)?);
+            let dat_provider =
+                Arc::new(LocalDatProvider::new(dat_sources)?.with_uploads(store.clone()));
             let provider_id = ModuleId(LOCAL_DAT_PROVIDER_ID.into());
             state.service = state
                 .service
                 .clone()
                 .with_streaming_provider(provider_id.clone(), dat_provider.clone())?
-                .with_catalog_parser(provider_id, dat_provider.clone())?;
+                .with_catalog_parser(provider_id, dat_provider.clone())?
+                .with_catalog_uploads(store.clone())
+                .with_catalog_inspection(Arc::new(collector_providers::StandardCatalogInspector));
             #[cfg(debug_assertions)]
             let accuraterip =
                 if let Ok(origin) = std::env::var("JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN") {
@@ -682,12 +1063,25 @@ async fn main() -> Result<()> {
                     .collect(),
             );
             state.multi_user = config.multi_user;
+            state.backup_reminder = config.backup_reminder.clone();
             state.allowed_origins = Arc::new(config.allowed_origins.clone());
-            if let Some(origin) = &config.authentication_origin {
-                state.passkeys = Some(Arc::new(collector_server::passkeys::Passkeys::new(origin)?));
-            }
-            let _job_runtime = collector_server::start_job_workers(state.clone());
+            state.passkeys = passkeys
+                .take()
+                .expect("serve validates passkey configuration before opening storage");
+            let _job_runtime = collector_server::start_job_workers(state.clone())?;
+            let _local_runtime = match config
+                .local_playback_bind
+                .filter(|_| config.local_playback_enabled)
+            {
+                Some(bind) => {
+                    Some(collector_server::local_playback::start(&mut state, bind).await?)
+                }
+                None => None,
+            };
+            state.remote_media_allowed = config.remote_media_allowed;
+            state.direct_media = false;
             let public = router(state.clone());
+            state.direct_media = true;
             let lan = router(state.clone());
             state.ingress = Ingress::Private;
             let private = router(state.clone());
@@ -720,7 +1114,7 @@ async fn main() -> Result<()> {
                 result=axum::serve(private_listener,private.into_make_service_with_connect_info::<SocketAddr>())=>{result?;},
                 result=axum_server::bind_rustls(config.lan_bind,tls_config).serve(lan.into_make_service_with_connect_info::<SocketAddr>())=>{result?;},
                 result=private_tls_server=>{result?;},
-                _=tokio::signal::ctrl_c()=>{tracing::info!("stopping listeners; durable uploads remain resumable");}
+                result=shutdown_signal()=>{result?; tracing::info!("stopping listeners; durable uploads remain resumable");}
             }
         }
     }

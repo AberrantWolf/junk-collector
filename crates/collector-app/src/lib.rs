@@ -1,4 +1,23 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod disc_audio;
+mod local_playback;
+pub use disc_audio::game_audio_search_projection;
+mod file_music;
+pub use file_music::{
+    UpdateDigitalPurchase, file_music_search_projection, import_preservation_format,
+};
+mod documents;
+pub use documents::*;
+mod backup_reminder;
+pub use backup_reminder::*;
+mod backup;
+pub use backup::*;
+mod archive_export;
+pub use archive_export::*;
+mod game_identification;
+pub use game_identification::*;
+mod acquisitions;
+pub use acquisitions::*;
 mod music_search;
 pub use music_search::*;
 mod collection_lists;
@@ -9,6 +28,8 @@ mod bulk_intake;
 pub use bulk_intake::*;
 mod album_grouping;
 pub use album_grouping::*;
+mod automatic_album_grouping;
+pub use automatic_album_grouping::AutomaticAlbumGroupCandidate;
 mod album_preparation;
 pub use album_preparation::*;
 mod collection_types;
@@ -16,6 +37,9 @@ pub use collection_types::*;
 mod derivatives;
 pub use derivatives::*;
 mod guided_ingest;
+mod inbox_cleanup;
+pub use guided_ingest::{is_inbox_cleanup_directory, is_intake_housekeeping};
+pub use inbox_cleanup::*;
 mod item_lifecycle;
 pub use item_lifecycle::prepare_clean_reimport;
 mod library_care;
@@ -229,6 +253,7 @@ pub trait MediaReader: Read + Seek + Send {}
 impl<T: Read + Seek + Send> MediaReader for T {}
 
 pub struct MediaResource {
+    pub visibility: Visibility,
     pub reader: Box<dyn MediaReader>,
     pub length: u64,
     pub media_type: String,
@@ -336,6 +361,11 @@ pub trait ContentPort: Send + Sync {
     fn asset_resource(&self, asset: AssetId, thumbnail: bool) -> Result<MediaResource>;
     fn asset_state(&self, asset: AssetId) -> Result<AssetState>;
     fn asset_states_for_item(&self, item: ItemId) -> Result<Vec<AssetState>>;
+    fn archived_item_cover_revisions(
+        &self,
+        item: ItemId,
+        limit: u16,
+    ) -> Result<Vec<(AssetId, Revision)>>;
     fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId>;
     fn asset_subject_item(&self, subject: AssetSubject) -> Result<Option<ItemId>>;
     fn create_asset(
@@ -344,6 +374,16 @@ pub trait ContentPort: Send + Sync {
         command: CreateAssetCommand,
         bytes: &[u8],
         context: AssetWriteContext,
+    ) -> Result<AssetState>;
+    /// Atomically create or reuse matching item-owned provider artwork. Only an
+    /// explicitly authorized selection may restore the exact archived revision.
+    fn materialize_provider_artwork(
+        &self,
+        asset: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+        context: ItemEffectContext,
+        restore_archived: Option<Revision>,
     ) -> Result<AssetState>;
     fn update_asset(
         &self,
@@ -358,6 +398,8 @@ pub trait ContentPort: Send + Sync {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UploadFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<Visibility>,
     pub name: String,
     pub bytes: ByteLength,
     pub sha256: Option<String>,
@@ -405,6 +447,8 @@ pub struct ImportSourceSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ImportDeclaredFile {
+    #[serde(default, skip_serializing_if = "Visibility::is_shared")]
+    pub visibility: Visibility,
     pub name: String,
     pub bytes: ByteLength,
     pub received_bytes: ByteLength,
@@ -498,6 +542,11 @@ pub use collector_modules::{IngestAnchorChoice, IngestBlocker, IngestBlockerKind
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPlanPackage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
+    // Retained private intake plans may predate this presentation capability.
+    #[serde(default)]
+    pub music_actions_available: bool,
     pub position: u16,
     pub source: ImportSourceSummary,
     pub files: Vec<UploadFile>,
@@ -533,6 +582,8 @@ pub struct PlanIngestCommand {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IngestPackageSelection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     pub source: ImportSourceSummary,
     pub files: Vec<UploadFile>,
     #[serde(default)]
@@ -549,6 +600,8 @@ pub struct IngestPlan {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StartIngestCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     #[serde(default)]
     pub clean_reimport: Option<CleanReimportOptions>,
     pub plan: IngestPlan,
@@ -590,6 +643,8 @@ pub struct GuidedBulkContext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GuidedIngestIntent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     #[serde(default)]
     pub bulk_context: Option<GuidedBulkContext>,
     pub clean_reimport: Option<CleanReimportOptions>,
@@ -659,14 +714,47 @@ pub struct IngestAttemptView {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPermissions {
+    pub can_clean_inbox: bool,
     pub can_resume_upload: bool,
     pub can_cancel: bool,
     pub can_discard: bool,
     pub can_correct_association: bool,
 }
 
+/// Current execution only; workflow outcome and preservation are independent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestWorkState {
+    Running,
+    Queued,
+    Waiting,
+    Cancelling,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IngestWork {
+    pub shared: bool,
+    pub state: IngestWorkState,
+    pub kind: String,
+    pub phase: String,
+    pub jobs: u32,
+}
+
+/// Mechanism projection, grouped without reading payloads or frozen media inputs.
+pub struct IngestWorkRecord {
+    pub shared: bool,
+    pub state: JobState,
+    pub kind: String,
+    pub phase: String,
+    pub jobs: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestSummary {
+    // Older completed admission receipts have no transient execution projection.
+    #[serde(default)]
+    #[schema(required = true)]
+    pub work: Vec<IngestWork>,
     pub import_id: ImportId,
     pub collection_id: CollectionId,
     pub package_name: String,
@@ -685,6 +773,7 @@ pub struct IngestSummary {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestDetail {
+    pub inbox_cleanup: Option<InboxCleanupView>,
     pub summary: IngestSummary,
     pub import: ImportView,
     pub steps: Vec<IngestStepView>,
@@ -715,6 +804,14 @@ pub struct RetryIngestCommand {
 }
 
 pub trait ProvisionalImportPort: Send + Sync {
+    fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId>;
+    fn inbox_cleanup_status(&self, id: ImportId) -> Result<Option<InboxCleanupView>>;
+    fn clean_inbox_source(
+        &self,
+        id: ImportId,
+        claim: &JobClaim,
+        guard: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<InboxCleanupView>;
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord>;
     fn import_record(&self, id: ImportId) -> Result<ImportRecord>;
     fn save_import(&self, record: ImportRecord, expected_revision: u64) -> Result<ImportRecord>;
@@ -778,6 +875,7 @@ pub trait ProvisionalImportPort: Send + Sync {
         limit: u16,
     ) -> Result<Page<ImportRecord>>;
     fn import_job_records(&self, id: ImportId, user: UserId) -> Result<Vec<JobRecord>>;
+    fn import_work_records(&self, id: ImportId, user: UserId) -> Result<Vec<IngestWorkRecord>>;
     fn discard_guided_import(
         &self,
         id: ImportId,
@@ -884,12 +982,31 @@ pub fn metadata_artwork_error<'a>(
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobResultView {
-    CatalogSnapshot { snapshot_id: SnapshotId },
+    GameIdentification {
+        status: collector_modules::games::GameDetectionStatus,
+        observation_id: ObservationId,
+    },
+    GameCatalogScan {
+        completed: u64,
+    },
+    CatalogSnapshot {
+        snapshot_id: SnapshotId,
+        response_status: Option<ProviderResponseStatus>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobProgressKind {
+    Measured,
+    Indeterminate,
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct JobView {
+    pub provider_status: Option<ProviderResponseStatus>,
     pub id: JobId,
+    pub progress_kind: JobProgressKind,
     pub collection_id: Option<CollectionId>,
     pub item_id: Option<ItemId>,
     pub kind: String,
@@ -927,11 +1044,38 @@ impl From<JobRecord> for JobView {
                     | "metadata_resolution"
                     | "bulk_intake"
                     | "metadata_existing"
+                    | "game_identification"
+                    | "game_catalog_scan"
             )
             || record.state == JobState::Completed
                 && metadata_artwork_error(&record.kind, record.result.as_ref()).is_some();
         let result = safe_job_result(&record.kind, record.result.as_ref());
+        let progress_kind = if matches!(
+            record.kind.as_str(),
+            "processing_operation" | "inbox_cleanup"
+        ) && matches!(
+            record.state,
+            JobState::Queued | JobState::Running | JobState::CancelRequested
+        ) {
+            JobProgressKind::Indeterminate
+        } else {
+            JobProgressKind::Measured
+        };
         Self {
+            provider_status: if record.phase == "waiting_provider" {
+                Some(ProviderResponseStatus::Waiting)
+            } else if record.phase == "waiting_shared_provider" {
+                Some(ProviderResponseStatus::Shared)
+            } else {
+                record
+                    .result
+                    .as_ref()
+                    .and_then(|v| v.get("completion").or(Some(v)))
+                    .and_then(|v| v.get("response_status"))
+                    .cloned()
+                    .and_then(|v| serde_json::from_value(v).ok())
+            },
+            progress_kind,
             id: record.id,
             collection_id: record.collection_id,
             item_id: record.item_id,
@@ -955,15 +1099,37 @@ impl From<JobRecord> for JobView {
 }
 
 fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<JobResultView> {
+    if kind == "game_identification" {
+        let result = result?;
+        return Some(JobResultView::GameIdentification {
+            status: serde_json::from_value(result.get("status")?.clone()).ok()?,
+            observation_id: result.get("observation_id")?.as_str()?.parse().ok()?,
+        });
+    }
+    if kind == "game_catalog_scan" {
+        return Some(JobResultView::GameCatalogScan {
+            completed: result?.get("completed")?.as_u64()?,
+        });
+    }
     if kind != "catalog_acquisition" {
         return None;
     }
     let result = result.and_then(|value| value.get("completion").or(Some(value)))?;
     let snapshot_id = result.get("snapshot_id")?.as_str()?.parse().ok()?;
-    Some(JobResultView::CatalogSnapshot { snapshot_id })
+    Some(JobResultView::CatalogSnapshot {
+        snapshot_id,
+        response_status: result
+            .get("response_status")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok()),
+    })
 }
 
+mod job_dispatch;
+pub use job_dispatch::{IMPORT_COPY_JOB_KIND, JobDispatchPolicy, JobSettings, PROVIDER_JOB_SLOTS};
+
 pub trait JobPort: Send + Sync {
+    fn job_settings(&self) -> Result<JobSettings>;
     fn work_job_records(&self, user: UserId, query: &WorkJobsQuery) -> Result<Page<JobRecord>>;
     fn work_page(&self, user: UserId, query: &WorkQuery) -> Result<Page<WorkEntry>>;
     fn work_entry(&self, user: UserId, target: &WorkTarget) -> Result<WorkEntry>;
@@ -973,13 +1139,44 @@ pub trait JobPort: Send + Sync {
         settle: &mut dyn FnMut(UserId, &WorkTarget) -> Result<bool>,
     ) -> Result<()>;
     fn scan_jobs(&self, user: UserId, key: &str) -> Result<Vec<JobRecord>>;
+    fn game_scan_member(
+        &self,
+        user: UserId,
+        parent: JobId,
+        item: ItemId,
+        representation: RepresentationId,
+    ) -> Result<Option<JobRecord>>;
+    fn game_import_job(&self, user: UserId, import: ImportId) -> Result<Option<JobRecord>>;
+    fn game_scan_page(&self, claim: &JobClaim, after: Option<ItemId>) -> Result<Vec<ItemId>>;
+    fn game_scan_status(&self, user: UserId, parent: JobId) -> Result<GameScanStatus>;
+    fn reconcile_game_scans(&self) -> Result<()>;
+    fn checkpoint_game_scan(
+        &self,
+        claim: &JobClaim,
+        after: Option<ItemId>,
+        admissions_done: bool,
+    ) -> Result<()>;
+
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId>;
+    fn enqueue_game_identifications(&self, specs: Vec<JobSpec>) -> Result<Vec<JobId>>;
     fn enqueue_preparation_member(
         &self,
         batch: JobId,
         claim_token: &str,
         spec: JobSpec,
     ) -> Result<JobId>;
+    fn acquisition_for_job(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenAcquisitionJob,
+    ) -> Result<Option<SnapshotId>>;
+    fn acquisition_owners(&self, claim: &JobClaim) -> Result<Vec<JobRecord>>;
+    fn acquisition_response_status(
+        &self,
+        claim: &JobClaim,
+    ) -> Result<Option<ProviderResponseStatus>>;
+    fn acquisition_committed_snapshot(&self, claim: &JobClaim) -> Result<Option<SnapshotId>>;
+    fn reconcile_acquisitions(&self) -> Result<()>;
     fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>>;
     fn renew_job_lease(&self, id: JobId, claim_token: &str, lease_seconds: i64) -> Result<()>;
     fn heartbeat_job(
@@ -1044,6 +1241,7 @@ pub trait AdministrationPort: Send + Sync {
         collection: CollectionId,
         provider: &ModuleId,
         snapshot: SnapshotId,
+        identification: JobSpec,
     ) -> Result<CatalogSnapshotStatus>;
 }
 
@@ -1389,6 +1587,7 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
 
 #[derive(Clone)]
 pub struct CollectionService {
+    browser_media_grants: Arc<local_playback::BrowserMediaGrants>,
     reader: Arc<dyn CollectionReadPort>,
     writer: Arc<dyn CollectionWritePort>,
     guided_transitions: Arc<std::sync::Mutex<()>>,
@@ -1409,6 +1608,9 @@ pub struct CollectionService {
     lists: Arc<dyn CollectionListPort>,
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
     artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
+    catalog_uploads: Option<Arc<dyn UploadedCatalogPort>>,
+    backup_history: Option<Arc<dyn BackupHistoryPort>>,
+    catalog_inspector: Option<Arc<dyn CatalogUploadInspectionPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
     modules: Arc<Registry>,
@@ -1419,27 +1621,6 @@ struct ContentWriteEligibility {
     binding: CollectionBinding,
     owner: ModuleId,
     schema_version: u32,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportAnalysisCandidateOutput {
-    key: String,
-    label: String,
-    observation: RawJson,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ImportAnalysisOutput {
-    #[serde(default)]
-    candidates: Vec<ImportAnalysisCandidateOutput>,
-    #[serde(default)]
-    limitations: Vec<String>,
-    #[serde(default, rename = "observations")]
-    _observations: Vec<RawJson>,
-    #[serde(default, rename = "selection")]
-    _selection: Option<RawJson>,
 }
 
 struct ProcessingHost<'a> {
@@ -1700,6 +1881,7 @@ impl From<Role> for EffectivePermissions {
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedCollection {
+    pub supports_listening: bool,
     pub id: CollectionId,
     pub revision: Revision,
     pub name: String,
@@ -1770,31 +1952,99 @@ impl PresentedSpecimen {
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedCapture {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     pub id: CaptureId,
     pub collection_id: CollectionId,
     pub revision: Revision,
     pub association: CaptureAssociation,
     pub created_at: DateTime<Utc>,
-    pub representations: Vec<Representation>,
+    pub representations: Vec<PresentedRepresentation>,
 }
 
 impl From<Capture> for PresentedCapture {
     fn from(capture: Capture) -> Self {
         Self {
+            purchase: capture.purchase,
             id: capture.id,
             collection_id: capture.collection_id,
             revision: capture.revision,
             association: capture.association,
             created_at: capture.created_at,
-            representations: capture.representations,
+            representations: capture
+                .representations
+                .into_iter()
+                .map(|r| PresentedRepresentation {
+                    id: r.id,
+                    role: r.role,
+                    format: r.format,
+                    source: r.source,
+                    profile: r.profile,
+                    files: r
+                        .files
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, file)| PresentedFile {
+                            index,
+                            visibility: file.visibility,
+                            name: file.name,
+                            bytes: file.bytes,
+                            digest: file.digest,
+                        })
+                        .collect(),
+                })
+                .collect(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PresentedFile {
+    pub index: usize,
+    pub visibility: Visibility,
+    pub name: String,
+    pub bytes: ByteLength,
+    pub digest: Digest,
+}
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PresentedRepresentation {
+    pub id: RepresentationId,
+    pub role: RepresentationRole,
+    pub format: String,
+    pub source: Option<RepresentationId>,
+    pub profile: Option<ConversionProfile>,
+    pub files: Vec<PresentedFile>,
+}
+
+impl PresentedCapture {
+    fn for_role(capture: Capture, role: Role) -> Self {
+        let mut capture = Self::from(capture);
+        if role == Role::Viewer {
+            capture.purchase = None;
+            for representation in &mut capture.representations {
+                representation
+                    .files
+                    .retain(|file| file.visibility == Visibility::Shared);
+            }
+        }
+        capture
+    }
+}
+
+/// Recorded checks for visible, currently associated originals. This is not an
+/// album-coverage claim: missing discs and unchecked originals remain distinct.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PresentedAudioCheck {
+    pub source_id: RepresentationId,
+    pub status: Option<collector_modules::music::AudioVerificationStatus>,
 }
 
 /// Explicit response shape: unrestricted stored Item records are never
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
+    pub supports_listening: bool,
+    pub digital_audio: bool,
     pub workflow_generation: u64,
     pub merged_into: Option<ItemId>,
     pub merge_group: Option<TransactionId>,
@@ -1811,6 +2061,8 @@ pub struct PresentedItem {
     pub identity_link: ItemIdentityLink,
     pub domain: PresentedModuleData,
     pub identity: IdentityState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accuraterip: Option<Vec<PresentedAudioCheck>>,
     pub translations: Vec<LocalizedText>,
     pub identifiers: Vec<ProviderIdentity>,
     pub specimens: Vec<PresentedSpecimen>,
@@ -2099,6 +2351,7 @@ impl CollectionService {
         let lists: Arc<dyn CollectionListPort> = catalog.clone();
         Self {
             reader,
+            browser_media_grants: Arc::new(Default::default()),
             writer,
             guided_transitions: Arc::new(std::sync::Mutex::new(())),
             access,
@@ -2118,6 +2371,9 @@ impl CollectionService {
             lists,
             audio_converter: None,
             artwork_preview: None,
+            catalog_uploads: None,
+            backup_history: None,
+            catalog_inspector: None,
             streaming_providers: Arc::new(Default::default()),
             catalog_parsers: Arc::new(Default::default()),
             modules,
@@ -2227,7 +2483,22 @@ impl CollectionService {
         let role = self.reader.role(actor.user_id, collection.id)?;
         let (effective_permissions, content_permissions) =
             self.presented_content_permissions(role, &collection, None);
+        let supports_listening = matches!(&collection.binding, CollectionBinding::Assigned { module } if self.modules.supports_listening(module))
+            || !self
+                .reader
+                .browse(
+                    actor.user_id,
+                    BrowseQuery {
+                        listening_only: true,
+                        collection_id: Some(collection.id),
+                        limit: Some(1),
+                        ..Default::default()
+                    },
+                )?
+                .items
+                .is_empty();
         Ok(PresentedCollection {
+            supports_listening,
             id: collection.id,
             revision: collection.revision,
             name: collection.name,
@@ -2387,6 +2658,24 @@ impl CollectionService {
         let (effective_permissions, content_permissions) =
             self.presented_content_permissions(role, &collection, Some(&item.domain));
         let mut presentation = self.modules.presentation(&item.domain);
+        if presentation.available && item.domain.module.0 == "org.junk.games" {
+            for (key, value) in &effective_metadata.domain_fields {
+                if let Some(field) = presentation
+                    .values
+                    .iter_mut()
+                    .find(|v| v.label.eq_ignore_ascii_case(key))
+                {
+                    field.value = serde_json::Value::String(value.value.clone());
+                } else {
+                    presentation
+                        .values
+                        .push(collector_modules::PresentationValue {
+                            label: "Platform".into(),
+                            value: serde_json::Value::String(value.value.clone()),
+                        });
+                }
+            }
+        }
         let mut asset_states = self
             .content
             .asset_states_for_item(item.id)?
@@ -2397,9 +2686,9 @@ impl CollectionService {
             })
             .collect::<Vec<_>>();
         presentation.artwork.retain(|reference| {
-            asset_states
-                .iter()
-                .any(|state| state.asset.id == reference.asset_id)
+            asset_states.iter().any(|state| {
+                state.asset.id == reference.asset_id && state.asset.kind != AssetKind::Document
+            })
         });
         let module_artwork = presentation.artwork.first().map(|value| value.asset_id);
         let mut fallback = asset_states
@@ -2427,13 +2716,76 @@ impl CollectionService {
         }
         let private = role != Role::Viewer;
         asset_states.sort_by_key(|state| state.asset.id);
-        effective_metadata.artwork = effective_metadata
-            .artwork
-            .filter(|asset_id| asset_states.iter().any(|state| state.asset.id == *asset_id));
+        effective_metadata.artwork = effective_metadata.artwork.filter(|asset_id| {
+            asset_states
+                .iter()
+                .any(|state| state.asset.id == *asset_id && state.asset.kind != AssetKind::Document)
+        });
         let primary_artwork = effective_metadata.artwork.or(primary_artwork);
+        let mut digital_audio = false;
+        let accuraterip = if item.domain.module.0 == "org.junk.music" {
+            let mut checks = Vec::new();
+            for capture in item
+                .captures
+                .iter()
+                .filter(|capture| capture.association.item_id == Some(item.id))
+            {
+                for source in capture
+                    .representations
+                    .iter()
+                    .filter(|source| source.role == RepresentationRole::PreservationMaster)
+                {
+                    if source.format == "original-file-audio-package"
+                        || self
+                            .recorded_file_tracks(item.collection_id, source.id)?
+                            .is_some()
+                    {
+                        digital_audio = true;
+                        continue;
+                    }
+                    let status = match self.latest_music_result(
+                        item.collection_id,
+                        source.id,
+                        collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                    )? {
+                        Some((
+                            _,
+                            collector_modules::music::CdProcessingResult::AudioVerification {
+                                verification,
+                            },
+                        )) => Some(verification.status),
+                        _ => None,
+                    };
+                    checks.push(PresentedAudioCheck {
+                        source_id: source.id,
+                        status,
+                    });
+                }
+            }
+            Some(checks)
+        } else {
+            None
+        };
+        let has_cd_audio_input = item
+            .captures
+            .iter()
+            .flat_map(|c| &c.representations)
+            .any(|r| {
+                r.role == RepresentationRole::PreservationMaster
+                    && r.files
+                        .iter()
+                        .any(|f| f.name.to_ascii_lowercase().ends_with(".cue"))
+            });
+        let supports_listening = (self.modules.supports_listening(&item.domain.module)
+            && (item.domain.module.0 == "org.junk.music" || has_cd_audio_input))
+            || !self
+                .music_track_availability_recorded(user, &item)?
+                .is_empty();
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
+            supports_listening,
+            digital_audio,
             workflow_generation: item.lifecycle.generation,
             merged_into: item.lifecycle.merged_into,
             merge_group: item.lifecycle.merge_group,
@@ -2476,7 +2828,12 @@ impl CollectionService {
                 .map(|specimen| PresentedSpecimen::from_stored(specimen, private))
                 .collect(),
             wishlist: item.wishlist,
-            captures: item.captures.into_iter().map(Into::into).collect(),
+            accuraterip,
+            captures: item
+                .captures
+                .into_iter()
+                .map(|capture| PresentedCapture::for_role(capture, role))
+                .collect(),
             assets: asset_states
                 .into_iter()
                 .map(|state| PresentedAsset::from_state(state, role))
@@ -3101,10 +3458,10 @@ impl CollectionService {
         }
         Ok(item.into())
     }
-    pub fn capture(&self, actor: &Principal, id: CaptureId) -> Result<Capture> {
+    pub fn capture(&self, actor: &Principal, id: CaptureId) -> Result<PresentedCapture> {
         let capture = self.reader.capture(id)?;
-        self.authorize(actor, capture.collection_id, Action::Browse)?;
-        Ok(capture)
+        let role = self.authorize(actor, capture.collection_id, Action::Browse)?;
+        Ok(PresentedCapture::for_role(capture, role))
     }
     pub fn work(&self, actor: &Principal, id: WorkId) -> Result<Work> {
         let work = self.reader.work(id)?;
@@ -3214,7 +3571,7 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<Capture> {
         let request = (id, expected, command.clone());
-        let (revision, created_at, representations) = match self.reader.capture(id) {
+        let (revision, created_at, representations, purchase) = match self.reader.capture(id) {
             Ok(previous) => {
                 self.content_write_eligibility(actor, previous.collection_id)?;
                 if previous.collection_id != command.collection_id {
@@ -3226,13 +3583,15 @@ impl CollectionService {
                     previous.revision,
                     previous.created_at,
                     previous.representations,
+                    previous.purchase,
                 )
             }
-            Err(Error::NotFound) => (Revision(0), Utc::now(), vec![]),
+            Err(Error::NotFound) => (Revision(0), Utc::now(), vec![], None),
             Err(error) => return Err(error),
         };
         self.content_write_eligibility(actor, command.collection_id)?;
         let capture = Capture {
+            purchase,
             id,
             collection_id: command.collection_id,
             revision,
@@ -3379,11 +3738,17 @@ impl CollectionService {
         index: usize,
     ) -> Result<MediaResource> {
         let item = self.reader.item(item_id)?;
-        self.authorize(actor, item.collection_id, Action::Browse)?;
+        let role = self.authorize(actor, item.collection_id, Action::Browse)?;
         if item.deleted {
             return Err(Error::NotFound);
         }
-        self.content.representation(item_id, representation, index)
+        let resource = self
+            .content
+            .representation(item_id, representation, index)?;
+        if resource.visibility == Visibility::Curators && role == Role::Viewer {
+            return Err(Error::Forbidden);
+        }
+        Ok(resource)
     }
     pub fn asset(
         &self,
@@ -3453,8 +3818,8 @@ impl CollectionService {
         bytes: &[u8],
         context: &CommandContext,
     ) -> Result<PresentedAsset> {
-        validate_asset_upload(&command.kind, &command.alt_text, bytes)?;
         let role = self.authorize(actor, command.collection_id, Action::Curate)?;
+        validate_asset_upload(&command.kind, &command.alt_text, bytes)?;
         self.content_write_eligibility(actor, command.collection_id)?;
         let subject_collection = self.content.asset_subject_collection(command.subject)?;
         if subject_collection != command.collection_id {
@@ -3612,6 +3977,13 @@ impl CollectionService {
             association,
             expected_item_revision,
         );
+        let file_audio = eligibility.owner.0 == "org.junk.music"
+            && collector_modules::music::files::is_file_package(
+                &files
+                    .iter()
+                    .map(|f| PackageFileName::new(&f.name))
+                    .collect::<Result<Vec<_>>>()?,
+            );
         let empty_digest = Digest::sha256(b"");
         let declared_files = files
             .into_iter()
@@ -3634,6 +4006,9 @@ impl CollectionService {
                     supplied_digest
                 };
                 Ok(ImportDeclaredFile {
+                    visibility: file
+                        .visibility
+                        .unwrap_or_else(|| default_import_visibility(file_audio, &file.name)),
                     name: file.name,
                     bytes: file.bytes,
                     received_bytes: ByteLength(0),
@@ -3795,15 +4170,45 @@ impl CollectionService {
                     .processing
                     .recorded_source(record.view.collection_id, inventory.scope)?;
                 let provider = ModuleId("org.junk.providers.local-dat".into());
-                let snapshot_id = self
-                    .processing
-                    .active_snapshot(record.view.collection_id, &provider)?;
                 let domain = record
                     .view
                     .association
                     .item_id
                     .map(|item| self.reader.item(item).map(|item| item.domain))
                     .transpose()?;
+                let snapshot_id = if module.0 == "org.junk.games" {
+                    let system = domain
+                        .as_ref()
+                        .and_then(|d| {
+                            d.payload
+                                .parse::<collector_modules::games::GameItemData>()
+                                .ok()
+                        })
+                        .and_then(|d| d.platform)
+                        .and_then(|p| collector_modules::games::standard_system(&p));
+                    let mut compatible = vec![];
+                    if let Some(system) = system {
+                        for id in self
+                            .processing
+                            .active_game_snapshots(record.view.collection_id)?
+                        {
+                            let snapshot = self.processing.snapshot(SnapshotQuery {
+                                collection_id: record.view.collection_id,
+                                snapshot_id: id,
+                            })?;
+                            if game_catalog_slot(&snapshot)?.is_some_and(|slot| {
+                                slot.system == system.id
+                                    && slot.byte_domain == "org.junk.game.raw-bytes"
+                            }) {
+                                compatible.push(id);
+                            }
+                        }
+                    }
+                    (compatible.len() == 1).then(|| compatible[0])
+                } else {
+                    self.processing
+                        .active_snapshot(record.view.collection_id, &provider)?
+                };
                 let selection = RawJson::from_value(serde_json::json!({
                     "import_id": id,
                     "representation_id": record.view.representation_id,
@@ -3905,6 +4310,7 @@ impl CollectionService {
             .processing
             .package_inventory(frozen.collection_id, frozen.source)?;
         frozen.source_fingerprint.validate_inventory(&inventory)?;
+        self.report_processing_phase(claim, "validating_source")?;
         if self.fingerprint_inventory_checked(&inventory, &mut || {
             if self
                 .jobs
@@ -3918,6 +4324,7 @@ impl CollectionService {
         {
             return Err(Error::Conflict);
         }
+        self.report_processing_phase(claim, "processing_files")?;
         let host = ProcessingHost {
             port: self.processing.as_ref(),
             access: PackageAccess {
@@ -3949,7 +4356,7 @@ impl CollectionService {
         }
         let (support, typed_result, limitations) = match analyzed {
             Ok(output) => {
-                let parsed: ImportAnalysisOutput = output.value.parse()?;
+                let parsed: collector_modules::ImportAnalysisSummary = output.value.parse()?;
                 record.view.candidates = parsed
                     .candidates
                     .into_iter()
@@ -4006,6 +4413,7 @@ impl CollectionService {
         {
             return Err(Error::Conflict);
         }
+        self.report_processing_phase(claim, "rechecking_source")?;
         if self.fingerprint_inventory_checked(&inventory, &mut || {
             if self
                 .jobs
@@ -4038,6 +4446,7 @@ impl CollectionService {
                 .map_or_else(|| self.authentication.now(), |prior| prior.created_at),
         };
         observation.validate()?;
+        self.report_processing_phase(claim, "recording_check")?;
         self.processing
             .save_provisional_observation(id, claim.id, &observation)?;
         record.view.analysis_job_id = Some(claim.id);
@@ -4475,13 +4884,12 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         let id = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
-        let spec = self.catalog_acquisition_spec(actor, &frozen, id)?;
         self.execute_command(
             actor,
             context,
             "catalog.acquire.enqueue",
-            &frozen,
-            |effects| effects.enqueue_job(spec),
+            &(frozen.request.clone(), frozen.item_id),
+            |effects| effects.enqueue_job(self.catalog_acquisition_spec(actor, &frozen, id)?),
         )
     }
 
@@ -4528,71 +4936,108 @@ impl CollectionService {
         command: AcquireAccurateRipCommand,
         context: &CommandContext,
     ) -> Result<JobId> {
-        let capture = self.reader.capture(capture_id)?;
-        let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
-        if eligibility.owner.0 != "org.junk.music"
-            || !capture
-                .representations
-                .iter()
-                .any(|value| value.id == command.representation_id)
-        {
-            return Err(Error::NotFound);
-        }
-        let structure = self
-            .processing
-            .processing_record(command.structure_observation_id)?
-            .observation;
-        if structure.collection_id != capture.collection_id
-            || structure.operation.as_str() != collector_modules::music::CD_STRUCTURE_OPERATION
-            || structure.operation_version != eligibility.schema_version
-            || structure.typed_result.module != eligibility.owner
-            || structure.typed_result.schema_version != eligibility.schema_version
-            || structure.source_fingerprint.source
-                != PackageScope::Representation(command.representation_id)
-            || !matches!(structure.support, OperationSupport::Supported)
-        {
-            return Err(Error::Invalid(
+        self.execute_command(
+            actor,
+            context,
+            "accuraterip.acquire",
+            &(capture_id, &command),
+            |effects| {
+                let capture = self.reader.capture(capture_id)?;
+                let eligibility = self.content_write_eligibility(actor, capture.collection_id)?;
+                if eligibility.owner.0 != "org.junk.music"
+                    || !capture
+                        .representations
+                        .iter()
+                        .any(|value| value.id == command.representation_id)
+                {
+                    return Err(Error::NotFound);
+                }
+                let structure = self
+                    .processing
+                    .processing_record(command.structure_observation_id)?
+                    .observation;
+                if structure.collection_id != capture.collection_id
+                    || !matches!(
+                        structure.operation.as_str(),
+                        collector_modules::music::CD_STRUCTURE_OPERATION
+                            | "org.junk.music.import-analysis"
+                    )
+                    || structure.operation_version != eligibility.schema_version
+                    || structure.typed_result.module != eligibility.owner
+                    || structure.typed_result.schema_version != eligibility.schema_version
+                    || structure.source_fingerprint.source
+                        != PackageScope::Representation(command.representation_id)
+                    || !matches!(structure.support, OperationSupport::Supported)
+                {
+                    return Err(Error::Invalid(
                 "AccurateRip acquisition requires structural evidence for this representation"
                     .into(),
             ));
-        }
-        let inventory = self.processing.package_inventory(
-            capture.collection_id,
-            PackageScope::Representation(command.representation_id),
-        )?;
-        structure
-            .source_fingerprint
-            .validate_inventory(&inventory)?;
-        if self
-            .processing
-            .recorded_source(capture.collection_id, inventory.scope)?
-            != structure.source_fingerprint
-        {
-            return Err(Error::Conflict);
-        }
-        let result: collector_modules::music::CdProcessingResult =
-            structure.typed_result.payload.parse()?;
-        let query = collector_modules::music::accuraterip_query_from_structure(&result)
-            .map_err(|error| Error::Invalid(error.to_string()))?;
-        let job = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
-        let frozen = FrozenAcquisitionJob {
-            request: ProviderRequest {
-                collection_id: capture.collection_id,
-                provider: ModuleId("org.junk.providers.accuraterip".into()),
-                operation: OperationId::new("org.junk.providers.accuraterip.acquire")?,
-                source_fingerprint: Some(structure.source_fingerprint),
-                query: RawJson::from_value(
-                    serde_json::to_value(query)
-                        .map_err(|error| Error::Invalid(error.to_string()))?,
-                ),
-                maximum_response_bytes: 8 * 1024 * 1024,
+                }
+                let inventory = self.processing.package_inventory(
+                    capture.collection_id,
+                    PackageScope::Representation(command.representation_id),
+                )?;
+                structure
+                    .source_fingerprint
+                    .validate_inventory(&inventory)?;
+                if self
+                    .processing
+                    .recorded_source(capture.collection_id, inventory.scope)?
+                    != structure.source_fingerprint
+                {
+                    return Err(Error::Conflict);
+                }
+                let result: collector_modules::music::CdProcessingResult =
+                    if structure.operation.as_str() == "org.junk.music.import-analysis" {
+                        let output: collector_modules::music::MusicImportAnalysisOutput =
+                            structure.typed_result.payload.parse()?;
+                        let mut layouts = output.observations.iter().filter_map(|value| {
+                            value
+                                .parse::<collector_modules::music::CdProcessingResult>()
+                                .ok()
+                                .filter(|value| {
+                                    matches!(
+                                        value,
+                                        collector_modules::music::CdProcessingResult::Layout { .. }
+                                    )
+                                })
+                        });
+                        let layout = layouts.next().ok_or_else(|| {
+                            Error::Invalid("Import analysis has no recorded CD layout".into())
+                        })?;
+                        if layouts.next().is_some() {
+                            return Err(Error::Invalid(
+                                "Import analysis has ambiguous CD layouts".into(),
+                            ));
+                        }
+                        layout
+                    } else {
+                        structure.typed_result.payload.parse()?
+                    };
+                let query = collector_modules::music::accuraterip_query_from_structure(&result)
+                    .map_err(|error| Error::Invalid(error.to_string()))?;
+                let job = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+                let frozen = FrozenAcquisitionJob {
+                    request: ProviderRequest {
+                        collection_id: capture.collection_id,
+                        provider: ModuleId("org.junk.providers.accuraterip".into()),
+                        operation: OperationId::new("org.junk.providers.accuraterip.acquire")?,
+                        source_fingerprint: Some(structure.source_fingerprint),
+                        query: RawJson::from_value(
+                            serde_json::to_value(query)
+                                .map_err(|error| Error::Invalid(error.to_string()))?,
+                        ),
+                        maximum_response_bytes: 8 * 1024 * 1024,
+                    },
+                    collection_binding: eligibility.binding,
+                    item_id: None,
+                    snapshot_id: SnapshotId(job.0),
+                    created_at: self.authentication.now(),
+                };
+                effects.enqueue_job(self.catalog_acquisition_spec(actor, &frozen, job)?)
             },
-            collection_binding: eligibility.binding,
-            item_id: None,
-            snapshot_id: SnapshotId(job.0),
-            created_at: self.authentication.now(),
-        };
-        self.enqueue_catalog_acquisition(actor, frozen, context)
+        )
     }
 
     pub fn import_catalog_snapshot(
@@ -4632,6 +5077,93 @@ impl CollectionService {
         self.enqueue_catalog_acquisition(actor, frozen, context)
     }
 
+    pub fn with_catalog_uploads(mut self, uploads: Arc<dyn UploadedCatalogPort>) -> Self {
+        self.catalog_uploads = Some(uploads);
+        self
+    }
+    pub fn upload_dat_catalog(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        metadata: DatUploadMetadata,
+        bytes: &[u8],
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.validate_dat_upload(actor, collection, &metadata)?;
+        let port = self
+            .catalog_uploads
+            .as_ref()
+            .ok_or_else(|| Error::Unavailable("DAT upload storage is unavailable.".into()))?;
+        if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
+            return Err(Error::Invalid("ZIP uploads are not supported. Extract the archive on your computer and upload the individual DAT file.".into()));
+        }
+        let digest = port.stage_uploaded_catalog(bytes)?;
+        self.import_uploaded_catalog(
+            actor,
+            collection,
+            UploadedDatCatalog {
+                metadata,
+                digest,
+                bytes: ByteLength(bytes.len() as u64),
+            },
+            context,
+        )
+    }
+
+    pub fn validate_dat_upload(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        metadata: &DatUploadMetadata,
+    ) -> Result<()> {
+        self.require_administrator(actor)?;
+        metadata.validate()?;
+        let eligibility = self.content_write_eligibility(actor, collection)?;
+        if eligibility.owner.0 != "org.junk.games" {
+            return Err(Error::Invalid(
+                "DAT catalogs require a Games collection.".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn import_uploaded_catalog(
+        &self,
+        actor: &Principal,
+        collection: CollectionId,
+        upload: UploadedDatCatalog,
+        context: &CommandContext,
+    ) -> Result<JobId> {
+        self.validate_dat_upload(actor, collection, &upload.metadata)?;
+        upload.validate()?;
+        // Bind receipts to submitted metadata and bytes, before resolving mutable binding/time.
+        self.execute_command(
+            actor,
+            context,
+            "catalog.upload.enqueue",
+            &(collection, upload.clone()),
+            |effects| {
+                let eligibility = self.content_write_eligibility(actor, collection)?;
+                let id = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
+                let frozen = FrozenAcquisitionJob {
+                    request: ProviderRequest {
+                        collection_id: collection,
+                        provider: ModuleId("org.junk.providers.local-dat".into()),
+                        operation: OperationId::new("org.junk.providers.local-dat.acquire")?,
+                        source_fingerprint: None,
+                        query: RawJson::from_value(serde_json::json!({"upload":upload})),
+                        maximum_response_bytes: MAX_DAT_UPLOAD_BYTES as u64,
+                    },
+                    collection_binding: eligibility.binding,
+                    item_id: None,
+                    snapshot_id: SnapshotId(id.0),
+                    created_at: self.authentication.now(),
+                };
+                effects.enqueue_job(self.catalog_acquisition_spec(actor, &frozen, id)?)
+            },
+        )
+    }
+
     pub fn catalog_snapshots(
         &self,
         actor: &Principal,
@@ -4667,11 +5199,26 @@ impl CollectionService {
         let page = self.processing.snapshots(collection_id, after, limit)?;
         let mut items = Vec::with_capacity(page.items.len());
         for snapshot in page.items {
-            let active = self
-                .processing
-                .active_snapshot(collection_id, &snapshot.provider)?
-                == Some(snapshot.id);
-            items.push(CatalogSnapshotStatus { snapshot, active });
+            let active = if snapshot.provider.0 == "org.junk.providers.local-dat" {
+                self.processing
+                    .active_game_snapshots(collection_id)?
+                    .contains(&snapshot.id)
+            } else {
+                self.processing
+                    .active_snapshot(collection_id, &snapshot.provider)?
+                    == Some(snapshot.id)
+            };
+            let inactive_reason = if game_catalog_slot(&snapshot)?.is_none() {
+                Some("Historical system, convention or byte variant is unsupported; retained inactive".into())
+            } else {
+                None
+            };
+            items.push(CatalogSnapshotStatus {
+                snapshot,
+                active,
+                identification_job_id: None,
+                inactive_reason,
+            });
         }
         Ok(Page {
             items,
@@ -4698,7 +5245,30 @@ impl CollectionService {
             context,
             "catalog.snapshot.activate",
             &(collection_id, snapshot_id),
-            |effects| effects.activate_catalog_snapshot(collection_id, &provider, snapshot_id),
+            |effects| {
+                let eligibility = self.content_write_eligibility(actor, collection_id)?;
+                let scan = FrozenGameCatalogScan {
+                    collection_id,
+                    collection_binding: eligibility.binding,
+                    activated_snapshot: snapshot_id,
+                };
+                effects.activate_catalog_snapshot(
+                    collection_id,
+                    &provider,
+                    snapshot_id,
+                    JobSpec {
+                        id: deterministic_job_id(actor.user_id, "game.catalog.scan", context.key()),
+                        user_id: actor.user_id,
+                        collection_id: Some(collection_id),
+                        item_id: None,
+                        kind: "game_catalog_scan".into(),
+                        phase: "queued".into(),
+                        total_units: 0,
+                        request: serde_json::json!({"snapshot_id":snapshot_id}),
+                        frozen_input: Some(FrozenJobInput::GameCatalogScan(scan)),
+                    },
+                )
+            },
         )
     }
 
@@ -4748,7 +5318,42 @@ impl CollectionService {
         )
     }
 
+    fn report_processing_phase(&self, claim: &JobClaim, phase: &str) -> Result<()> {
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        match self.jobs.heartbeat_job(
+            claim.id,
+            &claim.claim_token,
+            phase,
+            claim.completed_units,
+            30,
+        ) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                // Cancellation can arrive between the checkpoint and phase write.
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)?
+                {
+                    Err(Error::JobCancelled)
+                } else {
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    pub fn job_settings(&self) -> Result<JobSettings> {
+        self.jobs.job_settings()
+    }
+
     pub fn run_next_job(&self, worker_instance: &str) -> Result<bool> {
+        self.jobs.reconcile_game_scans()?;
+        self.jobs.reconcile_acquisitions()?;
         let Some(claim) = self.jobs.claim_job(worker_instance, 30)? else {
             return Ok(false);
         };
@@ -4798,6 +5403,7 @@ impl CollectionService {
                     .is_some()
             });
         let result = match claim.kind.as_str() {
+            "inbox_cleanup" => self.run_inbox_cleanup(&claim),
             "integrity_verification" => (|| {
                 if claim.phase == "revision_committed" {
                     let item = self.reader.item(claim.item_id.ok_or_else(|| {
@@ -4978,17 +5584,28 @@ impl CollectionService {
                         })
                     })
             })(),
-            "catalog_acquisition" => (|| {
+            "catalog_acquisition" | "provider_acquisition" => (|| {
                 let frozen = match claim.frozen_input.clone() {
                     Some(FrozenJobInput::Acquisition(value)) => value,
                     _ => return Err(Error::Storage("acquisition job has no frozen input".into())),
                 };
-                self.acquire_snapshot_for_job(&claim, &frozen)
-                    .map(|snapshot_id| serde_json::json!({"snapshot_id":snapshot_id}))
+                let snapshot_id = self.acquire_snapshot_for_job(&claim, &frozen)?;
+                let response_status = if claim.kind == "provider_acquisition" {
+                    Some(if snapshot_id == frozen.snapshot_id {
+                        ProviderResponseStatus::Downloaded
+                    } else {
+                        ProviderResponseStatus::Unchanged
+                    })
+                } else {
+                    self.jobs.acquisition_response_status(&claim)?
+                };
+                Ok(serde_json::json!({"snapshot_id":snapshot_id,"response_status":response_status}))
             })(),
             "metadata_resolution" => self.run_metadata_resolution(&claim),
             "bulk_intake" => self.run_bulk_intake(&claim),
             "bulk_library" => self.run_bulk_library(&claim),
+            "game_identification" => self.run_game_identification(&claim),
+            "game_catalog_scan" => self.run_game_catalog_scan(&claim),
             "metadata_existing" => self.run_existing_metadata(&claim),
             "music_derivative" => self.run_music_derivative(&claim),
             "music_derivative_batch" => self.run_music_derivative_batch(&claim),
@@ -5020,6 +5637,7 @@ impl CollectionService {
                     .processing
                     .package_inventory(frozen.collection_id, frozen.source)?;
                 frozen.source_fingerprint.validate_inventory(&inventory)?;
+                self.report_processing_phase(&claim, "validating_source")?;
                 if self.fingerprint_inventory_checked(&inventory, &mut || {
                     if self
                         .jobs
@@ -5052,6 +5670,14 @@ impl CollectionService {
                     job_id: claim.id,
                     claim_token: claim.claim_token.clone(),
                 };
+                let phase = if frozen.operation.as_str()
+                    == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
+                {
+                    "checking_accuraterip"
+                } else {
+                    "processing_files"
+                };
+                self.report_processing_phase(&claim, phase)?;
                 let (module, version) = self.modules.capability_owner(&frozen.operation)?;
                 let operated = self.modules.operate(
                     OperationRequest {
@@ -5101,6 +5727,7 @@ impl CollectionService {
                 )?;
                 self.validate_frozen_binding(&current, &frozen.collection_binding)?;
                 self.validate_operation_eligibility(&current, &frozen.operation)?;
+                self.report_processing_phase(&claim, "rechecking_source")?;
                 if self.fingerprint_inventory_checked(&inventory, &mut || {
                     if self
                         .jobs
@@ -5133,6 +5760,7 @@ impl CollectionService {
                     created_at: self.authentication.now(),
                 };
                 observation.validate()?;
+                self.report_processing_phase(&claim, "recording_check")?;
                 self.processing.publish_processing_record(
                     &claim,
                     PortableProcessingRecord {
@@ -5160,6 +5788,13 @@ impl CollectionService {
                 self.jobs
                     .complete_job(claim.id, &claim.claim_token, result)?;
             }
+            Err(Error::CommandInProgress) if claim.kind == "game_catalog_scan" => {}
+            Err(Error::CommandInProgress)
+                if self
+                    .jobs
+                    .job_record(claim.id, claim.user_id)?
+                    .phase
+                    .starts_with("waiting_") => {}
             Err(Error::JobCancelled) => {
                 if claim.kind.starts_with("import_")
                     && let Some(import_id) = claim
@@ -5169,6 +5804,10 @@ impl CollectionService {
                         .and_then(|value| value.parse().ok())
                 {
                     let _ = self.provisional_imports.cancel_import(import_id);
+                }
+                if self.jobs.job_record(claim.id, claim.user_id)?.state == JobState::Running {
+                    self.jobs
+                        .request_job_cancellation(claim.id, claim.user_id)?;
                 }
                 self.jobs.cancel_claimed_job(claim.id, &claim.claim_token)?
             }
@@ -5189,6 +5828,7 @@ impl CollectionService {
                 )?;
             }
         }
+        self.jobs.reconcile_acquisitions()?;
         if let Some(id) = guided_import_id {
             self.reconcile_guided_ingest(id)?;
         }
@@ -5199,6 +5839,15 @@ impl CollectionService {
         claim: &JobClaim,
         frozen: &FrozenAcquisitionJob,
     ) -> Result<SnapshotId> {
+        if claim.kind != "provider_acquisition" {
+            return self
+                .jobs
+                .acquisition_for_job(claim, frozen)?
+                .ok_or(Error::CommandInProgress);
+        }
+        if let Some(snapshot_id) = self.jobs.acquisition_committed_snapshot(claim)? {
+            return Ok(snapshot_id);
+        }
         if let Ok(existing) = self.processing.snapshot(SnapshotQuery {
             collection_id: frozen.request.collection_id,
             snapshot_id: frozen.snapshot_id,
@@ -5206,12 +5855,7 @@ impl CollectionService {
             return Ok(existing.id);
         }
         FrozenJobInput::Acquisition(frozen.clone()).validate()?;
-        let eligibility = self.content_write_eligibility_for_job(
-            claim.user_id,
-            claim.collection_id,
-            claim.item_id,
-        )?;
-        self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+        self.validate_acquisition_owners(claim, frozen)?;
         let mut execution = DurableProcessingContext {
             progress_base: if claim.kind == "metadata_resolution" {
                 self.jobs
@@ -5232,8 +5876,10 @@ impl CollectionService {
             .streaming_providers
             .get(&frozen.request.provider.0)
             .ok_or_else(|| Error::Unavailable("configured provider is unavailable".into()))?;
+        self.report_processing_phase(claim, "acquiring")?;
         let mut response = provider.acquire_stream(&frozen.request, &mut execution)?;
         let snapshot = SnapshotRecord {
+            acquisition_key: Some(acquisition_key(frozen)?),
             id: frozen.snapshot_id,
             collection_id: frozen.request.collection_id,
             provider: frozen.request.provider.clone(),
@@ -5251,15 +5897,9 @@ impl CollectionService {
         }
         self.processing
             .publish_snapshot(claim, snapshot, response.reader.as_mut(), &mut || {
-                let current = self.content_write_eligibility_for_job(
-                    claim.user_id,
-                    claim.collection_id,
-                    claim.item_id,
-                )?;
-                self.validate_frozen_binding(&current, &frozen.collection_binding)?;
+                self.validate_acquisition_owners(claim, frozen)?;
                 execution.cancellation_requested()
-            })?;
-        Ok(frozen.snapshot_id)
+            })
     }
     pub fn jobs(&self, actor: &Principal) -> Result<Vec<Job>> {
         let jobs = self.imports.jobs(actor.user_id)?;
@@ -5318,6 +5958,8 @@ impl CollectionService {
                 | "metadata_resolution"
                 | "bulk_intake"
                 | "metadata_existing"
+                | "game_identification"
+                | "game_catalog_scan"
         ) {
             self.content_write_eligibility_for_job(actor.user_id, job.collection_id, job.item_id)?;
         }
@@ -5338,6 +5980,8 @@ impl CollectionService {
                 | "metadata_resolution"
                 | "bulk_intake"
                 | "metadata_existing"
+                | "game_identification"
+                | "game_catalog_scan"
                 | "music_derivative"
                 | "processing_operation" => effects.retry_failed_job(id, actor.user_id),
                 "music_derivative_batch" => effects
@@ -5821,9 +6465,13 @@ fn deterministic_collection_id(user: UserId, key: &str) -> CollectionId {
     CollectionId(uuid::Uuid::from_bytes(bytes))
 }
 
-fn deterministic_inventory_uuid(user: UserId, kind: &str, key: &str) -> uuid::Uuid {
+fn deterministic_inventory_uuid(
+    owner: impl std::fmt::Display,
+    kind: &str,
+    key: &str,
+) -> uuid::Uuid {
     use sha2::{Digest as _, Sha256};
-    let mut bytes: [u8; 16] = Sha256::digest(format!("junk-collector:{kind}:{user}:{key}"))[..16]
+    let mut bytes: [u8; 16] = Sha256::digest(format!("junk-collector:{kind}:{owner}:{key}"))[..16]
         .try_into()
         .expect("SHA-256 prefix has fixed length");
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
@@ -5918,21 +6566,16 @@ fn deterministic_new_asset_id(user: UserId, key: &str) -> AssetId {
 }
 
 fn validate_asset_upload(kind: &AssetKind, alt_text: &str, bytes: &[u8]) -> Result<()> {
-    match kind {
-        AssetKind::Cover | AssetKind::Photo | AssetKind::Scan => {}
-        AssetKind::Document => {
-            return Err(Error::Unavailable(
-                "document uploads are not implemented in Wave 3".into(),
-            ));
-        }
-        AssetKind::Other => {
-            return Err(Error::Invalid(
-                "asset kind must be cover, photo, or scan".into(),
-            ));
-        }
+    if !matches!(
+        kind,
+        AssetKind::Cover | AssetKind::Photo | AssetKind::Scan | AssetKind::Document
+    ) {
+        return Err(Error::Invalid(
+            "asset kind must be cover, photo, scan, or document".into(),
+        ));
     }
-    if bytes.len() > 20 * 1024 * 1024 || alt_text.len() > 4096 {
-        return Err(Error::Invalid("image exceeds upload limit".into()));
+    if bytes.len() > MAX_ASSET_BYTES || alt_text.len() > 4096 {
+        return Err(Error::Invalid("asset exceeds upload limit".into()));
     }
     Ok(())
 }
@@ -5952,4 +6595,19 @@ fn validate_security_page(cursor: Option<&str>, limit: u16) -> Result<()> {
         return Err(Error::Invalid("invalid security page".into()));
     }
     Ok(())
+}
+
+/// New digital packages share playable files and ordinary covers. Companions
+/// require explicit review; old stored visibility is never rewritten.
+fn default_import_visibility(file_audio: bool, name: &str) -> Visibility {
+    let basename = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+    let ordinary_cover = basename.rsplit_once('.').is_some_and(|(stem, ext)| {
+        ["cover", "folder", "front"].contains(&stem)
+            && ["jpg", "jpeg", "png", "webp"].contains(&ext)
+    });
+    if file_audio && !collector_modules::music::files::is_audio_name(name) && !ordinary_cover {
+        Visibility::Curators
+    } else {
+        Visibility::Shared
+    }
 }

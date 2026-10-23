@@ -229,6 +229,7 @@ fn snapshot_parser_checks_exact_bytes_even_when_metadata_is_unchanged() {
     let provider = LocalDatProvider::new(BTreeMap::new()).unwrap();
     let (header, _) = LocalDatProvider::parse_observation(&source("unused".into()), xml()).unwrap();
     let record = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: CollectionId::new(),
         provider: ModuleId(LOCAL_DAT_PROVIDER_ID.into()),

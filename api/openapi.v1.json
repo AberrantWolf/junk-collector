@@ -240,6 +240,183 @@
         }
       }
     },
+    "/api/v1/admin/collections/{id}/catalog-upload": {
+      "post": {
+        "operationId": "upload_catalog_snapshot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "system",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "catalog",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "byte_domain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 67108864
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/admin/collections/{id}/catalog-upload/accept": {
+      "post": {
+        "operationId": "accept_catalog_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadedDatCatalog"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/admin/collections/{id}/catalog-upload/inspect": {
+      "post": {
+        "operationId": "inspect_catalog_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogUploadForm"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 537919488
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogUploadPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/admin/default-user/{id}": {
       "put": {
         "operationId": "reassign_default_user",
@@ -421,7 +598,9 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ServerSettingsView"
+                }
               }
             }
           },
@@ -1929,6 +2108,50 @@
             "description": ""
           },
           "416": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{collection}/assets/{asset}/text-preview": {
+      "get": {
+        "operationId": "asset_text_preview",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "asset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssetId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTextPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           }
         }
@@ -3740,6 +3963,64 @@
         }
       }
     },
+    "/api/v1/ingests/{id}/inbox-cleanup": {
+      "post": {
+        "operationId": "cleanup_ingest_inbox",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ImportId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupInboxCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobId"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/ingests/{id}/retry": {
       "post": {
         "operationId": "retry_ingest",
@@ -4691,6 +4972,50 @@
             "description": ""
           },
           "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/identify-game": {
+      "post": {
+        "operationId": "identify_game_entry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobId"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
             "description": ""
           }
         }
@@ -6085,6 +6410,72 @@
         }
       }
     },
+    "/api/v1/items/{item}/captures/{capture}/purchase": {
+      "put": {
+        "operationId": "update_digital_purchase",
+        "parameters": [
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "capture",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDigitalPurchase"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresentedCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/items/{item}/client-playback": {
       "get": {
         "operationId": "client_album_playback",
@@ -6875,6 +7266,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Pairing"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/playback/grants": {
+      "post": {
+        "operationId": "browser_grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaybackTarget"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserPlaybackGrant"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/playback/routes": {
+      "get": {
+        "operationId": "routes",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalPlaybackDescriptor"
                 }
               }
             }
@@ -7990,6 +8435,9 @@
           "sources"
         ],
         "properties": {
+          "automatic": {
+            "type": "boolean"
+          },
           "destination": {
             "$ref": "#/components/schemas/ItemId"
           },
@@ -8364,6 +8812,49 @@
           }
         ]
       },
+      "BackupReminder": {
+        "type": "object",
+        "required": [
+          "status",
+          "after_days",
+          "externally_managed",
+          "checked_at"
+        ],
+        "properties": {
+          "after_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "externally_managed": {
+            "type": "boolean"
+          },
+          "last_completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BackupReminderStatus"
+          }
+        }
+      },
+      "BackupReminderStatus": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "recent",
+          "due",
+          "failed",
+          "unconfirmed"
+        ]
+      },
       "BadgeTone": {
         "type": "string",
         "enum": [
@@ -8380,6 +8871,22 @@
         ],
         "properties": {
           "username": {
+            "type": "string"
+          }
+        }
+      },
+      "BrowserPlaybackGrant": {
+        "type": "object",
+        "required": [
+          "token",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "token": {
             "type": "string"
           }
         }
@@ -8648,6 +9155,16 @@
           "id": {
             "$ref": "#/components/schemas/CaptureId"
           },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
+          },
           "representations": {
             "type": "array",
             "items": {
@@ -8759,6 +9276,89 @@
           "other"
         ]
       },
+      "CatalogCandidate": {
+        "type": "object",
+        "required": [
+          "provider",
+          "provider_record_id",
+          "label",
+          "matched_units"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "matched_units": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogMatchedUnit"
+            }
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "provider_record_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogDetection": {
+        "type": "object",
+        "required": [
+          "status",
+          "dialect",
+          "system_choices",
+          "version",
+          "byte_domains",
+          "reasons"
+        ],
+        "properties": {
+          "byte_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "catalog": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dialect": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameDetectionStatus"
+          },
+          "system": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StandardGameSystem"
+              }
+            ]
+          },
+          "system_choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StandardGameSystem"
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
       "CatalogImportRequest": {
         "type": "object",
         "required": [
@@ -8767,6 +9367,138 @@
         "properties": {
           "source": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CatalogMatchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "match"
+            ],
+            "properties": {
+              "match": {
+                "type": "string",
+                "enum": [
+                  "inconclusive"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "match"
+            ],
+            "properties": {
+              "match": {
+                "type": "string",
+                "enum": [
+                  "no_match"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidate",
+              "match"
+            ],
+            "properties": {
+              "candidate": {
+                "$ref": "#/components/schemas/CatalogCandidate"
+              },
+              "match": {
+                "type": "string",
+                "enum": [
+                  "unique_complete_match"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidates",
+              "match"
+            ],
+            "properties": {
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogCandidate"
+                }
+              },
+              "match": {
+                "type": "string",
+                "enum": [
+                  "ambiguous_complete_matches"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "candidates",
+              "matched_files",
+              "total_files",
+              "match"
+            ],
+            "properties": {
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CatalogCandidate"
+                }
+              },
+              "match": {
+                "type": "string",
+                "enum": [
+                  "partial_identification"
+                ]
+              },
+              "matched_files": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "total_files": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
+      "CatalogMatchedUnit": {
+        "type": "object",
+        "required": [
+          "source_file_id",
+          "digest"
+        ],
+        "properties": {
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "source_file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          },
+          "track_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -8801,6 +9533,22 @@
           "active": {
             "type": "boolean"
           },
+          "identification_job_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId"
+              }
+            ]
+          },
+          "inactive_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "snapshot": {
             "$ref": "#/components/schemas/SnapshotRecord"
           }
@@ -8833,6 +9581,85 @@
           },
           "system": {
             "type": "string"
+          }
+        }
+      },
+      "CatalogUploadEntry": {
+        "type": "object",
+        "required": [
+          "name",
+          "detection",
+          "corrections"
+        ],
+        "properties": {
+          "corrections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadedDatCatalog"
+            }
+          },
+          "detection": {
+            "$ref": "#/components/schemas/CatalogDetection"
+          },
+          "name": {
+            "type": "string"
+          },
+          "upload": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UploadedDatCatalog"
+              }
+            ]
+          }
+        }
+      },
+      "CatalogUploadForm": {
+        "type": "object",
+        "description": "Browser batch of binary DAT/ZIP uploads; parsing uses bounded multipart chunks.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        }
+      },
+      "CatalogUploadPreview": {
+        "type": "object",
+        "required": [
+          "expanded_bytes",
+          "member_count",
+          "entries",
+          "ignored"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogUploadEntry"
+            }
+          },
+          "expanded_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "ignored": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "member_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -8889,6 +9716,18 @@
                 "$ref": "#/components/schemas/RepresentationId"
               }
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "CleanupInboxCommand": {
+        "type": "object",
+        "required": [
+          "source_is_idle"
+        ],
+        "properties": {
+          "source_is_idle": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -9557,6 +10396,16 @@
           "name"
         ],
         "properties": {
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectionListKind"
+              }
+            ]
+          },
           "name": {
             "type": "string"
           }
@@ -9596,6 +10445,58 @@
       "CurrencyCode": {
         "type": "string"
       },
+      "DatUploadMetadata": {
+        "type": "object",
+        "required": [
+          "system",
+          "catalog",
+          "byte_domain"
+        ],
+        "properties": {
+          "byte_domain": {
+            "type": "string"
+          },
+          "catalog": {
+            "type": "string"
+          },
+          "system": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DbarQuery": {
+        "type": "object",
+        "required": [
+          "track_count",
+          "accuraterip_id1",
+          "accuraterip_id2",
+          "cddb_id"
+        ],
+        "properties": {
+          "accuraterip_id1": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "accuraterip_id2": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cddb_id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "DeviceId": {
         "type": "string",
         "format": "uuid"
@@ -9614,6 +10515,120 @@
             "type": "string"
           }
         }
+      },
+      "DigitalPurchase": {
+        "type": "object",
+        "description": "Acquisition facts belong to the purchased package, independently of physical copies.",
+        "properties": {
+          "cost": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Money"
+              }
+            ]
+          },
+          "date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "order_reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "store": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DiscAudioManifest": {
+        "type": "object",
+        "required": [
+          "version",
+          "anchor_file_index",
+          "tracks",
+          "data_tracks"
+        ],
+        "properties": {
+          "anchor_file_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "data_tracks": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscAudioTrack"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "DiscAudioTrack": {
+        "type": "object",
+        "required": [
+          "position",
+          "start_frame",
+          "frame_count",
+          "source_start_frame",
+          "source_end_frame"
+        ],
+        "properties": {
+          "frame_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "source_end_frame": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source_start_frame": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "start_frame": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "DiscardIngestCommand": {
         "type": "object",
@@ -9709,6 +10724,21 @@
         },
         "additionalProperties": false
       },
+      "DocumentTextPreview": {
+        "type": "object",
+        "required": [
+          "text",
+          "truncated"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
       "DomainEdit": {
         "type": "object",
         "description": "A bounded owner-mediated patch. The raw object preserves JSON scalar types;\neach owner deserializes it into its own typed patch where missing and null are\ndistinct operations.",
@@ -9772,6 +10802,27 @@
                 "enum": [
                   "text"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "values",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "choice"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -10010,6 +11061,17 @@
           "unsupported"
         ]
       },
+      "Exposure": {
+        "type": "object",
+        "properties": {
+          "public_administration": {
+            "type": "boolean"
+          },
+          "public_curation": {
+            "type": "boolean"
+          }
+        }
+      },
       "FeaturesResponse": {
         "type": "object",
         "required": [
@@ -10036,8 +11098,405 @@
           },
           "passkeys": {
             "type": "boolean"
+          },
+          "passkeys_unavailable_reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UnavailableReason"
+              }
+            ]
           }
         }
+      },
+      "GameCatalogIdentification": {
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "snapshot_digest",
+          "byte_domain",
+          "system",
+          "catalog"
+        ],
+        "properties": {
+          "byte_domain": {
+            "type": "string"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/CatalogMatchResult"
+          },
+          "snapshot_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "snapshot_id": {
+            "$ref": "#/components/schemas/SnapshotId"
+          },
+          "system": {
+            "type": "string"
+          }
+        }
+      },
+      "GameDetectionStatus": {
+        "type": "string",
+        "enum": [
+          "recognized",
+          "ambiguous",
+          "unrecognized",
+          "malformed",
+          "unsupported"
+        ]
+      },
+      "GameFileDigest": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "bytes",
+          "domain",
+          "digests"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Digest"
+            }
+          },
+          "domain": {
+            "$ref": "#/components/schemas/NormalizedByteDomain"
+          },
+          "file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameFormatInspection": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "status",
+          "reason"
+        ],
+        "properties": {
+          "file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameDetectionStatus"
+          }
+        }
+      },
+      "GameIdentification": {
+        "type": "object",
+        "required": [
+          "analyses",
+          "status",
+          "inspections",
+          "catalogs",
+          "candidates",
+          "limitations"
+        ],
+        "properties": {
+          "analyses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameProcessingResult"
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataCandidateObservation"
+            }
+          },
+          "catalogs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameCatalogIdentification"
+            }
+          },
+          "inspections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameFormatInspection"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameDetectionStatus"
+          }
+        }
+      },
+      "GameProcessingResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "audio",
+              "result"
+            ],
+            "properties": {
+              "audio": {
+                "$ref": "#/components/schemas/DiscAudioManifest"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "cd_audio"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "files",
+              "result"
+            ],
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GameFileDigest"
+                }
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "hashes"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "tracks",
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "track_hashes"
+                ]
+              },
+              "tracks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GameTrackDigest"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "format",
+              "fields",
+              "result"
+            ],
+            "properties": {
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/GameStructureValue"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "format": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "structure"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "catalog",
+              "result"
+            ],
+            "properties": {
+              "catalog": {
+                "$ref": "#/components/schemas/CatalogMatchResult"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "catalog_match"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "GameStructureValue": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsigned"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "signed"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boolean"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bytes"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ByteLength"
+              }
+            }
+          }
+        ]
+      },
+      "GameTrackDigest": {
+        "type": "object",
+        "required": [
+          "track_number",
+          "source_file_id",
+          "source_byte_offset",
+          "bytes",
+          "synthetic_pregap_frames",
+          "synthetic_postgap_frames",
+          "domain",
+          "digests"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Digest"
+            }
+          },
+          "domain": {
+            "$ref": "#/components/schemas/NormalizedByteDomain"
+          },
+          "source_byte_offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source_file_id": {
+            "$ref": "#/components/schemas/PackageFileId"
+          },
+          "synthetic_postgap_frames": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "synthetic_pregap_frames": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_number": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "GeoCoordinate": {
         "type": "object",
@@ -10265,6 +11724,9 @@
           },
           "received_bytes": {
             "$ref": "#/components/schemas/ByteLength"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
           }
         },
         "additionalProperties": false
@@ -10464,6 +11926,49 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "InboxCleanupView": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "state",
+          "removed_bytes",
+          "total_bytes",
+          "completed",
+          "retained_files"
+        ],
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "recovery_directory": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "removed_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "retained_files": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "total_bytes": {
+            "$ref": "#/components/schemas/ByteLength"
           }
         }
       },
@@ -10672,6 +12177,16 @@
           "import": {
             "$ref": "#/components/schemas/ImportView"
           },
+          "inbox_cleanup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InboxCleanupView"
+              }
+            ]
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -10733,6 +12248,16 @@
               "$ref": "#/components/schemas/UploadFile"
             }
           },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
+          },
           "source": {
             "$ref": "#/components/schemas/ImportSourceSummary"
           }
@@ -10742,6 +12267,7 @@
       "IngestPermissions": {
         "type": "object",
         "required": [
+          "can_clean_inbox",
           "can_resume_upload",
           "can_cancel",
           "can_discard",
@@ -10749,6 +12275,9 @@
         ],
         "properties": {
           "can_cancel": {
+            "type": "boolean"
+          },
+          "can_clean_inbox": {
             "type": "boolean"
           },
           "can_correct_association": {
@@ -10829,6 +12358,9 @@
           "metadata_available": {
             "type": "boolean"
           },
+          "music_actions_available": {
+            "type": "boolean"
+          },
           "position": {
             "type": "integer",
             "format": "int32",
@@ -10841,6 +12373,16 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
             ]
           },
           "source": {
@@ -10923,6 +12465,7 @@
       "IngestSummary": {
         "type": "object",
         "required": [
+          "work",
           "import_id",
           "collection_id",
           "package_name",
@@ -10995,8 +12538,53 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "work": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestWork"
+            }
           }
         }
+      },
+      "IngestWork": {
+        "type": "object",
+        "required": [
+          "shared",
+          "state",
+          "kind",
+          "phase",
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IngestWorkState"
+          }
+        }
+      },
+      "IngestWorkState": {
+        "type": "string",
+        "description": "Current execution only; workflow outcome and preservation are independent.",
+        "enum": [
+          "running",
+          "queued",
+          "waiting",
+          "cancelling"
+        ]
       },
       "IntakeDestination": {
         "oneOf": [
@@ -11018,7 +12606,6 @@
             "type": "object",
             "required": [
               "key",
-              "title",
               "copy_key",
               "destination"
             ],
@@ -11036,7 +12623,10 @@
                 "type": "string"
               },
               "title": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           },
@@ -11439,6 +13029,10 @@
           "reset_artwork_through"
         ],
         "properties": {
+          "automatic_grouping_disabled": {
+            "type": "boolean",
+            "description": "An explicit group undo preserves the user's choice to keep entries apart."
+          },
           "automatic_metadata_through": {
             "type": "integer",
             "format": "int64",
@@ -11550,8 +13144,57 @@
         "type": "string",
         "format": "uuid"
       },
+      "JobProgressKind": {
+        "type": "string",
+        "enum": [
+          "measured",
+          "indeterminate"
+        ]
+      },
       "JobResultView": {
         "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "observation_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "game_identification"
+                ]
+              },
+              "observation_id": {
+                "$ref": "#/components/schemas/ObservationId"
+              },
+              "status": {
+                "$ref": "#/components/schemas/GameDetectionStatus"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "completed",
+              "kind"
+            ],
+            "properties": {
+              "completed": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "game_catalog_scan"
+                ]
+              }
+            }
+          },
           {
             "type": "object",
             "required": [
@@ -11563,6 +13206,16 @@
                 "type": "string",
                 "enum": [
                   "catalog_snapshot"
+                ]
+              },
+              "response_status": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProviderResponseStatus"
+                  }
                 ]
               },
               "snapshot_id": {
@@ -11587,6 +13240,7 @@
         "type": "object",
         "required": [
           "id",
+          "progress_kind",
           "kind",
           "state",
           "phase",
@@ -11656,6 +13310,19 @@
           },
           "phase": {
             "type": "string"
+          },
+          "progress_kind": {
+            "$ref": "#/components/schemas/JobProgressKind"
+          },
+          "provider_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderResponseStatus"
+              }
+            ]
           },
           "result": {
             "oneOf": [
@@ -11970,6 +13637,58 @@
       "LoanId": {
         "type": "string",
         "format": "uuid"
+      },
+      "LocalPlaybackDescriptor": {
+        "type": "object",
+        "description": "Authenticated control-plane advertisement; each endpoint has the same server identity.",
+        "required": [
+          "server_id",
+          "endpoints",
+          "remote_media_allowed"
+        ],
+        "properties": {
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalPlaybackEndpoint"
+            }
+          },
+          "remote_media_allowed": {
+            "type": "boolean"
+          },
+          "server_id": {
+            "$ref": "#/components/schemas/ServerId"
+          }
+        }
+      },
+      "LocalPlaybackEndpoint": {
+        "type": "object",
+        "required": [
+          "https_url",
+          "webtransport_url",
+          "certificate_pem",
+          "certificate_sha256",
+          "expires_at"
+        ],
+        "properties": {
+          "certificate_pem": {
+            "type": "string"
+          },
+          "certificate_sha256": {
+            "type": "string",
+            "description": "SHA-256 of the DER leaf, as required by WebTransport serverCertificateHashes."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "https_url": {
+            "type": "string"
+          },
+          "webtransport_url": {
+            "type": "string"
+          }
+        }
       },
       "LocalizedText": {
         "type": "object",
@@ -12330,6 +14049,62 @@
               "string",
               "null"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "MetadataCandidateObservation": {
+        "type": "object",
+        "required": [
+          "identity",
+          "title",
+          "complete_identity",
+          "strength",
+          "provider_priority",
+          "observation"
+        ],
+        "properties": {
+          "artwork": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AssetId"
+              }
+            ]
+          },
+          "complete_identity": {
+            "type": "boolean",
+            "description": "A provider's complete identity assertion is ranked before all partial\nidentifier or layout evidence. It is descriptive identity evidence, not\nintegrity or catalog verification."
+          },
+          "identity": {
+            "$ref": "#/components/schemas/MetadataCandidateIdentity"
+          },
+          "observation": {
+            "type": "object"
+          },
+          "provider_priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Lower values are preferred. Policy supplies this value; array order never\nparticipates in resolution.",
+            "minimum": 0
+          },
+          "strength": {
+            "$ref": "#/components/schemas/MatchStrength"
+          },
+          "subtitle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataText"
+              }
+            ]
+          },
+          "title": {
+            "$ref": "#/components/schemas/MetadataText"
           }
         },
         "additionalProperties": false
@@ -12725,6 +14500,16 @@
               }
             ]
           },
+          "response_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderResponseStatus"
+              }
+            ]
+          },
           "snapshot_id": {
             "$ref": "#/components/schemas/SnapshotId"
           }
@@ -12777,7 +14562,9 @@
           "providers",
           "lookup_choices",
           "catalog_sources",
-          "permissions"
+          "permissions",
+          "terms",
+          "recognized_systems"
         ],
         "properties": {
           "authority": {
@@ -12797,6 +14584,16 @@
           },
           "display": {
             "$ref": "#/components/schemas/ResolvedMetadataDisplay"
+          },
+          "identification": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GameIdentification"
+              }
+            ]
           },
           "item_id": {
             "$ref": "#/components/schemas/ItemId"
@@ -12829,6 +14626,12 @@
               "$ref": "#/components/schemas/MetadataProviderView"
             }
           },
+          "recognized_systems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StandardGameSystem"
+            }
+          },
           "review_reasons": {
             "type": "array",
             "items": {
@@ -12837,6 +14640,9 @@
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/MetadataTerms"
           }
         }
       },
@@ -12865,6 +14671,29 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "MetadataTerms": {
+        "type": "object",
+        "required": [
+          "singular",
+          "plural",
+          "choice",
+          "subtitle"
+        ],
+        "properties": {
+          "choice": {
+            "type": "string"
+          },
+          "plural": {
+            "type": "string"
+          },
+          "singular": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
           }
         }
       },
@@ -12926,6 +14755,20 @@
           {
             "type": "object",
             "required": [
+              "source"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "provisional"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "identity",
               "source"
             ],
@@ -12970,6 +14813,7 @@
           "schema_version",
           "display_name",
           "collection_type_label",
+          "metadata_terms",
           "fields",
           "capabilities"
         ],
@@ -12995,10 +14839,16 @@
           "id": {
             "$ref": "#/components/schemas/ModuleId"
           },
+          "metadata_terms": {
+            "$ref": "#/components/schemas/MetadataTerms"
+          },
           "schema_version": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "supports_listening": {
+            "type": "boolean"
           }
         }
       },
@@ -13191,6 +15041,14 @@
           }
         }
       },
+      "MusicAlbumSelection": {
+        "type": "string",
+        "enum": [
+          "included",
+          "excluded",
+          "needs_review"
+        ]
+      },
       "MusicAlbumSourcePlan": {
         "type": "object",
         "required": [
@@ -13228,6 +15086,53 @@
             "$ref": "#/components/schemas/RepresentationId"
           },
           "track_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MusicAudioFormat": {
+        "type": "object",
+        "required": [
+          "codec",
+          "sample_rate",
+          "channels"
+        ],
+        "properties": {
+          "bits_per_sample": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "channels": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "codec": {
+            "type": "string"
+          },
+          "delay_frames": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "padding_frames": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "sample_rate": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
@@ -13573,6 +15478,16 @@
           "item_id": {
             "$ref": "#/components/schemas/ItemId"
           },
+          "source_representation_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepresentationId"
+              }
+            ]
+          },
           "title": {
             "type": "string"
           },
@@ -13593,11 +15508,23 @@
           "start_frame",
           "frame_count",
           "title",
-          "profile",
           "state",
           "can_prepare"
         ],
         "properties": {
+          "album_selection": {
+            "$ref": "#/components/schemas/MusicAlbumSelection"
+          },
+          "audio_format": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MusicAudioFormat"
+              }
+            ]
+          },
           "can_prepare": {
             "type": "boolean",
             "description": "Current actor, module, source and encoder permit explicit preparation."
@@ -13613,12 +15540,27 @@
             "format": "int32",
             "minimum": 0
           },
+          "display_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
           "frame_count": {
             "$ref": "#/components/schemas/PcmFrame",
-            "description": "Exact track-local integer stereo PCM frame count."
+            "description": "Decoded track-local frames; MP3 gapless knowledge is separate in audio_format."
           },
           "profile": {
-            "$ref": "#/components/schemas/ConversionProfile"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConversionProfile"
+              }
+            ]
           },
           "source_label": {
             "type": "string"
@@ -13628,7 +15570,7 @@
           },
           "start_frame": {
             "$ref": "#/components/schemas/PcmFrame",
-            "description": "Exact coordinate in the source's integer stereo PCM timeline."
+            "description": "Coordinate in the source PCM timeline at sample_rate(), with native channels."
           },
           "state": {
             "$ref": "#/components/schemas/MusicTrackAvailabilityState"
@@ -13845,6 +15787,24 @@
             "type": "string"
           }
         }
+      },
+      "NormalizedByteDomain": {
+        "type": "object",
+        "required": [
+          "name",
+          "version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "ObservationId": {
         "type": "string",
@@ -14306,6 +16266,22 @@
                 "active": {
                   "type": "boolean"
                 },
+                "identification_job_id": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/JobId"
+                    }
+                  ]
+                },
+                "inactive_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "snapshot": {
                   "$ref": "#/components/schemas/SnapshotRecord"
                 }
@@ -14522,6 +16498,9 @@
                 "metadata_available": {
                   "type": "boolean"
                 },
+                "music_actions_available": {
+                  "type": "boolean"
+                },
                 "position": {
                   "type": "integer",
                   "format": "int32",
@@ -14534,6 +16513,16 @@
                   "type": [
                     "string",
                     "null"
+                  ]
+                },
+                "purchase": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DigitalPurchase"
+                    }
                   ]
                 },
                 "source": {
@@ -14561,6 +16550,7 @@
             "items": {
               "type": "object",
               "required": [
+                "work",
                 "import_id",
                 "collection_id",
                 "package_name",
@@ -14633,6 +16623,12 @@
                 "updated_at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "work": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestWork"
+                  }
                 }
               }
             }
@@ -14827,6 +16823,7 @@
               "type": "object",
               "required": [
                 "id",
+                "progress_kind",
                 "kind",
                 "state",
                 "phase",
@@ -14896,6 +16893,19 @@
                 },
                 "phase": {
                   "type": "string"
+                },
+                "progress_kind": {
+                  "$ref": "#/components/schemas/JobProgressKind"
+                },
+                "provider_status": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderResponseStatus"
+                    }
+                  ]
                 },
                 "result": {
                   "oneOf": [
@@ -15109,6 +17119,7 @@
             "items": {
               "type": "object",
               "required": [
+                "supports_listening",
                 "id",
                 "revision",
                 "name",
@@ -15139,6 +17150,9 @@
                 },
                 "revision": {
                   "$ref": "#/components/schemas/Revision"
+                },
+                "supports_listening": {
+                  "type": "boolean"
                 }
               }
             }
@@ -15163,6 +17177,8 @@
               "type": "object",
               "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
               "required": [
+                "supports_listening",
+                "digital_audio",
                 "workflow_generation",
                 "id",
                 "collection_id",
@@ -15186,6 +17202,15 @@
                 "content_permissions"
               ],
               "properties": {
+                "accuraterip": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/PresentedAudioCheck"
+                  }
+                },
                 "assets": {
                   "type": "array",
                   "items": {
@@ -15205,6 +17230,9 @@
                   "$ref": "#/components/schemas/ContentPermissions"
                 },
                 "deleted": {
+                  "type": "boolean"
+                },
+                "digital_audio": {
                   "type": "boolean"
                 },
                 "domain": {
@@ -15297,6 +17325,9 @@
                 },
                 "subtitle": {
                   "type": "string"
+                },
+                "supports_listening": {
+                  "type": "boolean"
                 },
                 "title": {
                   "type": "string"
@@ -15872,6 +17903,27 @@
         },
         "additionalProperties": false
       },
+      "PlaybackTarget": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "representation_id",
+          "file_index"
+        ],
+        "properties": {
+          "file_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "representation_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          }
+        },
+        "additionalProperties": false
+      },
       "Possession": {
         "type": "string",
         "enum": [
@@ -16040,6 +18092,28 @@
           }
         }
       },
+      "PresentedAudioCheck": {
+        "type": "object",
+        "description": "Recorded checks for visible, currently associated originals. This is not an\nalbum-coverage claim: missing discs and unchecked originals remain distinct.",
+        "required": [
+          "source_id"
+        ],
+        "properties": {
+          "source_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AudioVerificationStatus"
+              }
+            ]
+          }
+        }
+      },
       "PresentedCapture": {
         "type": "object",
         "required": [
@@ -16064,10 +18138,20 @@
           "id": {
             "$ref": "#/components/schemas/CaptureId"
           },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
+          },
           "representations": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Representation"
+              "$ref": "#/components/schemas/PresentedRepresentation"
             }
           },
           "revision": {
@@ -16078,6 +18162,7 @@
       "PresentedCollection": {
         "type": "object",
         "required": [
+          "supports_listening",
           "id",
           "revision",
           "name",
@@ -16108,6 +18193,9 @@
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
+          },
+          "supports_listening": {
+            "type": "boolean"
           }
         }
       },
@@ -16181,10 +18269,40 @@
           }
         }
       },
+      "PresentedFile": {
+        "type": "object",
+        "required": [
+          "index",
+          "visibility",
+          "name",
+          "bytes",
+          "digest"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
+          }
+        }
+      },
       "PresentedItem": {
         "type": "object",
         "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
         "required": [
+          "supports_listening",
+          "digital_audio",
           "workflow_generation",
           "id",
           "collection_id",
@@ -16208,6 +18326,15 @@
           "content_permissions"
         ],
         "properties": {
+          "accuraterip": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PresentedAudioCheck"
+            }
+          },
           "assets": {
             "type": "array",
             "items": {
@@ -16227,6 +18354,9 @@
             "$ref": "#/components/schemas/ContentPermissions"
           },
           "deleted": {
+            "type": "boolean"
+          },
+          "digital_audio": {
             "type": "boolean"
           },
           "domain": {
@@ -16320,6 +18450,9 @@
           "subtitle": {
             "type": "string"
           },
+          "supports_listening": {
+            "type": "boolean"
+          },
           "title": {
             "type": "string"
           },
@@ -16358,6 +18491,52 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "PresentedRepresentation": {
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "format",
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PresentedFile"
+            }
+          },
+          "format": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "profile": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConversionProfile"
+              }
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/RepresentationRole"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepresentationId"
+              }
+            ]
           }
         }
       },
@@ -16617,6 +18796,15 @@
           }
         }
       },
+      "ProviderResponseStatus": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "shared",
+          "downloaded",
+          "unchanged"
+        ]
+      },
       "PublishProviderArtworkCommand": {
         "type": "object",
         "required": [
@@ -16766,6 +18954,15 @@
                 "$ref": "#/components/schemas/MetadataCandidateIdentity"
               }
             ]
+          },
+          "domain_fields": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ResolvedMetadataText"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "resolution": {
             "$ref": "#/components/schemas/MetadataResolutionKind"
@@ -17078,6 +19275,27 @@
           "blockers"
         ],
         "properties": {
+          "accuraterip_query": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DbarQuery",
+                "description": "Recorded current disc identity, for choosing compatible saved responses."
+              }
+            ]
+          },
+          "accuraterip_structure_observation_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ObservationId"
+              }
+            ]
+          },
           "blockers": {
             "type": "array",
             "items": {
@@ -17134,6 +19352,47 @@
         "type": "string",
         "format": "uuid"
       },
+      "ServerSettingsView": {
+        "type": "object",
+        "required": [
+          "default_user_id",
+          "current_user_id",
+          "exposure",
+          "multi_user",
+          "server_id",
+          "ingress"
+        ],
+        "properties": {
+          "backup_reminder": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BackupReminder"
+              }
+            ]
+          },
+          "current_user_id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "default_user_id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "exposure": {
+            "$ref": "#/components/schemas/Exposure"
+          },
+          "ingress": {
+            "type": "string"
+          },
+          "multi_user": {
+            "type": "boolean"
+          },
+          "server_id": {
+            "$ref": "#/components/schemas/ServerId"
+          }
+        }
+      },
       "SessionId": {
         "type": "string",
         "format": "uuid"
@@ -17184,6 +19443,12 @@
           "created_at"
         ],
         "properties": {
+          "acquisition_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "bytes": {
             "$ref": "#/components/schemas/ByteLength"
           },
@@ -17356,6 +19621,32 @@
           }
         }
       },
+      "StandardGameSystem": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "aliases",
+          "byte_domain"
+        ],
+        "properties": {
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "byte_domain": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "StartEnrollment": {
         "type": "object",
         "required": [
@@ -17406,6 +19697,16 @@
           },
           "prepare_music": {
             "type": "boolean"
+          },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -17514,12 +19815,22 @@
           },
           "name": {
             "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/Visibility"
           }
         }
       },
       "TransactionId": {
         "type": "string",
         "format": "uuid"
+      },
+      "UnavailableReason": {
+        "type": "string",
+        "enum": [
+          "not_configured",
+          "dns_name_required"
+        ]
       },
       "UpdateAssetCommand": {
         "type": "object",
@@ -17565,6 +19876,28 @@
           },
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateDigitalPurchase": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "purchase": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DigitalPurchase"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -17670,6 +20003,36 @@
               "string",
               "null"
             ]
+          },
+          "visibility": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Visibility"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadedDatCatalog": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "digest",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/ByteLength"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/DatUploadMetadata"
           }
         },
         "additionalProperties": false

@@ -5,11 +5,12 @@ type Preview=components['schemas']['AlbumGroupPreview'];
 type Request=components['schemas']['PreviewAlbumGroup'];
 type Choices=components['schemas']['AlbumGroupChoices'];
 type Undo=components['schemas']['AlbumGroupUndo'];
-export function GroupUndo({groupId,onChanged}:{groupId:string;onChanged:()=>void}){
+export function GroupUndo({groupId,item,onChanged}:{groupId:string;item:Item;onChanged:()=>void}){
  const [status,setStatus]=useState<Undo>();const [error,setError]=useState('');const [busy,setBusy]=useState(false);
- async function load(){try{setStatus(await api<Undo>(`/album-groups/${groupId}/undo`));}catch(error){setError(requestErrorMessage(error));}}
- useEffect(()=>{void load();},[groupId]);
- return <section aria-label="Album grouping history"><h3>Album grouping history</h3><p>Original entries and their history are kept.</p>{error&&<p role="alert">{error}</p>}{status&&<><p>{status.reason||'All affected records still match the completed group. Undo restores the separate entries and their inventory.'}</p><button disabled={busy||!status.can_undo} onClick={async()=>{setBusy(true);setError('');try{await api(`/album-groups/${groupId}/undo`,{method:'POST'});await load();onChanged();}catch(error){setError(requestErrorMessage(error));}finally{setBusy(false);}}}>Undo album grouping</button></>}</section>;
+ const lifecycle=useRef(new AbortController());
+ async function load(signal:AbortSignal){try{const next=await api<Undo>(`/album-groups/${groupId}/undo`,{signal});if(!signal.aborted)setStatus(next);}catch(error){if(!signal.aborted)setError(requestErrorMessage(error));}}
+ useEffect(()=>{const controller=new AbortController();lifecycle.current=controller;setStatus(undefined);setError('');setBusy(false);void load(controller.signal);return()=>controller.abort();},[groupId,item]);
+ return <section aria-label="Album grouping history"><h3>Album grouping history</h3><p>Original entries and their history are kept.</p>{error&&<p role="alert">{error}</p>}{status&&<>{status.group.automatic&&<p>Grouped automatically from matching MusicBrainz disc options. Album metadata may still need a choice. Undo keeps these entries separate from future automatic grouping.</p>}<p>{status.reason||'All affected records still match the completed group. Undo restores the separate entries and their inventory.'}</p><button disabled={busy||!status.can_undo} onClick={async()=>{const signal=lifecycle.current.signal;setBusy(true);setError('');try{await api(`/album-groups/${groupId}/undo`,{method:'POST',signal});await load(signal);if(!signal.aborted)onChanged();}catch(error){if(!signal.aborted)setError(requestErrorMessage(error));}finally{if(!signal.aborted)setBusy(false);}}}>Undo album grouping</button></>}</section>;
 }
 export default function AlbumGrouping({items,userId,onCompleted,onCancel}:{items:Item[];userId:string;onCompleted:(destination:string)=>void;onCancel:()=>void}){
  const [destination,setDestination]=useState(items[0]?.id||'');const [choices,setChoices]=useState<Choices>({});const [preview,setPreview]=useState<Preview>();const [request,setRequest]=useState<Request>();const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [copyMap,setCopyMap]=useState<Record<string,string>>({});const [positions,setPositions]=useState<Record<string,number>>({});

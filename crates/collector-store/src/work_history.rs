@@ -11,7 +11,7 @@ WITH roots AS (
  EXISTS(SELECT 1 FROM private.jobs j JOIN private.scan_requests r ON r.job_id=j.id WHERE json_extract(j.request,'$.import_id')=i.id AND r.kind='direct' AND j.state IN ('queued','running','cancel_requested')) AS shared,
  CASE WHEN EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=i.id AND j.state IN ('queued','running','cancel_requested')) THEN 'active'
  WHEN i.phase='cancelled' THEN 'cancelled'
- WHEN EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=i.id AND j.state='failed') OR EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=i.id AND (g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL)) THEN 'failed'
+ WHEN EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=i.id AND j.state='failed' AND (j.kind<>'inbox_cleanup' OR EXISTS(SELECT 1 FROM private.inbox_cleanup latest WHERE latest.import_id=i.id AND latest.job_id=j.id))) OR EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=i.id AND (g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL)) THEN 'failed'
  WHEN i.phase IN ('staging','awaiting_review') OR (i.phase='analyzing' AND NOT EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=i.id AND g.settled=0 AND g.cancelled=0)) THEN 'needs_input'
  WHEN i.phase='published' AND NOT EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=i.id AND g.settled=0 AND g.cancelled=0) THEN 'completed' ELSE 'active' END AS status,
  coalesce((SELECT sum(json_extract(value,'$.received_bytes')) FROM json_each(i.files)),0) AS received_bytes,

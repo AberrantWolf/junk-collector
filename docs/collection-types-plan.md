@@ -1,5 +1,13 @@
 # Module-owned collection types: implementation handoff
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 Status: **CT.1–CT.4 reviewed and corrected; resume Wave 4 at D04.1**. This is a prerequisite
 inserted after reviewed W4.2, not a redo of W4.0–W4.2. Target executor: Sol at medium
 reasoning. No runtime plugins, new analyzers or sibling extractions in this task.
@@ -498,15 +506,3 @@ reader-only extraction and independent-vector gates. Preserve module ownership,
 patch receipts, safe fallback DTOs, artwork rows and the late publication-policy
 callbacks. Do not introduce a checkpoint-specific schema version or compatibility
 layer without an actual persisted-data requirement.
-
-## Prompt to send to the implementing agent
-
-```text
-Implement D04.2 and D04.3 in docs/wave-4-plan.md, in that order. CT.1–CT.4 and
-D04.1 are reviewed and corrected. Preserve the existing uncommitted work in all
-repositories. Follow D04.1's strict source/coordinate and external-oracle boundaries;
-complete D04.2's DAT matching/vector gates before D04.3 integration. Stop for an
-architectural conflict or missing required qualification. Otherwise continue through
-D04.3 and stop for review. Do not start D05, reset data, spawn agents or commit.
-Update status, validation and handoff documents with actual evidence.
-```

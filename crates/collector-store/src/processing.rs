@@ -482,6 +482,7 @@ impl Store {
                     .and_then(Path::parent)
                     .unwrap()
                     .join("payload/source.bin");
+                let payload = self.resolve_snapshot_payload(&record, &payload)?;
                 let (bytes, digest) = crate::files::hash_file(&payload)?;
                 if bytes != record.bytes || digest != record.digest {
                     return Err(Error::Storage("archived snapshot payload mismatch".into()));
@@ -928,20 +929,9 @@ impl SnapshotPort for Store {
         serde_json::from_str(&record).map_err(storage)
     }
     fn snapshot_bytes(&self, query: SnapshotQuery) -> Result<Box<dyn Read + Send>> {
-        let path: String = lock(&self.db)?
-            .query_row(
-                "SELECT payload_path FROM snapshots WHERE id=? AND collection_id=?",
-                params![
-                    query.snapshot_id.to_string(),
-                    query.collection_id.to_string()
-                ],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(storage)?
-            .ok_or(Error::NotFound)?;
+        let record = self.snapshot(query)?;
         Ok(Box::new(
-            File::open(self.archive.join(path)).map_err(storage)?,
+            File::open(self.snapshot_payload_path(&record)?).map_err(storage)?,
         ))
     }
 
@@ -999,6 +989,35 @@ impl SnapshotPort for Store {
         Ok(Page { items, next_cursor })
     }
 
+    fn active_game_snapshots(&self, collection_id: CollectionId) -> Result<Vec<SnapshotId>> {
+        let db = lock(&self.db)?;
+        let mut stmt=db.prepare("SELECT s.record FROM private.active_game_catalogs a JOIN snapshots s ON s.id=a.snapshot_id WHERE a.collection_id=?").map_err(storage)?;
+        let records = stmt
+            .query_map(params![collection_id.to_string()], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(storage)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?;
+        let mut slots = std::collections::BTreeMap::new();
+        for raw in records {
+            let record: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
+            let Some(slot) = collector_app::game_catalog_slot(&record)? else {
+                continue;
+            };
+            let slot = (slot.system, slot.catalog, slot.byte_domain);
+            slots.insert(slot, record.id);
+        }
+        if slots.len() > 128 {
+            return Err(Error::Unavailable(
+                "At most 128 game catalog slots may be active".into(),
+            ));
+        }
+        let mut result: Vec<_> = slots.into_values().collect();
+        result.sort();
+        result.dedup();
+        Ok(result)
+    }
     fn active_snapshot(
         &self,
         collection_id: CollectionId,
@@ -1020,8 +1039,14 @@ impl SnapshotPort for Store {
 
 impl ProcessingPort for Store {
     fn ensure_snapshot_current(&self, item: ItemId, snapshot: SnapshotId) -> Result<()> {
-        let stale: bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN items i ON i.id=j.item_id WHERE j.item_id=?1 AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id'))=?2 AND COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=j.id),0)<>COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))",params![item.to_string(),snapshot.to_string()],|row|row.get(0)).map_err(storage)?;
-        if stale { Err(Error::Conflict) } else { Ok(()) }
+        let db = lock(&self.db)?;
+        let bound:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.snapshot_bindings b JOIN items i ON i.id=b.item_id WHERE b.snapshot_id=? AND b.item_id=? AND b.generation=COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))",params![snapshot.to_string(),item.to_string()],|r|r.get(0)).map_err(storage)?;
+        let historical:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.snapshot_bindings WHERE snapshot_id=? AND item_id=?)",params![snapshot.to_string(),item.to_string()],|r|r.get(0)).map_err(storage)?;
+        if historical && !bound {
+            Err(Error::Conflict)
+        } else {
+            Ok(())
+        }
     }
 
     fn conversion_scratch(&self) -> Result<Box<dyn collector_app::ConversionScratch>> {
@@ -1159,8 +1184,12 @@ impl ProcessingPort for Store {
         record: SnapshotRecord,
         reader: &mut dyn Read,
         cancelled: &mut dyn FnMut() -> Result<bool>,
-    ) -> Result<()> {
+    ) -> Result<SnapshotId> {
         record.validate()?;
+        self.validate_publication_claim(claim, record.collection_id)?;
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
         if let Ok(existing) = self.snapshot(SnapshotQuery {
             collection_id: record.collection_id,
             snapshot_id: record.id,
@@ -1168,7 +1197,7 @@ impl ProcessingPort for Store {
             return if serde_json::to_value(existing).map_err(storage)?
                 == serde_json::to_value(&record).map_err(storage)?
             {
-                Ok(())
+                Ok(record.id)
             } else {
                 Err(Error::Storage(
                     "immutable snapshot identity conflicts".into(),
@@ -1207,6 +1236,103 @@ impl ProcessingPort for Store {
         }
         spool.rewind().map_err(storage)?;
         let _writer = lock(&self.writer)?;
+        self.validate_publication_claim(claim, record.collection_id)?;
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
+        if record.acquisition_key.is_some()
+            && collector_app::reuses_equivalent_provider_responses(&record.provider)
+        {
+            let response_key = collector_app::snapshot_response_key(&record)?;
+            let mut after = None;
+            let mut retained: Option<SnapshotRecord> = None;
+            let mut references = Default::default();
+            loop {
+                if cancelled()? {
+                    return Err(Error::JobCancelled);
+                }
+                let candidates = self.snapshot_record_page(Some(record.collection_id), after)?;
+                if candidates.is_empty() {
+                    break;
+                }
+                after = candidates.last().map(|row| row.0);
+                for (_, raw) in candidates {
+                    if cancelled()? {
+                        return Err(Error::JobCancelled);
+                    }
+                    let Some(raw) = raw else {
+                        continue;
+                    };
+                    let old: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
+                    if old.provider != record.provider {
+                        continue;
+                    }
+                    let value: serde_json::Value = serde_json::from_str(&raw).map_err(storage)?;
+                    if serde_json::to_value(&old).map_err(storage)? != value {
+                        continue;
+                    }
+                    let mut comparison = old.clone();
+                    if comparison.acquisition_key.is_none() {
+                        comparison.acquisition_key =
+                            self.legacy_snapshot_key_checked(old.id, cancelled, &mut references)?;
+                    }
+                    if comparison.acquisition_key != record.acquisition_key {
+                        continue;
+                    }
+                    if collector_app::snapshot_response_key(&comparison)? == response_key
+                        && retained.as_ref().is_none_or(|best| {
+                            (old.created_at, old.id) < (best.created_at, best.id)
+                        })
+                    {
+                        retained = Some(old);
+                    }
+                }
+            }
+            if let Some(old) = retained {
+                // Validate both consumed download and retained bytes before reuse.
+                let (retained_bytes, digest) = crate::files::hash_file_checked(
+                    &self.snapshot_payload_path(&old)?,
+                    old.bytes.0,
+                    &mut || {
+                        if cancelled()? {
+                            Err(Error::JobCancelled)
+                        } else {
+                            Ok(())
+                        }
+                    },
+                )?;
+                if retained_bytes != old.bytes {
+                    return Err(Error::Conflict);
+                }
+                let mut hash = Sha256::new();
+                let mut chunk = vec![0; STREAM_CHUNK];
+                loop {
+                    if cancelled()? {
+                        return Err(Error::JobCancelled);
+                    }
+                    let n = spool.read(&mut chunk).map_err(storage)?;
+                    if n == 0 {
+                        break;
+                    }
+                    hash.update(&chunk[..n]);
+                }
+                if hex::encode(hash.finalize()) != record.digest.hex || digest != record.digest {
+                    return Err(Error::Conflict);
+                }
+                let _gate = lock(&self.job_publication_gate)?;
+                if cancelled()? {
+                    return Err(Error::JobCancelled);
+                }
+                let mut db = lock(&self.db)?;
+                let tx = db
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(storage)?;
+                if tx.execute("UPDATE private.jobs SET phase='revision_committed' WHERE id=? AND claim_token=? AND state='running' AND cancellation_requested=0",params![claim.id.to_string(),claim.claim_token]).map_err(storage)?!=1 {return Err(Error::JobCancelled);}
+                tx.execute("UPDATE private.processing_jobs SET output_references=?,checkpoint='snapshot_committed' WHERE job_id=?",params![serde_json::json!([old.id]).to_string(),claim.id.to_string()]).map_err(storage)?;
+                tx.commit().map_err(storage)?;
+                return Ok(old.id);
+            }
+        }
         let txid = TransactionId(job.0);
         let result = self.publish_v4(
             V4Target {
@@ -1239,7 +1365,8 @@ impl ProcessingPort for Store {
         tx.execute("UPDATE private.processing_jobs SET output_references=?,checkpoint='snapshot_committed' WHERE job_id=?",params![serde_json::to_string(&vec![record.id]).map_err(storage)?,job.to_string()]).map_err(storage)?;
         tx.commit().map_err(storage)?;
         drop(db);
-        finish_v3_publication(self, txid)
+        finish_v3_publication(self, txid)?;
+        Ok(record.id)
     }
     fn processing_record(&self, id: ObservationId) -> Result<PortableProcessingRecord> {
         let value: String = lock(&self.db)?
@@ -1308,15 +1435,16 @@ impl ProcessingPort for Store {
         &self,
         transaction: TransactionId,
         record: MetadataAuthorityRecord,
+        context: Option<collector_app::ItemEffectContext>,
     ) -> Result<()> {
-        self.publish_metadata_record(transaction, record, None)
+        self.publish_metadata_record(transaction, record, None, context)
     }
     fn publish_metadata_for_job(
         &self,
         claim: &JobClaim,
         record: MetadataAuthorityRecord,
     ) -> Result<()> {
-        self.publish_metadata_record(TransactionId::new(), record, Some(claim))
+        self.publish_metadata_record(TransactionId::new(), record, Some(claim), None)
     }
 
     fn metadata_authority(
@@ -1395,9 +1523,22 @@ pub(crate) fn project_effective_metadata_search(
     let display = collector_app::resolve_record_metadata(&item, record, &candidates)?;
     let artist = collector_app::music_search_artist_override(&item, record)?;
     music_search::project(tx, &item, Some(&display), &candidates, artist.as_deref())?;
+    let platform = display
+        .domain_fields
+        .get("platform")
+        .map(|value| value.value.clone())
+        .unwrap_or_else(|| collector_app::browse_sort_fields(&item).1);
     tx.execute(
-        "UPDATE browse_items SET title_key=? WHERE id=?",
-        params![display.title.value.to_lowercase(), item.id.to_string()],
+        "UPDATE browse_items SET title_key=?,platform_key=? WHERE id=?",
+        params![
+            display.title.value.to_lowercase(),
+            if platform.is_empty() {
+                "\u{10ffff}".to_owned()
+            } else {
+                platform.to_lowercase()
+            },
+            item.id.to_string()
+        ],
     )
     .map_err(storage)?;
     tx.execute(
@@ -1418,7 +1559,7 @@ pub(crate) fn project_effective_metadata_search(
                     .map(|value| value.value.as_str())
                     .unwrap_or(""),
                 collector_app::browse_sort_fields(&item).0,
-                collector_app::browse_sort_fields(&item).1
+                platform
             )
         ],
     )
@@ -1454,6 +1595,34 @@ impl Store {
         {
             return Err(Error::Conflict);
         }
+        if let Some(collector_app::FrozenJobInput::GameIdentification(frozen)) = &claim.frozen_input
+        {
+            let item = self.item(frozen.item_id)?;
+            if item.deleted
+                || self.collection(collection)?.binding != frozen.processing.collection_binding
+                || item.lifecycle.generation != frozen.generation
+                || self.recorded_source(collection, frozen.processing.source)?
+                    != frozen.processing.source_fingerprint
+                || self.active_game_snapshots(collection)? != frozen.snapshots
+            {
+                return Err(Error::Conflict);
+            }
+            self.validate_item_effect(
+                collector_app::ItemEffectContext {
+                    item_id: frozen.item_id,
+                    generation: frozen.generation,
+                    source: collector_app::ItemEffectSource::Job {
+                        id: claim.id,
+                        claim: claim.claim_token.parse().map_err(storage)?,
+                    },
+                },
+                collection,
+            )?;
+            let allowed: bool = lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=? AND u.enabled=1 AND g.collection_id=? AND g.role>=1)", params![claim.user_id.to_string(),collection.to_string()],|r|r.get(0)).map_err(storage)?;
+            if !allowed {
+                return Err(Error::Forbidden);
+            }
+        }
         if self.cancellation_requested_record(claim.id, &claim.claim_token)? {
             return Err(Error::JobCancelled);
         }
@@ -1467,6 +1636,7 @@ impl Store {
         transaction: TransactionId,
         record: MetadataAuthorityRecord,
         claim: Option<&JobClaim>,
+        context: Option<collector_app::ItemEffectContext>,
     ) -> Result<()> {
         record.validate()?;
         if self.item(record.item_id)?.collection_id != record.collection_id {
@@ -1476,6 +1646,9 @@ impl Store {
         if let Some(claim) = claim {
             self.validate_publication_claim(claim, record.collection_id)?;
             self.ensure_job_continues(claim.id, Some(&claim.claim_token))?;
+        }
+        if let Some(context) = context {
+            self.validate_item_effect(context, record.collection_id)?;
         }
         let current = lock(&self.db)?
             .query_row(
@@ -1495,6 +1668,11 @@ impl Store {
                 baseline.revision != item.revision
                     || baseline.title != item.title
                     || baseline.subtitle != item.subtitle
+                    || baseline.domain.as_ref().is_some_and(|domain| {
+                        domain.module != item.domain.module
+                            || domain.schema_version != item.domain.schema_version
+                            || domain.payload != item.domain.payload
+                    })
             })
         {
             return Err(Error::Conflict);
@@ -1557,6 +1735,9 @@ impl Store {
             }
         }
         let mut guarded = || {
+            if let Some(context) = context {
+                self.validate_item_effect(context, record.collection_id)?;
+            }
             if let Some(claim) = claim {
                 self.validate_publication_claim(claim, record.collection_id)?;
                 let db = lock(&self.db)?;
@@ -1626,4 +1807,102 @@ pub(crate) fn project_authority_revision(
     project_effective_metadata_search(tx, record)?;
 
     Ok(())
+}
+
+impl Store {
+    /// Sync a content-addressed private spool before committing its Job reference.
+    pub fn stage_uploaded_catalog(&self, bytes: &[u8]) -> Result<Digest> {
+        if bytes.is_empty() || bytes.len() > collector_app::MAX_DAT_UPLOAD_BYTES {
+            return Err(Error::Invalid(
+                "Upload an extracted DAT file between 1 byte and 64 MiB.".into(),
+            ));
+        }
+        let digest = Digest::new(HashAlgorithm::Sha256, hex::encode(Sha256::digest(bytes)))?;
+        let directory = self.state.join("catalog-uploads");
+        fs::create_dir_all(&directory).map_err(storage)?;
+        let target = directory.join(&digest.hex);
+        let mut staged = tempfile::NamedTempFile::new_in(&directory).map_err(storage)?;
+        staged.write_all(bytes).map_err(storage)?;
+        staged.as_file().sync_all().map_err(storage)?;
+        match staged.persist_noclobber(&target) {
+            Ok(_) => {}
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let file = File::open(&target).map_err(storage)?;
+                let valid = if file.metadata().map_err(storage)?.len() == bytes.len() as u64 {
+                    let mut existing = Vec::with_capacity(bytes.len());
+                    file.take(bytes.len() as u64 + 1)
+                        .read_to_end(&mut existing)
+                        .map_err(storage)?;
+                    existing == bytes
+                } else {
+                    false
+                };
+                if !valid {
+                    // Repair only private staging from freshly supplied bytes with
+                    // this exact digest. Immutable archive snapshots are untouched.
+                    error
+                        .file
+                        .persist(&target)
+                        .map_err(|error| storage(error.error))?;
+                }
+            }
+            Err(error) => return Err(storage(error.error)),
+        }
+        File::open(&directory)
+            .and_then(|file| file.sync_all())
+            .map_err(storage)?;
+        Ok(digest)
+    }
+}
+impl collector_app::UploadedCatalogPort for Store {
+    fn stage_uploaded_catalog(&self, bytes: &[u8]) -> Result<Digest> {
+        Store::stage_uploaded_catalog(self, bytes)
+    }
+    fn uploaded_catalog(
+        &self,
+        upload: &collector_app::UploadedDatCatalog,
+    ) -> Result<Box<dyn collector_app::MediaReader>> {
+        upload.validate()?;
+        let file = File::open(self.state.join("catalog-uploads").join(&upload.digest.hex))
+            .map_err(storage)?;
+        if file.metadata().map_err(storage)?.len() != upload.bytes.0 {
+            return Err(Error::Invalid(
+                "Saved DAT upload length changed; upload the original DAT again.".into(),
+            ));
+        }
+        Ok(Box::new(file))
+    }
+}
+
+impl Store {
+    pub(crate) fn convert_active_game_catalogs(&self) -> Result<()> {
+        let mut db = lock(&self.db)?;
+        let rows = {
+            let mut statement=db.prepare("SELECT s.record,a.activated_at FROM private.active_catalog_snapshots a JOIN snapshots s ON s.id=a.snapshot_id AND s.collection_id=a.collection_id WHERE a.provider='org.junk.providers.local-dat'").map_err(storage)?;
+            statement
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        let tx = db.transaction().map_err(storage)?;
+        for (raw, activated) in rows {
+            let record: SnapshotRecord = serde_json::from_str(&raw).map_err(storage)?;
+            if let Some(slot) = collector_app::game_catalog_slot(&record)? {
+                tx.execute(
+                    "INSERT OR IGNORE INTO private.active_game_catalogs VALUES(?,?,?,?,?,?)",
+                    params![
+                        record.collection_id.to_string(),
+                        slot.system,
+                        slot.catalog,
+                        slot.byte_domain,
+                        record.id.to_string(),
+                        activated
+                    ],
+                )
+                .map_err(storage)?;
+            }
+        }
+        tx.commit().map_err(storage)
+    }
 }

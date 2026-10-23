@@ -317,6 +317,7 @@ fn parse(row: StoredImport) -> Result<ImportRecord> {
 const SELECT: &str = "SELECT id,user_id,revision,collection_id,source_kind,source_label,package_name,files,capture_id,representation_id,item_id,specimen_id,component_id,carrier_id,expected_item_revision,candidates,limitations,review,analysis_job_id,phase,created_at,updated_at FROM private.imports";
 
 fn insert_import(tx: &rusqlite::Transaction<'_>, record: &ImportRecord) -> Result<()> {
+    Store::ensure_inbox_acceptance(tx, record)?;
     validate(record)?;
     if let Some(item_id) = record.view.association.item_id {
         let current: Option<(String, u64, bool)> = tx
@@ -438,8 +439,8 @@ impl Store {
             }
             insert_import(tx, record)?;
             tx.execute(
-                "INSERT INTO private.guided_ingest_intents(import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,clean_reimport,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
-                params![intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),intent.clean_reimport.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
+                "INSERT INTO private.guided_ingest_intents(purchase,import_id,user_id,plan_token,target_item_id,created_item,default_title,anchor_file_index,analysis,clean_reimport,enrichment,enrichment_error,prepare_music,preparation_batch_id,preparation_error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,?,NULL,NULL,?,?)",
+                params![intent.purchase.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string(),intent.created_item,intent.default_title,intent.anchor_file_index.map(|value| value as i64),analysis(intent.analysis),intent.clean_reimport.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,enrichment(intent.enrichment),intent.prepare_music,intent.created_at.timestamp(),intent.updated_at.timestamp()],
             )
             .map_err(storage)?;
             tx.execute(
@@ -462,6 +463,24 @@ impl Store {
 }
 
 impl ProvisionalImportPort for Store {
+    fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId> {
+        self.queue_inbox_source_cleanup(id, source, spec)
+    }
+    fn inbox_cleanup_status(
+        &self,
+        id: ImportId,
+    ) -> Result<Option<collector_app::InboxCleanupView>> {
+        self.inbox_source_cleanup_status(id)
+    }
+    fn clean_inbox_source(
+        &self,
+        id: ImportId,
+        claim: &JobClaim,
+        guard: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<collector_app::InboxCleanupView> {
+        self.remove_preserved_inbox_source(id, claim, guard)
+    }
+
     fn create_import(&self, record: ImportRecord) -> Result<ImportRecord> {
         let mut db = lock(&self.db)?;
         let tx = db
@@ -583,8 +602,14 @@ impl ProvisionalImportPort for Store {
             return Err(Error::Invalid("inbox package changed while staging".into()));
         }
         let root = fs::canonicalize(source).map_err(storage)?;
-        let initial_inventory = Self::inventory_directory(&root)?;
         let mut record = self.import_record(id)?;
+        let retained = record
+            .view
+            .files
+            .iter()
+            .map(|file| file.name.clone())
+            .collect::<Vec<_>>();
+        let initial_inventory = Self::inventory_directory_retaining(&root, &retained)?;
         if record.view.phase == ImportPhase::Analyzing
             && record
                 .view
@@ -646,7 +671,7 @@ impl ProvisionalImportPort for Store {
                 return Err(Error::Invalid("inbox package changed while staging".into()));
             }
         }
-        let final_inventory = Self::inventory_directory(&root)?;
+        let final_inventory = Self::inventory_directory_retaining(&root, &retained)?;
         if final_inventory.len() != initial_inventory.len()
             || final_inventory
                 .iter()
@@ -737,14 +762,15 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context,purchase FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?,row.get::<_, Option<String>>(18)?)),
             )
             .optional()
             .map_err(storage)?
             .map(|row| {
                 Ok(GuidedIngestIntent {
+            purchase: row.18.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
                     import_id: id,
                     bulk_context: row.17.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
                     user_id: row.0.parse().map_err(storage)?,
@@ -920,6 +946,67 @@ impl ProvisionalImportPort for Store {
             None
         };
         Ok(Page { items, next_cursor })
+    }
+
+    fn import_work_records(
+        &self,
+        id: ImportId,
+        user: UserId,
+    ) -> Result<Vec<collector_app::IngestWorkRecord>> {
+        // Only durable ownership links select descendants. An album/item match
+        // alone could include unrelated imports or another requester's work.
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "WITH owned AS (
+                SELECT j.id FROM private.jobs j
+                WHERE j.user_id=?1 AND json_extract(j.request,'$.import_id')=?2
+                  AND j.kind!='inbox_cleanup'
+                UNION
+                SELECT m.job_id FROM private.preparation_members m
+                JOIN private.guided_ingest_intents g ON g.preparation_batch_id=m.batch_id
+                JOIN private.jobs parent ON parent.id=m.batch_id
+                JOIN private.jobs child ON child.id=m.job_id
+                WHERE g.user_id=?1 AND g.import_id=?2
+                  AND (parent.cancellation_requested=0 OR child.state='cancel_requested')
+            ), current_work AS (
+                SELECT j.kind, COALESCE(a.state,j.state) AS state,
+                       COALESCE(a.phase,j.phase) AS phase,
+                       (a.id IS NOT NULL AND j.phase='waiting_shared_provider') AS shared
+                FROM owned o JOIN private.jobs j ON j.id=o.id
+                LEFT JOIN private.acquisition_waits w ON w.owner_job=j.id
+                    AND j.phase IN ('waiting_provider','waiting_shared_provider')
+                    AND j.state='queued'
+                LEFT JOIN private.jobs a ON a.id=w.acquisition_job
+                    AND a.state IN ('queued','running','cancel_requested')
+                WHERE j.user_id=?1 AND j.state IN ('queued','running','cancel_requested')
+            )
+            SELECT kind,state,phase,COUNT(*),shared FROM current_work
+            GROUP BY kind,state,phase,shared ORDER BY kind,state,phase,shared",
+            )
+            .map_err(storage)?;
+        let rows = statement
+            .query_map(params![user.to_string(), id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, u32>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            })
+            .map_err(storage)?;
+        rows.map(|row| {
+            let (kind, state, phase, jobs, shared) = row.map_err(storage)?;
+            Ok(collector_app::IngestWorkRecord {
+                shared,
+                kind,
+                state: parse_job_state(&state)?,
+                phase,
+                jobs,
+            })
+        })
+        .collect()
     }
 
     fn import_job_records(
@@ -1176,6 +1263,88 @@ impl Store {
         }
     }
 
+    /// Called under the archive writer before new publication. Frozen archive
+    /// records also allow an older failed import to resume through ordinary retry.
+    fn grouped_publication_revision_can_advance(
+        &self,
+        record: &ImportRecord,
+        expected: Revision,
+        current: &Item,
+        job: JobId,
+        claim_token: &str,
+    ) -> Result<bool> {
+        let Some(intent) = self.guided_ingest_intent(record.view.id)? else {
+            return Ok(false);
+        };
+        let Some(context) = intent.bulk_context else {
+            return Ok(false);
+        };
+        if intent.cancelled || intent.target_item_id != current.id {
+            return Ok(false);
+        }
+        let path = self.item_path(current.id)?;
+        let revisions = if path.join("revisions").exists() {
+            path.join("revisions")
+        } else {
+            path.parent()
+                .ok_or_else(|| Error::Storage("Item archive path has no parent".into()))?
+                .join(current.id.to_string())
+                .join("revisions")
+        };
+        let (previous, before) = migration_v3::read_item(
+            &revisions.join(format!("{:020}", expected.0)),
+            current.collection_id,
+        )?;
+        let (latest, after) = migration_v3::read_item(
+            &revisions.join(format!("{:020}", current.revision.0)),
+            current.collection_id,
+        )?;
+        let before: std::collections::BTreeMap<_, _> = before
+            .into_iter()
+            .map(|reference| (reference.id, reference.sha256))
+            .collect();
+        let after: std::collections::BTreeMap<_, _> = after
+            .into_iter()
+            .map(|reference| (reference.id, reference.sha256))
+            .collect();
+        let mut siblings = std::collections::BTreeSet::new();
+        let added = after.keys().filter(|id| !before.contains_key(id));
+        if added.clone().count() > collector_app::INTAKE_PACKAGE_LIMIT as usize {
+            return Ok(false);
+        }
+        for id in added {
+            self.ensure_job_continues(job, Some(claim_token))?;
+            let owns: bool = lock(&self.db)?
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM private.imports p
+                 JOIN private.guided_ingest_intents g ON g.import_id=p.id
+                 JOIN captures c ON c.id=p.capture_id
+                 WHERE p.id=?1 AND p.id<>?2 AND g.user_id=?3 AND g.target_item_id=?4
+                   AND json_extract(g.bulk_context,'$.intake_id')=?5
+                   AND c.item_id=?4)",
+                    params![
+                        id.to_string(),
+                        record.view.id.to_string(),
+                        intent.user_id.to_string(),
+                        current.id.to_string(),
+                        context.intake_id.to_string()
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if owns {
+                siblings.insert(*id);
+            }
+        }
+        collector_app::grouped_publication_revision_is_evidence_only(
+            &previous.into_item(vec![], vec![]),
+            &latest.into_item(vec![], vec![]),
+            &before,
+            &after,
+            &siblings,
+        )
+    }
+
     fn publish_import_inner(
         &self,
         id: ImportId,
@@ -1223,6 +1392,13 @@ impl Store {
                 .reimport
                 .as_ref()
                 .is_some_and(|pending| pending.import_id == id && !pending.completed)
+            && !self.grouped_publication_revision_can_advance(
+                &record,
+                expected,
+                &self.item(item_id)?,
+                job,
+                claim_token,
+            )?
         {
             if record.view.phase != ImportPhase::AwaitingReview {
                 record.view.phase = ImportPhase::AwaitingReview;
@@ -1266,6 +1442,7 @@ impl Store {
                 ));
             }
             files.push(StoredFile {
+                visibility: declared.visibility,
                 name: declared.name.clone(),
                 bytes,
                 digest,
@@ -1290,6 +1467,9 @@ impl Store {
             }
         }
         let capture = Capture {
+            purchase: self
+                .guided_ingest_intent(id)?
+                .and_then(|intent| intent.purchase),
             id: record.view.capture_id,
             collection_id: record.view.collection_id,
             revision: Revision(1),
@@ -1298,7 +1478,11 @@ impl Store {
             representations: vec![Representation {
                 id: record.view.representation_id,
                 role: RepresentationRole::PreservationMaster,
-                format: "original-package".into(),
+                format: collector_app::import_preservation_format(
+                    &self.collection(record.view.collection_id)?.binding,
+                    &record.view.files,
+                )
+                .into(),
                 files: files.clone(),
                 source: None,
                 profile: None,

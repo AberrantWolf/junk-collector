@@ -1,5 +1,13 @@
 # Import history and cleanup — P04 completion follow-up
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 **Current status 2026-09-27:** P04.4–P04.6 passed local acceptance through
 FX-03–FX-07. The [FX-07 audit](fx07-interface-audit.md) and
 [validation](validation.md) record the real-browser three-import, cleanup
@@ -49,8 +57,8 @@ Keep unmet broader criteria open; alpha does not certify every web interface.
 Historical user requirement, 2026-09-15. LA1 implemented the focused
 single-import journey; FX-03–FX-07 later completed the broader local web gate.
 P04.1–P04.3 remain historically validated but do not satisfy this added gate.
-See the [backlog](handoff-backlog.md#p04--inbox-import-review-and-job-ui) and
-[music-first milestones](music-first-milestones.md).
+See [dated validation](validation.md) for the completed local acceptance.
+All remaining work is in [remaining work](remaining-work.md).
 
 ## Problem and ownership
 
@@ -135,13 +143,3 @@ playback and recovery checks must pass.
 
 Update this ledger, P04 status, milestones and validation together. P04.4–P04.6
 are a necessary web UI completion gate, not a claim that other requirements are met.
-
-## Historical child assignment (use the local-alpha handoff instead)
-
-Implement P04.4 from docs/import-management-plan.md. Read AGENTS.md,
-docs/architecture.md, docs/release-requirements.md and the P02/P03/P04 backlog
-entries. Inspect current stores/callers; define the bounded authorized read and
-attempt contract, then implement the complete history workflow and real browser
-tests. Preserve historical data and label missing legacy attempt detail honestly.
-Do not implement P04.5 cleanup in this child. Update the ledger, current status,
-validation and next assignment together.

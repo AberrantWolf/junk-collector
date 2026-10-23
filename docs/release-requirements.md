@@ -2,7 +2,117 @@
 
 Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
 
-This is the repository-local summary of the user-approved plan, recorded for handoff from commit `98e9187`. It describes the target, not current capabilities. [Implementation status](implementation-status.md) describes what exists; [handoff backlog](handoff-backlog.md) defines the remaining work. Implementation shortcuts are not amendments to these requirements. If a requirement needs to change, record the discrepancy and resolve it explicitly.
+The user revised the target on 2026-10-09 toward a clean, useful home-lab tool,
+with proportional public-Internet security, reassessed contracts and meaningful
+provenance. Phono Junk is no longer a target. This explicit direction supersedes
+universal release gates and history-retention assumptions in the earlier plan from
+`98e9187`. [Implementation status](implementation-status.md) describes what exists;
+[remaining work](remaining-work.md) is the single remaining-work queue.
+See [the accepted scope policy](decisions/home-lab-scope.md).
+
+## Current home-lab release gate
+
+The [current capability/evidence checklist](release-readiness.md) records accepted
+coverage and remaining native/owned-format limits without creating another queue.
+
+- Preserve raw originals, physical collection facts, manual authority, unknown data
+  and meaningful source-bound evidence. Keep accepted metadata/artwork attribution;
+  do not require a permanent history of every lookup or equivalent provider response.
+  Simplification/compaction must preserve actual data and recovery through an
+  explicit tested policy, not silent deletion. The [bounded retention audit](retention-audit.md)
+  records current owned policies and the limits of implemented response reuse/conversion.
+- Deliver actual web and Trash Amp collection/listening workflows. Complete relevant
+  LAN/native qualification and meaningful format/audio oracles for advertised
+  support. Phono-specific acceptance is retired. Missing capabilities stay labeled.
+- Provide an executable stopped-server backup/restore workflow and qualify the
+  intended Linux binary/container and storage layout. The HL-03 CLI and tested
+  [operator runbook](local-alpha-installation.md#stopped-server-backup) provide the
+  stopped-server workflow; [actual isolated NAS install/update/restore](validation/nas-operations-2026-10-20.md)
+  and [public alpha.3 Portainer upgrade/recovery](validation/container-publication-2026-10-21.md)
+  are qualified with their named limits.
+  The [clarified backup scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
+  requires practical local recovery, not automatic full-media backups, cloud storage
+  or a separately chosen independent destination. External copies and backup-age
+  reminders are optional; the current explicit full backup includes media.
+- Publish automatically built Docker images that users can anonymously pull for
+  installation and updates without local compilation or image archive transfer
+  (user requirement, 2026-10-19). Exercise the existing release workflow for amd64
+  and arm64, versioned images/digests and documented moving release channels;
+  stable `latest` must not advance to a prerelease. Qualify a Portainer pull/update
+  with existing configuration, accounts, originals and pending work. Coordinate
+  scalable backup and storage-format-specific recovery instructions. Workflow
+  scaffolding alone is not release acceptance; HL-07 owns completion.
+- For supported public access, qualify trusted HTTPS, listener/page/API exposure,
+  roles, Origin/session controls, recovery/revocation, credential redaction and
+  bounded untrusted work. Reuse the existing backend/LAN/isolated evidence and
+  operator-observed journeys; add a short smoke check at the intended HTTPS URL.
+  A new isolated tunnel and repetition of every configuration/failure/load case
+  through the proxy are not release prerequisites. Keep focused security review;
+  automatic rotation/discovery, exhaustive commercial matrices and distributed
+  limiting are not default prerequisites.
+- Test real user journeys, reasonable collection scale on the intended host,
+  keyboard/mobile use and affected repository/sibling gates. State supported
+  platforms, evidence limits and any upgrade/storage promise explicitly.
+
+A separate Collector Slint app, full offline/activity parity across clients,
+100k-item load gate, general Retro Junk migration, delta export and advanced
+security certification are deferred/conditional outcomes in the backlog. Earlier
+proposed contracts must be reviewed for validity and excessive complexity before
+implementation. No older ticket is a mandatory stability/retention promise merely
+because it was written down.
+
+The standalone full portable archive export/import portion of HL-10 is now
+included in public alpha.3; see its [operator workflow](archive-export.md) and
+[local acceptance](validation/archive-export-2026-10-21.md). It transfers preserved
+collection data into a fresh identity, with explicit access recovery. Deltas and
+legacy adoption remain conditional; full operational backup/restore is separate.
+
+## Digital purchases — requested 2026-10-19
+
+[HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)
+owns complete DRM-free FLAC/MP3 purchase support: preserve exact originals,
+record digital acquisition without a physical copy, review tags/artwork and use
+normal library/search, playback, playlists and Trash Amp online/offline listening.
+Native high-resolution FLAC and MP3 timing/seek behavior require named independent
+vectors and actual client evidence. Private purchase facts/companions remain
+protected through APIs, original downloads and offline manifests. Lossy originals
+remain preservation masters without claims of recovered lossless quality, CD
+identity or catalog/audio verification. The [implementation](digital-purchases.md)
+is delivered; [qualification](validation/digital-purchases-2026-10-19.md) records
+independent vectors, actual Chrome and native GUI playback/seek/download/offline
+acceptance on the named clients. Additional codecs, DRM and album-image splitting
+are outside its first delivery.
+Raw-disc guided imports retain their physical-copy default; digital intake must
+explicitly follow the new acquisition policy. HL-02 records the completed delivery;
+the linked implementation and dated validation records define its supported
+contract and acceptance evidence. Follow-up scope stays in the consolidated queue.
+
+## Broader product target reference
+
+The sections below retain the earlier product goals, detailed safety constraints
+and dated user requirements. Their feature lists and broad acceptance matrix are
+reference scope, not a second execution queue or universal home-lab release gate.
+Current scope and retention policy take precedence. Completed requirements remain
+useful regression criteria; deferred capabilities require fresh bounded design
+before implementation. No unrun check is marked passed by this change.
+
+## Automatic standard-game identification
+
+The accepted 2026-10-10 delivery requires upload → review → activate → automatic
+existing-game identification and future guided imports without technical fields.
+The [supported detection matrix](game-identification.md) is the contract: finite
+standard systems, supported No-Intro/Redump conventions and existing qualified
+byte interpretations. No suffix/name/size-based identity or permissive fallback
+from recognized malformed/unsupported input is permitted. Headerless bytes need a
+complete unambiguous catalog match; CRC-only evidence is explicitly weaker.
+
+Preserve failed inputs, originals, explicit authority, sources and unknown records.
+Automatic/Manual controls must apply detected fields immediately to detail, browse
+and search, while deliberate edits survive refresh. Qualify bounded DAT/ZIP batches,
+multiple active systems, ambiguity/partial coverage, restart/page recovery, shared
+owners, catalog replacement and source/permission fences through the actual worker
+and UI. [Dated delivery evidence](validation/game-identification-2026-10-10.md) does
+not imply universal format understanding or new format-algorithm qualification.
 
 ## Collection lists and playlists
 
@@ -18,8 +128,8 @@ or overwritten. List queries/admission must not hash or read full media payloads
 
 Accepted 2026-09-16: prioritize ingestion of raw dumps, automatic metadata,
 artwork/text browsing, supported CD playback and multiple trusted local users in
-the existing web UI. The [local-alpha plan](local-alpha-plan.md) is the active
-execution order. Automatic enrichment is default for its new guided import path;
+the existing web UI. The [local-alpha plan](local-alpha-plan.md) records the earlier delivery;
+current ordering is in the consolidated backlog. Automatic enrichment is default for its new guided import path;
 playback derivatives remain optional and explicitly requested. Local-only limits
 deployment scope, not authorization or transport protections. A tested stopped-server
 backup/restore procedure is an alpha gate; complete portable export, native/offline

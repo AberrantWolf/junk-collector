@@ -37,9 +37,12 @@ fn direct_lan_wins_and_same_class_hysteresis_prevents_flapping() {
 fn pinned_offline_content_survives_eviction() {
     let server = ServerId::new();
     let pinned = CacheEntry {
+        user_id: UserId::new(),
         server_id: server,
         representation_id: RepresentationId::new(),
-        profile: ConversionProfile::Flac,
+        file_id: PackageFileId::new(),
+        digest: Digest::sha256(b"cache fixture"),
+        profile: Some(ConversionProfile::Flac),
         bytes: 100,
         pinned: true,
         last_used: 0,
@@ -59,16 +62,19 @@ fn pinned_offline_content_survives_eviction() {
 #[test]
 fn cache_identity_includes_server_and_encoding_profile() {
     let base = CacheEntry {
+        user_id: UserId::new(),
         server_id: ServerId::new(),
         representation_id: RepresentationId::new(),
-        profile: ConversionProfile::Flac,
+        file_id: PackageFileId::new(),
+        digest: Digest::sha256(b"cache fixture"),
+        profile: Some(ConversionProfile::Flac),
         bytes: 100,
         pinned: true,
         last_used: 0,
         complete: true,
     };
     let lossy = CacheEntry {
-        profile: ConversionProfile::Opus { bitrate_kbps: 128 },
+        profile: Some(ConversionProfile::Opus { bitrate_kbps: 128 }),
         pinned: false,
         ..base.clone()
     };
@@ -77,6 +83,22 @@ fn cache_identity_includes_server_and_encoding_profile() {
         pinned: false,
         ..base.clone()
     };
+    let other_file = CacheEntry {
+        file_id: PackageFileId::new(),
+        profile: None,
+        ..base.clone()
+    };
+    let replacement = CacheEntry {
+        digest: Digest::sha256(b"replacement"),
+        ..base.clone()
+    };
+    let other_user = CacheEntry {
+        user_id: UserId::new(),
+        ..base.clone()
+    };
+    assert_ne!(base.key(), other_user.key());
+    assert_ne!(base.key(), other_file.key());
+    assert_ne!(base.key(), replacement.key());
     let evicted = eviction_candidates(&[base.clone(), lossy.clone(), remote.clone()], 100);
     assert_eq!(evicted, vec![lossy.key(), remote.key()]);
     assert!(!evicted.contains(&base.key()));

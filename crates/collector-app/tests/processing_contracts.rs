@@ -135,3 +135,101 @@ fn provider_acquisition_does_not_invent_a_file_source() {
         "catalog-sized buffering must use the stream port"
     );
 }
+
+#[test]
+fn unmeasured_file_checks_do_not_advertise_a_zero_percent_counter() {
+    use collector_app::{JobProgressKind, JobRecord, JobView};
+    use collector_core::{JobId, JobState, UserId};
+    let now = Utc.with_ymd_and_hms(2026, 10, 9, 0, 0, 0).unwrap();
+    let record = JobRecord {
+        id: JobId::new(),
+        user_id: UserId::new(),
+        collection_id: None,
+        item_id: None,
+        kind: "processing_operation".into(),
+        state: JobState::Running,
+        phase: "checking_accuraterip".into(),
+        completed_units: 0,
+        total_units: 999,
+        attempt: 1,
+        created_at: now,
+        updated_at: now,
+        error: None,
+        limitation: None,
+        result: None,
+    };
+    let view = JobView::from(record.clone());
+    assert_eq!(view.progress_kind, JobProgressKind::Indeterminate);
+    assert_eq!(
+        serde_json::to_value(view).unwrap()["progress_kind"],
+        "indeterminate"
+    );
+    let mut measured = record.clone();
+    measured.kind = "music_derivative".into();
+    assert_eq!(
+        JobView::from(measured).progress_kind,
+        JobProgressKind::Measured
+    );
+    let mut finished = record;
+    finished.state = JobState::Completed;
+    finished.completed_units = finished.total_units;
+    assert_eq!(
+        JobView::from(finished).progress_kind,
+        JobProgressKind::Measured
+    );
+}
+
+#[test]
+fn shared_acquisition_and_response_identity_preserve_meaningful_boundaries() {
+    use collector_app::{
+        FrozenAcquisitionJob, SnapshotRecord, acquisition_key, snapshot_response_key,
+    };
+    use collector_core::ItemId;
+    let mut frozen = FrozenAcquisitionJob {
+        collection_binding: games_binding(),
+        request: ProviderRequest {
+            collection_id: CollectionId::new(),
+            provider: ModuleId("org.junk.providers.musicbrainz".into()),
+            operation: "org.junk.providers.musicbrainz.acquire".parse().unwrap(),
+            source_fingerprint: None,
+            query: RawJson::from_json(r#"{"kind":"disc_id","disc_id":"abc","refresh":true}"#)
+                .unwrap(),
+            maximum_response_bytes: 1024,
+        },
+        item_id: None,
+        snapshot_id: SnapshotId::new(),
+        created_at: Utc::now(),
+    };
+    let first = acquisition_key(&frozen).unwrap();
+    frozen.snapshot_id = SnapshotId::new();
+    frozen.item_id = Some(ItemId::new());
+    frozen.created_at += chrono::Duration::days(1);
+    frozen.request.query =
+        RawJson::from_json(r#"{"refresh":false,"disc_id":"abc","kind":"disc_id"}"#).unwrap();
+    assert_eq!(first, acquisition_key(&frozen).unwrap());
+    frozen.request.maximum_response_bytes += 1;
+    assert_ne!(first, acquisition_key(&frozen).unwrap());
+    let mut record = SnapshotRecord {
+        acquisition_key: Some(first),
+        id: SnapshotId::new(),
+        collection_id: frozen.request.collection_id,
+        provider: frozen.request.provider,
+        media_type: "application/json".into(),
+        bytes: ByteLength(0),
+        digest: Digest::sha256(b""),
+        parsed_observation: RawJson::from_json(r#"{"outcome":"no_data","parser_version":1}"#)
+            .unwrap(),
+        created_at: Utc::now(),
+    };
+    let no_data = snapshot_response_key(&record).unwrap();
+    record.id = SnapshotId::new();
+    record.created_at += chrono::Duration::days(1);
+    assert_eq!(no_data, snapshot_response_key(&record).unwrap());
+    for interpretation in [
+        r#"{"outcome":"data","parser_version":1}"#,
+        r#"{"outcome":"no_data","parser_version":2}"#,
+    ] {
+        record.parsed_observation = RawJson::from_json(interpretation).unwrap();
+        assert_ne!(no_data, snapshot_response_key(&record).unwrap());
+    }
+}

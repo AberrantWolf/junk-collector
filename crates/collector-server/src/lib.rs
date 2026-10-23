@@ -5,11 +5,12 @@ use collector_api_types::{
 use collector_app::{
     WorkEntry, WorkHistoryCommand, WorkJobView, WorkJobsQuery, WorkQuery, WorkTarget,
 };
+pub mod local_playback;
 pub mod passkeys;
 use axum::{
     Json, Router,
     body::Body,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State},
+    extract::{ConnectInfo, DefaultBodyLimit, FromRequest, Multipart, Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -67,12 +68,17 @@ pub struct AppState {
     pub ingress: Ingress,
     pub pairing: Pairing,
     pub multi_user: bool,
+    pub local_playback: Option<Arc<local_playback::LocalPlayback>>,
+    pub remote_media_allowed: bool,
+    pub direct_media: bool,
+    pub backup_reminder: Option<collector_app::BackupReminderSettings>,
     pub inboxes: Arc<std::collections::BTreeMap<String, std::path::PathBuf>>,
     pub catalog_sources: Arc<Vec<CatalogSourceView>>,
     pub allowed_origins: Arc<Vec<String>>,
-    pub passkeys: Option<Arc<passkeys::Passkeys>>,
+    pub passkeys: passkeys::Configuration,
     pub rate_limits: Arc<RateLimits>,
     artwork_preview_slots: Arc<tokio::sync::Semaphore>,
+    catalog_upload_slots: Arc<tokio::sync::Semaphore>,
 }
 impl AppState {
     pub fn new(store: Arc<Store>, pairing: Pairing) -> Self {
@@ -80,7 +86,9 @@ impl AppState {
     }
 
     pub fn new_with_registry(store: Arc<Store>, pairing: Pairing, modules: Arc<Registry>) -> Self {
-        let service = CollectionService::new(store.clone(), modules);
+        let service = CollectionService::new(store.clone(), modules)
+            .with_catalog_uploads(store.clone())
+            .with_backup_history(store.clone());
         Self {
             store,
             service,
@@ -88,12 +96,17 @@ impl AppState {
             ingress: Ingress::Public,
             pairing,
             multi_user: false,
+            local_playback: None,
+            remote_media_allowed: false,
+            direct_media: false,
+            backup_reminder: None,
             inboxes: Arc::new(std::collections::BTreeMap::new()),
             catalog_sources: Arc::new(Vec::new()),
             allowed_origins: Arc::new(vec![]),
             rate_limits: Arc::new(RateLimits::default()),
             artwork_preview_slots: Arc::new(tokio::sync::Semaphore::new(4)),
-            passkeys: None,
+            catalog_upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+            passkeys: passkeys::Configuration::Disabled(passkeys::UnavailableReason::NotConfigured),
         }
     }
 }
@@ -108,64 +121,61 @@ impl Drop for JobRuntime {
     }
 }
 
-pub fn start_job_workers(state: AppState) -> JobRuntime {
-    let service = state.service.clone();
+pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> {
+    let settings = state.service.job_settings()?;
     let worker_instance = ServerId::new().to_string();
-    let workers = (0..2)
-        .map(|worker_index| {
-            let service = service.clone();
-            let recovery_state = state.clone();
-            let worker_instance = worker_instance.clone();
-            tokio::spawn(async move {
-                let mut next_recovery = tokio::time::Instant::now();
-                loop {
-                    if worker_index == 0 && tokio::time::Instant::now() >= next_recovery {
-                        next_recovery =
-                            tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-                        let recovery_state = recovery_state.clone();
-                        let recovery = service.clone();
-                        match tokio::task::spawn_blocking(move || {
-                            recover_guided_inbox_staging(&recovery_state)?;
-                            recovery.resume_bulk_intakes()?;
-                            recovery.resume_bulk_library()?;
-                            recovery.resume_guided_ingests()
-                        })
-                        .await
-                        {
-                            Ok(Ok(())) => {}
-                            Ok(Err(error)) => {
-                                tracing::error!(%error, "guided ingest recovery failed")
-                            }
-                            Err(error) => {
-                                tracing::error!(%error, "guided ingest recovery panicked")
-                            }
-                        }
+    let mut workers = Vec::new();
+    let recovery_state = state.clone();
+    workers.push(tokio::spawn(async move {
+        loop {
+            let state = recovery_state.clone();
+            match tokio::task::spawn_blocking(move || {
+                let recovery = (|| {
+                    state.service.reconcile_provider_acquisitions()?;
+                    recover_guided_inbox_staging(&state)?;
+                    state.service.resume_bulk_intakes()?;
+                    state.service.resume_bulk_library()?;
+                    state.service.resume_guided_ingests()
+                })();
+                // An unrelated recovery error must not suppress grouping, nor
+                // may a grouping failure prevent ordinary workflow recovery.
+                let grouping = state.service.reconcile_automatic_album_groups();
+                recovery.and(grouping)
+            })
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::error!(%error, "workflow recovery failed"),
+                Err(error) => tracing::error!(%error, "workflow recovery panicked"),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    }));
+    for worker_index in 0..settings.execution_loops() {
+        let service = state.service.clone();
+        let worker_instance = worker_instance.clone();
+        workers.push(tokio::spawn(async move {
+            loop {
+                let service = service.clone();
+                let instance = worker_instance.clone();
+                match tokio::task::spawn_blocking(move || service.run_next_job(&instance)).await {
+                    Ok(Ok(true)) => continue,
+                    Ok(Ok(false)) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await
                     }
-                    let service = service.clone();
-                    let worker_instance = worker_instance.clone();
-                    match tokio::task::spawn_blocking(move || {
-                        service.run_next_job(&worker_instance)
-                    })
-                    .await
-                    {
-                        Ok(Ok(true)) => continue,
-                        Ok(Ok(false)) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(250)).await
-                        }
-                        Ok(Err(error)) => {
-                            tracing::error!(worker_index, %error, "durable job worker failed");
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
-                        Err(error) => {
-                            tracing::error!(worker_index, %error, "durable job worker panicked");
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
+                    Ok(Err(error)) => {
+                        tracing::error!(worker_index,%error,"job worker failed");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                    Err(error) => {
+                        tracing::error!(worker_index,%error,"job worker panicked");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                 }
-            })
-        })
-        .collect();
-    JobRuntime(workers)
+            }
+        }));
+    }
+    Ok(JobRuntime(workers))
 }
 
 pub trait RateLimitClock: Send + Sync {
@@ -219,11 +229,9 @@ impl RateLimits {
         let now = self.clock.monotonic_millis();
         let mut state = lock_rate(&self.state)?;
         purge(&mut state.global, now, WINDOW_MILLIS);
-        let peer_attempts = state.peers.entry(peer.to_owned()).or_default();
-        purge(peer_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.peers, now, WINDOW_MILLIS);
         let account_key = Digest::sha256(account.trim().as_bytes()).hex;
-        let account_attempts = state.accounts.entry(account_key.clone()).or_default();
-        purge(account_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.accounts, now, WINDOW_MILLIS);
         if state.global.len() >= GLOBAL_LIMIT
             || state
                 .peers
@@ -239,13 +247,13 @@ impl RateLimits {
         state.global.push_back(now);
         state
             .peers
-            .get_mut(peer)
-            .expect("peer bucket exists")
+            .entry(peer.to_owned())
+            .or_default()
             .push_back(now);
         state
             .accounts
-            .get_mut(&account_key)
-            .expect("account bucket exists")
+            .entry(account_key)
+            .or_default()
             .push_back(now);
         Ok(())
     }
@@ -254,11 +262,7 @@ impl RateLimits {
         let now = self.clock.monotonic_millis();
         let mut state = lock_rate(&self.state)?;
         purge(&mut state.enrollment_polls, now, 60_000);
-        purge(
-            state.enrollment_poll_peers.entry(peer.into()).or_default(),
-            now,
-            60_000,
-        );
+        purge_buckets(&mut state.enrollment_poll_peers, now, 60_000);
         if state.enrollment_polls.len() >= 600
             || state
                 .enrollment_poll_peers
@@ -270,8 +274,8 @@ impl RateLimits {
         state.enrollment_polls.push_back(now);
         state
             .enrollment_poll_peers
-            .get_mut(peer)
-            .expect("poll bucket exists")
+            .entry(peer.to_owned())
+            .or_default()
             .push_back(now);
         Ok(())
     }
@@ -283,14 +287,9 @@ impl RateLimits {
         let now = self.clock.monotonic_millis();
         let mut state = lock_rate(&self.state)?;
         purge(&mut state.enrollment_global, now, WINDOW_MILLIS);
-        let peer_attempts = state.enrollment_peers.entry(peer.to_owned()).or_default();
-        purge(peer_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.enrollment_peers, now, WINDOW_MILLIS);
         let account_key = Digest::sha256(account.trim().as_bytes()).hex;
-        let account_attempts = state
-            .enrollment_accounts
-            .entry(account_key.clone())
-            .or_default();
-        purge(account_attempts, now, WINDOW_MILLIS);
+        purge_buckets(&mut state.enrollment_accounts, now, WINDOW_MILLIS);
         if state.enrollment_global.len() >= GLOBAL_LIMIT
             || state
                 .enrollment_peers
@@ -306,13 +305,13 @@ impl RateLimits {
         state.enrollment_global.push_back(now);
         state
             .enrollment_peers
-            .get_mut(peer)
-            .expect("peer bucket exists")
+            .entry(peer.to_owned())
+            .or_default()
             .push_back(now);
         state
             .enrollment_accounts
-            .get_mut(&account_key)
-            .expect("account bucket exists")
+            .entry(account_key)
+            .or_default()
             .push_back(now);
         Ok(())
     }
@@ -331,6 +330,13 @@ fn purge(values: &mut VecDeque<u64>, now: u64, window: u64) {
     {
         values.pop_front();
     }
+}
+
+fn purge_buckets(buckets: &mut HashMap<String, VecDeque<u64>>, now: u64, window: u64) {
+    buckets.retain(|_, values| {
+        purge(values, now, window);
+        !values.is_empty()
+    });
 }
 
 #[derive(Clone)]
@@ -437,7 +443,7 @@ impl IntoResponse for ApiError {
             Error::PreparedMediaInvalid => (
                 StatusCode::CONFLICT,
                 "prepared_media_invalid",
-                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is preserved; ask a curator to repair this prepared track.".into(),
+                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is saved; ask a curator to repair this prepared track.".into(),
             ),
         };
         (
@@ -494,6 +500,28 @@ fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<Authenticat
 fn principal(state: &AppState, headers: &HeaderMap) -> ApiResult<Principal> {
     Ok(authenticated(state, headers)?.principal)
 }
+
+// Reject untrusted large uploads before body extractors allocate or parse them.
+// Collection-specific authority is still checked by each application command.
+async fn authenticated_api(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> ApiResult<Response> {
+    principal(&state, request.headers())?;
+    Ok(next.run(request).await)
+}
+
+async fn administrator_api(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> ApiResult<Response> {
+    state
+        .service
+        .require_administrator(&principal(&state, request.headers())?)?;
+    Ok(next.run(request).await)
+}
 fn command_context(headers: &HeaderMap) -> ApiResult<CommandContext> {
     let key = headers
         .get("idempotency-key")
@@ -513,6 +541,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pair", get(index))
         .route("/lists", get(index))
         .route("/app.js", get(app_js))
+        .route("/playback-sw.js", get(local_playback::worker))
         .route("/app.css", get(app_css))
         .route("/security.js", get(security_js))
         .merge(client_api);
@@ -531,7 +560,10 @@ pub fn router(state: AppState) -> Router {
             .route("/library-imports.js", get(library_imports_js))
             .route("/collection-access.js", get(collection_access_js))
             .route("/work-history.js", get(work_history_js))
-            .merge(curation_api);
+            .merge(curation_api.route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                authenticated_api,
+            )));
     }
     if state
         .exposure
@@ -541,7 +573,12 @@ pub fn router(state: AppState) -> Router {
         router = router
             .route("/admin", get(index))
             .route("/administration.js", get(administration_js))
-            .merge(administration_api);
+            .merge(
+                administration_api.route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    administrator_api,
+                )),
+            );
     }
     router
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
@@ -552,6 +589,8 @@ pub fn router(state: AppState) -> Router {
 fn client_api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(routes!(identity))
+        .routes(routes!(local_playback::routes))
+        .routes(routes!(local_playback::browser_grant))
         .routes(routes!(features))
         .routes(routes!(login))
         .routes(routes!(recover))
@@ -597,6 +636,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(item_asset))
         .routes(routes!(asset_metadata))
         .routes(routes!(asset_original))
+        .routes(routes!(asset_text_preview))
         .routes(routes!(asset_thumbnail))
         .routes(routes!(music_track_availability))
         .routes(routes!(music_album_coverage))
@@ -643,6 +683,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(discover_ingest))
         .routes(routes!(start_ingest, list_ingests))
         .routes(routes!(ingest_detail))
+        .routes(routes!(cleanup_ingest_inbox))
         .routes(routes!(discard_ingest))
         .routes(routes!(cancel_ingest))
         .routes(routes!(retry_ingest))
@@ -667,12 +708,14 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_job))
         .routes(routes!(retry_job))
         .routes(routes!(prepare_music_track))
+        .routes(routes!(update_digital_purchase).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(music_album_preparation_plan))
         .routes(routes!(prepare_music_album, music_preparation_batches))
         .routes(routes!(music_preparation_batch))
         .routes(routes!(cancel_music_preparation_batch))
         .routes(routes!(retry_music_preparation_batch))
         .routes(routes!(metadata_review, update_metadata_authority))
+        .routes(routes!(identify_game_entry))
         .routes(routes!(resolve_metadata, metadata_resolutions))
         .routes(routes!(metadata_care))
         .routes(routes!(preparation_care))
@@ -714,6 +757,15 @@ fn administration_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(grant))
         .routes(routes!(reindex))
         .routes(routes!(catalog_sources))
+        .routes(
+            routes!(upload_catalog_snapshot)
+                .layer(DefaultBodyLimit::max(collector_app::MAX_DAT_UPLOAD_BYTES)),
+        )
+        .routes(
+            routes!(inspect_catalog_upload)
+                .layer(DefaultBodyLimit::max(512 * 1024 * 1024 + 1024 * 1024)),
+        )
+        .routes(routes!(accept_catalog_upload))
         .routes(routes!(catalog_snapshots, import_catalog_snapshot))
         .routes(routes!(activate_catalog_snapshot))
 }
@@ -726,7 +778,11 @@ pub fn openapi() -> OpenApi {
     document.info.title = "Junk Collector API".into();
     document.info.version = "1.0.0".into();
     for (path, item) in &mut document.paths.paths {
-        let limit = if path.ends_with("/cover") || path.ends_with("/assets") {
+        let limit = if path.ends_with("/catalog-upload/inspect") {
+            512 * 1024 * 1024 + 1024 * 1024
+        } else if path.ends_with("/catalog-upload") {
+            collector_app::MAX_DAT_UPLOAD_BYTES
+        } else if path.ends_with("/cover") || path.ends_with("/assets") {
             20 * 1024 * 1024
         } else if path.ends_with("/files/{index}") {
             8 * 1024 * 1024
@@ -797,6 +853,11 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         .map(|peer| peer.0.ip().to_string())
         .unwrap_or_else(|| "unknown-direct-peer".into());
     request.extensions_mut().insert(DirectPeer(peer));
+    let local_origins = state
+        .local_playback
+        .as_ref()
+        .map(|local| local.connect_origins())
+        .unwrap_or_default();
     let mut response = next.run(request).await;
     for (key, value) in [
         ("x-content-type-options", "nosniff"),
@@ -811,6 +872,17 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         response
             .headers_mut()
             .insert(key, HeaderValue::from_static(value));
+    }
+    if !local_origins.is_empty() {
+        let csp = format!(
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' {}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            local_origins.join(" ")
+        );
+        if let Ok(value) = HeaderValue::from_str(&csp) {
+            response
+                .headers_mut()
+                .insert("content-security-policy", value);
+        }
     }
     response
 }
@@ -915,6 +987,7 @@ pub struct FeaturesResponse {
     pub curation: bool,
     pub administration: bool,
     pub passkeys: bool,
+    pub passkeys_unavailable_reason: Option<passkeys::UnavailableReason>,
 }
 
 #[utoipa::path(get, path = "/api/v1/identity", responses((status = 200, body = IdentityResponse)))]
@@ -937,7 +1010,8 @@ async fn features(State(state): State<AppState>) -> ApiResult<Json<FeaturesRespo
         administration: state
             .exposure
             .allows(state.ingress, Surface::Administration),
-        passkeys: state.passkeys.is_some(),
+        passkeys: state.passkeys.get().is_some(),
+        passkeys_unavailable_reason: state.passkeys.unavailable_reason(),
     }))
 }
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -1443,8 +1517,11 @@ async fn client_collections(
 ) -> ApiResult<Json<Vec<collector_api_types::ClientCollection>>> {
     let actor = principal(&state, &headers)?;
     let curation = state.exposure.allows(state.ingress, Surface::Curation);
-    let values = blocking(move || state.service.collections(&actor)).await?;
-    Ok(Json(values.into_iter().filter(|v| matches!(&v.binding, CollectionBinding::Assigned {module} if module.0=="org.junk.music")).map(|v|collector_api_types::ClientCollection { id:v.id,name:v.name,can_browse:v.effective_permissions.can_browse,can_play:v.effective_permissions.can_browse,can_edit_playlists:curation&&v.content_permissions.can_edit }).collect()))
+    let mut values = blocking(move || state.service.listening_collections(&actor)).await?;
+    for collection in &mut values {
+        collection.can_edit_playlists &= curation;
+    }
+    Ok(Json(values))
 }
 #[utoipa::path(get,path="/api/v1/client/albums",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_api_types::ClientAlbum>)))]
 async fn client_albums(
@@ -1453,26 +1530,9 @@ async fn client_albums(
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<Page<collector_api_types::ClientAlbum>>> {
     let actor = principal(&state, &headers)?;
-    let values = blocking(move || state.service.browse_presented(&actor, query)).await?;
-    Ok(Json(Page {
-        items: values
-            .items
-            .into_iter()
-            .filter(|v| v.domain.module.0 == "org.junk.music")
-            .map(|v| collector_api_types::ClientAlbum {
-                id: v.id,
-                collection_id: v.collection_id,
-                title: v.effective_metadata.title.value,
-                artist: v
-                    .effective_metadata
-                    .subtitle
-                    .map(|s| s.value)
-                    .unwrap_or(v.subtitle),
-                artwork: v.primary_artwork,
-            })
-            .collect(),
-        next_cursor: values.next_cursor,
-    }))
+    Ok(Json(
+        blocking(move || state.service.listening_albums(&actor, query)).await?,
+    ))
 }
 #[utoipa::path(get,path="/api/v1/items/{item}/client-tracks",params(("item"=ItemId,Path)),responses((status=200,body=Vec<collector_api_types::MusicTrackAvailability>),(status=403)))]
 async fn client_music_tracks(
@@ -2296,6 +2356,23 @@ async fn asset_original(
     file_response(resource, headers, false).await
 }
 
+#[utoipa::path(get,path="/api/v1/collections/{collection}/assets/{asset}/text-preview",params(("collection"=CollectionId,Path),("asset"=AssetId,Path)),responses((status=200,body=collector_app::DocumentTextPreview),(status=400),(status=403),(status=404)))]
+async fn asset_text_preview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection, asset)): Path<(CollectionId, AssetId)>,
+) -> ApiResult<Json<collector_app::DocumentTextPreview>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .document_text_preview(&actor, collection, asset)
+        })
+        .await?,
+    ))
+}
+
 #[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}/thumbnail", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, content_type = "image/png"), (status = 206, content_type = "image/png"), (status = 403), (status = 404), (status = 416)))]
 async fn asset_thumbnail(
     State(state): State<AppState>,
@@ -2455,6 +2532,12 @@ async fn media(
     headers: HeaderMap,
     Path((id, representation, index)): Path<(ItemId, RepresentationId, usize)>,
 ) -> ApiResult<Response> {
+    if !state.direct_media && !state.remote_media_allowed {
+        return Err(Error::Unavailable(
+            "Local playback is required; public media fallback is disabled".into(),
+        )
+        .into());
+    }
     let actor = principal(&state, &headers)?;
     let resource = blocking(move || {
         state
@@ -2658,8 +2741,135 @@ mod security_tests {
             limits.check_authentication("owner", "192.0.2.2"),
             Err(Error::RateLimited(60))
         ));
+        limits.check_authentication("recent", "192.0.2.3").unwrap();
         clock.0.store(60_000, Ordering::SeqCst);
         limits.check_authentication("owner", "192.0.2.2").unwrap();
+        for _ in 0..9 {
+            limits.check_authentication("recent", "192.0.2.3").unwrap();
+        }
+        assert!(matches!(
+            limits.check_authentication("recent", "192.0.2.4"),
+            Err(Error::RateLimited(60))
+        ));
+    }
+
+    #[test]
+    fn authentication_alias_flood_is_throttled_without_retaining_rejected_identities() {
+        let clock = Arc::new(TestRateClock(AtomicU64::new(0)));
+        let limits = RateLimits::new(clock.clone());
+        for index in 0..30 {
+            limits
+                .check_authentication(&format!("account-{index}"), "busy-peer")
+                .unwrap();
+        }
+        assert!(matches!(
+            limits.check_authentication("another-account", "busy-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 30..100 {
+            limits
+                .check_authentication(&format!("account-{index}"), &format!("peer-{index}"))
+                .unwrap();
+        }
+        for index in 0..1000 {
+            assert!(matches!(
+                limits.check_authentication(
+                    &format!("rejected-account-{index}"),
+                    &format!("rejected-peer-{index}")
+                ),
+                Err(Error::RateLimited(60))
+            ));
+        }
+        {
+            let state = limits.state.lock().unwrap();
+            assert_eq!(state.global.len(), 100);
+            assert_eq!(state.accounts.len(), 100);
+            assert!(state.peers.len() <= 100);
+        }
+        clock.0.store(59_999, Ordering::SeqCst);
+        assert!(matches!(
+            limits.check_authentication("new-account", "new-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        clock.0.store(60_000, Ordering::SeqCst);
+        limits
+            .check_authentication("new-account", "new-peer")
+            .unwrap();
+        let state = limits.state.lock().unwrap();
+        assert_eq!(state.global.len(), 1);
+        assert_eq!(state.accounts.len(), 1);
+        assert_eq!(state.peers.len(), 1);
+    }
+
+    #[test]
+    fn enrollment_and_poll_alias_floods_bound_state_and_reclaim_expired_buckets() {
+        let clock = Arc::new(TestRateClock(AtomicU64::new(0)));
+        let limits = RateLimits::new(clock.clone());
+        for index in 0..8 {
+            limits
+                .check_enrollment("account", &format!("peer-{index}"))
+                .unwrap();
+        }
+        assert!(matches!(
+            limits.check_enrollment("account", "different-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 0..15 {
+            limits
+                .check_enrollment(&format!("account-{index}"), "busy-peer")
+                .unwrap();
+        }
+        assert!(matches!(
+            limits.check_enrollment("another-account", "busy-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 23..50 {
+            limits
+                .check_enrollment(&format!("account-{index}"), &format!("peer-{index}"))
+                .unwrap();
+        }
+        for _ in 0..120 {
+            limits.check_enrollment_poll("busy-poll-peer").unwrap();
+        }
+        assert!(matches!(
+            limits.check_enrollment_poll("busy-poll-peer"),
+            Err(Error::RateLimited(60))
+        ));
+        for index in 120..600 {
+            limits
+                .check_enrollment_poll(&format!("poll-peer-{index}"))
+                .unwrap();
+        }
+        for index in 0..1000 {
+            assert!(matches!(
+                limits.check_enrollment(
+                    &format!("rejected-account-{index}"),
+                    &format!("rejected-peer-{index}")
+                ),
+                Err(Error::RateLimited(60))
+            ));
+            assert!(matches!(
+                limits.check_enrollment_poll(&format!("rejected-poll-peer-{index}")),
+                Err(Error::RateLimited(60))
+            ));
+        }
+        {
+            let state = limits.state.lock().unwrap();
+            assert_eq!(state.enrollment_global.len(), 50);
+            assert!(state.enrollment_peers.len() <= 50);
+            assert!(state.enrollment_accounts.len() <= 50);
+            assert_eq!(state.enrollment_polls.len(), 600);
+            assert!(state.enrollment_poll_peers.len() <= 600);
+        }
+        clock.0.store(60_000, Ordering::SeqCst);
+        limits.check_enrollment("new-account", "new-peer").unwrap();
+        limits.check_enrollment_poll("new-poll-peer").unwrap();
+        let state = limits.state.lock().unwrap();
+        assert_eq!(state.enrollment_global.len(), 1);
+        assert_eq!(state.enrollment_peers.len(), 1);
+        assert_eq!(state.enrollment_accounts.len(), 1);
+        assert_eq!(state.enrollment_polls.len(), 1);
+        assert_eq!(state.enrollment_poll_peers.len(), 1);
     }
 
     #[test]
@@ -3108,11 +3318,7 @@ async fn append_intake(
                     for package in &plan.packages {
                         if package.source.kind == ImportSourceKind::Inbox {
                             let (_, files) = resolve_inbox_package(&state, &package.source)?;
-                            if serde_json::to_value(files)
-                                .map_err(|e| Error::Invalid(e.to_string()))?
-                                != serde_json::to_value(&package.files)
-                                    .map_err(|e| Error::Invalid(e.to_string()))?
-                            {
+                            if !same_upload_inventory(&files, &package.files) {
                                 return Err(Error::Conflict);
                             }
                         }
@@ -3203,7 +3409,13 @@ async fn plan_ingest(
                 .authorize(&actor, command.collection_id, Action::Curate)?;
             for package in &mut command.packages {
                 if package.source.kind == ImportSourceKind::Inbox {
-                    let (_, files) = resolve_inbox_package(&state, &package.source)?;
+                    let (_, mut files) = resolve_inbox_package(&state, &package.source)?;
+                    if !package.files.is_empty() {
+                        if !same_upload_inventory(&files, &package.files) {
+                            return Err(Error::Conflict);
+                        }
+                        files = package.files.clone();
+                    }
                     package.files = files;
                 }
             }
@@ -3231,11 +3443,7 @@ async fn start_ingest(
                         if package.source.kind == ImportSourceKind::Inbox {
                             let (path, current_files) =
                                 resolve_inbox_package(&state, &package.source)?;
-                            if serde_json::to_value(&current_files)
-                                .map_err(|e| Error::Invalid(e.to_string()))?
-                                != serde_json::to_value(&package.files)
-                                    .map_err(|e| Error::Invalid(e.to_string()))?
-                            {
+                            if !same_upload_inventory(&current_files, &package.files) {
                                 return Err(Error::Conflict);
                             }
                             inbox_paths.push((package.position, path));
@@ -3303,6 +3511,29 @@ async fn ingest_detail(
     Ok(Json(
         blocking(move || state.service.ingest_detail(&actor, id)).await?,
     ))
+}
+
+#[utoipa::path(post, path="/api/v1/ingests/{id}/inbox-cleanup", params(("id"=ImportId,Path),("Idempotency-Key"=String,Header)), request_body=collector_app::CleanupInboxCommand, responses((status=202,body=JobId),(status=403),(status=404),(status=409),(status=422)))]
+async fn cleanup_ingest_inbox(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ImportId>,
+    Json(command): Json<collector_app::CleanupInboxCommand>,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job = blocking(move || {
+        state
+            .service
+            .request_inbox_cleanup(&actor, id, command, &context, |source| {
+                let (path, _) = resolve_inbox_package(&state, source)?;
+                path.into_os_string()
+                    .into_string()
+                    .map_err(|_| Error::Invalid("Inbox path must be UTF-8".into()))
+            })
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(job)).into_response())
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -3650,6 +3881,8 @@ fn paged_inbox_packages(
             continue;
         };
         if !metadata.is_dir()
+            || collector_app::is_intake_housekeeping(&name, true)
+            || collector_app::is_inbox_cleanup_directory(&name)
             || metadata.file_type().is_symlink()
             || name.is_empty()
             || name.contains(['/', '\\'])
@@ -3685,6 +3918,8 @@ fn direct_inbox_packages(root: &std::path::Path) -> Result<Vec<String>> {
             continue;
         };
         if metadata.is_dir()
+            && !collector_app::is_intake_housekeeping(&name, true)
+            && !collector_app::is_inbox_cleanup_directory(&name)
             && !metadata.file_type().is_symlink()
             && !name.is_empty()
             && !name.contains(['/', '\\'])
@@ -3701,6 +3936,14 @@ fn resolve_inbox_package(
     state: &AppState,
     source: &ImportSourceSummary,
 ) -> Result<(std::path::PathBuf, Vec<UploadFile>)> {
+    resolve_inbox_package_retaining(state, source, None)
+}
+
+fn resolve_inbox_package_retaining(
+    state: &AppState,
+    source: &ImportSourceSummary,
+    retained: Option<&[String]>,
+) -> Result<(std::path::PathBuf, Vec<UploadFile>)> {
     let label = source
         .label
         .as_ref()
@@ -3708,6 +3951,9 @@ fn resolve_inbox_package(
     if source.package_name.is_empty()
         || source.package_name.contains(['/', '\\'])
         || matches!(source.package_name.as_str(), "." | "..")
+        || (retained.is_none()
+            && (collector_app::is_intake_housekeeping(&source.package_name, true)
+                || collector_app::is_inbox_cleanup_directory(&source.package_name)))
     {
         return Err(Error::Invalid(
             "select a direct inbox package directory".into(),
@@ -3725,7 +3971,7 @@ fn resolve_inbox_package(
     {
         return Err(Error::Forbidden);
     }
-    let files = Store::inventory_directory(&path)?;
+    let files = Store::inventory_directory_retaining(&path, retained.unwrap_or_default())?;
     Ok((path, files))
 }
 
@@ -3738,7 +3984,16 @@ fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
         }
         after = imports.last().map(|value| value.id);
         for import in imports {
-            let (path, current) = match resolve_inbox_package(state, &import.source) {
+            let retained = import
+                .files
+                .iter()
+                .map(|file| file.name.clone())
+                .collect::<Vec<_>>();
+            let (path, current) = match resolve_inbox_package_retaining(
+                state,
+                &import.source,
+                Some(&retained),
+            ) {
                 Ok(value) => value,
                 Err(error) => {
                     state.service.report_guided_staging_failure(import.id, "Configured inbox package is unavailable; restore the source or discard this import.")?;
@@ -3746,15 +4001,20 @@ fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
                     continue;
                 }
             };
+            let by_name = current
+                .iter()
+                .map(|file| (file.name.as_str(), file))
+                .collect::<std::collections::BTreeMap<_, _>>();
             if current.len() != import.files.len()
-                || current.iter().zip(&import.files).any(|(source, declared)| {
-                    source.name != declared.name
-                        || source.bytes != declared.bytes
-                        || source
-                            .sha256
-                            .as_ref()
-                            .zip(declared.digest.as_ref())
-                            .is_some_and(|(source, declared)| source != &declared.hex)
+                || import.files.iter().any(|declared| {
+                    by_name.get(declared.name.as_str()).is_none_or(|source| {
+                        source.bytes != declared.bytes
+                            || source
+                                .sha256
+                                .as_ref()
+                                .zip(declared.digest.as_ref())
+                                .is_some_and(|(source, declared)| source != &declared.hex)
+                    })
                 })
             {
                 state.service.report_guided_staging_failure(import.id, "Inbox inventory changed after acceptance; restore the original package or discard and preview it again.")?;
@@ -3844,6 +4104,7 @@ async fn stage_inbox_import(
     if input.package.is_empty()
         || input.package.contains(['/', '\\'])
         || matches!(input.package.as_str(), "." | "..")
+        || collector_app::is_intake_housekeeping(&input.package, true)
     {
         return Err(Error::Invalid("select a direct inbox package directory".into()).into());
     }
@@ -3928,6 +4189,7 @@ fn compatibility_upload(user_id: UserId, import: ImportView) -> Result<Upload> {
             .files
             .into_iter()
             .map(|file| UploadFile {
+                visibility: Default::default(),
                 name: file.name,
                 bytes: file.bytes,
                 sha256: file.digest.map(|digest| digest.hex),
@@ -4179,16 +4441,41 @@ async fn retry_job(
     let view = blocking(move || state.service.job(&actor, id)).await?;
     Ok((StatusCode::ACCEPTED, Json(view)).into_response())
 }
-#[utoipa::path(get, path = "/api/v1/admin/settings", responses((status = 200, body = serde_json::Value), (status = 403)))]
+#[derive(serde::Serialize, utoipa::ToSchema)]
+struct ServerSettingsView {
+    default_user_id: UserId,
+    current_user_id: UserId,
+    exposure: Exposure,
+    multi_user: bool,
+    server_id: ServerId,
+    ingress: String,
+    backup_reminder: Option<collector_app::BackupReminder>,
+}
+#[utoipa::path(get, path = "/api/v1/admin/settings", responses((status = 200, body = ServerSettingsView), (status = 403)))]
 async fn settings(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ServerSettingsView>> {
     let actor = principal(&state, &headers)?;
     let default_user_id = state.service.default_user_id(&actor)?;
-    Ok(Json(
-        serde_json::json!({"default_user_id":default_user_id,"current_user_id":actor.user_id,"exposure":state.exposure,"multi_user":state.multi_user,"server_id":state.pairing.server_id,"ingress":format!("{:?}",state.ingress)}),
-    ))
+    let reminder = if let Some(settings) = &state.backup_reminder {
+        let settings = settings.clone();
+        let service = state.service.clone();
+        let actor = actor.clone();
+        Some(blocking(move || service.backup_reminder(&actor, &settings)).await?)
+    } else {
+        None
+    };
+
+    Ok(Json(ServerSettingsView {
+        default_user_id,
+        current_user_id: actor.user_id,
+        exposure: state.exposure,
+        multi_user: state.multi_user,
+        server_id: state.pairing.server_id,
+        ingress: format!("{:?}", state.ingress),
+        backup_reminder: reminder,
+    }))
 }
 
 #[utoipa::path(get, path = "/api/v1/admin/catalog-sources", responses((status = 200, body = Vec<CatalogSourceView>), (status = 403)))]
@@ -4285,6 +4572,149 @@ async fn import_catalog_snapshot(
         Json(serde_json::json!({"job_id":job_id})),
     )
         .into_response())
+}
+
+#[utoipa::path(post, path = "/api/v1/admin/collections/{id}/catalog-upload", params(("id" = CollectionId, Path), ("Idempotency-Key" = String, Header), collector_app::DatUploadMetadata), request_body(content = String, content_type = "application/octet-stream"), responses((status = 202, body = serde_json::Value), (status = 400), (status = 403), (status = 409), (status = 413)))]
+async fn upload_catalog_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Query(metadata): Query<collector_app::DatUploadMetadata>,
+    request: Request,
+) -> ApiResult<Response> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    state.service.validate_dat_upload(&actor, id, &metadata)?;
+    let _slot = state
+        .catalog_upload_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            Error::Unavailable("Other DAT uploads are in progress; try again shortly.".into())
+        })?;
+    let bytes = match axum::body::to_bytes(request.into_body(), collector_app::MAX_DAT_UPLOAD_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => return Ok((StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"error":{"code":"invalid","message":"Upload an extracted DAT file no larger than 64 MiB."}}))).into_response()),
+    };
+    let job_id = blocking(move || {
+        state
+            .service
+            .upload_dat_catalog(&actor, id, metadata, &bytes, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job_id})),
+    )
+        .into_response())
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/identify-game", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), responses((status = 202, body = Vec<JobId>), (status = 403), (status = 409)))]
+async fn identify_game_entry(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<(StatusCode, Json<Vec<JobId>>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(blocking(move || state.service.identify_game_entry(&actor, id, &context)).await?),
+    ))
+}
+
+/// Browser batch of binary DAT/ZIP uploads; parsing uses bounded multipart chunks.
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+struct CatalogUploadForm {
+    #[schema(value_type=Vec<String>, format=Binary)]
+    files: Vec<String>,
+}
+
+#[utoipa::path(post, path = "/api/v1/admin/collections/{id}/catalog-upload/inspect", params(("id" = CollectionId, Path)), request_body(content = CatalogUploadForm, content_type = "multipart/form-data"), responses((status = 200, body = collector_app::CatalogUploadPreview), (status = 400), (status = 403), (status = 413)))]
+async fn inspect_catalog_upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    request: Request,
+) -> ApiResult<Json<collector_app::CatalogUploadPreview>> {
+    let actor = principal(&state, &headers)?;
+    let service = state.service.clone();
+    let authorized = actor.clone();
+    blocking(move || service.authorize_game_catalog_upload(&authorized, id)).await?;
+    let _slot = state
+        .catalog_upload_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| Error::Unavailable("Other catalog uploads are in progress".into()))?;
+    let multipart = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("multipart/form-data"));
+    let mut files = vec![];
+    if multipart {
+        let mut form = Multipart::from_request(request, &state)
+            .await
+            .map_err(|_| Error::Invalid("Invalid catalog batch".into()))?;
+        let mut total = 0usize;
+        while let Some(mut field) = form
+            .next_field()
+            .await
+            .map_err(|_| Error::Invalid("Invalid catalog batch field".into()))?
+        {
+            if files.len() >= 128 {
+                return Err(Error::Invalid("Batch exceeds 128 uploaded files".into()).into());
+            }
+            let name = field.file_name().unwrap_or("Uploaded DAT").to_owned();
+            let mut data = Vec::new();
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|_| Error::Invalid("Catalog upload read failed".into()))?
+            {
+                total = total.checked_add(chunk.len()).ok_or(Error::Conflict)?;
+                if data.len() + chunk.len() > collector_app::MAX_DAT_UPLOAD_BYTES
+                    || total > 512 * 1024 * 1024
+                {
+                    return Err(Error::Invalid("Upload file or batch limit exceeded".into()).into());
+                }
+                data.extend_from_slice(&chunk);
+            }
+            files.push((name, data));
+        }
+    } else {
+        let bytes = axum::body::to_bytes(request.into_body(), collector_app::MAX_DAT_UPLOAD_BYTES)
+            .await
+            .map_err(|_| Error::Invalid("Upload files up to 64 MiB each".into()))?;
+        files.push(("Uploaded DAT".into(), bytes.to_vec()));
+    }
+    Ok(Json(
+        blocking(move || {
+            let _slot = _slot;
+            state.service.inspect_catalog_batch(&actor, id, files)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post, path = "/api/v1/admin/collections/{id}/catalog-upload/accept", params(("id" = CollectionId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::UploadedDatCatalog, responses((status = 202, body = serde_json::Value), (status = 400), (status = 403)))]
+async fn accept_catalog_upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Json(upload): Json<collector_app::UploadedDatCatalog>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job = blocking(move || {
+        state
+            .service
+            .import_uploaded_catalog(&actor, id, upload, &context)
+    })
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id":job})),
+    ))
 }
 
 #[utoipa::path(put, path = "/api/v1/admin/collections/{id}/catalog-snapshots/{snapshot_id}/active", params(("id" = CollectionId, Path), ("snapshot_id" = SnapshotId, Path), ("Idempotency-Key" = String, Header)), request_body = ActivateCatalogSnapshotCommand, responses((status = 200, body = CatalogSnapshotStatus), (status = 400), (status = 403), (status = 404), (status = 409)))]
@@ -4569,6 +4999,7 @@ async fn import_inbox(
     if input.package.is_empty()
         || input.package.contains(['/', '\\'])
         || matches!(input.package.as_str(), "." | "..")
+        || collector_app::is_intake_housekeeping(&input.package, true)
     {
         return Err(Error::Invalid("select a direct inbox package directory".into()).into());
     }
@@ -4745,4 +5176,39 @@ async fn update_collection_list(
         })
         .await?,
     ))
+}
+
+#[utoipa::path(put, path = "/api/v1/items/{item}/captures/{capture}/purchase", params(("item" = ItemId, Path), ("capture" = CaptureId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::UpdateDigitalPurchase, responses((status = 200, body = collector_app::PresentedCapture), (status = 400), (status = 403), (status = 404), (status = 409)))]
+async fn update_digital_purchase(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((item, capture)): Path<(ItemId, CaptureId)>,
+    Json(command): Json<collector_app::UpdateDigitalPurchase>,
+) -> ApiResult<Json<collector_app::PresentedCapture>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .update_digital_purchase(&actor, item, capture, command, &context)
+        })
+        .await?,
+    ))
+}
+
+fn same_upload_inventory(
+    actual: &[collector_app::UploadFile],
+    reviewed: &[collector_app::UploadFile],
+) -> bool {
+    let by_name = actual
+        .iter()
+        .map(|file| (file.name.as_str(), file))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    actual.len() == reviewed.len()
+        && reviewed.iter().all(|file| {
+            by_name
+                .get(file.name.as_str())
+                .is_some_and(|actual| actual.bytes == file.bytes && actual.sha256 == file.sha256)
+        })
 }

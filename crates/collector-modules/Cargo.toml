@@ -13,6 +13,7 @@ thiserror.workspace = true
 junk-libs-game-formats.workspace = true
 junk-libs-accuraterip.workspace = true
 junk-libs-core.workspace = true
+junk-libs-audio = { workspace = true, features = ["decode-compressed"] }
 junk-libs-disc.workspace = true
 junk-libs-disc-id.workspace = true
 

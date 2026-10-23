@@ -200,10 +200,12 @@ impl collector_modules::CollectionModule for SharedMediaModule {
     fn descriptor(&self) -> collector_modules::ModuleDescriptor {
         use collector_modules::*;
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.media".into()),
             schema_version: 1,
             display_name: "Media fixture".into(),
             collection_type_label: "Media fixture".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![Capability {
                 id: "org.example.media.read".parse().unwrap(),

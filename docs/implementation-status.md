@@ -1,5 +1,198 @@
 # Implementation status
 
+## Build-once container publication — delivered and qualified, 2026-10-22
+
+The existing release workflow now separates validation from publication. Validation
+builds labelled native AMD64/ARM64 OCI exports once, imports those exact runtime
+configs for the existing recovery/inbox/proxy smokes, verifies their merged index
+and retains a 30-day immutable Actions artifact. Publication restores only a
+successful trusted same-source validation, checks the artifact/archive digests and
+platform/source evidence, and copies those bytes to GHCR without compilation.
+Anonymous pulls, channel downgrade guards and pinned installation assets remain.
+Missing/expired/mismatched artifacts fail closed; manual reuse rehearses acceptance
+without publishing. See [operator contract](container-release-pipeline.md) and
+[qualification record](validation/container-promotion-2026-10-22.md).
+Full exact-source validation (all source checks, native AMD64/ARM64 identity and
+recovery/proxy/inbox smokes, merged OCI inspection) and a same-source reuse
+rehearsal passed. The rehearsal skipped source checks and native builds, consumed
+the current successful attempt's immutable artifact, retained exact image/platform
+digests and generated matching bundle/provenance/checksums. All eleven CI policy/
+rootless transport tests passed. Docker store identity and archive portability
+failures found during qualification are corrected; history remains in the dated
+record. Public registry copy/anonymous/channel steps retain their existing gates
+and were deliberately skipped during rehearsal. No new release or deployment
+was performed; beta.4/preview and the NAS are unchanged.
+
+**Beta.4 published — 2026-10-22:** the automatic private playback image is verified
+ready on `ghcr.io/aberrantwolf/junk-collector:preview`. Both native architectures,
+container smoke, anonymous pulls, source labels and pinned installation bundle
+passed. See [publication evidence](validation/container-beta4-publication-2026-10-22.md)
+and [update/client requirements](releases/v0.1.0-beta.4.md). No NAS deployment was
+performed; Trash Amp needs its matching new client build. The subsequent [build-once pipeline delivery](validation/container-promotion-2026-10-22.md)
+now reuses validated images for future publication.
+
+## Beta.3 published — 2026-10-22
+
+The reviewed worker/progress/grouping delivery is published as beta.3 from signed
+tag source `d80013530ff8147f8a534dba819eeaaaa813be1e`. Exact-source checks,
+native AMD64/ARM64 container smoke tests and anonymous public pulls passed.
+The bundle pins the verified multiarch digest; `preview` matches it and stable
+`latest` remains absent. Rust 1.99.1 is unchanged. Actual beta.3 NAS/Portainer
+updating remains an operator check, distinct from publication acceptance.
+See [publication evidence](validation/container-beta3-publication-2026-10-22.md)
+and [release notes and update behavior](releases/v0.1.0-beta.3.md).
+
+## Automatic private playback — 2026-10-22 source delivery
+
+The [production implementation](automatic-private-playback.md) now covers web and
+Trash Amp together: authenticated private endpoint/pin discovery, software-managed
+short-lived certificates, pinned browser WebTransport with a streaming worker,
+and native HTTPS route selection through the shared range reader. Saved account,
+connection, queue and cache identities remain stable. Each range checks current
+authorization. Public media fallback defaults to disabled; ordinary control/login
+access remains. No Tailscale integration or configuration is involved.
+
+See [dated source acceptance](validation/automatic-private-playback-2026-10-22.md)
+for actual playback/seek, trust, revocation, rollover and regression results and
+remaining device/deployment limits. Private reachability does not establish a
+physical LAN path or zero ISP upload. No new source is deployed to the NAS by
+this delivery. The personal `collector-lan.awkwardexplorer.com` address remains the
+accepted **manual stopgap** until the updated server and clients are installed.
+
+Earlier feasibility records remain dated history: [primitive transports](validation/direct-transports-2026-10-22.md),
+[actual NAS player](validation/webtransport-lan-2026-10-22.md) and
+[work-Mac public-origin permission/CSP trial](validation/public-origin-webtransport-2026-10-22.md).
+The operator confirmed Chrome playback and forward/back seeks under GlobalProtect,
+and both clients using the [manual HTTPS stopgap](validation/lan-https-2026-10-22.md).
+Those tests do not qualify every managed VPN, Safari, the new build on a second
+device, physical-path billing or the deferred relay/Iroh work. HL-12 retains those
+limits; the manual certificate renewal task is separate from automatic ephemeral
+media certificate rotation. Existing public hosting/certificate choices are unchanged.
+
+## Automatic multidisc album grouping — 2026-10-22 source delivery
+
+Clear accepted MusicBrainz matches now group existing entries automatically in
+the same collection. Every preserved source must have a recorded disc ID that
+maps uniquely to a medium; medium layouts must agree across accepted release
+variants, and positions must be distinct across entries. Same album/language
+variants with coherent positions are allowed. Duplicate positions, incomplete or
+conflicting matches, conflicting explicit metadata and unknown inventory/authority
+data stay available for reviewed grouping. Filename/artwork similarity is not a
+basis for the decision.
+
+Startup and five-second reconciliation traverse all pages of the accepted-album
+projection, including metadata accepted before this change. Busy affected imports,
+Jobs and accepted bulk members defer a merge; admission/retry and publication
+share fences. Existing atomic group publication preserves originals, physical-copy
+records, captures, artwork and meaningful evidence. Larger existing destinations
+remain stable as later discs arrive. No physical-copy assembly is inferred.
+
+The UI identifies automatic groups and offers existing guarded undo. Metadata
+views follow background merges and refresh undo eligibility after choices. Undo retains
+a portable separation preference across restart/reindex. Old metadata links follow
+the combined entry. Metadata proposals remain available for ambiguous cases.
+Capture/artwork identity ordering is now canonical when a group is frozen, fixing
+false undo conflicts after hydration/reindex. This supersedes the confirmation-only
+behavior in the dated 2026-10-21 delivery below. See
+[automatic-grouping acceptance](validation/automatic-album-grouping-2026-10-22.md).
+
+The ambiguity follow-up separates membership from metadata. Entries group when
+all viable MusicBrainz album options agree about their membership and distinct
+disc positions, retaining unresolved alternatives as tentative metadata. Equivalent
+explicit releases/versions no longer conflict solely because their candidate IDs
+differ; a stable manual display choice and every original choice/history survive.
+An accepted or manually chosen album can admit unresolved siblings when it is the
+unique compatible established target. Competing targets and overlapping option
+sets retain review. A compatibility graph prioritizes accepted
+subsets before unresolved attachments, without letting one conflicting/ambiguous
+peer veto the component or choosing arbitrary duplicate copies.
+
+The commit review preserves incomplete/conflicting alternatives as unproven
+instead of dropping them to justify a merge. Grouping also honors the same
+automatic-metadata reset markers as display; retained history cannot silently
+reactivate cleared metadata. Explicit later selection remains supported.
+Removed-item recovery preserves already settled import outcomes after grouping,
+while continuing to stop unfinished work.
+
+The album-option index is many-to-many (catalog schema 15). Older disposable
+catalogs rebuild from archive records while preserving private Jobs/access and
+originals. Every assessed neighbor is fenced at publication, including newly
+appearing competitors. Bounds remain 200 related entries/32 MiB of metadata per
+assessment, 32 entries per publication and 128 preserved sources per entry; larger
+or incomplete proofs retain manual review. The reconciler publishes one safe class
+per connected component/pass, then reassesses remaining entries on the next pass.
+See [follow-up acceptance](validation/automatic-album-grouping-2026-10-22.md#ambiguity-follow-up--2026-10-22).
+
+## Configurable workers, metadata priority and Activity navigation — 2026-10-21 delivered in source
+
+Startup `[jobs]` configuration defaults to four processing workers (allowed 1–8)
+and independently caps inbox copying at one (allowed 1 through the processing
+limit). Provider concurrency stays one. The execution-loop count and atomic Store
+claim limits use the same application settings. Setup and doctor report limits;
+invalid values fail before storage opens. Existing pending Jobs and claim fences
+survive restart with a reduced limit.
+
+Ready discs get bounded preference for analysis and original publication. With
+one worker, that normally completes a disc's originals before the next copy;
+provider waits, failures and optional encoding cannot pin a worker. Two processing
+admissions offer copying its next turn, allowing one ready publication to finish
+a just-analyzed disc first. Other processing receives normal FIFO opportunities
+after two preferred continuations. Multiple slots leave room for both waiting
+classes; copying keeps its cap even when processing is idle.
+Metadata resolution now overtakes an encoding/ordinary-processing backlog for
+at most two preferred admissions, shared with ready-disc continuations, before
+returning to other processing. It starts after
+original publication for its destination album group, without waiting for unrelated
+intake members. Album text
+and identity commit before optional artwork. Existing accepted album identities
+produce grouping suggestions in Metadata → Grouping proposals; combining existing
+entries requires review/confirmation and is not an automatic title-based merge.
+
+Work & history now uses aligned compact filters, a collapsible collection chooser,
+and selection-dependent bulk commands. Activity Back clears the selected work and
+restores its list/filter state; Back/Forward and reload retain their recorded
+return context without opening a duplicate modal. Existing library return behavior
+is retained. See [configuration](configuration.md#background-workers) and
+[dated acceptance and limits](validation/configurable-workers-2026-10-21.md).
+
+## Import queue and active stages — 2026-10-21 delivered in source
+
+The 2026-10-22 commit review also gates import source/review controls on restored
+draft state, preventing a late IndexedDB load from overwriting an immediate choice.
+
+The Imports album rows and focused import details distinguish active execution,
+queued tasks, provider/upload waits and cancellation. Current stage labels include
+inbox copying, source checks, file analysis, original publication, metadata/artwork
+lookup and audio preparation; concurrent stages and grouped task counts remain
+visible. Shared provider downloads expose the actual provider state and are marked
+shared. Track jobs remain visible after their admission batch completes. Existing
+two-second polling resumes after reload and continues through optional work.
+Inbox step labels say “Copy files from inbox,” rather than “Uploading files,”
+and browser upload/resume controls stay out of inbox-only batches. Intake member
+rows remain visible on narrow screens, independently of library-detail hiding.
+
+The authorized application summary projects durable Job ownership without payload
+reads or integrity scans. Overall failure/completion remains separate from active
+work. No import state/storage conversion or worker-capacity change is required.
+The initial two-slot dispatch repair is superseded by the configurable-worker
+follow-up above; the original two-slot acceptance remains dated evidence. Existing active work finishes before a newly
+waiting lane receives its released slot. Provider capacity, cancellation and claim
+fencing remain in force. The dispatch preference is transient; no stored-format
+conversion is required. Source acceptance and deployment limits are recorded in
+[the dated validation](validation/ingest-progress-2026-10-21.md).
+
+## Beta.2 correction — 2026-10-21
+
+**An existing installation was updated to beta.2.** [Update checks](validation/live-beta2-upgrade-2026-10-21.md).
+
+Beta.1 passed source checks and public pulls, then failed the isolated NAS upgrade.
+An old music-search table was incorrectly reused. Beta.2 rebuilds obsolete catalogs
+and repairs the bad schema stamp. Archive records and private accounts stay intact.
+Both native images, anonymous pulls and the isolated DS1522+ alpha.3 upgrade/full restore passed.
+All 17 live containers stayed unchanged.
+See [release scope](releases/v0.1.0-beta.2.md), [beta.1 failure](validation/container-beta1-publication-2026-10-21.md)
+and [beta.2 publication acceptance](validation/container-beta2-publication-2026-10-21.md).
+
 Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
 
 Wave 3 review follow-up (2026-09-11; validated review-fix commit): interrupted pre-commit cancellations now
@@ -12,20 +205,608 @@ those prefixes for comparison but never rewrites them. Saved reviews can be edit
 again after a failed publication, and transient restore failures retain the saved
 Import identity. These changes add permanent recovery and browser regression tests.
 
-This repository is an executable architecture/server foundation, not the complete first release described in the accepted plan. Capability reporting must stay honest as remaining modules land.
+Use the [capability checklist](release-readiness.md) for current supported scope. The detailed entries below include earlier development stages.
 
-Use the [handoff backlog](handoff-backlog.md) for ordered, scoped implementation tickets and the [release requirements](release-requirements.md) for the repository-local target specification. The gap list below is a summary, not a substitute for ticket acceptance criteria.
+Use the [consolidated backlog](remaining-work.md) for all remaining work and
+[release requirements](release-requirements.md) for the revised home-lab gate.
+Older dated entries below describe their state at the time, not the current queue.
+Completed records retain their historical milestone labels; the 2026-10-19 queue
+renumbering is documented in remaining work. Active remaining-work references use
+its current IDs.
+
+## Game-disc CD audio — 2026-10-21 delivered in source
+
+Standard BINARY CUE/BIN game packages now record source-bound AUDIO ranges and
+reuse FLAC/Opus preparation, listening catalogs, playlists and manual track titles.
+Data tracks stay excluded. Games retain their identity, artwork and originals;
+no duplicate music import is required. Shared-reader owned-disc, actual owned/browser
+and isolated native streaming/offline checks pass, as do all 458 source tests and
+required source gates. Trash Amp’s published `codex/game-disc-audio` delivery pins
+Collector exactly and passes 32 affected tests plus desktop/Clippy checks. Its
+original checkout and staged native release work remain unchanged. See [delivery](game-disc-audio.md) and
+[dated evidence](validation/game-disc-audio-2026-10-21.md). This is post-alpha.3
+source work, not a change to the published image's advertised formats.
+
+## Focused release review and early body authentication — 2026-10-21
+
+Curation routes now authenticate before JSON/byte body extraction; administration
+routes also enforce application administrator policy first. Collection-specific
+and handler authority checks remain current. A reproducing no-body-poll regression,
+all 32 HTTP tests, 455 workspace tests, strict Clippy and actual Chrome workflows
+pass. This post-alpha.3 source repair and its bounded review are recorded in
+[acceptance](validation/ingress-review-2026-10-21.md). The
+[release capability checklist](release-readiness.md) links accepted evidence and
+keeps broader native/owned-format and game-audio scope explicitly incomplete.
+
+## HL-09 explicit inbox source cleanup — 2026-10-21
+
+The import requester's Work & history detail now offers explicit inbox cleanup
+after committed preservation and settled processing, with confirmation, typed
+progress/failure/cancellation and retry. Bounded background checks verify actual
+archive originals and frozen source identities/checksums before deletion. Durable
+quarantine/per-file intents preserve restart inputs and protect replacement source
+names. Extra content stays retained; source files remain by default. Active cleanup
+pauses new inbox admission, including aliased roots. Optional processing can retry
+from the archive. Private schema 21 preserves previous data; downgrade needs the old
+complete recovery point. The packaged bind remains read-only unless explicitly
+changed through the new environment option. See [delivery](inbox-cleanup.md) and
+[local real-browser/recovery evidence](validation/inbox-cleanup-2026-10-21.md).
+Public alpha.3 packages this feature; both native container jobs and the isolated
+actual-NAS Portainer upgrade/cleanup/full restore passed. See [publication acceptance](validation/container-publication-2026-10-21.md).
+
+## HL-10 portable full archive export/import — 2026-10-21
+
+Local `export-archive`, `validate-archive-export` and `import-archive` commands now
+copy a frozen full portable archive with digest inventory and completion seal.
+Originals, artwork, manual authority, evidence/history, lists, recipes and unknown
+records stay intact. Operational locks/scratch, configuration and private account/
+grant/session/server state are excluded; unresolved staging is refused. Imports
+use empty roots, fence interrupted copies and require fresh setup plus explicit
+first-Owner recovery. The real compiled CLI journey, byte equality, cold reindex,
+fresh identity/access and focused interruption/change regressions pass. See the
+[operator delivery](archive-export.md) and [dated acceptance](validation/archive-export-2026-10-21.md).
+Public alpha.3 includes this feature; see
+[publication acceptance](validation/container-publication-2026-10-21.md). Deltas, existing-archive
+merge and Retro Junk conversion remain unimplemented. Portable records can include
+private collection facts; this is not a redacted sharing feature or full backup.
+
+## Public-ingress qualification scope — clarified 2026-10-21
+
+Use the existing configured Cloudflare hostname and a short real-origin smoke,
+reusing backend/isolated tests and operator-reported sign-in/playback. An additional
+tunnel or exhaustive repetition of configuration/failure/load matrices is not a
+home-lab release prerequisite. The live hostname passed normal trusted Chrome
+sign-in-page loading without script errors and typed anonymous account/admin API
+401 denials. No authenticated media journey was independently repeated or production
+state changed. See [live observations and limits](validation/synology-deployment-2026-10-19.md#lightweight-live-https-check--2026-10-21)
+and [scope policy](decisions/home-lab-scope.md#security-proportional-to-a-public-home-server).
+
+## Backup operating scope — clarified 2026-10-20
+
+The packaged container initializes `${COLLECTOR_DATA}/backups` (on the inspected NAS,
+`/volume1/junk-collector/backups`). Backups remain explicit commands with a fresh
+named destination; the implemented full backup includes media. No automatic media
+backup schedule, cloud account, independent destination or lightweight database-only
+backup is required for release. Local consistent points provide practical update
+rollback; optional independent copies retain their qualified runbook.
+The [accepted scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
+removes the earlier destination-selection blocker. A small catalog/settings backup
+would need more than SQLite alone; that mode is not implemented. Optional backup-age
+reminders are delivered in post-alpha.3 source; see below and the earlier
+[clarification validation](validation/backup-scope-2026-10-20.md).
+
+## Numeric-IP authentication startup — repaired and NAS-qualified, 2026-10-20
+
+Numeric-IP HTTPS authentication origins now support startup, password login and
+recovery while explicitly reporting that passkeys require a trusted DNS hostname.
+DNS passkey registration remains available. Setup/doctor/serve share strict origin
+validation before storage writes; features/security guidance uses typed availability.
+Real executable identity/TLS/session continuity and Chrome login/recovery/mobile
+acceptance passed. An unpublished native candidate also passed numeric-IP HTTPS
+startup/login and full browser/recovery acceptance on the actual NAS. See
+[repair evidence](validation/numeric-ip-authentication-2026-10-20.md).
+The published alpha.2 image predates this source repair; no production installation
+or public image was replaced.
+
+## Metadata save after storage permission loss — repaired and NAS-qualified, 2026-10-20
+
+An isolated NAS permission-loss test exposed a failed manual-save reservation that
+could conflict with a later successful retry and block restart/cold backup. Source
+now releases provably uncommitted metadata reservations under the writer lock and
+recovers an older losing reservation only with an independently attested immutable
+winner. Unexplained digest changes and inconsistent responses still fail closed.
+No archive format/schema changed. Rebuilt-server Chrome failed-save/retry, exact
+originals, playback and full backup/restore passed with session/identity/TLS/manual
+authority continuity; all 440 workspace tests and strict Clippy passed. See
+[repair and acceptance scope](validation/storage-permission-recovery-2026-10-20.md).
+An unpublished native candidate passed actual-NAS Btrfs permission loss, browser
+retry without an intervening restart, cold backup and full restore, also using a
+numeric-IP HTTPS origin. Identity/session/TLS/manual authority and exact originals
+survived; fixture cleanup and unchanged live services were verified. The published
+alpha.2 image predates these fixes. Parent HL-05 remains partial.
+
+## Bounded archive ENOSPC recovery — qualified, 2026-10-20
+
+The published alpha.2 runtime passed a real NAS/Chrome archive-full save failure,
+unchanged originals/committed metadata, space reclamation, normal restart, successful
+manual retry and full backup/restore. The fixture verified a dedicated 96 MiB tmpfs
+before filling it; the real Btrfs disk was never filled. Session/ServerId/TLS/manual
+authority and exact originals survived. Generated resources were cleaned and live
+services matched baseline. This qualifies bounded archive ENOSPC, not full private
+SQLite/Btrfs, lost power or public ingress. See [HL-05E acceptance](validation/storage-capacity-recovery-2026-10-20.md).
+
+## Authentication rate-limit identity retention — source repaired, 2026-10-20
+
+Rejected alias rotation can no longer grow the authentication/enrollment/poll
+identity maps, and expired inactive identities are reclaimed. Retained identities
+are bounded by admitted attempts in the current global window. Existing thresholds,
+hashed account keys, direct TCP peer selection and 429 behavior are preserved.
+Advancing-clock/flood regressions and a real executable/TCP account/peer/header/
+restart journey passed; all 443 workspace tests, strict Clippy and full Chrome smoke
+passed. This is bounded source acceptance, not public-ingress/load certification or
+a published image. See [HL-05F evidence](validation/rate-limit-retention-2026-10-20.md).
+
+## Actual NAS authentication thresholds — qualified, 2026-10-20
+
+An isolated published-alpha.2 NAS installation passed actual Linux TCP account,
+direct-peer and global login ceilings using distinct loopback source addresses.
+Both listeners share limits; account/forwarded-header rotation cannot bypass the
+peer ceiling. Existing sessions work while login is throttled; restart clears
+transient limits and preserves accounts/sessions. Real Chrome playback/download/
+mobile and full backup/restore passed afterward, with exact originals and identity/
+TLS retained. Cleanup and unchanged live services were verified. This does not
+qualify external clients, public ingress or sustained load, or ship the newer
+limiter memory fix. See [HL-05G acceptance](validation/nas-authentication-limits-2026-10-20.md).
+
+## Physical Safari LAN browser journey — qualified, 2026-10-20
+
+An isolated actual-NAS alpha.2 installation with synthetic FLAC/MP3, artwork and
+a test Viewer passed named TLS/CA/ServerId validation and real Chrome preflight.
+The operator's iPhone 16 Pro (reported iOS 26.6.2) passed physical Safari trust,
+artwork, FLAC/MP3 playback/seek and persisted Curator track editing. Viewer editing
+controls disappeared after demotion. Grant removal stopped playback and denied the
+album; the loaded player also refused replay while access stayed revoked, although
+its personal queue label remained. Revoking the browser session returned Safari to
+sign-in; fresh sign-in worked. Independent API write/media/range/HEAD/session denials
+passed. The separate temporary-CA test installation and secret handoffs were cleaned,
+with live services unchanged; device profile removal remains an operator action.
+Parent HL-04 remains partial for native/offline/failure qualification. Preparation
+also exposed a numeric-IP authentication-origin startup failure in WebAuthn; using
+a DNS-name origin works. The source repair is recorded above; the published alpha.2
+image still predates it. See the
+[dated acceptance record](validation/lan-device-preparation-2026-10-20.md).
+
+## Real-tool audio oracles — HL-06A qualified, 2026-10-20
+
+Published alpha.2 passed actual NAS FLAC PCM equality and configured Opus
+96/128/192 kbps preparation using flac 1.4.2 and opus-tools 0.2 / libopus 1.3.1.
+Independent decoding recovered all expected FLAC samples and exact Opus frame
+counts with distinct-channel signal checks. Chrome prepared/downloaded/played/sought
+each Opus-only item; full backup/restore retained the exact audio identities/bytes
+and repeated the independent Opus/browser checks. Test handoffs now publish complete
+private JSON atomically. Live services were unchanged and fixture resources cleaned.
+See the [current audio matrix](audio-preparation.md) and
+[bounded evidence](validation/audio-oracles-2026-10-20.md). This is single-track
+synthetic qualification, not owned-disc/catalog, gapless, bit-perfect device,
+native Opus or additional original-codec acceptance. Parent HL-06 remains partial.
+
+## NAS preparation recovery — HL-05C qualified, 2026-10-20
+
+The published alpha.2 image passed real NAS cancellation during encoder execution,
+failure after real FLAC output, and SIGKILL/restart of active encoding. Cancelled/
+failed work published no audio; cancellation persisted across restart and generic
+retry was fenced. Explicit web retry and crash recovery produced one playable
+output while preserving originals and Job identity. Full restore retained those
+batch outcomes/audio identities, account/session/config/TLS; real Chrome playback,
+seek/download/mobile checks passed. Live services matched their baseline and test
+resources were cleaned. See [bounded acceptance and reproduction](validation/nas-preparation-recovery-2026-10-20.md).
+This qualifies existing runtime behavior using fixture controls, not a new runtime
+image. Parent HL-05 public ingress, storage failure/abuse and physical-device/trust
+qualification remain open.
+
+## Published Docker alpha.2 — HL-07D delivered, 2026-10-20
+
+The signed `v0.1.0-alpha.2` source tag and GitHub prerelease now supply public
+AMD64/ARM64 images and a digest-pinned installation bundle. Version and `preview`
+resolve to `sha256:f86f46d2c8870f8d647fc9225ce2cfe7c4319521a29c89897b419abb77629433`; stable `latest` is absent.
+Native platform builds and actual native recovery smokes, all source gates,
+anonymous all-layer/platform/source-label checks and both-platform Docker pulls
+passed. The existing workflow now uses native runners after prolonged QEMU release
+optimization; explicit retries freeze an existing published tag's source. Normal
+empty-input manual dispatch remains nonpublishing. Channel promotion cannot
+supersede a newer release in its channel.
+
+Actual disposable Portainer 2.45 NAS acceptance passed a distinct-image old→public
+version update while retaining an unchanged companion, and fresh digest install/
+forced re-pull/redeploy/full restore. Saved original bytes, accounts/session,
+ServerId, config/TLS and unfinished upload survived. Real Chrome playback/seek/
+download/mobile checks passed after update and restore; independent native ARM64
+startup/HTTPS/clean shutdown passed. All test resources/private handoffs were
+cleaned; live Collector, Portainer and both tunnel identities/start times matched
+the baseline. See [publication acceptance](validation/container-publication-2026-10-20.md)
+and [alpha.2 notes](releases/v0.1.0-alpha.2.md). The dated
+[preparation record](validation/container-release-preparation-2026-10-20.md) stays historical.
+Direct alpha.1 upgrades, system-trusted second-device/public-ingress/remaining
+format qualification remain outside this packaging delivery.
+
+## Scalable update recovery — HL-05B, 2026-10-20
+
+The actual DSM Collector root is an eligible single Btrfs subvolume. A qualified
+[operations path](../deploy/container/snapshot-recovery.md) captures all cold roots
+without copying/hashing masters, then exports GNU tar baseline/increments while
+the service runs. A narrow adapter binds tar's cutoff to snapshot time, retaining
+writes made between capture and export. Full CLI backup remains unchanged.
+
+Isolated actual-host acceptance passed SIGKILL/restart and whole-point old-image
+rollback with a pending upload, a NAS→Mac→NAS independent chain, complete cold
+file/permission comparisons and recovered account/session/TLS/original/audio checks.
+Chrome playback/seek/downloads passed before and after restore. The 32 MiB unchanged
+payload was excluded from the 3.28 MB increment; the baseline was 34.51 MB.
+See [dated evidence](validation/snapshot-recovery-2026-10-20.md). No production recovery
+configuration was changed. Independent copies are optional under the clarified
+operating scope; destination selection does not block release. Generic/DSM Btrfs incremental receive through the isolated bind
+mount failed and is not accepted. Public pull/redeploy is accepted under HL-07D;
+power-loss remains open.
+
+## Reproducible NAS operations — HL-05A, 2026-10-20
+
+Fresh-install proxy configuration uses guarded, byte-checked atomic stdin transfer.
+The runbooks create DSM bind roots before initialize/restore, distinguish inbox ACLs
+from mount writability, supply a shared supplemental-group override, and keep
+Portainer runtime/SSH CLI image IDs aligned without removing tunnel services.
+Startup/doctor distinguish configured provider contact from network/match success.
+
+On the actual DS1522+ Btrfs host, isolated amd64 installations passed distinct-image
+update with resumed partial upload, retained account/session/ServerId/config/TLS,
+exact original downloads, inbox group access, explicit FLAC preparation, clean
+SIGTERM and full stopped-server restore. Real remote Chrome exercised album/track
+play, seek, persistent playback, mobile layout and exact downloads before and after
+restore. Configured provider acquisition completed; absent configuration left a
+visible metadata failure without blocking originals/audio. See [dated evidence](validation/nas-operations-2026-10-20.md).
+The live Portainer installation and tunnels were inspected only. Permanent-installation
+inventory/enrichment acceptance, public ingress, system-browser trust, power-loss
+behavior remain open; HL-05B's isolated snapshot/incremental path is now qualified
+separately above. Choosing optional independent media-backup storage is not a
+release prerequisite. Public registry pull/update acceptance is now qualified
+under [HL-07D](validation/container-publication-2026-10-20.md).
+
+## Release/setup wording — HL-07C, 2026-10-20
+
+Current startup/doctor, enrollment and certificate help describe web/Trash Amp
+with its actual Settings → Servers URL/trust-file/Connect controls. Browser trust
+and native approval remain separate. UI and operator instructions use saved/kept
+for stored files and precise protection/reset wording for existing accounts, TLS,
+manual choices and collection history. README intake/listening instructions match
+the Imports/Prepare audio pages and persistent player. Technical storage/state
+identifiers and dated Phono evidence are unchanged. See [dated acceptance](validation/release-wording-2026-10-20.md).
+HL-05A installation/update operations are now accepted separately above; scalable
+recovery remains HL-05B.
+
+## Direct web playback — HL-07B, 2026-10-19
+
+Album and preparation views expose Play album, per-import Play original and
+individual-track Play. Explicit Play replaces the personal queue and starts
+immediately; Add to queue remains available separately. Whole-album expansion and
+numeric order reuse the existing authorized client playback snapshot. Fresh
+availability requires a browser-decodable existing format for every selected track;
+unavailable or ambiguous selections keep the old queue and show recovery guidance.
+Digital alternate-encoding choices retain their existing metadata authority.
+Closing/replacing a panel cancels its reads before they can change a newer queue.
+See [dated validation](validation/direct-playback-2026-10-19.md). No Play action
+starts encoding, and the persistent player's permission/revocation checks remain.
+
+## Multi-disc inbox review — HL-07A, 2026-10-19
+
+Batch import review now exposes CUE/Redumper anchor selection through shared
+readiness, preserving file visibility and destination choices during replanning.
+Album group labels are independent of optional manual titles. Physical-copy labels
+are explicitly reviewed: matching labels within an album/intake identify one copy,
+different labels identify separate copies. Numeric per-disc defaults are removed.
+Known `.DS_Store` files and `#recycle`/`@eaDir` directory subtrees are excluded from
+new inbox/browser intake. Unknown hidden files remain originals, and recovery of
+previously accepted inventories retains declared housekeeping files.
+
+Real Chrome inbox workflows cover automatic title/artwork, manual-title authority,
+one-copy and separate-copy grouping, retained file privacy and exact original
+downloads, draft reload and server restart. Existing grouped-publication failure/
+retry and manual-inventory fences remain covered. See [dated acceptance](validation/intake-review-2026-10-19.md).
+The operator's permanent NAS acceptance remains HL-05; optional source cleanup
+remains unimplemented under HL-09.
+
+## Digital FLAC/MP3 purchases — delivered 2026-10-19
+
+[HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)
+has coordinated Collector, junk-libs and Trash Amp implementations. Digital
+acquisition and per-file visibility are portable; file sources have immutable
+native-format track manifests, descriptive tags/artwork and direct original
+playback without encoders or manufactured physical copies. Web intake/review,
+search, queues, playlists and source-scoped track edits use the same contracts as
+native streaming, download and retained offline metadata/artwork/playback.
+Private companions default to curators, and private audio cannot publish tags/art.
+Alternate encodings require explicit album inclusion choices.
+
+See the [supported matrix and retention/compatibility policy](digital-purchases.md)
+and [dated checks](validation/digital-purchases-2026-10-19.md). Real Chrome journeys,
+independent codec/tag vectors, restore/rebuild and native TLS/device-callback
+qualification are recorded there. The actual native GUI passed browse/search,
+artwork, both original formats, seek/next/queue, downloads, connection removal and
+server-stopped offline reopen/playback. HL-02 is delivered. Authorized coordinated
+publication replaces local Cargo patches with exact pushed sibling revisions,
+recorded in manifests and lockfiles; no sibling checkout is required.
+Further codecs, DRM and album-image splitting remain deferred.
+
+## HL-08 AccurateRip contribution investigation — 2026-10-18
+
+The bounded [contribution investigation](accuraterip-contribution-investigation.md)
+is complete. It recommends EAC or dBpoweramp on Windows with the physical disc,
+AccurateRip drive calibration, secure full-disc extraction and the ripper's own
+consented submission workflow. Maintainer statements distinguish those submitting
+clients from Mac and file-verification tools; CTDB contribution is a separate
+service. Collector's DBAR acquisition and source-bound comparison evidence do not
+supply a supported write contract or attest to a calibrated physical rip. Direct
+integration remains blocked pending that contract and typed provenance policy.
+Sending results does not verify audio; later self-matches are not automatically
+independent corroboration. See the [dated validation and limits](validation/accuraterip-contribution-2026-10-18.md).
+No uploader was implemented, disc re-ripped, live archive changed or result submitted.
+The external workflow was documented, not runtime-qualified.
+
+## HL-08 Library return after nested work — 2026-10-18
+
+Library “Back to results” now includes nested Work & history list/detail entries
+in the distance to the originating results. Repeated modal visits return to the
+loaded pages, scroll position and focused row. Intentional browser Back/Forward
+still restores work views, and direct detail links retain their local return
+fallback. A real-server Chrome regression reproduces the previous modal reopening
+and covers both navigation intents, including same-document restoration after the
+modal unmounts and the identity of the restored work. Self-review found no further
+production-code defect. See the
+[dated validation](validation/library-work-return-2026-10-18.md). Other HL-09
+conveniences, game-disc listening and performance follow-ups remain open.
+
+## HL-03 stopped-server backup and restore — 2026-10-18
+
+The CLI supplies `backup`, `validate-backup` and `restore`, including explicit
+archive-only recovery. The conversion backup implementation is shared by the
+general workflow. Both roots are locked, startup settles journals and SQLite is
+checkpointed before a complete copy of archive/private state, TLS/config and
+pending-work scratch. Validation checks the sealed inventory and complete file set
+without opening databases. Empty-root restore rechecks copied bytes, publishes
+relocated configuration last and fences interrupted roots before normal startup.
+Full recovery retains identity; archive-only recovery requires fresh setup and
+explicit grants. The HL-03 review repairs add stopped-server `unowned-collections`
+discovery and `recover-collection-owner` for the first explicit Owner assignment;
+ordinary web grants still require an Owner. Existing Owners and disabled targets
+are protected, and repeat assignments preserve the grant revision. The private
+grant/audit commit uses the same grant effect as normal access changes. Restore
+now recreates lost original lockfiles in writable surviving roots while preserving
+live-writer refusal and read-only backup inputs. Compiled-CLI regressions cover
+both findings, including normal access after local recovery. External inbox/DAT/tool paths are reported for review. See the
+[operator runbook](local-alpha-installation.md#stopped-server-backup) and
+[dated validation](validation/backup-restore-2026-10-18.md). No live archive was
+backed up, restored or converted. Online backup, scheduling, export/deltas and a
+dashboard remain outside this delivery. Linux deployment qualification remains HL-05.
+
+## HL-01 cover reuse review repairs — 2026-10-18
+
+Provider cover creation/reuse now converges under the archive writer for concurrent
+curators, with matching-content, Item-generation and live-claim checks. Concurrent
+identical cover selections preserve one committed authority change. Explicit CAA
+image selection restores an archived cover through a new revision of the same Asset,
+retaining its tombstone, bytes, visibility and alternative text. Automatic refresh
+and older requests admitted before a later archive cannot restore it. Restore
+permissions persist with the admitted Job across restart. Stale restore revisions and mismatched content/ownership fail
+closed. See [repair validation](validation/retention-review-2026-10-18.md) and the
+[updated retention policy](retention-audit.md). No live archive was changed.
+
+## Bounded retention audit and CAA response reuse — 2026-10-17
+
+The [audit](retention-audit.md) maps current storage/consumers to must-keep data,
+bounded response/cache state and obsolete blanket lookup-history requirements.
+CAA listings, images and negative responses now reuse exact validated equivalent
+snapshots through the existing acquisition/publication pipeline. Automatic cover
+Assets bind item and image Snapshot, independent of requester, preventing both
+cross-item ownership collisions and repeat materialization by another curator.
+Changed artwork keeps a distinct source/Asset. Existing Assets and archive IDs are
+preserved. The explicit stopped-server backup/inspect/apply conversion now includes
+proven duplicate CAA payloads, with the same recovery and unknown-data guards.
+
+No live cleanup, general history deletion, command-receipt expiration or spool purge
+was performed or implemented. Private Jobs/receipts still accumulate under their
+existing replay contract; response reuse does not bound that database. General
+operator backup/restore remains HL-03. See [dated validation](validation/retention-audit-2026-10-17.md).
+
+## Automatic standard-game identification — 2026-10-10
+
+Standard DAT/ZIP batch review detects No-Intro/Redump conventions and recognized
+systems, without required technical selections. Scoped active slots queue durable
+identification scans of existing entries; guided imports and Identify game use the
+same application service. Complete unambiguous catalog evidence applies automatic
+titles, edition details and systems. Partial/competing matches stay reviewable;
+malformed/unsupported recognized input cannot fall through to raw identity.
+Provisional import labels and deliberate per-field overrides are distinct, with
+Use detected controls and game terminology. Unsupported historical settings remain
+inactive and explained; originals and existing evidence are preserved.
+
+The [supported matrix](game-identification.md) limits the claim to existing byte
+interpretations and recognized standards. CHD/UNIF/compressed game containers,
+arbitrary systems and new normalization algorithms remain unsupported/deferred.
+[Delivery validation](validation/game-identification-2026-10-10.md) records format,
+archive bounds, durable recovery, publication fences and browser acceptance.
+
+## Current scope and remaining work — 2026-10-09
+
+Web and Trash Amp are the client targets; Phono Junk is no longer a target.
+PJ1 and Phono-specific GUI/device acceptance are retired, not passed. Existing
+shared account/client/transport software remains implemented. Remaining useful work
+is grouped only in the backlog: contract/retention simplification, web/Trash Amp
+LAN acceptance, practical backup tooling, actual Linux/public-ingress qualification,
+independent evidence for advertised formats and a bounded release audit. Optional
+features and advanced security remain there with reasons for deferral.
+
+Old proposed contracts require reassessment. Repeated artwork/metadata lookups do
+not require permanent provenance history. The current append-only envelopes and raw observations still exist. The later
+2026-10-10 and 2026-10-17 deliveries reuse equivalent responses and provide explicit
+duplicate-payload conversion; general record deletion remains unimplemented. See [the accepted scope policy](decisions/home-lab-scope.md).
+
+## Game-disc listening scope — 2026-10-10 (historical)
+
+Listening to CD audio tracks preserved with games through the normal music
+interface and Trash Amp is requested future work, not an implemented capability.
+Preparation currently requires a music collection and does not support mixed-mode
+audio extraction. [HL-09](remaining-work.md#game-disc-audio-in-music-listening-and-trash-amp)
+owns the complete cross-module preparation, discovery, playlist and native/offline
+delivery; no duplicate music import or proprietary game-audio decoding is required
+by that initial scope.
+
+## Compact album format availability — 2026-10-09
+
+Album browsing and preparation use small inline FLAC/Opus labels beside track
+names instead of full bordered availability boxes. Ready downloads show a check,
+preparation buttons show a plus, active work an ellipsis, and unavailable formats
+a muted minus with keyboard/touch-openable reason details. File sizes remain in
+accessible download labels and hover text. Track/list/queue actions stay available;
+format preparation is visually secondary. Album browsing now has a small cover/title
+header and two-line track rows: one ellipsized title line, one small format line.
+Native overflow popovers hold album management, list additions, track queue actions
+and refresh. Disc checks, collection facts, metadata details, evidence and stored
+files are collapsed until explicitly requested; unsupported playback guidance stays
+in an inline help control. The dedicated preparation view retains its actual plan
+and progress controls. The desktop entry panel now meets the
+viewport right edge and player dock without page gutters; its full-height scroll
+area stays fixed while the library scrolls. Mobile retains the ordinary page layout. See the
+[dated validation](validation.md#compact-album-format-availability--2026-10-09).
+
+## AccurateRip browsing shortcut — 2026-10-09
+
+Album rows replace the independent legacy Identity flag with AccurateRip results
+for their visible, currently associated preserved originals. Unchecked, verified,
+mismatch, no-data, incomplete-search, ambiguous-offset, unavailable and unsupported
+outcomes stay distinct; multiple originals show the verified fraction when any pass.
+Mismatches remain explicit; mixed unsuccessful outcomes are inconclusive. This does
+not assert completeness of album disc coverage. The typed presentation reads
+recorded observations against committed source fingerprints without reading or
+hashing audio. Curators can open the checks directly from the status column or
+Album management → Check audio with AccurateRip; per-disc shortcuts focus that
+original. The existing processing workflow owns snapshot acquisition and check
+submission. Readers see results without write controls. See the
+[dated validation](validation.md#accuraterip-browsing-shortcut--2026-10-09).
+Real owned-disc/live AccurateRip qualification remains outstanding in HL-06.
+
+## AccurateRip response selection repair — 2026-10-09
+
+The check panel previously offered collection-wide AccurateRip responses and could
+default to another disc's response, causing the worker to reject the query before
+checking audio. Single-anchor packages now get a server-computed query from current
+recorded structure/import analysis. Admission rejects mismatched references; the
+panel chooses only responses matching track count, both AccurateRip IDs and CDDB
+ID, repairs a stale saved choice, and loads older snapshot pages. Missing matches
+show fetch guidance. Multiple-anchor packages keep explicit choices and the strict
+worker check. No checksum algorithm, saved evidence or originals changed. See
+[validation](validation.md#accuraterip-response-selection-repair--2026-10-09).
+This does not complete HL-06 real owned-disc/live-provider qualification.
+
+Follow-up recovery fix: empty response selections retain the source chooser and
+show one actionable prerequisite instead of a UUID parse failure. Scan plans expose
+the usable structure observation; acquisition accepts imported structure under the
+same validation as a dedicated check. The fetch action is therefore available for
+import-only layouts even when history is paginated. A missing layout has an explicit
+Inspect CD structure action. Existing dedicated-check acquisition stays available.
+
+
+## File-check progress and development audio performance — 2026-10-09
+
+Active processing operations now carry typed indeterminate progress instead of
+presenting an untouched source-byte counter as zero completion. Actual worker
+phases distinguish source validation, AccurateRip checksum/offset computation,
+final source recheck and recording the result. Both the check panel and Work
+history use an indeterminate meter; other measured workflows retain counters.
+Shared disc decoding and AccurateRip loops are optimized in development builds,
+which previously ran unoptimized on the home-server debug binary. Algorithms and
+coverage are unchanged, and running Jobs are not interrupted by this code change.
+See [validation](validation.md#file-check-progress--2026-10-09).
+
+## October 9 TODO delivery
+
+Game and other non-music imports no longer offer FLAC/music controls or album-only
+suggestions. Package plans return typed music-action eligibility; music retains
+its preparation controls. No-active-catalog import results explain saved originals,
+unavailable identification and that no catalog match was attempted.
+
+Administration adds manual DAT download guidance, bounded browser upload, parsed
+platform/version/entry review and explicit activation through the existing durable
+catalog pipeline. Exact bytes and historical snapshots are retained; ZIPs require
+manual extraction, failed validation cannot activate a snapshot, and prior games
+can be checked afterward. See [the contract](game-catalog-upload.md) and
+[validation](validation/october-todos.md). No provider downloader was added.
+
+The tested checkout/CI/Docker baseline advances to Rust 1.99.0, with matching local
+pin/build guidance and no Collector lint suppressions. Shared-library and consumer
+tests pass; separate strict-Clippy findings in unchanged junk-libs remain recorded.
+The dated alpha.1 Rust 1.95 evidence remains historical. Relevant LA3/Trash Amp
+qualification remains open; Phono-specific gates are retired under the current scope.
 
 ## Experimental source alpha — 2026-10-09
 
 `v0.1.0-alpha.1` is the first experimental source-release checkpoint, including
 Git-consumable `collector-client` and server crates for Trash Amp builds/tests.
 The [release notes](releases/v0.1.0-alpha.1.md) state installation, pinning, backup
-requirements and the remaining qualifications. This tag does not accept LA3/PJ1,
+requirements and the remaining qualifications. This tag does not complete the remaining installation/client acceptance,
 promise stable interfaces/storage upgrades, or claim the planned first release
 complete. No prebuilt binary or registry image is supplied.
 
 ## Shared-library release baseline — 2026-10-09
+
+Actual-host continuation (2026-10-19): the Synology DS1522+ x86-64 container
+passed owner login, import/download byte comparisons, recreated-container
+session/account/original persistence and a full stopped-server backup/restore
+with restored-original SHA-256 comparisons. The default SIGTERM defect is corrected
+in source; SIGINT remains the workaround for the older tested image. The
+[Compose install/update package](../deploy/container/README.md) and versioned
+image/bundle release workflow are implemented; publication and actual DSM
+pull-based update qualification remain incomplete. Automatically built, publicly
+pullable amd64/arm64 images with version/digest references and documented moving
+release channels are now an explicit release requirement (2026-10-19), tracked
+under HL-07; users must not need to build/export/transfer images themselves.
+Actual DSM acceptance of the new package remains open. Evening operator continuation established
+a running Portainer-managed amd64 installation, a dedicated host-network Cloudflare
+connector and working browser access through the configured public HTTPS hostname.
+The SMB inbox initially denied UID 10001; supplemental DSM group access corrected
+directory listing. Three raw-CD packages pass import preview; subsequent retry
+recovery/playback reports are recorded below, while complete grouping, enrichment
+and new-installation recovery acceptance remain pending.
+The grouped-disc Save originals conflict has a source repair: publication can
+advance a stale expected revision only across proven same-intake sibling Evidence
+additions with unchanged inventory/metadata and prior references. Local tests cover
+publication, persisted failure/restart/web-API retry, original bytes and manual-edit
+conflicts. The operator reports successful normal-terminal workspace tests and
+amd64 image build, plus transfer/load on the NAS; detailed logs and image ID have
+not been collected. The operator subsequently provided successful backup/validation
+output (401 files) and reported that the fix worked after the instructed Portainer
+update and existing-import retry at 23:13 JST, followed by working playback at
+23:15 JST. Final inventory grouping, metadata/artwork, explicit seek and
+original-byte comparisons remain pending. The current
+full-copy backup CLI remains available, but a scalable
+routine-update process using qualified consistent NAS snapshots and incremental
+independent backups is not delivered. The user explicitly requested addressing
+this before full-archive copies become an update burden at collection scale;
+actual NAS snapshot support and restore behavior remain to be checked.
+See [repair validation](validation/grouped-disc-publication-2026-10-19.md).
+Batch review lacks its multiple-anchor selector and couples album grouping to a
+manual title; housekeeping filtering and requested successful-import inbox cleanup
+are not delivered. The [work ledger](remaining-work.md#placement-of-the-2026-10-19-live-use-findings)
+now assigns import-review repairs to HL-07A, direct Play actions to HL-07B,
+wording to HL-07C, public Docker release automation to HL-07D, deployment/recovery
+to HL-05A/B, and optional inbox cleanup to HL-09. HL-07A is the next code delivery;
+the completed grouped-publication repair is not reopened. Observations remain in
+the dated NAS record below.
+Packaging changes and available checks are recorded in
+[container packaging validation](validation/container-packaging-2026-10-19.md).
+The operator guide now uses generic storage/host examples and leads with an
+external HTTPS proxy/tunnel configuration; direct TLS remains an alternative.
+Historical local installation observations are retained separately from setup.
+See [partial qualification](validation/synology-deployment-2026-10-19.md).
+Interrupted work, filesystem failure and public-ingress acceptance remain open
+under HL-05.
 
 Collector's seven `junk-libs` dependencies now use the published `v0.1.0` Git tag;
 `Cargo.lock` freezes commit `a0abcdae1bafec8793ce77111f58aa9ab5675c4e`.
@@ -34,7 +815,7 @@ Git/CA certificates for dependency acquisition, and CI explicitly builds the
 release server after its checks. The Linux ARM64 Docker image built and passed
 non-root setup, authenticated HTTPS/web serving and recreated-container persistence
 on Docker Desktop. Validation and wider deployment limits are recorded
-in [validation](validation.md). This dependency baseline does not accept LA3/PJ1
+in [validation](validation.md). This dependency baseline does not complete installation/client acceptance
 or establish a supported Collector release/storage contract.
 
 ## Collection lists — locally accepted (2026-10-03)
@@ -64,7 +845,7 @@ journey, publication interruption matrix, generated 2,400-package/album measurem
 and separate live response qualification. Multi-terabyte codec processing, NAS and
 second-device qualification are not established by those local tests.
 
-## Active delivery target — 2026-09-16
+## Historical local-alpha target — 2026-09-16
 
 D06.3 is committed as `3a6143b`. The accepted [local-alpha plan](local-alpha-plan.md)
 now takes precedence over the remaining wave order. LA1 guided ingestion and
@@ -229,11 +1010,13 @@ The full first release, native clients and public deployment remain later target
 - Client trust construction, route selection/hysteresis and cache eviction policy. A TLS integration test enrolls through same-user browser approval, persists a native credential through the storage port, proves authenticated ranged downloads over loopback LAN without any public route, and rejects an unrelated certificate or credential-bearing cross-origin route.
 - Configured server inbox inventory/import API using the same source-retaining staging and evidence path; background upload errors persist as failed jobs.
 - P02.1/P02.2 advance private state to schema v8 and implement typed durable jobs
-  plus a local executable scheduler. Transactional FIFO claiming enforces a
-  two-job global bound and one active job per user; 30-second leases,
+  plus a local executable scheduler. Its initial two-processing/one-provider limits
+  are superseded by the configurable dispatch above. Transactional claiming initially enforced
+  two processing executions plus one reserved provider acquisition globally,
+  including two same-account processing Jobs; 30-second leases,
   five-second heartbeats, claim-token fencing, restart takeover, and bounded
-  progress persistence are permanent-test covered. Two server worker loops run
-  integrity verification as the first consumer. Its deterministic Evidence
+  progress persistence are permanent-test covered. Three server execution loops
+  share a process-instance identity; integrity verification was the first consumer. Its deterministic Evidence
   identity makes recovery after archive publication idempotent, and the existing
   verification HTTP action now returns the actual queued Job identity.
 - P02.3 separates incomplete upload staging from executable queue state and moves
@@ -276,8 +1059,7 @@ The full first release, native clients and public deployment remain later target
   PNG thumbnails. Visibility/alt-text updates and tombstones create independent
   schema-3 Asset revisions without changing Item revisions; subjects remain
   immutable, payloads/history survive tombstoning, and reindex retains standalone
-  records. Documents are rejected as explicitly unavailable rather than accepted
-  as a placeholder.
+  records. The post-alpha.3 document delivery below adds PDF and text Assets.
 - U04.2 exposes revisioned `PresentedAsset` metadata and collection-scoped
   original/thumbnail resources through application-owned authorization. Viewer
   DTOs omit visibility and stored filenames/digests, while curator-only metadata
@@ -293,8 +1075,8 @@ The full first release, native clients and public deployment remain later target
   retained-history guidance. Browse/detail consume server-selected artwork and
   visibly separate missing artwork from identity uncertainty. Keyboard flow,
   focus restoration, reduced motion, viewer filtering, and responsive layout are
-  browser tested. U04 is locally complete; document uploads, offline artwork, and
-  independent review remain outstanding.
+  browser tested. General document upload/preview support is described below;
+  broader offline artwork and independent review remain separate.
 - P03.1 advances private state to schema v9 and persists provisional Import
   workflows under an `ImportId` distinct from Jobs and command transactions.
   Records retain a safe source summary, bounded file inventory with offsets and
@@ -419,11 +1201,11 @@ The full first release, native clients and public deployment remain later target
 - Optional private TLS management listener bound to an explicit interface address.
 - WebUI onboarding distinguishes client-only and private management surfaces, offers first-collection/first-item next steps, preserves structured API error codes, and separates wrong-origin, expired-session and role-denial guidance without weakening listener or authorization policy.
 
-## Wave 4 plan
+## Processing implementation checkpoint — September 2026
 
-[Wave 4 implementation handoff](wave-4-plan.md) defines the next 28 ordered
-implementation/review steps from baseline `c5c3ecf`. It covers game/CD processing,
-metadata, derivatives, backup/restore and native connection/trust/failover services.
+[Dated validation](validation.md) and [the review](wave-4-review.md) record game/CD
+processing, metadata, derivatives and their limits. The obsolete wave queue has
+been removed; future backup/trust/routing scope is consolidated in remaining work.
 W4.0 is reviewed and corrected. W4.1's portable processing/metadata types,
 source-bound package-reader and application port contracts, deterministic source
 fingerprints, and split game/music module files are implemented locally, reviewed and corrected. They add no analyzer, provider I/O, persistence, API, or runtime support
@@ -497,47 +1279,13 @@ passed local acceptance with exact evidence in [the interface audit](fx07-interf
 and [validation](validation.md). See the current sections below.
 LA3's second-device qualification and broader release gates remain open.
 
-## Required before the planned first release
+## Remaining work and follow-on scope
 
-- **Album/background-queue gate, added 2026-09-15:**
-  [D07.4–D07.5](background-work-plan.md) are reviewed and corrected locally. Whole-album submission, durable per-member state, independent
-  enqueueing, retry/restart and shared-safe cancellation now use the existing bounded
-  Jobs. FX-07 audited the other implemented interfaces for unnecessary
-  background-work blocking; LA2 alone did not claim that application-wide gate.
-
-- **Interface readiness gate, added 2026-09-15:** LA1 implements typed readiness,
-  unique-anchor defaults and prerequisite guidance for its guided import journey.
-  The broader [U05.1–U05.3](interface-readiness-plan.md) operation matrix and
-  application-wide audit passed local acceptance in FX-07.
-
-- **Web UI completion gate, added 2026-09-15:** LA1 implements bounded personal
-  import/attempt history, reopen, retry/cancel, staging reclamation and published
-  association correction for guided intake. P04 search/filter, bulk cleanup,
-  dismiss/archive/restore, cleanup-failure UI and its completion review passed
-  local acceptance through FX-03–FX-07. See the [import-management plan](import-management-plan.md).
-
-1. Implement authenticated certificate rotation (S04) and complete the external security qualifications: real password-manager/platform and hardware passkeys, browser-trusted remote HTTPS, native platform secure storage, and independent review.
-2. Complete independent accessibility/security review for the locally implemented
-   P04 workspace and Job controls. The legacy upload and administrator inbox routes
-   remain compatibility adapters scheduled for API-major removal. Document
-   attachments, event streaming, and offline artwork remain unimplemented.
-3. Complete independent D04-D05 real-dump verification oracles and review the
-   locally implemented MusicBrainz/CAA enrichment and DAT metadata integration.
-   D02/D03 and D04.1 complete the reusable disc/audio/game primitives locally; no
-   Collector catalog verification is currently claimed.
-4. Complete the active local-alpha deliveries before returning to P05.1 portable
-   export/change inventory. The local deterministic MusicBrainz/CAA workflow
-   passes with actual published artwork, and LA3 adds one live provider result;
-   other-browser and deployment qualification remain unclaimed.
-5. Implement one-way Retro Junk archive migration, complete export/backup/recovery commands, recovery UI and scalable incremental reindexing.
-6. Deliver an actual Slint macOS app with shared playback, browsing, artwork, pairing, download persistence and personal activity sync. Extract/share audio with Trash Amp and add its server provider. Current client crate is not a desktop application.
-7. Add authenticated endpoint discovery, mDNS, automatic health checks and actual transfer failover. Extend the tested enrolled LAN trust path to automatic discovery and full native-client failover.
-8. Add event delivery/polling plus their UI/integration tests under P02/C06. A04 application boundaries, command idempotency, generated OpenAPI/TypeScript contracts, body limits, and Wave 1 command migration are complete.
-9. Execute the 100k-item/1m-record benchmark on a recorded 4-core/16GB SSD host; validate native/container/tunnel/NAS deployments and load behavior.
-
-## Follow-on releases
-
-SwiftUI iOS through UniFFI; PriceCharting collection exchange; runtime plugins; replication; video/emulation; ripping hardware. These remain explicitly deferred by the accepted plan.
+See [the single remaining-work queue](remaining-work.md). The previous gap list
+mixed completed interfaces/indexing/native integration with unrun qualification,
+and treated optional clients/advanced deployment as universal release gates.
+It is superseded by the 2026-10-09 reassessment. Obsolete work queues have been removed. Relevant unfinished scope is in
+remaining-work.md; no missing capability is accepted by reprioritization.
 
 ## Local onboarding
 
@@ -1046,3 +1794,82 @@ results, destructive reset choices and security requirements remain visible.
 This changes presentation only; evidence, authorization and workflow policy remain
 unchanged. Browser checks cover info-control keyboard/mobile behavior and Escape
 inside a parent dialog; validation outcomes are recorded separately.
+
+
+## Concurrent processing and response reuse — 2026-10-10
+
+Initial 2026-10-10 implementation (superseded by the configurable-worker follow-up
+above): two global processing slots plus one reserved provider-download slot,
+including two processing Jobs from the same account. Direct, guided and metadata
+work use durable collection-scoped shared acquisitions with private requester Jobs,
+independent cancellation and committed-result recovery. Reconciliation runs every
+five seconds independently of workers and traverses unfinished workflow pages.
+Identical AccurateRip/MusicBrainz responses reuse canonical snapshots; unchanged
+metadata resolution does not append redundant authority/candidate revisions.
+The web exposes typed provider progress and resumes pending AccurateRip requests
+with their original receipt after reopening.
+
+Administrator CLI backup/inspect/apply commands convert proven existing duplicate
+payloads with both roots exclusively locked and a verified full backup. Historical
+IDs and evidence remain readable through portable checksummed references, including
+reindex and archive-only recovery. Unknown or unresolved inputs are skipped;
+corruption fails closed. See [conversion](snapshot-duplicate-conversion.md) and
+[delivery validation](validation/concurrent-processing.md). No live archive was
+converted. Full-source validation is retained; disk contention and hashing redesign
+remain separate work. This does not qualify live-provider or real-disc HL-06 checks.
+
+### General document attachments — 2026-10-21
+
+Post-alpha.3 source supports PDF and UTF-8 text Assets, up to 20 MiB, attached
+through the existing subject, revision, visibility and archive pipeline. The
+Documents editor defaults to Curators only and explicitly offers sharing. The
+item view provides original downloads, browser-native PDF viewing and escaped
+128 KiB text previews with a truncation notice. No server PDF renderer, PDF
+structural-validation claim or artificial thumbnail is provided. Documents cannot
+be selected as artwork. Originals and visibility survive reindexing; archived
+originals remain in history. Existing purchase companion preservation is unchanged.
+Shared byte classification/read bounds live in junk-libs-core, pinned to
+`193e0a88faaa0c3d5636976932f120c237831ad0`. See
+[acceptance and limits](validation/documents-2026-10-21.md). These changes are not
+in the published alpha.3 images.
+
+### Optional backup-age reminder — 2026-10-21
+
+An optional `[backup_reminder]` section enables an administrator Server settings
+notice and `doctor` output. Full-backup attempts record a small private receipt;
+only successful final validation advances the completion date. A failed attempt
+retains the previous date, and abrupt interruption stays unconfirmed. Missing,
+malformed, unsupported or future history stays unknown. Status reads one bounded
+receipt without scanning backups, opening media or rehashing bytes. External
+completion/failure dates can be explicitly reported in configuration and remain
+labelled operator reports that Collector has not observed or validated. The
+reminder never schedules or creates a backup; removing its configuration disables
+it. Existing backups without receipts stay unknown, and restored copies retain
+their captured history rather than inventing a new validation. See the
+[operator instructions](local-alpha-installation.md#optional-backup-age-reminder)
+and [acceptance](validation/backup-reminder-2026-10-21.md). Published alpha.3 is unchanged.
+
+### Native list response/restart recovery — 2026-10-21
+
+Trash Amp source `0493b59` fences the complete inputs of an unresolved playlist
+receipt before HTTP. Actual TLS tests truncate responses after genuine create and
+append commits, reopen the native profile and retry saved requests without extra
+playlists or entries. All eight affected adapter tests and strict Clippy passed;
+the actual-output callback remains an existing opt-in test. The staged native
+release checkout is preserved. See [acceptance and remaining physical/media-read
+limits](validation/native-failure-recovery-2026-10-21.md). This source change is not
+a new native or Docker release.
+
+Native source `8afb19d` additionally qualifies real grant/device revocation after
+an actual successful network chunk: the next uncached byte is denied to the
+separate Viewer. Nine affected adapter tests and strict Clippy/formatting pass;
+buffered and retained offline bytes are outside that revocation claim. See the
+same [bounded native acceptance](validation/native-failure-recovery-2026-10-21.md).
+
+Native source `339a871` adds accepted real-TLS range rejection/recovery,
+header/body-stall cancellation and pinned-identity rejection with complete-catalog
+retention. Eleven affected adapter tests pass with strict Clippy and formatting;
+the physical-output callback remains an existing opt-in check. Native UI queue
+continuity and the remaining physical-device/network/trust scenarios retain their
+HL-04 limits. See the same
+[finite acceptance](validation/native-failure-recovery-2026-10-21.md).

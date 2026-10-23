@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }
 collector-core.workspace = true
 collector-app.workspace = true
 collector-modules.workspace = true

@@ -89,7 +89,11 @@ impl CollectionService {
         self.authorize(actor, collection, Action::Curate)?;
         self.execute_command(actor, context, "collection.list.create", &(collection, &command), |effects| {
             let binding = self.reader.collection(collection)?.binding;
-            let kind = if matches!(binding, CollectionBinding::Assigned { ref module } if module.0 == "org.junk.music") { CollectionListKind::MusicTracks } else { CollectionListKind::Items };
+            let default_kind = if matches!(binding, CollectionBinding::Assigned { ref module } if module.0 == "org.junk.music") { CollectionListKind::MusicTracks } else { CollectionListKind::Items };
+            let kind = command.kind.unwrap_or(default_kind);
+            if kind == CollectionListKind::MusicTracks && !matches!(&binding, CollectionBinding::Assigned { module } if self.modules.supports_listening(module)) {
+                return Err(Error::Invalid("This collection does not support audio playlists.".into()));
+            }
             let id = CollectionListId(deterministic_job_id(actor.user_id, "collection.list.create", context.key()).0);
             let list = CollectionList {id, collection_id: collection, revision: Revision(1), name: command.name.trim().into(), kind, entries: vec![], deleted: false};
             list.validate()?;
@@ -148,10 +152,8 @@ impl CollectionService {
         source: Option<RepresentationId>,
         track: Option<u16>,
     ) -> Result<Vec<ListTarget>> {
-        if item.domain.module.0 != "org.junk.music" || (track.is_some() && source.is_none()) {
-            return Err(Error::Invalid(
-                "Choose a music album, or a source disc and track.".into(),
-            ));
+        if track.is_some() && source.is_none() {
+            return Err(Error::Invalid("Choose a source disc and track.".into()));
         }
         let rows = self.music_track_availability_for_item(actor.user_id, item)?;
         let coverage = self.music_album_coverage(actor, item.id)?;
@@ -160,9 +162,57 @@ impl CollectionService {
         // successful-looking complete expansion. Recorded structure defines the
         // full audio scope; individual track additions remain deliberately narrow.
         if track.is_none() {
+            if rows.iter().any(|r| {
+                source.is_none_or(|id| id == r.source_representation_id)
+                    && r.album_selection == collector_api_types::MusicAlbumSelection::NeedsReview
+            }) {
+                return Err(Error::Invalid("Choose which alternate encodings belong in the album using Edit track details. Individual originals remain playable.".into()));
+            }
             for candidate in coverage.sources.iter().filter(|candidate| {
                 source.is_none_or(|id| candidate.source_representation_id == id)
             }) {
+                if let Some(manifest) = self
+                    .recorded_file_tracks(item.collection_id, candidate.source_representation_id)?
+                {
+                    let available = rows
+                        .iter()
+                        .filter(|r| {
+                            r.source_representation_id == candidate.source_representation_id
+                        })
+                        .map(|r| r.track_position)
+                        .collect::<BTreeSet<_>>();
+                    if manifest
+                        .tracks
+                        .iter()
+                        .any(|t| !available.contains(&t.position))
+                    {
+                        return Err(Error::Unavailable("Some purchased tracks are unavailable; add individual available tracks instead.".into()));
+                    }
+                    continue;
+                }
+                if let Some(manifest) = self
+                    .recorded_game_audio(item.collection_id, candidate.source_representation_id)?
+                {
+                    let recorded = manifest
+                        .tracks
+                        .iter()
+                        .map(|t| t.position)
+                        .collect::<BTreeSet<_>>();
+                    let available = rows
+                        .iter()
+                        .filter(|r| {
+                            r.primary_playback()
+                                && r.source_representation_id == candidate.source_representation_id
+                        })
+                        .map(|r| r.track_position)
+                        .collect::<BTreeSet<_>>();
+                    if recorded != available {
+                        return Err(Error::Unavailable(
+                            "The complete game disc audio scope is unavailable.".into(),
+                        ));
+                    }
+                    continue;
+                }
                 let Some(collector_modules::music::CdProcessingResult::Layout { tracks, .. }) =
                     self.recorded_music_layout(
                         item.collection_id,
@@ -179,7 +229,7 @@ impl CollectionService {
                 let available = rows
                     .iter()
                     .filter(|row| {
-                        row.profile == ConversionProfile::Flac
+                        row.primary_playback()
                             && row.source_representation_id == candidate.source_representation_id
                     })
                     .map(|row| row.track_position)
@@ -190,7 +240,7 @@ impl CollectionService {
             }
         }
         let mut discs: BTreeMap<String, BTreeSet<RepresentationId>> = BTreeMap::new();
-        for row in rows.iter().filter(|r| r.profile == ConversionProfile::Flac) {
+        for row in rows.iter().filter(|r| r.primary_playback()) {
             let medium = coverage
                 .sources
                 .iter()
@@ -215,7 +265,7 @@ impl CollectionService {
         }
         let selected = if let Some(source) = source {
             if !discs.values().any(|values| values.contains(&source)) {
-                return Err(Error::Invalid("The selected disc has no recorded supported audio tracks. Inspect its structure first.".into()));
+                return Err(Error::Invalid("This original has no recorded supported audio tracks. Finish audio analysis first.".into()));
             }
             BTreeSet::from([source])
         } else {
@@ -250,9 +300,11 @@ impl CollectionService {
         let mut rows = rows
             .into_iter()
             .filter(|r| {
-                r.profile == ConversionProfile::Flac
+                r.primary_playback()
                     && selected.contains(&r.source_representation_id)
                     && track.is_none_or(|p| p == r.track_position)
+                    && (track.is_some()
+                        || r.album_selection == collector_api_types::MusicAlbumSelection::Included)
             })
             .collect::<Vec<_>>();
         rows.sort_by_key(|r| {
@@ -263,12 +315,14 @@ impl CollectionService {
                     .find(|s| s.source_representation_id == r.source_representation_id)
                     .and_then(|s| s.medium_position)
                     .unwrap_or(u16::MAX),
+                r.disc_position.unwrap_or(u16::MAX),
+                r.display_position.unwrap_or(r.track_position),
                 r.track_position,
             )
         });
         if rows.is_empty() {
             return Err(Error::Invalid(
-                "No recorded audio tracks are available. Inspect the CD structure first.".into(),
+                "No recorded audio tracks are available. Finish audio analysis first.".into(),
             ));
         }
         Ok(rows
@@ -364,8 +418,6 @@ impl CollectionService {
                     view.album = Some(item.title.clone());
                     view.track_position = Some(track_position);
                     view.title = format!("Track {track_position:02}");
-                    if self.modules.has_module(&item.domain.module)
-                        && item.domain.module.0 == "org.junk.music"
                     {
                         if let std::collections::btree_map::Entry::Vacant(slot) =
                             audio.entry(item.id)
@@ -392,7 +444,7 @@ impl CollectionService {
                         let preferred = matches
                             .iter()
                             .find(|r| {
-                                r.profile == ConversionProfile::Flac
+                                r.primary_playback()
                                     && matches!(
                                         r.state,
                                         MusicTrackAvailabilityState::Available { .. }
@@ -422,14 +474,20 @@ impl CollectionService {
                                     ListEntryAvailability::Preparing
                                 }
                                 MusicTrackAvailabilityState::Unavailable { .. } => {
-                                    ListEntryAvailability::NeedsPreparation
+                                    if self.modules.has_module(&item.domain.module) {
+                                        ListEntryAvailability::NeedsPreparation
+                                    } else {
+                                        ListEntryAvailability::ModuleUnavailable
+                                    }
                                 }
                             }
                         } else {
-                            ListEntryAvailability::SourceUnavailable
+                            if self.modules.has_module(&item.domain.module) {
+                                ListEntryAvailability::SourceUnavailable
+                            } else {
+                                ListEntryAvailability::ModuleUnavailable
+                            }
                         };
-                    } else {
-                        view.availability = ListEntryAvailability::ModuleUnavailable;
                     }
                 }
             }

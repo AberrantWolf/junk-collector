@@ -36,6 +36,21 @@ fn safe_package_title(name: &str) -> Result<String> {
     }
 }
 
+/// Narrow policy for new intake only. Unknown and other hidden files are originals.
+/// Adapters pass `directory` when deciding whether to descend into a directory.
+pub fn is_intake_housekeeping(name: &str, directory: bool) -> bool {
+    let parts = name.split('/').collect::<Vec<_>>();
+    parts.iter().enumerate().any(|(index, part)| {
+        matches!(*part, "#recycle" | "@eaDir") && (directory || index + 1 < parts.len())
+    }) || (!directory && parts.last() == Some(&".DS_Store"))
+}
+
+/// Reserved direct inbox recovery directory; never a generic package-file filter.
+pub fn is_inbox_cleanup_directory(name: &str) -> bool {
+    name.strip_prefix(".collector-cleanup-")
+        .is_some_and(|id| id.parse::<ImportId>().is_ok())
+}
+
 fn validate_plan_files(files: &[UploadFile]) -> Result<()> {
     validate_intake_files(files, 10_000)
 }
@@ -167,10 +182,13 @@ impl CollectionService {
     pub fn discover_ingest(
         &self,
         actor: &Principal,
-        command: DiscoverIngestCommand,
+        mut command: DiscoverIngestCommand,
     ) -> Result<DiscoveredIngestPlan> {
         let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
         validate_plan_files(&command.files)?;
+        command
+            .files
+            .retain(|file| !is_intake_housekeeping(&file.name, false));
         let names = command
             .files
             .iter()
@@ -193,6 +211,7 @@ impl CollectionService {
                 files.push(file.clone());
             }
             packages.push(IngestPackageSelection {
+                purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
                     label: None,
@@ -235,6 +254,47 @@ impl CollectionService {
         let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
         let mut packages = Vec::with_capacity(command.packages.len());
         for (position, package) in command.packages.iter().enumerate() {
+            let mut package = package.clone();
+            validate_plan_files(&package.files)?;
+            if let Some(selected) = package.anchor_file_index {
+                let selected_name = package
+                    .files
+                    .get(selected)
+                    .ok_or_else(|| Error::Invalid("Invalid anchor file index".into()))?
+                    .name
+                    .clone();
+                package
+                    .files
+                    .retain(|file| !is_intake_housekeeping(&file.name, false));
+                package.anchor_file_index = Some(
+                    package
+                        .files
+                        .iter()
+                        .position(|file| file.name == selected_name)
+                        .ok_or_else(|| {
+                            Error::Invalid(
+                                "A housekeeping file cannot be an analysis anchor".into(),
+                            )
+                        })?,
+                );
+            } else {
+                package
+                    .files
+                    .retain(|file| !is_intake_housekeeping(&file.name, false));
+            }
+            let digital = eligibility.owner.0 == "org.junk.music"
+                && collector_modules::music::files::is_file_package(
+                    &package
+                        .files
+                        .iter()
+                        .map(|f| PackageFileName::new(f.name.clone()))
+                        .collect::<Result<Vec<_>>>()?,
+                );
+            for file in &mut package.files {
+                if file.visibility.is_none() {
+                    file.visibility = Some(default_import_visibility(digital, &file.name));
+                }
+            }
             validate_plan_files(&package.files)?;
             let default_title = safe_package_title(&package.source.package_name)?;
             let readiness = self
@@ -260,12 +320,10 @@ impl CollectionService {
                 .is_ok()
                 && !blockers.iter().any(|issue| issue.blocks_analysis);
             let metadata_available = if eligibility.owner.0 == "org.junk.games" {
-                self.processing
-                    .active_snapshot(
-                        command.collection_id,
-                        &ModuleId("org.junk.providers.local-dat".into()),
-                    )?
-                    .is_some()
+                !self
+                    .processing
+                    .active_game_snapshots(command.collection_id)?
+                    .is_empty()
             } else if eligibility.owner.0 == "org.junk.music" {
                 self.streaming_providers
                     .contains_key(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
@@ -282,11 +340,29 @@ impl CollectionService {
                 && self
                     .catalog_parsers
                     .contains_key(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID);
+            if let Some(purchase) = &package.purchase {
+                purchase.validate()?;
+            }
+            let file_audio = eligibility.owner.0 == "org.junk.music"
+                && collector_modules::music::files::is_file_package(
+                    &package
+                        .files
+                        .iter()
+                        .map(|f| PackageFileName::new(f.name.clone()))
+                        .collect::<Result<Vec<_>>>()?,
+                );
+            if package.purchase.is_some() && !file_audio {
+                return Err(Error::Invalid(
+                    "Purchase facts apply to digital music packages.".into(),
+                ));
+            }
             let analysis_blocked = blockers.iter().any(|issue| issue.blocks_analysis);
             let (preparation_available, preparation_reason) = if eligibility.owner.0
                 == "org.junk.music"
             {
-                if analysis_blocked {
+                if file_audio {
+                    (false, Some("Purchased audio plays directly after import; preparation is unnecessary.".into()))
+                } else if analysis_blocked {
                     (
                         false,
                         Some("Choose a usable CD anchor before preparing this package.".into()),
@@ -304,6 +380,8 @@ impl CollectionService {
                 )
             };
             packages.push(IngestPlanPackage {
+                purchase: package.purchase.clone(),
+                music_actions_available: eligibility.owner.0 == "org.junk.music",
                 position: position
                     .try_into()
                     .map_err(|_| Error::Invalid("too many packages".into()))?,
@@ -313,8 +391,8 @@ impl CollectionService {
                 anchors,
                 blockers,
                 analysis_available,
-                metadata_available,
-                artwork_available,
+                metadata_available: file_audio || metadata_available,
+                artwork_available: file_audio || artwork_available,
                 preparation_available,
                 preparation_reason,
             });
@@ -349,6 +427,28 @@ impl CollectionService {
         preflight: impl FnOnce(&IngestPlan) -> Result<()>,
     ) -> Result<AcceptedIngest> {
         self.authorize(actor, command.plan.collection_id, Action::Curate)?;
+        if let Some(purchase) = &command.purchase {
+            purchase.validate()?;
+        }
+        if command.purchase.is_some()
+            && command.plan.packages.iter().any(|package| {
+                !package.music_actions_available
+                    || package.anchors.iter().any(|a| a.selected)
+                    || !collector_modules::music::files::is_file_package(
+                        &package
+                            .files
+                            .iter()
+                            .map(|f| PackageFileName::new(f.name.clone()))
+                            .collect::<Result<Vec<_>>>()
+                            .unwrap_or_default(),
+                    )
+            })
+        {
+            return Err(Error::Invalid(
+                "Purchase facts apply to digital music packages.".into(),
+            ));
+        }
+
         if command.destination.is_some() && command.plan.packages.len() != 1 {
             return Err(Error::Invalid(
                 "an existing destination accepts one package at a time".into(),
@@ -380,6 +480,7 @@ impl CollectionService {
                         .packages
                         .iter()
                         .map(|package| IngestPackageSelection {
+                            purchase: package.purchase.clone(),
                             source: package.source.clone(),
                             files: package.files.clone(),
                             anchor_file_index: package
@@ -497,6 +598,7 @@ impl CollectionService {
                         ));
                     }
                     Ok(ImportDeclaredFile {
+                        visibility: file.visibility.unwrap_or(Visibility::Shared),
                         name: file.name.clone(),
                         bytes: file.bytes,
                         received_bytes: ByteLength(0),
@@ -544,6 +646,10 @@ impl CollectionService {
                 },
             });
             intents.push(GuidedIngestIntent {
+                purchase: package
+                    .purchase
+                    .clone()
+                    .or_else(|| command.purchase.clone()),
                 clean_reimport: command.clean_reimport.clone(),
                 bulk_context: None,
                 import_id,
@@ -577,7 +683,18 @@ impl CollectionService {
         intent: &GuidedIngestIntent,
         record: &ImportRecord,
     ) -> Result<Item> {
-        self.content_write_eligibility_for_user(intent.user_id, record.view.collection_id)?;
+        let eligibility =
+            self.content_write_eligibility_for_user(intent.user_id, record.view.collection_id)?;
+        let digital = eligibility.owner.0 == "org.junk.music"
+            && record
+                .view
+                .files
+                .iter()
+                .any(|f| collector_modules::music::files::is_audio_name(&f.name))
+            && !record.view.files.iter().any(|f| {
+                f.name.to_ascii_lowercase().ends_with(".cue")
+                    || f.name.to_ascii_lowercase().ends_with(".toc")
+            });
         let mut item = match self.reader.item(intent.target_item_id) {
             Ok(item) => {
                 if item.deleted || item.collection_id != record.view.collection_id {
@@ -594,7 +711,7 @@ impl CollectionService {
                     intent.user_id,
                     record.view.collection_id,
                 )?;
-                let item = Item {
+                let mut item = Item {
                     lifecycle: Default::default(),
                     id: intent.target_item_id,
                     collection_id: record.view.collection_id,
@@ -642,12 +759,16 @@ impl CollectionService {
                     deleted: false,
                     updated_at: intent.created_at,
                 };
+                if digital {
+                    item.specimens.clear();
+                }
                 self.modules.inspect(&item.domain).map_err(Error::from)?;
                 self.writer.save(item, Revision(0))?
             }
             Err(error) => return Err(error),
         };
         if let Some(context) = &intent.bulk_context
+            && !digital
             && !item.specimens.iter().any(|copy| copy.id == context.copy_id)
         {
             let expected = item.revision;
@@ -699,7 +820,7 @@ impl CollectionService {
                     &intent.import_id.to_string(),
                 )),
                 MetadataAuthorityRecord {
-                    resolution_policy: 2,
+                    resolution_policy: 3,
                     current_candidates: Some(vec![]),
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
@@ -710,6 +831,7 @@ impl CollectionService {
                     display: Some(display),
                     updated_at: intent.created_at,
                 },
+                None,
             )?;
         }
         Ok(item)
@@ -965,7 +1087,11 @@ impl CollectionService {
         {
             record.view.association = CaptureAssociation {
                 item_id: Some(item.id),
-                specimen_id: intent.bulk_context.as_ref().map(|context| context.copy_id),
+                specimen_id: intent
+                    .bulk_context
+                    .as_ref()
+                    .filter(|context| item.specimens.iter().any(|copy| copy.id == context.copy_id))
+                    .map(|context| context.copy_id),
                 ..Default::default()
             };
             if intent.created_item || intent.bulk_context.is_some() {
@@ -975,6 +1101,7 @@ impl CollectionService {
             record = self.provisional_imports.save_import(record, revision)?;
         }
         if let Some(context) = &intent.bulk_context
+            && item.specimens.iter().any(|copy| copy.id == context.copy_id)
             && record.view.association.specimen_id != Some(context.copy_id)
             && record.view.phase != ImportPhase::Published
         {
@@ -985,7 +1112,14 @@ impl CollectionService {
         }
         match record.view.phase {
             ImportPhase::Analyzing => {
-                if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
+                if intent.analysis == IngestAnalysisPolicy::PreserveOnly
+                    || (item.domain.module.0 == "org.junk.games"
+                        && !record
+                            .view
+                            .files
+                            .iter()
+                            .any(|file| file.name.to_ascii_lowercase().ends_with(".cue")))
+                {
                     record.view.review = Some(ImportReviewDecision {
                         identity: ImportIdentityDecision::Unidentified,
                         association: record.view.association,
@@ -1066,6 +1200,12 @@ impl CollectionService {
                 {
                     return Ok(());
                 }
+                let current_item = self.reader.item(intent.target_item_id)?;
+                if current_item.domain.module.0 == "org.junk.music"
+                    && intent.enrichment_error.is_none()
+                {
+                    self.apply_file_tags(&intent, &record, &current_item)?;
+                }
                 let enrichment_done = if intent.enrichment == IngestEnrichmentPolicy::None
                     || intent.enrichment_error.is_some()
                 {
@@ -1136,47 +1276,12 @@ impl CollectionService {
             ));
         }
         if item.domain.module.0 == "org.junk.games" {
-            // DAT candidates are retained by Import analysis. Publication has
-            // already rebound the exact observation; applying them automatically
-            // is handled by the same metadata authority resolver in the follow-up
-            // helper, never as catalog verification.
-            self.apply_guided_dat_metadata(intent, record, &item)?;
-            return Ok(true);
+            return self.advance_guided_game_identification(intent, record, &item);
         }
         if item.domain.module.0 == "org.junk.music" {
             return self.advance_guided_music_metadata(intent, record, &item);
         }
         Ok(true)
-    }
-
-    fn apply_guided_dat_metadata(
-        &self,
-        intent: &GuidedIngestIntent,
-        record: &ImportRecord,
-        item: &Item,
-    ) -> Result<()> {
-        let Some(analysis) = record.view.analysis_job_id else {
-            return Ok(());
-        };
-        let portable = self
-            .processing
-            .processing_record(ObservationId(analysis.0))?;
-        let snapshot_id = portable.observation.snapshot_id.ok_or_else(|| {
-            Error::Unavailable("No active DAT snapshot was available for automatic metadata".into())
-        })?;
-        self.refresh_provider_metadata_for_job(
-            intent.user_id,
-            item,
-            snapshot_id,
-            Some(portable.observation.id),
-            vec![],
-            ObservationId(super::deterministic_inventory_uuid(
-                intent.user_id,
-                "guided-dat-metadata",
-                &record.view.id.to_string(),
-            )),
-        )?;
-        Ok(())
     }
 
     fn advance_guided_music_metadata(
@@ -1214,28 +1319,64 @@ impl CollectionService {
             .observation;
         let payload: collector_modules::music::MusicImportAnalysisOutput =
             observation.typed_result.payload.parse()?;
-        let structure: collector_modules::music::CdProcessingResult = payload
-            .observations
-            .first()
-            .ok_or_else(|| Error::Unavailable("music structure analysis is unavailable".into()))?
-            .parse()?;
-        let collector_modules::music::CdProcessingResult::Layout {
-            disc_ids: Some(ids),
-            ..
-        } = structure
-        else {
-            return Err(Error::Unavailable(
-                "the supported CD layout produced no MusicBrainz disc identifier".into(),
-            ));
+        let lookup = if let Some(manifest) = &payload.file_tracks {
+            if !self
+                .streaming_providers
+                .contains_key(collector_modules::music::MUSICBRAINZ_PROVIDER_ID)
+            {
+                return Ok(true);
+            }
+            let capture = self.reader.capture(record.view.capture_id)?;
+            let source = capture
+                .representations
+                .iter()
+                .find(|r| r.id == record.view.representation_id)
+                .ok_or(Error::Conflict)?;
+            let ids = manifest
+                .tracks
+                .iter()
+                .filter(|t| {
+                    source
+                        .files
+                        .get(t.file_index)
+                        .is_some_and(|f| f.visibility == Visibility::Shared)
+                })
+                .filter_map(|t| t.audio.tag("musicbrainz_release_id"))
+                .collect::<BTreeSet<_>>();
+            if ids.len() != 1 {
+                return Ok(true);
+            }
+            AcquireMetadataCommand::MusicBrainzRelease {
+                release_id: ids.first().unwrap().to_string(),
+                refresh: false,
+            }
+        } else {
+            let structure: collector_modules::music::CdProcessingResult = payload
+                .observations
+                .first()
+                .ok_or_else(|| {
+                    Error::Unavailable("music structure analysis is unavailable".into())
+                })?
+                .parse()?;
+            let collector_modules::music::CdProcessingResult::Layout {
+                disc_ids: Some(ids),
+                ..
+            } = structure
+            else {
+                return Err(Error::Unavailable(
+                    "the supported CD layout produced no MusicBrainz disc identifier".into(),
+                ));
+            };
+            AcquireMetadataCommand::MusicBrainzDisc {
+                disc_id: ids.musicbrainz,
+                refresh: false,
+            }
         };
         let frozen = self.freeze_metadata_resolution(
             intent.user_id,
             item,
             ResolveMetadataCommand {
-                lookup: AcquireMetadataCommand::MusicBrainzDisc {
-                    disc_id: ids.musicbrainz,
-                    refresh: false,
-                },
+                lookup,
                 acquire_artwork: true,
             },
             SnapshotId(job_id.0),
@@ -1244,7 +1385,11 @@ impl CollectionService {
         Ok(false)
     }
 
-    fn ingest_summary(&self, actor: &Principal, view: ImportView) -> Result<IngestSummary> {
+    pub(crate) fn ingest_summary(
+        &self,
+        actor: &Principal,
+        view: ImportView,
+    ) -> Result<IngestSummary> {
         let intent = self
             .provisional_imports
             .guided_ingest_intent(view.id)?
@@ -1252,17 +1397,24 @@ impl CollectionService {
         let jobs = self
             .provisional_imports
             .import_job_records(view.id, actor.user_id)?;
-        let failed = jobs.iter().any(|job| {
-            job.state == JobState::Failed
-                || super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some()
-        }) || intent.enrichment_error.is_some()
+        let failed = jobs
+            .iter()
+            .filter(|job| job.kind != "inbox_cleanup")
+            .any(|job| {
+                job.state == JobState::Failed
+                    || super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some()
+            })
+            || intent.enrichment_error.is_some()
             || intent.preparation_error.is_some();
-        let active = jobs.iter().any(|job| {
-            matches!(
-                job.state,
-                JobState::Queued | JobState::Running | JobState::CancelRequested
-            )
-        });
+        let active = jobs
+            .iter()
+            .filter(|job| job.kind != "inbox_cleanup")
+            .any(|job| {
+                matches!(
+                    job.state,
+                    JobState::Queued | JobState::Running | JobState::CancelRequested
+                )
+            });
         let outcome = if view.phase == ImportPhase::Cancelled || intent.cancelled {
             IngestStepState::Cancelled
         } else if failed {
@@ -1280,7 +1432,40 @@ impl CollectionService {
         } else {
             None
         };
+        let mut work = self
+            .provisional_imports
+            .import_work_records(view.id, actor.user_id)?
+            .into_iter()
+            .filter_map(|job| {
+                let state = match job.state {
+                    JobState::CancelRequested => IngestWorkState::Cancelling,
+                    JobState::Queued | JobState::Running
+                        if job.phase.starts_with("waiting_")
+                            || matches!(job.phase.as_str(), "awaiting_source" | "staging") =>
+                    {
+                        IngestWorkState::Waiting
+                    }
+                    JobState::Running => IngestWorkState::Running,
+                    JobState::Queued => IngestWorkState::Queued,
+                    _ => return None,
+                };
+                Some(IngestWork {
+                    shared: job.shared,
+                    state,
+                    kind: job.kind,
+                    phase: job.phase,
+                    jobs: job.jobs,
+                })
+            })
+            .collect::<Vec<_>>();
+        work.sort_by_key(|entry| match entry.state {
+            IngestWorkState::Running => 0,
+            IngestWorkState::Cancelling => 1,
+            IngestWorkState::Waiting => 2,
+            IngestWorkState::Queued => 3,
+        });
         Ok(IngestSummary {
+            work,
             import_id: view.id,
             collection_id: view.collection_id,
             package_name: view.source.package_name.clone(),
@@ -1299,6 +1484,12 @@ impl CollectionService {
             prepare_music: intent.prepare_music,
             updated_at: view.updated_at,
             permissions: IngestPermissions {
+                can_clean_inbox: can_write
+                    && view.source.kind == ImportSourceKind::Inbox
+                    && view.phase == ImportPhase::Published
+                    && intent.settled
+                    && !intent.cancelled
+                    && !active,
                 can_resume_upload: can_write
                     && !intent.cancelled
                     && view.phase == ImportPhase::Staging
@@ -1457,7 +1648,19 @@ impl CollectionService {
             "guided.cover-art.image",
             &record.view.id.to_string(),
         );
-        let metadata_job = jobs.iter().find(|job| job.id == metadata_job_id);
+        let game_job = if owner
+            .as_ref()
+            .is_some_and(|module| module.0 == "org.junk.games")
+        {
+            self.jobs.game_import_job(intent.user_id, record.view.id)?
+        } else {
+            None
+        };
+        let metadata_job = if music {
+            jobs.iter().find(|job| job.id == metadata_job_id)
+        } else {
+            game_job.as_ref()
+        };
         let metadata_message = metadata_job
             .filter(|job| job.state == JobState::Completed)
             .and_then(|job| completed_snapshot_id(job.result.as_ref()))
@@ -1608,12 +1811,15 @@ impl CollectionService {
                 retryable: false,
             }
         };
-        let steps = vec![
+        let mut steps = vec![
             staging_step,
             job_step(
                 "identification",
-                by_kind.get("import_analysis").copied(),
-                record.view.phase == ImportPhase::Published
+                game_job
+                    .as_ref()
+                    .or_else(|| by_kind.get("import_analysis").copied()),
+                game_job.is_none()
+                    && record.view.phase == ImportPhase::Published
                     && !by_kind.contains_key("import_analysis"),
                 if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
                     Some("Save originals only was selected. Files were not analyzed or matched to an album or edition.".into())
@@ -1631,7 +1837,11 @@ impl CollectionService {
             artwork_step,
             preparation_step,
         ];
+        if !music {
+            steps.retain(|step| step.step != "preparation" && step.step != "metadata");
+        }
         Ok(IngestDetail {
+            inbox_cleanup: self.provisional_imports.inbox_cleanup_status(id)?,
             summary,
             import: record.view,
             steps,

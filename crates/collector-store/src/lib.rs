@@ -1,7 +1,12 @@
 //! Portable immutable revisions plus local SQLite projections and private operational state.
+mod acquisitions;
 mod album_grouping;
+mod archive_export;
 mod archive_v3;
 mod auth;
+mod backup;
+pub use archive_export::{import_archive, validate_archive_export};
+pub use backup::read_backup_history;
 mod browse;
 mod bulk_intake;
 mod bulk_library;
@@ -17,6 +22,10 @@ mod library_care;
 mod migration;
 mod migration_v3;
 mod music_search;
+pub use backup::{restore_backup, validate_backup};
+mod snapshot_compaction;
+pub use snapshot_compaction::{SnapshotDuplicate, SnapshotDuplicatePlan};
+mod inbox_cleanup;
 mod processing;
 mod provisional_imports;
 mod publication;
@@ -47,6 +56,8 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
+pub(crate) const PRIVATE_SCHEMA: u32 = 21;
+
 pub(crate) fn storage(e: impl std::fmt::Display) -> Error {
     Error::Storage(e.to_string())
 }
@@ -63,6 +74,7 @@ pub struct Store {
     pub(crate) writer: Arc<Mutex<()>>,
     pub(crate) uploads: Arc<Mutex<()>>,
     pub(crate) job_publication_gate: Arc<Mutex<()>>,
+    pub(crate) job_dispatch: Arc<Mutex<collector_app::JobDispatchPolicy>>,
     recovery_report: RecoveryReport,
     catalog_reused: bool,
     receipt: Option<collector_app::CommandReceipt>,
@@ -165,6 +177,14 @@ struct CollectionCreateRecovery {
     relative_path: String,
 }
 impl Store {
+    /// Startup configuration shared by all Store/command clones. Pending Jobs
+    /// and their durable claims are preserved when limits change after restart.
+    pub fn with_job_settings(self, settings: collector_app::JobSettings) -> Result<Self> {
+        settings.validate()?;
+        lock(&self.job_dispatch)?.settings = settings;
+        Ok(self)
+    }
+
     pub fn open(archive: impl AsRef<Path>, state: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_dependencies(
             archive,
@@ -237,6 +257,9 @@ impl Store {
             .try_lock_exclusive()
             .map_err(|_| Error::Unavailable("archive already has a writer".into()))?;
         let archive_lock = ProcessLock(archive_lock);
+        for root in [&archive, &state] {
+            ensure_restore_complete(root)?;
+        }
         for dir in ["collections", ".staging", ".transactions"] {
             fs::create_dir_all(archive.join(dir)).map_err(storage)?;
         }
@@ -283,6 +306,7 @@ impl Store {
             writer: Arc::new(Mutex::new(())),
             uploads: Arc::new(Mutex::new(())),
             job_publication_gate: Arc::new(Mutex::new(())),
+            job_dispatch: Arc::new(Mutex::new(collector_app::JobDispatchPolicy::default())),
             recovery_report,
             catalog_reused: false,
             receipt: None,
@@ -306,6 +330,7 @@ impl Store {
             elapsed_ms = startup.elapsed().as_millis(),
             "startup catalog ready"
         );
+        store.convert_active_game_catalogs()?;
         store.rebuild_scan_admissions()?;
         store.recover_private_publications()?;
         store.reconcile_job_publications()?;
@@ -361,7 +386,8 @@ impl Store {
     /// Rebuild committed metadata and validate prepared derivative payloads.
     /// No grants are reconstructed. Startup uses the metadata-only variant.
     pub fn reindex(&self) -> Result<()> {
-        self.reindex_catalog(true)
+        self.reindex_catalog(true)?;
+        self.convert_active_game_catalogs()
     }
 
     fn reindex_catalog(&self, verify_derivative_bytes: bool) -> Result<()> {
@@ -1183,6 +1209,7 @@ impl ContentPort for Store {
             _ => "application/octet-stream",
         };
         Ok(MediaResource {
+            visibility: file.visibility,
             reader: Box::new(reader),
             length,
             media_type: media_type.into(),
@@ -1198,6 +1225,7 @@ impl ContentPort for Store {
         let reader = File::open(path).map_err(storage)?;
         let length = reader.metadata().map_err(storage)?.len();
         Ok(MediaResource {
+            visibility: Default::default(),
             reader: Box::new(reader),
             length,
             media_type,
@@ -1213,6 +1241,30 @@ impl ContentPort for Store {
 
     fn asset_states_for_item(&self, item: ItemId) -> Result<Vec<AssetState>> {
         self.asset_states_for_item_record(item)
+    }
+
+    fn archived_item_cover_revisions(
+        &self,
+        item: ItemId,
+        limit: u16,
+    ) -> Result<Vec<(AssetId, Revision)>> {
+        if !(1..=4097).contains(&limit) {
+            return Err(Error::Invalid(
+                "archived cover limit must be 1..=4097".into(),
+            ));
+        }
+        let db = lock(&self.db)?;
+        let mut statement = db.prepare("SELECT id,revision FROM assets WHERE json_extract(record,'$.asset.subject.item_id')=? AND deleted=1 AND json_extract(record,'$.asset.kind')='cover' ORDER BY id LIMIT ?").map_err(storage)?;
+        statement
+            .query_map(params![item.to_string(), limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            })
+            .map_err(storage)?
+            .map(|row| {
+                let (id, revision) = row.map_err(storage)?;
+                Ok((id.parse().map_err(storage)?, Revision(revision)))
+            })
+            .collect()
     }
 
     fn asset_subject_collection(&self, subject: AssetSubject) -> Result<CollectionId> {
@@ -1231,6 +1283,17 @@ impl ContentPort for Store {
         context: collector_app::AssetWriteContext,
     ) -> Result<AssetState> {
         self.create_asset_record(asset, command, bytes, context)
+    }
+
+    fn materialize_provider_artwork(
+        &self,
+        asset: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+        context: collector_app::ItemEffectContext,
+        restore_archived: Option<Revision>,
+    ) -> Result<AssetState> {
+        self.materialize_provider_artwork_record(asset, command, bytes, context, restore_archived)
     }
 
     fn update_asset(
@@ -1321,6 +1384,9 @@ impl ImportPort for Store {
 }
 
 impl JobPort for Store {
+    fn job_settings(&self) -> Result<collector_app::JobSettings> {
+        Ok(lock(&self.job_dispatch)?.settings)
+    }
     fn work_job_records(
         &self,
         user: UserId,
@@ -1372,6 +1438,83 @@ impl JobPort for Store {
             .collect()
     }
 
+    fn game_scan_member(
+        &self,
+        user: UserId,
+        parent: JobId,
+        item: ItemId,
+        representation: RepresentationId,
+    ) -> Result<Option<JobRecord>> {
+        let id:Option<String>=lock(&self.db)?.query_row("SELECT m.job_id FROM private.game_scan_members m JOIN private.jobs j ON j.id=m.parent WHERE m.parent=? AND m.item_id=? AND m.representation_id=? AND j.user_id=?",params![parent.to_string(),item.to_string(),representation.to_string(),user.to_string()],|r|r.get(0)).optional().map_err(storage)?;
+        id.map(|id| self.job_record(id.parse().map_err(storage)?, user))
+            .transpose()
+    }
+    fn game_import_job(&self, user: UserId, import: ImportId) -> Result<Option<JobRecord>> {
+        let id: Option<String> = lock(&self.db)?.query_row("SELECT j.id FROM private.scan_requests r JOIN private.jobs j ON j.id=r.job_id WHERE r.kind='import' AND r.owner=? AND j.user_id=? AND j.kind='game_identification' ORDER BY j.created_at DESC,j.id DESC LIMIT 1", params![import.to_string(), user.to_string()], |r| r.get(0)).optional().map_err(storage)?;
+        id.map(|id| self.job_record(id.parse().map_err(storage)?, user))
+            .transpose()
+    }
+    fn game_scan_page(&self, claim: &JobClaim, after: Option<ItemId>) -> Result<Vec<ItemId>> {
+        let db = lock(&self.db)?;
+        let mut stmt = db.prepare("SELECT i.id FROM items i JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=? WHERE i.collection_id=? AND i.deleted=0 AND (? IS NULL OR i.id>?) ORDER BY i.id LIMIT 100").map_err(storage)?;
+        stmt.query_map(
+            params![
+                claim.user_id.to_string(),
+                claim.collection_id.map(|id| id.to_string()),
+                after.map(|id| id.to_string()),
+                after.map(|id| id.to_string())
+            ],
+            |r| r.get::<_, String>(0),
+        )
+        .map_err(storage)?
+        .map(|v| v.map_err(storage)?.parse().map_err(storage))
+        .collect()
+    }
+    fn game_scan_status(
+        &self,
+        user: UserId,
+        parent: JobId,
+    ) -> Result<collector_app::GameScanStatus> {
+        lock(&self.db)?.query_row("SELECT COALESCE(SUM(j.state IN ('queued','running','cancel_requested')),0),COALESCE(SUM(j.state='completed'),0),COALESCE(SUM(j.state='failed'),0),COALESCE(SUM(j.state='cancelled'),0) FROM private.scan_requests r JOIN private.jobs j ON j.id=r.job_id WHERE r.kind='game_batch' AND r.owner=? AND j.user_id=?", params![parent.to_string(), user.to_string()], |r| Ok(collector_app::GameScanStatus { pending:r.get(0)?,completed:r.get(1)?,failed:r.get(2)?,cancelled:r.get(3)? })).map_err(storage)
+    }
+    fn reconcile_game_scans(&self) -> Result<()> {
+        lock(&self.db)?.execute("UPDATE private.jobs SET phase='queued' WHERE kind='game_catalog_scan' AND state='queued' AND phase='waiting_games' AND NOT EXISTS(SELECT 1 FROM private.scan_requests r JOIN private.jobs child ON child.id=r.job_id WHERE r.kind='game_batch' AND r.owner=jobs.id AND child.state IN ('queued','running','cancel_requested'))", []).map_err(storage)?;
+        Ok(())
+    }
+    fn checkpoint_game_scan(
+        &self,
+        claim: &JobClaim,
+        after: Option<ItemId>,
+        admissions_done: bool,
+    ) -> Result<()> {
+        let progress = serde_json::json!({"cursor":after,"admissions_done":admissions_done});
+        let changed = lock(&self.db)?.execute("UPDATE private.jobs SET state='queued',phase=?,result=?,claim_token=NULL,lease_expires=NULL,worker_instance=NULL WHERE id=? AND user_id=? AND claim_token=? AND state='running' AND cancellation_requested=0", params![if admissions_done {"waiting_games"} else {"queued"},progress.to_string(),claim.id.to_string(),claim.user_id.to_string(),claim.claim_token]).map_err(storage)?;
+        if changed != 1 {
+            return Err(Error::JobCancelled);
+        }
+        Ok(())
+    }
+    fn enqueue_game_identifications(&self, specs: Vec<JobSpec>) -> Result<Vec<JobId>> {
+        let mut ids = vec![];
+        let mut admissions = self.clone();
+        admissions.receipt = None;
+        admissions.command_result = None;
+        for spec in specs {
+            if spec.kind != "game_identification" {
+                return Err(Error::Conflict);
+            }
+            let recorded:Option<String>=lock(&self.db)?.query_row("SELECT job_id FROM private.game_direct_members WHERE request_id=? AND user_id=?",params![spec.id.to_string(),spec.user_id.to_string()],|r|r.get(0)).optional().map_err(storage)?;
+            ids.push(match recorded {
+                Some(id) => id.parse().map_err(storage)?,
+                None => admissions.enqueue_job_record(spec)?,
+            });
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        self.record_command(&tx, &ids)?;
+        tx.commit().map_err(storage)?;
+        Ok(ids)
+    }
     fn enqueue_job(&self, spec: JobSpec) -> Result<JobId> {
         self.enqueue_job_record(spec)
     }
@@ -1382,6 +1525,33 @@ impl JobPort for Store {
         spec: JobSpec,
     ) -> Result<JobId> {
         self.enqueue_job_record_with_batch(spec, Some((batch, claim_token)))
+    }
+
+    fn acquisition_for_job(
+        &self,
+        claim: &JobClaim,
+        frozen: &collector_app::FrozenAcquisitionJob,
+    ) -> Result<Option<SnapshotId>> {
+        self.acquire_for_owner(claim, frozen)
+    }
+    fn acquisition_owners(&self, claim: &JobClaim) -> Result<Vec<JobRecord>> {
+        self.provider_owners(claim)
+    }
+    fn acquisition_response_status(
+        &self,
+        claim: &JobClaim,
+    ) -> Result<Option<collector_app::ProviderResponseStatus>> {
+        let raw:Option<String>=lock(&self.db)?.query_row("SELECT json_extract(a.result,'$.response_status') FROM private.acquisition_links l JOIN private.jobs a ON a.id=l.acquisition_job WHERE l.owner_job=? AND l.snapshot_id IS NOT NULL ORDER BY a.created_at LIMIT 1",[claim.id.to_string()],|r|r.get(0)).optional().map_err(storage)?.flatten();
+        raw.map(|v| serde_json::from_value(serde_json::Value::String(v)).map_err(storage))
+            .transpose()
+    }
+    fn acquisition_committed_snapshot(&self, claim: &JobClaim) -> Result<Option<SnapshotId>> {
+        let value:Option<String>=lock(&self.db)?.query_row("SELECT json_extract(p.output_references,'$[0]') FROM private.processing_jobs p JOIN private.jobs j ON j.id=p.job_id WHERE p.job_id=? AND j.claim_token=? AND p.checkpoint='snapshot_committed'",params![claim.id.to_string(),claim.claim_token],|r|r.get(0)).optional().map_err(storage)?.flatten();
+        value.map(|v| v.parse().map_err(storage)).transpose()
+    }
+    fn reconcile_acquisitions(&self) -> Result<()> {
+        self.reconcile_provider_work()?;
+        Ok(())
     }
 
     fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>> {
@@ -1514,8 +1684,10 @@ impl AdministrationPort for Store {
         collection: CollectionId,
         provider: &ModuleId,
         snapshot: SnapshotId,
+        identification: JobSpec,
     ) -> Result<collector_app::CatalogSnapshotStatus> {
         provider.validate()?;
+        let _writer = lock(&self.writer)?;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         let record: String = tx
@@ -1534,13 +1706,33 @@ impl AdministrationPort for Store {
                 "snapshot provider does not match activation target".into(),
             ));
         }
+        let slot = collector_app::game_catalog_slot(&record)?.ok_or_else(|| {
+            Error::Invalid("This catalog system or convention is unsupported".into())
+        })?;
         let result = collector_app::CatalogSnapshotStatus {
             snapshot: record,
             active: true,
+            identification_job_id: Some(identification.id),
+            inactive_reason: None,
         };
         tx.execute(
-            "INSERT INTO private.active_catalog_snapshots(collection_id,provider,snapshot_id,activated_at) VALUES(?,?,?,?) ON CONFLICT(collection_id,provider) DO UPDATE SET snapshot_id=excluded.snapshot_id,activated_at=excluded.activated_at",
-            params![collection.to_string(), provider.0, snapshot.to_string(), self.clock.now().timestamp()],
+            "INSERT INTO private.active_game_catalogs(collection_id,system,catalog,byte_domain,snapshot_id,activated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(collection_id,system,catalog,byte_domain) DO UPDATE SET snapshot_id=excluded.snapshot_id,activated_at=excluded.activated_at",
+            params![collection.to_string(), slot.system, slot.catalog, slot.byte_domain, snapshot.to_string(), self.clock.now().timestamp()],
+        )
+        .map_err(storage)?;
+        identification
+            .frozen_input
+            .as_ref()
+            .ok_or(Error::Conflict)?
+            .validate()?;
+        let now = self.clock.now().timestamp();
+        tx.execute("INSERT OR IGNORE INTO private.jobs(id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,request,result,worker_instance,lease_expires,claim_token,cancellation_requested) VALUES(?,?,?,NULL,'game_catalog_scan','queued','queued',0,0,1,?,?,NULL,NULL,?,NULL,NULL,NULL,NULL,0)", params![identification.id.to_string(),identification.user_id.to_string(),collection.to_string(),now,now,serde_json::to_string(&identification.request).map_err(storage)?]).map_err(storage)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO private.processing_jobs(job_id,frozen_input) VALUES(?,?)",
+            params![
+                identification.id.to_string(),
+                serde_json::to_string(&identification.frozen_input.unwrap()).map_err(storage)?
+            ],
         )
         .map_err(storage)?;
         self.record_command(&tx, &result)?;
@@ -1826,13 +2018,24 @@ impl IdempotencyPort for Store {
         key: &str,
         request_sha256: &str,
     ) -> Result<()> {
-        lock(&self.db)?
-            .execute(
+        let _writer = if operation == "metadata.authority.update" {
+            Some(lock(&self.writer)?)
+        } else {
+            None
+        };
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        // Only provably absent archive effects can be released. Committed or
+        // journal-backed effects retain their receipt for normal crash recovery.
+        if operation == "metadata.authority.update" {
+            commands::release_absent_metadata_outcomes(&tx, &self.archive, None, None)?;
+        }
+        tx.execute(
                 "DELETE FROM private.command_receipts WHERE user_id=? AND api_major=? AND operation=? AND idempotency_key=? AND request_sha256=? AND state='in_progress' AND NOT EXISTS(SELECT 1 FROM private.command_outcomes o WHERE o.user_id=command_receipts.user_id AND o.api_major=command_receipts.api_major AND o.operation=command_receipts.operation AND o.idempotency_key=command_receipts.idempotency_key)",
                 params![user.to_string(), api_major, operation, key, request_sha256],
             )
             .map_err(storage)?;
-        Ok(())
+        tx.commit().map_err(storage)
     }
 }
 
@@ -1840,11 +2043,14 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     let private_version: u32 = db
         .query_row("PRAGMA private.user_version", [], |row| row.get(0))
         .map_err(storage)?;
-    if private_version > 19 {
+    if private_version > PRIVATE_SCHEMA {
         return Err(Error::Unavailable(format!(
             "private database schema {private_version} is newer than this server"
         )));
     }
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.game_direct_members(request_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,job_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS private.game_scan_members(parent TEXT NOT NULL,item_id TEXT NOT NULL,representation_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(parent,item_id,representation_id));
+            CREATE TABLE IF NOT EXISTS private.active_game_catalogs(collection_id TEXT NOT NULL,system TEXT NOT NULL,catalog TEXT NOT NULL,byte_domain TEXT NOT NULL,snapshot_id TEXT NOT NULL,activated_at INTEGER NOT NULL,PRIMARY KEY(collection_id,system,catalog,byte_domain));").map_err(storage)?;
     if private_version < 2 {
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch("
@@ -2261,6 +2467,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         }
     }
     for (column, declaration) in [
+        ("purchase", "TEXT"),
         ("prepare_music", "INTEGER NOT NULL DEFAULT 0"),
         ("preparation_batch_id", "TEXT"),
         ("preparation_error", "TEXT"),
@@ -2329,7 +2536,22 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             PRAGMA private.user_version=19;").map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
-    db.execute_batch("PRAGMA private.user_version=19;")
+    let tx = db.transaction().map_err(storage)?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS private.acquisition_links(owner_job TEXT NOT NULL,input_key TEXT NOT NULL,acquisition_job TEXT NOT NULL,snapshot_id TEXT,PRIMARY KEY(owner_job,input_key));
+      CREATE INDEX IF NOT EXISTS private.acquisition_links_work ON acquisition_links(acquisition_job);
+      CREATE TABLE IF NOT EXISTS private.acquisition_waits(owner_job TEXT PRIMARY KEY,acquisition_job TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS private.snapshot_bindings(job_id TEXT NOT NULL,snapshot_id TEXT NOT NULL,item_id TEXT,generation INTEGER NOT NULL,PRIMARY KEY(job_id,snapshot_id));
+      ")
+        .map_err(storage)?;
+    if private_version < 20 {
+        tx.execute_batch("INSERT OR IGNORE INTO private.snapshot_bindings(job_id,snapshot_id,item_id,generation) SELECT j.id,COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id')),j.item_id,COALESCE(g.generation,0) FROM private.jobs j LEFT JOIN private.item_job_generations g ON g.job_id=j.id WHERE j.state='completed' AND j.item_id IS NOT NULL AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id')) IS NOT NULL;").map_err(storage)?;
+        Store::adopt_existing_acquisitions(&tx)?;
+    }
+    tx.commit().map_err(storage)?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.inbox_cleanup(import_id TEXT PRIMARY KEY, source_path TEXT NOT NULL, job_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL CHECK(length(record)<=16777216));
+        CREATE INDEX IF NOT EXISTS private.inbox_cleanup_source ON inbox_cleanup(source_path);
+        ").map_err(storage)?;
+    db.execute_batch(&format!("PRAGMA private.user_version={PRIVATE_SCHEMA};"))
         .map_err(storage)?;
     let catalog_version: u32 = db
         .query_row("PRAGMA main.user_version", [], |row| row.get(0))
@@ -2451,7 +2673,8 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
-    db.execute_batch("CREATE TABLE IF NOT EXISTS browse_items (
+    db.execute_batch("CREATE INDEX IF NOT EXISTS assets_item_cover_state ON assets(json_extract(record,'$.asset.subject.item_id'),deleted,id) WHERE json_extract(record,'$.asset.kind')='cover';
+        CREATE TABLE IF NOT EXISTS browse_items (
         id TEXT PRIMARY KEY, collection_id TEXT NOT NULL, title_key TEXT NOT NULL,
         artist_key TEXT NOT NULL, platform_key TEXT NOT NULL, recent_key TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS browse_title ON browse_items(title_key,id);
@@ -2655,6 +2878,13 @@ impl CollectionTypePort for Store {
                     .transpose()
                     .map_err(storage)?
                     .map(|input| match input {
+                        collector_app::FrozenJobInput::GameIdentification(job) => {
+                            job.processing.operation
+                        }
+                        collector_app::FrozenJobInput::GameCatalogScan(_) => {
+                            collector_core::OperationId::new("org.junk.games.identify")
+                                .expect("static operation")
+                        }
                         collector_app::FrozenJobInput::Processing(job) => job.operation,
                         collector_app::FrozenJobInput::Acquisition(job) => job.request.operation,
                         collector_app::FrozenJobInput::MetadataResolution(job) => {
@@ -3419,6 +3649,19 @@ impl Store {
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(storage)?;
+        let result = self.set_grant_effect(&tx, collection, user, expected, role)?;
+        tx.commit().map_err(storage)?;
+        Ok(result)
+    }
+
+    fn set_grant_effect(
+        &self,
+        tx: &Connection,
+        collection: CollectionId,
+        user: UserId,
+        expected: Revision,
+        role: Option<Role>,
+    ) -> Result<Option<GrantView>> {
         let enabled: Option<bool> = tx
             .query_row(
                 "SELECT enabled FROM private.users WHERE id=?",
@@ -3498,8 +3741,7 @@ impl Store {
                 None
             }
         };
-        self.record_command(&tx, &result)?;
-        tx.commit().map_err(storage)?;
+        self.record_command(tx, &result)?;
         Ok(result)
     }
 }
@@ -4415,6 +4657,13 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     File::open(path).and_then(|f| f.sync_all()).map_err(storage)
+}
+pub(crate) fn ensure_restore_complete(root: &Path) -> Result<()> {
+    match fs::symlink_metadata(root.join(".restore-in-progress")) {
+        Ok(_) => Err(Error::Unavailable("incomplete restore: retain these roots for inspection and restore into newly empty roots".into())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(storage(error)),
+    }
 }
 pub(crate) fn private_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]

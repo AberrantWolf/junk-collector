@@ -1,5 +1,12 @@
 # Security, recovery, and enrollment contract (S01)
 
+**Current scheduling (updated 2026-10-19):** [remaining work](../remaining-work.md)
+separates necessary public-server controls/qualification (HL-05) from advanced
+rotation/routing and exhaustive assurance (HL-12/14). Preserve implemented defenses;
+review old proposals for actual need under [the revised scope](home-lab-scope.md).
+Production Keychain-backed Phono/Trash Amp adapters now exist; the older statement
+below about missing native secure storage is historical. Phono is retired as a target.
+
 Status: accepted design gate, 2026-09-09. S02 and S03 were implemented on
 2026-09-10; S04 certificate rotation and R03 external qualification remain open.
 

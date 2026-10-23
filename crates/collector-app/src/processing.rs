@@ -100,6 +100,8 @@ pub struct SnapshotQuery {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquisition_key: Option<String>,
     pub id: SnapshotId,
     pub collection_id: CollectionId,
     pub provider: ModuleId,
@@ -223,6 +225,7 @@ pub trait SnapshotPort: Send + Sync {
         after: Option<SnapshotId>,
         limit: u16,
     ) -> Result<collector_core::Page<SnapshotRecord>>;
+    fn active_game_snapshots(&self, collection_id: CollectionId) -> Result<Vec<SnapshotId>>;
     fn active_snapshot(
         &self,
         collection_id: CollectionId,
@@ -233,6 +236,8 @@ pub trait SnapshotPort: Send + Sync {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogSnapshotStatus {
+    pub identification_job_id: Option<collector_core::JobId>,
+    pub inactive_reason: Option<String>,
     pub snapshot: SnapshotRecord,
     pub active: bool,
 }
@@ -261,6 +266,73 @@ impl ImportCatalogSnapshotCommand {
         }
         Ok(())
     }
+}
+
+/// Browser uploads use the same provider and immutable snapshot pipeline as local DATs.
+pub const MAX_DAT_UPLOAD_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct DatUploadMetadata {
+    pub system: String,
+    pub catalog: String,
+    pub byte_domain: String,
+}
+impl DatUploadMetadata {
+    pub fn validate(&self) -> Result<()> {
+        for (value, maximum) in [(&self.system, 120), (&self.catalog, 255)] {
+            if value.trim().is_empty()
+                || value.len() > maximum
+                || value.chars().any(char::is_control)
+            {
+                return Err(collector_core::Error::Invalid(
+                    "Enter a platform and catalog name (up to 120 and 255 bytes).".into(),
+                ));
+            }
+        }
+        if !matches!(
+            self.byte_domain.as_str(),
+            "org.junk.game.raw-bytes"
+                | "org.junk.game.nes.ines-payload"
+                | "org.junk.game.n64.z64-big-endian"
+                | "org.junk.game.snes.headerless-payload"
+                | "org.junk.game.pce.hucard-payload"
+                | "org.junk.game.cd.raw-2352-track"
+        ) {
+            return Err(collector_core::Error::Invalid(
+                "Choose a supported catalog byte variant.".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UploadedDatCatalog {
+    pub metadata: DatUploadMetadata,
+    pub digest: Digest,
+    pub bytes: ByteLength,
+}
+impl UploadedDatCatalog {
+    pub fn validate(&self) -> Result<()> {
+        self.metadata.validate()?;
+        self.digest.validate()?;
+        if self.digest.algorithm != collector_core::HashAlgorithm::Sha256
+            || self.bytes.0 == 0
+            || self.bytes.0 > MAX_DAT_UPLOAD_BYTES as u64
+        {
+            return Err(collector_core::Error::Invalid(
+                "Upload an extracted DAT file between 1 byte and 64 MiB.".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+/// Private immutable upload staging; no adapter paths cross this boundary.
+pub trait UploadedCatalogPort: Send + Sync {
+    fn stage_uploaded_catalog(&self, bytes: &[u8]) -> Result<Digest>;
+    fn uploaded_catalog(&self, upload: &UploadedDatCatalog) -> Result<Box<dyn crate::MediaReader>>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -310,6 +382,8 @@ pub struct FrozenAcquisitionJob {
 #[serde(tag = "kind", content = "input", rename_all = "snake_case")]
 pub enum FrozenJobInput {
     Processing(FrozenProcessingJob),
+    GameIdentification(crate::FrozenGameIdentification),
+    GameCatalogScan(crate::FrozenGameCatalogScan),
     Acquisition(FrozenAcquisitionJob),
     Derivative(crate::FrozenDerivativeJob),
     DerivativeBatch(crate::FrozenDerivativeBatchJob),
@@ -320,6 +394,8 @@ impl FrozenJobInput {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Processing(job) => job.validate(),
+            Self::GameIdentification(job) => job.validate(),
+            Self::GameCatalogScan(job) => job.validate(),
             Self::MetadataResolution(job) => job.validate(),
             Self::ExistingMetadata(job) => job.validate(),
             Self::Derivative(job) => job.validate(),
@@ -505,6 +581,8 @@ pub struct AcquireAccurateRipCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataInventoryState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<collector_core::ModuleData>,
     pub revision: collector_core::Revision,
     pub title: String,
     pub subtitle: String,
@@ -513,6 +591,7 @@ pub struct MetadataInventoryState {
 impl From<&collector_core::Item> for MetadataInventoryState {
     fn from(item: &collector_core::Item) -> Self {
         Self {
+            domain: Some(item.domain.clone()),
             revision: item.revision,
             title: item.title.clone(),
             subtitle: item.subtitle.clone(),
@@ -564,7 +643,7 @@ impl MetadataAuthorityRecord {
                 candidates,
                 self.current_candidates.as_deref(),
             )?;
-            let expected = crate::metadata::resolve_metadata_fields_with_policy(
+            let mut expected = crate::metadata::resolve_metadata_fields_with_policy(
                 &inventory.title,
                 &inventory.subtitle,
                 &self.authority,
@@ -575,6 +654,23 @@ impl MetadataAuthorityRecord {
                     .map_or("en", collector_core::LanguageTag::as_str),
                 self.resolution_policy == 1,
             )?;
+            if self.resolution_policy <= 2 {
+                if expected.title.source == collector_core::MetadataValueSource::Provisional {
+                    expected.title.source = collector_core::MetadataValueSource::Manual;
+                }
+                if let Some(subtitle) = &mut expected.subtitle
+                    && subtitle.source == collector_core::MetadataValueSource::Provisional
+                {
+                    subtitle.source = collector_core::MetadataValueSource::Manual;
+                }
+            } else if let Some(domain) = &inventory.domain {
+                crate::metadata::resolve_metadata_domain(
+                    domain,
+                    &self.authority,
+                    &current,
+                    &mut expected,
+                )?;
+            }
             if self.display.as_ref() != Some(&expected) || inventory.revision.0 == 0 {
                 return Err(collector_core::Error::Invalid(
                     "metadata display disagrees with its frozen inputs".into(),
@@ -585,7 +681,7 @@ impl MetadataAuthorityRecord {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if !matches!(self.resolution_policy, 1 | 2) {
+        if !matches!(self.resolution_policy, 1..=3) {
             return Err(collector_core::Error::Unavailable(
                 "unknown metadata resolution policy".into(),
             ));
@@ -670,7 +766,7 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         record: SnapshotRecord,
         reader: &mut dyn std::io::Read,
         cancelled: &mut dyn FnMut() -> Result<bool>,
-    ) -> Result<()>;
+    ) -> Result<SnapshotId>;
     fn processing_record(&self, id: ObservationId) -> Result<PortableProcessingRecord>;
     fn recipe(&self, id: RecipeId) -> Result<collector_core::ConversionRecipe>;
     fn publish_recipe(
@@ -688,6 +784,7 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         &self,
         transaction: collector_core::TransactionId,
         record: MetadataAuthorityRecord,
+        context: Option<crate::ItemEffectContext>,
     ) -> Result<()>;
     fn metadata_authority(
         &self,

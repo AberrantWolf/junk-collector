@@ -549,6 +549,9 @@ pub struct ItemLifecycle {
     pub merged_into: Option<ItemId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_group: Option<TransactionId>,
+    /// An explicit group undo preserves the user's choice to keep entries apart.
+    #[serde(default)]
+    pub automatic_grouping_disabled: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ItemReimport {
@@ -713,6 +716,9 @@ impl Item {
     }
     pub fn redact_for(&mut self, role: Role) {
         if role == Role::Viewer {
+            for capture in &mut self.captures {
+                capture.purchase = None;
+            }
             for specimen in &mut self.specimens {
                 specimen.acquisition = None;
                 specimen.private_notes = None;
@@ -841,8 +847,36 @@ pub enum CarrierKind {
     Case,
     Other,
 }
+/// Acquisition facts belong to the purchased package, independently of physical copies.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DigitalPurchase {
+    pub store: Option<String>,
+    pub source_url: Option<String>,
+    pub date: Option<NaiveDate>,
+    pub cost: Option<Money>,
+    pub order_reference: Option<String>,
+}
+
+impl DigitalPurchase {
+    pub fn validate(&self) -> Result<()> {
+        if let Some(cost) = &self.cost {
+            cost.validate()?;
+        }
+        for text in [&self.store, &self.source_url, &self.order_reference]
+            .into_iter()
+            .flatten()
+        {
+            if text.len() > 4096 || text.chars().any(char::is_control) {
+                return Err(Error::Invalid("invalid purchase text".into()));
+            }
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Capture {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<DigitalPurchase>,
     pub id: CaptureId,
     pub collection_id: CollectionId,
     pub revision: Revision,
@@ -852,6 +886,9 @@ pub struct Capture {
 }
 impl Capture {
     pub fn validate(&self) -> Result<()> {
+        if let Some(purchase) = &self.purchase {
+            purchase.validate()?;
+        }
         let ids = self
             .representations
             .iter()
@@ -907,6 +944,8 @@ pub enum RepresentationRole {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct StoredFile {
+    #[serde(default, skip_serializing_if = "Visibility::is_shared")]
+    pub visibility: Visibility,
     pub name: String,
     pub bytes: ByteLength,
     pub digest: Digest,
@@ -947,11 +986,18 @@ pub enum AssetKind {
     Document,
     Other,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
+    #[default]
     Shared,
     Curators,
+}
+
+impl Visibility {
+    pub fn is_shared(&self) -> bool {
+        *self == Self::Shared
+    }
 }
 
 /// Canonical collection-level aggregate used by schema-2 migration and reindex.
@@ -1406,6 +1452,8 @@ pub enum BrowseFilter {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BrowseQuery {
     #[serde(default)]
+    pub listening_only: bool,
+    #[serde(default)]
     pub sort: BrowseSort,
     #[serde(default)]
     pub filter: BrowseFilter,
@@ -1572,6 +1620,7 @@ mod tests {
             updated_at: Utc::now(),
         };
         let capture = Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: collection,
             revision: Revision(1),
@@ -1605,6 +1654,7 @@ mod tests {
         assert!(!invalid_component.kind.data_bearing());
         let representation = RepresentationId::new();
         let capture = Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: CollectionId::new(),
             revision: Revision(1),

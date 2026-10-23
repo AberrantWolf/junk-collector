@@ -84,6 +84,7 @@ pub fn music_search_projection(
     };
     let (album, artist) = music_search_labels(item, display, artist_override);
     let make = |disc, position, title: String, frames: Option<u64>| MusicSearchRecord {
+        source_representation_id: None,
         duration_ms: frames
             .filter(|frames| *frames > 0)
             .and_then(|frames| u64::try_from(u128::from(frames) * 1000 / 44100).ok()),
@@ -150,7 +151,10 @@ impl CollectionService {
             let sources = rows
                 .iter()
                 .filter(|row| {
-                    row.profile == ConversionProfile::Flac
+                    row.primary_playback()
+                        && song
+                            .source_representation_id
+                            .is_none_or(|source| row.source_representation_id == source)
                         && row.track_position == song.track_position
                         && song
                             .disc_position
@@ -160,7 +164,10 @@ impl CollectionService {
                 .collect::<Vec<_>>();
             if song.duration_ms.is_none() {
                 song.duration_ms = sources.first().and_then(|row| {
-                    u64::try_from(u128::from(row.frame_count.0) * 1000 / 44100).ok()
+                    u64::try_from(
+                        u128::from(row.frame_count.0) * 1000 / u128::from(row.sample_rate()),
+                    )
+                    .ok()
                 });
             }
             hits.push(MusicSearchHit {
@@ -203,7 +210,7 @@ impl CollectionService {
                 .find(|v| {
                     v.source_representation_id == source_representation_id
                         && v.track_position == track_position
-                        && v.profile == ConversionProfile::Flac
+                        && v.primary_playback()
                 })
                 .ok_or(Error::Conflict)?;
             tracks.push(row.clone());

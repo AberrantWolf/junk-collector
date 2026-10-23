@@ -1,8 +1,11 @@
+import {loadDraft,saveDraft} from './intake-drafts';
+import PurchaseFields from './purchase-fields';
+import IngestStatus from './ingest-status';
 import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {WorkProgress,UploadMeter,bytes} from './work-progress';
-import React,{useEffect,useRef,useState,api,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,getApiIdentity,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import type {components} from './generated/api';
 import DestinationChooser from './destination-chooser';
 import InboxPackageChooser from './inbox-package-chooser';
@@ -12,8 +15,9 @@ type Accepted=components['schemas']['AcceptedIngest'];
 type Detail=components['schemas']['IngestDetail'];
 type Item=components['schemas']['PresentedItem'];
 type InboxSource=components['schemas']['InboxSourceView'];
+type PendingPurchase={key:string;command:components['schemas']['StartIngestCommand']};
 type Props={initialImportId?:string;historyOnly?:boolean;initialItem?:Item;collectionId:string;busy:boolean;setBusy:(value:boolean)=>void;onPublished:(item:Item,replacedItemId?:string)=>void;onError:(error:unknown)=>void;onDraftChange?:(value:boolean)=>void};
-function selectedName(files:File[]){return files.length===1?files[0].name:'Browser package';}
+function selectedName(files:File[]){const cues=files.filter(file=>file.name.toLowerCase().endsWith('.cue'));return files.length===1?files[0].name:cues.length===1?cues[0].name:'Browser package';}
 function fileName(file:File){return file.webkitRelativePath||file.name;}
 function stateLabel(value:string){return presentationLabel(value);}
 
@@ -24,10 +28,16 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  const [packageName,setPackageName]=useState('Browser package');
  const [inboxes,setInboxes]=useState<InboxSource[]>([]);const [inboxLabel,setInboxLabel]=useState('');const [inboxPackages,setInboxPackages]=useState<string[]>([]);
  const [plan,setPlan]=useState<Plan>();const [automatic,setAutomatic]=useState(true);const [prepareMusic,setPrepareMusic]=useState(false);const [preserveOnly,setPreserveOnly]=useState(false);
+ const [pendingPurchase,setPendingPurchase]=useState<PendingPurchase>();
+ const pendingKey=`collector:guided-purchase:${getApiIdentity()?.user_id}:${collectionId}:${initialItem?.id||'new'}`;
+ const [purchase,setPurchase]=useState<components['schemas']['DigitalPurchase']>();
+ useEffect(()=>{if(historyOnly)return;const controller=new AbortController();void loadDraft<PendingPurchase>(pendingKey).then(value=>{if(!controller.signal.aborted)setPendingPurchase(value);}).catch(onError);return()=>controller.abort();},[pendingKey,historyOnly]);
  const [destination,setDestination]=useState<Item|null>(initialItem||null);
  useEffect(()=>{if(initialItem)setDestination(initialItem);},[initialItem?.id,initialItem?.revision]);
  const [detail,setDetail]=useState<Detail>();const [detailOpen,setDetailOpen]=useState(false);const [target,setTarget]=useState<Item|null>();
  const [uploadProgress,setUploadProgress]=useState<UploadProgress>();const [activity,setActivity]=useState('');
+ const [inboxConfirmed,setInboxConfirmed]=useState(false);
+ useEffect(()=>setInboxConfirmed(false),[detail?.import.id]);
  const [notice,setNotice]=useState('');const [failure,setFailure]=useState('');
  const lifecycle=useRef(new AbortController());const reads=useOperationScope(collectionId);const reading=useRef(false);const mutating=useRef(false);
  const acceptance=useRef<string|undefined>(undefined);const detailId=useRef<string|undefined>(undefined);
@@ -75,6 +85,9 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  async function chooseAnchor(position:number,fileIndex:number){if(!plan)return;await mutate(async()=>{
   const value=await request<Plan>('/ingests/plan',{method:'POST',body:JSON.stringify({collection_id:collectionId,packages:plan.packages.map(pkg=>({source:pkg.source,files:pkg.files,anchor_file_index:pkg.position===position?fileIndex:(pkg.anchors.find(anchor=>anchor.selected)?.file_index??null)}))})});setPlan(value);setPreserveOnly(value.packages.every(pkg=>!pkg.analysis_available));setPrepareMusic(current=>current&&value.packages.every(pkg=>pkg.preparation_available));acceptance.current=crypto.randomUUID();
  });}
+ async function changeVisibility(position:number,index:number,visibility:'shared'|'curators'){
+  if(!plan)return;await mutate(async()=>{const value=await request<Plan>('/ingests/plan',{method:'POST',body:JSON.stringify({collection_id:collectionId,packages:plan.packages.map(pkg=>({purchase:pkg.purchase,source:pkg.source,files:pkg.files.map((f,i)=>pkg.position===position&&i===index?{...f,visibility}:f),anchor_file_index:pkg.anchors.find(a=>a.selected)?.file_index??null}))})});setPlan(value);acceptance.current=crypto.randomUUID();});
+ }
  async function upload(value:Detail,selectedFiles:File[],verifyPrefix:boolean){
   const names=new Set(value.import.files.map(file=>file.name));
   await uploadPackage(value.import,selectedFiles.filter(file=>names.has(fileName(file))),verifyPrefix,lifecycle.current.signal,setUploadProgress,record=>{
@@ -82,27 +95,40 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   });
   setUploadProgress(undefined);setActivity('Refreshing import status…');
  }
- async function start(){if(!plan)return;const frozen=plan;const selected=[...files];await mutate(async()=>{
+ async function start(){if(!plan&&!pendingPurchase)return;const frozen=pendingPurchase?.command.plan||plan!;const selected=[...files];await mutate(async()=>{
   setDetailOpen(false);setActivity('Starting import…');acceptance.current??=crypto.randomUUID();
-  if(destination&&frozen.packages.length!==1)throw new Error('Select one package when attaching to an existing entry.');
-  const currentDestination=destination?await request<Item>(`/items/${destination.id}`):null;
+  if(!pendingPurchase&&destination&&frozen.packages.length!==1)throw new Error('Select one package when attaching to an existing entry.');
+  const currentDestination=!pendingPurchase&&destination?await request<Item>(`/items/${destination.id}`):null;
   if(currentDestination&&currentDestination.collection_id!==collectionId)throw new Error('The destination is outside this collection.');
   if(currentDestination&&currentDestination.revision!==destination?.revision)throw new Error('The destination changed. Reopen it and review the current revision before importing.');
-  const accepted=await request<Accepted>('/ingests',{method:'POST',headers:{'Idempotency-Key':acceptance.current},body:JSON.stringify({plan:frozen,analysis:preserveOnly?'preserve_only':'automatic',enrichment:automatic&&!preserveOnly?'automatic':'none',prepare_music:prepareMusic&&!preserveOnly,destination:currentDestination?{item_id:currentDestination.id,expected_revision:currentDestination.revision}:null})});
+  const submitted=pendingPurchase||{key:acceptance.current,command:{purchase:purchase||null,plan:frozen,analysis:preserveOnly?'preserve_only' as const:'automatic' as const,enrichment:automatic&&!preserveOnly?'automatic' as const:'none' as const,prepare_music:prepareMusic&&!preserveOnly&&frozen.packages.every(pkg=>pkg.music_actions_available),destination:currentDestination?{item_id:currentDestination.id,expected_revision:currentDestination.revision}:null}};
+  await saveDraft(pendingKey,submitted);setPendingPurchase(submitted);
+  const accepted=await request<Accepted>('/ingests',{method:'POST',headers:{'Idempotency-Key':submitted.key},body:JSON.stringify(submitted.command)});
+  await saveDraft(pendingKey,undefined);setPendingPurchase(undefined);
   if(!accepted.imports.length)throw new Error(accepted.rejected[0]?.reason||'No package was accepted.');
   setPlan(undefined);
   for(let index=0;index<accepted.imports.length;index++){
    const summary=accepted.imports[index];setQueueLabel(`Package ${index+1} of ${accepted.imports.length}: ${summary.package_name}`);
    reads.cancel();reading.current=false;targetEdited.current=false;detailId.current=summary.import_id;const current=await request<Detail>(`/ingests/${summary.import_id}`);setDetail(current);
-   if(current.import.source.kind==='browser'&&current.import.phase==='staging')await upload(current,selected,false);
+   if(current.import.source.kind==='browser'&&current.import.phase==='staging'&&selected.length)await upload(current,selected,false);
   }
-  setQueueLabel('');setDetailOpen(true);setFiles([]);setNotice(accepted.rejected.length?`Uploads finished. ${accepted.rejected.length} packages were not accepted: ${accepted.rejected.map(value=>value.reason).join('; ')}`:frozen.packages.every(pkg=>pkg.source.kind==='browser')?'Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.':'Import queued. Your entries are saved. You can close this window; the server will copy the source packages and continue processing.');
+  setQueueLabel('');setDetailOpen(true);setFiles([]);setNotice(accepted.rejected.length?`Uploads finished. ${accepted.rejected.length} packages were not accepted: ${accepted.rejected.map(value=>value.reason).join('; ')}`:frozen.packages.every(pkg=>pkg.source.kind==='browser')?(frozen.packages.every(pkg=>pkg.music_actions_available)?'Upload complete. Your entries are saved. You can close this window; identification, metadata and optional audio preparation continue on the server.':'Upload complete. Your entries are saved. You can close this window; identification and metadata lookup continue on the server.'):'Import queued. Your entries are saved. You can close this window; the server will copy the source packages and continue processing.');
 
  });}
  async function resume(){if(!detail)return;await mutate(async()=>{const current=await request<Detail>(`/ingests/${detail.summary.import_id}`);if(current.import.phase!=='staging')throw new Error('This import no longer needs an upload. Refresh its detail.');await upload(current,resumeFiles,true);setResumeFiles([]);await open(current.summary.import_id);});}
  async function discard(){if(!detail||!confirm(`Discard ${detail.summary.package_name} and delete its temporary files?`))return;await mutate(async()=>{await request(`/ingests/${detail.summary.import_id}/discard`,{method:'POST',body:JSON.stringify({expected_revision:detail.import.revision})});setNotice('Import discarded. Temporary file cleanup is shown below.');await open(detail.summary.import_id);});}
  async function cancel(){if(!detail)return;await mutate(async()=>{setDetail(await request<Detail>(`/ingests/${detail.summary.import_id}/cancel`,{method:'POST',body:JSON.stringify({expected_revision:detail.import.revision})}));});}
  async function retry(jobId?:string|null){if(!detail)return;await mutate(async()=>{setDetail(await request<Detail>(`/ingests/${detail.summary.import_id}/retry`,{method:'POST',body:JSON.stringify({job_id:jobId||null})}));});}
+ async function cleanInbox(){if(!detail||!inboxConfirmed)return;const id=detail.import.id;await mutate(async()=>{
+  const draftKey=`collector:inbox-cleanup:${getApiIdentity()?.user_id}:${id}`;
+  const pending=await loadDraft<{key:string}>(draftKey)||{key:crypto.randomUUID()};
+  await saveDraft(draftKey,pending);
+  await request(`/ingests/${id}/inbox-cleanup`,{method:'POST',headers:{'Idempotency-Key':pending.key},body:JSON.stringify({source_is_idle:true})});
+  await saveDraft(draftKey,undefined);setInboxConfirmed(false);await loadDetail(id);
+ });}
+ async function cancelInboxCleanup(){if(!detail?.inbox_cleanup)return;const id=detail.import.id;await mutate(async()=>{
+  await request(`/jobs/${detail.inbox_cleanup!.job_id}/cancel`,{method:'POST'});await loadDetail(id);
+ });}
  async function correct(){if(!detail||!associationChanged||detail.summary.capture_revision===null)return;await mutate(async()=>{
   const selected=target?await request<Item>(`/items/${target.id}`):null;
   if(selected&&selected.collection_id!==collectionId)throw new Error('The destination is outside this collection.');
@@ -111,13 +137,13 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
  });}
  return <section className="guided-ingest" data-uploading={!!uploadProgress} aria-labelledby="guided-ingest-heading">
   <h3 id="guided-ingest-heading">{historyOnly?'Import progress':'Import original files'}</h3>{!historyOnly&&<>
-  <p className="muted">Choose a folder of dumps. We find packages in its subfolders, create entries, preserve the originals, and gather available metadata and artwork.</p>
+  <p className="muted">Choose a folder of dumps. We find packages in its subfolders, create entries, save the originals, and gather available metadata and artwork.</p>
   </>}
   {failure&&<p role="alert" className="notice error">{failure} Saved entries and received bytes are kept. Open the import below to resume.</p>}
   {notice&&<p role="status" className="notice">{notice}</p>}
   {queueLabel&&<p><strong>{queueLabel}</strong></p>}
   {uploadProgress?<UploadMeter value={uploadProgress}/>:activity&&<WorkProgress label={activity}/>}
-  {!historyOnly&&<><form onSubmit={event=>{event.preventDefault();void (plan?start():preview());}}>
+  {!historyOnly&&<>{pendingPurchase&&<p className="notice">A submitted import is waiting for confirmation. <button disabled={busy} onClick={()=>void start()}>Resume submitted import</button></p>}<form onSubmit={event=>{event.preventDefault();void (plan?start():preview());}}>
    <DestinationChooser collectionId={collectionId} selected={destination} disabled={busy||!!initialItem} emptyMode="create" onSelect={value=>{setDestination(value);acceptance.current=undefined;}}/>{initialItem&&<p className="muted">This import will attach to the open entry. Use Add / import to choose another destination.</p>}
    <fieldset className="source-choice"><legend>Import from</legend><label><input type="radio" name="guided-source" disabled={busy} checked={source==='browser'} onChange={()=>{setSource('browser');setPlan(undefined);}}/> This browser</label><label><input type="radio" name="guided-source" disabled={busy} checked={source==='inbox'} onChange={()=>{setSource('inbox');setPlan(undefined);}}/> Server inbox</label></fieldset>
    {source==='browser'?<>
@@ -127,25 +153,43 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
    </>:inboxes.length?<div><label>Inbox<select value={inboxLabel} disabled={busy} onChange={event=>{setInboxLabel(event.target.value);setPlan(undefined);}}>{inboxes.map(value=><option key={value.label}>{value.label}</option>)}</select></label><InboxPackageChooser collectionId={collectionId} label={inboxLabel} selected={inboxPackages} onSelect={value=>{setInboxPackages(value);setPlan(undefined);}} disabled={busy} multiple/></div>:<p className="notice">No configured inbox packages are available.</p>}
    {!!unassigned.length&&<details className="notice"><summary>{unassigned.length} {unassigned.length===1?'file is':'files are'} outside the detected packages and will not be uploaded</summary><ul>{unassigned.map(name=><li key={name}>{name}</li>)}</ul></details>}
    {plan&&<>
-    <p><strong>{plan.packages.length} dump packages found.</strong> {destination?'The package will be attached to the selected entry; its copy records stay as they are.':'A new entry and one owned physical copy will be recorded for each package.'}</p>
-    {plan.packages.some(pkg=>pkg.blockers.length>0)&&<div className="notice" role="note"><strong>Review before preserving</strong>{plan.packages.flatMap(pkg=>pkg.blockers.map(blocker=><p key={`${pkg.position}:${blocker.kind}:${blocker.message}`}>{pkg.default_title}: {blocker.message} {blocker.blocks_analysis?'Originals can still be preserved without analysis.':''}</p>))}</div>}
+    <p><strong>{plan.packages.length} dump packages found.</strong> {destination?'The package will be attached to the selected entry; its copy records stay as they are.':plan.packages.every(pkg=>pkg.files.some(f=>/\.(flac|mp3)$/i.test(f.name))&&!pkg.anchors.length)?'A digital entry will be recorded without a physical copy.':'A new entry and one owned physical copy will be recorded for each package.'}</p>
+    {plan.packages.every(pkg=>pkg.files.some(f=>/\.(flac|mp3)$/i.test(f.name))&&!pkg.anchors.length)&&<PurchaseFields value={purchase} disabled={busy} onChange={value=>{setPurchase(value);acceptance.current=undefined;}}/>}
+    {plan.packages.some(pkg=>pkg.blockers.length>0)&&<div className="notice" role="note"><strong>Review before saving</strong>{plan.packages.flatMap(pkg=>pkg.blockers.map(blocker=><p key={`${pkg.position}:${blocker.kind}:${blocker.message}`}>{pkg.default_title}: {blocker.message} {blocker.blocks_analysis?'Originals can still be saved without analysis.':''}</p>))}</div>}
     {destination&&plan.packages.length!==1&&<p className="notice error" role="alert">Choose one package when attaching to an existing entry. Clear the destination to create separate entries for all packages.</p>}
     <label className="inline-check"><input type="checkbox" checked={preserveOnly} disabled={busy} onChange={event=>{setPreserveOnly(event.target.checked);if(event.target.checked)setPrepareMusic(false);}}/> Save originals only</label>
-    <details className="ingest-preview"><summary>Package details and import options</summary>{plan.packages.map(pkg=><div key={pkg.position}><strong>{pkg.default_title}</strong><p>{pkg.files.length} files · destination: {destination?.title||'new collection entry'}</p>{pkg.anchors.length>1&&<fieldset><legend>Main file for analysis (optional) <InfoHelp label="main file">Choose the file that describes this import, such as its CUE sheet.</InfoHelp></legend>{pkg.anchors.map(anchor=><label key={anchor.file_index}><input type="radio" name={`anchor-${pkg.position}`} checked={anchor.selected} disabled={busy} onChange={()=>void chooseAnchor(pkg.position,anchor.file_index)}/>{anchor.label}: {pkg.files[anchor.file_index]?.name}</label>)}</fieldset>}<p className="muted">Metadata: {pkg.metadata_available?'available':'unavailable or not configured'} · Artwork: {pkg.artwork_available?'available':'unavailable or not configured'} · FLAC: {pkg.preparation_available?'available':pkg.preparation_reason||'unavailable'}</p>{pkg.blockers.map(blocker=><p className="notice" key={`${blocker.kind}:${blocker.message}`}>{blocker.message}</p>)}</div>)}<label><input type="checkbox" checked={automatic&&!preserveOnly} disabled={busy||preserveOnly} onChange={event=>setAutomatic(event.target.checked)}/> Find metadata and artwork automatically</label></details>
-    <label><input type="checkbox" disabled={busy||preserveOnly||!plan.packages.every(pkg=>pkg.preparation_available)} checked={prepareMusic} onChange={event=>setPrepareMusic(event.target.checked)}/> Prepare FLAC tracks after import</label>
+    <details className="ingest-preview"><summary>Package details and import options</summary>{plan.packages.map(pkg=><div key={pkg.position}><strong>{pkg.default_title}</strong><p>{pkg.files.length} files · destination: {destination?.title||'new collection entry'}</p><details><summary>File sharing</summary>{pkg.files.map((file,index)=><label key={file.name}><input type="checkbox" checked={file.visibility==='curators'} disabled={busy} onChange={e=>void changeVisibility(pkg.position,index,e.target.checked?'curators':'shared')}/> Curators only: {file.name}</label>)}</details>{pkg.anchors.length>1&&<fieldset><legend>Main file for analysis (optional) <InfoHelp label="main file">Choose the file that describes this import, such as its CUE sheet.</InfoHelp></legend>{pkg.anchors.map(anchor=><label key={anchor.file_index}><input type="radio" name={`anchor-${pkg.position}`} checked={anchor.selected} disabled={busy} onChange={()=>void chooseAnchor(pkg.position,anchor.file_index)}/>{anchor.label}: {pkg.files[anchor.file_index]?.name}</label>)}</fieldset>}<p className="muted">Metadata: {pkg.metadata_available?'available':'unavailable or not configured'} · Artwork: {pkg.artwork_available?'available':'unavailable or not configured'}{pkg.music_actions_available&&<> · FLAC: {pkg.preparation_available?'available':pkg.preparation_reason||'unavailable'}</>}</p>{pkg.blockers.map(blocker=><p className="notice" key={`${blocker.kind}:${blocker.message}`}>{blocker.message}</p>)}</div>)}<label><input type="checkbox" checked={automatic&&!preserveOnly} disabled={busy||preserveOnly} onChange={event=>setAutomatic(event.target.checked)}/> Find metadata and artwork automatically</label></details>
+    {plan.packages.every(pkg=>pkg.music_actions_available)&&<label><input type="checkbox" disabled={busy||preserveOnly||!plan.packages.every(pkg=>pkg.preparation_available)} checked={prepareMusic} onChange={event=>setPrepareMusic(event.target.checked)}/> Prepare FLAC tracks after import</label>}
    </>}
-   {(plan||source==='inbox'||!folderMode)&&<button className="primary" disabled={busy||!!(destination&&plan&&plan.packages.length!==1)||(source==='browser'?!files.length:!inboxPackages.length)}>{plan?`Preserve ${plan.packages.length} ${plan.packages.length===1?'package':'packages'}`:'Preview import'}</button>}
+   {(plan||source==='inbox'||!folderMode)&&<button className="primary" disabled={busy||!!(destination&&plan&&plan.packages.length!==1)||(source==='browser'?!files.length:!inboxPackages.length)}>{plan?`Save ${plan.packages.length} ${plan.packages.length===1?'package':'packages'}`:'Preview import'}</button>}
   </form>
   <p className="muted">Keep this window open until uploading finishes. Processing continues afterward.</p>
   <button disabled={busy} onClick={()=>window.dispatchEvent(new Event('collector-open-work'))}>Open work &amp; history</button>
   </>}
   {detail&&<details className="ingest-detail" open={detailOpen} onToggle={event=>setDetailOpen(event.currentTarget.open)}><summary>Details: {detail.summary.package_name}</summary>
+   <IngestStatus summary={detail.summary}/>
    {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {target?.id===detail.import.association.item_id?target.title:'its saved collection entry'}. Other discs attached to that entry are retained.</p>}
-   {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label={detail.import.source.kind==='browser'?'Upload progress':'Copying original files'} completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Uploaded files are saved on the server."/>}
+   {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label={detail.import.source.kind==='browser'?'Upload progress':'Original files copied'} completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Uploaded files are saved on the server."/>}
+   {detail.import.source.kind==='inbox'&&<section aria-label="Inbox source cleanup" className="notice inbox-cleanup">
+    <strong>Inbox source files</strong>
+    <p>Originals stay in the inbox unless you explicitly remove them here. Cleanup is available after preservation succeeds and requested processing finishes. Optional metadata or preparation failures can still be retried from the archive. Finish other inbox imports first; new inbox imports pause while cleanup runs.</p>
+    {detail.inbox_cleanup&&<>
+     <p role="status">{detail.inbox_cleanup.completed?'Inbox cleanup complete':`Cleanup ${stateLabel(detail.inbox_cleanup.state)}`} · Confirmed removed {bytes(detail.inbox_cleanup.removed_bytes)} of {bytes(detail.inbox_cleanup.total_bytes)}</p>
+     {detail.inbox_cleanup.error&&<p role="alert">{detail.inbox_cleanup.error}</p>}
+     {detail.inbox_cleanup.recovery_directory&&(!detail.inbox_cleanup.completed||detail.inbox_cleanup.retained_files)&&<p>Recovery location: <code>{detail.inbox_cleanup.recovery_directory}</code> inside the configured inbox. Files that could not be moved stay in the original package. Retry cleanup to continue; unimported files are kept.</p>}
+     {detail.inbox_cleanup.retained_files&&<p>Unimported files or directories remain in that recovery area. They were not deleted.</p>}
+     {['queued','running','cancel_requested'].includes(detail.inbox_cleanup.state)&&!detail.inbox_cleanup.completed&&<button disabled={busy||detail.inbox_cleanup.state==='cancel_requested'} onClick={()=>void cancelInboxCleanup()}>Cancel inbox cleanup</button>}
+    </>}
+    {detail.summary.permissions.can_clean_inbox&&!detail.inbox_cleanup?.completed&&(!detail.inbox_cleanup||['failed','cancelled'].includes(detail.inbox_cleanup.state))&&<>
+     <p>Checksums of the inbox files and their preserved archive copies are checked first. Only matching imported files are removed. The inbox must allow renaming and deletion.</p>
+     <label><input type="checkbox" checked={inboxConfirmed} disabled={busy} onChange={event=>setInboxConfirmed(event.target.checked)}/> Copying and editing this source package have finished. Remove its imported inbox files and keep the archive originals.</label>
+     <button disabled={busy||!inboxConfirmed} onClick={()=>void cleanInbox()}>{detail.inbox_cleanup?'Retry inbox cleanup':'Remove imported inbox files'}</button>
+    </>}
+   </section>}
    {detail.cleanup&&<p role="status">Temporary files cleared: {bytes(detail.cleanup.reclaimed_bytes)} · Remaining: {bytes(detail.cleanup.pending_bytes)}{detail.cleanup.cleanup_pending?' · cleanup pending':' · cleanup complete'}</p>}
    {detail.attempts.length>0&&<details><summary>Technical details: previous attempts</summary>{detail.attempts.map((attempt,index)=><p key={`${attempt.job_id}:${attempt.attempt}:${index}`}><strong>{stateLabel(attempt.step)} · attempt {attempt.attempt}</strong> — {stateLabel(attempt.state)}{attempt.diagnostic&&<> · {attempt.diagnostic}</>}</p>)}</details>}
    {detail.summary.capture_id&&<details><summary>Technical details</summary><p>Import ID: {detail.summary.import_id}</p><p>Capture ID: {detail.summary.capture_id}</p></details>}
-   <div className="ingest-steps">{detail.steps.map(step=><div key={step.step}><strong>{stateLabel(step.step)}</strong><span>{stateLabel(step.state)}</span>{step.message&&<p>{step.message}</p>}{step.state==='active'&&<WorkProgress label={`${stateLabel(step.step)} in progress`} detail="The server is working; this view refreshes automatically."/>}{step.retryable&&<button disabled={busy} onClick={()=>void retry(step.job_id)}>Retry this step</button>}</div>)}</div>
+   <div className="ingest-steps">{detail.steps.map(step=><div key={step.step}><strong>{step.step==='staging'&&detail.import.source.kind==='inbox'?'Copy files from inbox':stateLabel(step.step)}</strong><span>{stateLabel(step.state)}</span>{step.message&&<p>{step.message}</p>}{step.retryable&&<button disabled={busy} onClick={()=>void retry(step.job_id)}>Retry this step</button>}</div>)}</div>
    {!uploadProgress&&detail.summary.permissions.can_resume_upload&&<form aria-label="Resume guided package" onSubmit={event=>{event.preventDefault();void resume();}}><p>Select the original folder or files. Received bytes will be checked before the upload continues.</p><label>Original folder<input type="file" multiple {...{webkitdirectory:''}} disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><label>Original files<input aria-label="Resume original package files" type="file" multiple disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><button disabled={busy||!resumeFiles.length}>Resume upload</button></form>}
    {detail.summary.permissions.can_cancel&&<button disabled={busy} onClick={()=>void cancel()}>Cancel remaining work</button>}{detail.summary.permissions.can_discard&&<button disabled={busy} onClick={()=>void discard()}>Discard unfinished import</button>}
    {detail.summary.outcome==='failed'&&!detail.steps.some(step=>step.retryable)&&<button disabled={busy} onClick={()=>void retry(null)}>Retry optional processing</button>}

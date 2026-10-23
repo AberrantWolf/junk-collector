@@ -1,5 +1,13 @@
 # Bulk import, metadata repair and preparation
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 Accepted 2026-10-03. This user assignment takes precedence over the previously
 active serial handoff. Preserve actual archive/private data and all P06 recovery
 and lightweight-query guarantees. Full accepted scope: dedicated Library,
@@ -20,8 +28,9 @@ request ownership and bounded rolling admission.
 
 Defaults: metadata automatic, prepare-after-import explicit and unchecked,
 FLAC only, music plus existing DAT sources, originals preserved before review,
-copies kept distinct unless explicitly mapped, same-collection merges, confirmed
-entry combination even where matching is authoritative. Language variants of one
+copies kept distinct unless explicitly mapped and same-collection merges. The
+2026-10-22 user direction below supersedes confirmation for clear distinct-disc
+MusicBrainz matches; ambiguous combinations retain reviewed confirmation. Language variants of one
 album are not ambiguity. Filename/text-search matches remain suggestions. A disc
 ID identifying genuinely different albums requires review.
 
@@ -84,11 +93,60 @@ loaded result pages, selections and review drafts survive task navigation. The p
 remains outside task pages; mobile reviews have an explicit return path and keyboard
 focus returns to the originating result.
 
-## Next handoff
+## BL1 retention follow-up — 2026-10-17
 
-No BL1–BL3 implementation remains assigned. Continue the existing
-[LA3 second-device qualification](local-alpha-plan.md#ready-to-send-la3-prompt)
-with the intended trusted physical LAN device. Preserve the passing local corpus,
-provider and restore records; qualify new changes separately. Keep blocked DAT
-acquisition disabled. General post-edit splitting, new providers, native/offline
-clients, synchronized listening and backup UI remain separate scoped deliveries.
+The bounded [HL-01 audit](retention-audit.md) extends the existing shared resolution
+pipeline to reuse exact equivalent CAA listings/images/negative responses. A new
+automatic cover Asset belongs to item + image Snapshot, independent of curator;
+changed bytes keep a separate source/Asset. Existing history/manual authority and
+private command recovery remain intact. General record/log deletion is outside
+this delivery. See [dated acceptance](validation/retention-audit-2026-10-17.md).
+
+
+### BL1 review repairs — 2026-10-18
+
+Concurrent provider-cover creation and equal selection converge on one item-owned
+Asset and authority change. Explicit image selection can restore an archived cover
+with preserved payloads, visibility, alternative text and tombstone history;
+automatic refresh cannot restore it. [Repair validation](validation/retention-review-2026-10-18.md)
+covers both reported defects and the effect's conflict/recovery guarantees.
+
+### BL2 grouped-disc publication repair — 2026-10-19
+
+The live NAS workflow exposed sibling imports freezing one album revision, then
+conflicting after the first preservation appended its Evidence reference. Retrying
+the failed Job reused the stale expectation. Publication now accepts only a proven
+same-intake sibling evidence advance with unchanged Item inventory/metadata and
+unchanged prior references, under the archive writer. Existing failed imports use
+the same path on retry after restart. Manual changes remain conflicts and originals
+and physical-copy identities remain stable. See [repair validation](validation/grouped-disc-publication-2026-10-19.md)
+for local tests and the operator-reported successful NAS recovery. Other evening UI/inbox
+findings remain in the consolidated remaining-work queue.
+
+### BL2 import review — HL-07A, 2026-10-19
+
+Batch review exposes shared CUE/Redumper anchor readiness and preserves reviewed
+file visibility, group and copy choices while replanning. Group labels no longer
+set manual title authority. Optional explicit titles apply to the complete group;
+reviewed matching physical-copy labels mean one purchased copy, distinct labels
+mean separate copies. Known new-intake Synology/macOS housekeeping is excluded at
+chooser, planning and staging; unknown files and older accepted inventories survive.
+See [validation](validation/intake-review-2026-10-19.md). Source cleanup stays HL-09.
+
+### Automatic multidisc grouping — 2026-10-22
+
+The user explicitly requested automatic grouping when MusicBrainz clearly
+identifies different discs of the same album. Application policy now reconciles
+accepted album peers and recorded disc-to-medium matches, reusing the portable
+atomic group publisher and undo. Coherent release/language variants are accepted;
+conflicting/manual/incomplete/duplicate-position cases retain review. Active work
+is fenced and deferred; originals and physical-copy records are preserved. Undo
+records separation so automatic reconciliation respects the choice after restart.
+See [current acceptance and limits](validation/automatic-album-grouping-2026-10-22.md).
+
+The ambiguity follow-up also groups invariant membership across unresolved album
+options, keeps those metadata alternatives tentative, accepts equivalent manual
+release/version selections and reassesses unresolved siblings after a choice.
+Competing accepted targets remain reviewed; independent safe subsets can group.
+Catalog v15 indexes multiple viable album options per entry; publication fences
+all assessed neighbors and new competitors. See the same dated acceptance record.

@@ -83,7 +83,7 @@ impl Store {
             collector_app::WorkTarget::Job(id) => ("job", id.to_string()),
         };
         let db = lock(&self.db)?;
-        let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND json_extract(request,'$.import_id')=?3) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
+        let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND (json_extract(request,'$.import_id')=?3 OR id IN (SELECT job_id FROM private.scan_requests WHERE kind='import' AND owner=?3))) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3) OR id IN (SELECT job_id FROM private.game_scan_members WHERE parent=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
         let mut items = stmt
             .query_map(
                 params![
@@ -322,6 +322,7 @@ impl Store {
     }
 
     pub(crate) fn retry_preparation_batch_record(&self, id: JobId, user: UserId) -> Result<()> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -490,22 +491,9 @@ impl Store {
                     && expected
                         .iter()
                         .all(|id| evidence.iter().any(|value| value.id == *id))
-            } else if kind == "catalog_acquisition" {
-                let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
-                request
-                    .get("snapshot_id")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|value| value.parse::<SnapshotId>().ok())
-                    .is_some_and(|snapshot_id| {
-                        lock(&self.db).is_ok_and(|db| {
-                            db.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id=?)",
-                                [snapshot_id.to_string()],
-                                |row| row.get::<_, bool>(0),
-                            )
-                            .unwrap_or(false)
-                        })
-                    })
+            } else if kind == "provider_acquisition" {
+                let db = lock(&self.db)?;
+                db.query_row("SELECT EXISTS(SELECT 1 FROM private.processing_jobs p JOIN snapshots s ON s.id=json_extract(p.output_references,'$[0]') WHERE p.job_id=? AND p.checkpoint='snapshot_committed')",[&id],|r|r.get::<_,bool>(0)).map_err(storage)?
             } else if kind == "music_derivative" {
                 let request: serde_json::Value = serde_json::from_str(&request).map_err(storage)?;
                 let capture: CaptureId =
@@ -576,10 +564,11 @@ impl Store {
     }
     pub(crate) fn enqueue_job_record_with_owners(
         &self,
-        spec: JobSpec,
+        mut spec: JobSpec,
         batch: Option<(JobId, &str)>,
         bulk: Option<(JobId, &str, u32)>,
     ) -> Result<JobId> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
         if spec.kind.is_empty()
             || spec.kind.len() > 120
             || spec.phase.is_empty()
@@ -589,6 +578,11 @@ impl Store {
                 "job kind and phase are required and bounded".into(),
             ));
         }
+        let game_claim = spec
+            .request
+            .as_object_mut()
+            .and_then(|o| o.remove("game_parent_claim"))
+            .and_then(|v| v.as_str().map(str::to_owned));
         let request = serde_json::to_string(&spec.request).map_err(storage)?;
         if let Some(input) = &spec.frozen_input {
             input.validate()?;
@@ -607,6 +601,17 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        self.admit_inbox_cleanup(&tx, &spec)?;
+        if let Some(parent) = spec
+            .request
+            .get("game_parent")
+            .and_then(serde_json::Value::as_str)
+        {
+            let allowed:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs WHERE id=? AND user_id=? AND collection_id=? AND kind='game_catalog_scan' AND state='running' AND cancellation_requested=0 AND claim_token=?)",params![parent,spec.user_id.to_string(),spec.collection_id.map(|v|v.to_string()),game_claim],|r|r.get(0)).map_err(storage)?;
+            if !allowed {
+                return Err(Error::JobCancelled);
+            }
+        }
         if let Some((parent, token, position)) = bulk {
             let allowed:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN private.bulk_library b ON b.id=j.id JOIN private.bulk_library_members m ON m.batch_id=b.id WHERE j.id=? AND j.user_id=? AND j.claim_token=? AND j.state='running' AND j.cancellation_requested=0 AND b.state='accepted' AND m.position=? AND m.state='ready' AND m.item_id=? AND m.collection_id=? AND EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=j.user_id AND u.enabled=1 AND g.collection_id=m.collection_id AND g.role>=1))",params![parent.to_string(),spec.user_id.to_string(),token,position,spec.item_id.map(|v|v.to_string()),spec.collection_id.map(|v|v.to_string())],|r|r.get(0)).map_err(storage)?;
             if !allowed {
@@ -697,6 +702,27 @@ impl Store {
             }
         }
         // Creation time belongs to the first durable request, not output identity.
+        if let Some(FrozenJobInput::GameIdentification(mut proposed)) = spec.frozen_input.clone() {
+            let saved: Option<String> = tx
+                .query_row(
+                    "SELECT frozen_input FROM private.processing_jobs WHERE job_id=?",
+                    [spec.id.to_string()],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(storage)?;
+            if let Some(saved) = saved
+                && let FrozenJobInput::GameIdentification(old) =
+                    serde_json::from_str(&saved).map_err(storage)?
+            {
+                proposed.processing.created_at = old.processing.created_at;
+                proposed.processing.observation_id = old.processing.observation_id;
+                frozen_input = Some(
+                    serde_json::to_string(&FrozenJobInput::GameIdentification(proposed))
+                        .map_err(storage)?,
+                );
+            }
+        }
         if let Some(FrozenJobInput::Derivative(mut proposed)) = spec.frozen_input.clone() {
             let retained: Option<String> = tx
                 .query_row(
@@ -839,6 +865,22 @@ impl Store {
             member.view.state = collector_app::BulkMemberState::Queued;
             tx.execute("UPDATE private.bulk_library_members SET job_id=?,state='queued',record=? WHERE batch_id=? AND position=?",params![spec.id.to_string(),serde_json::to_string(&member).map_err(storage)?,parent.to_string(),position]).map_err(storage)?;
         }
+        let acquisition = match &spec.frozen_input {
+            Some(FrozenJobInput::Acquisition(input)) => Some(input),
+            Some(FrozenJobInput::MetadataResolution(input)) => Some(&input.acquisition),
+            _ => None,
+        };
+        if spec.kind != "provider_acquisition"
+            && let Some(input) = acquisition
+        {
+            Self::attach_acquisition(&tx, spec.id, input, now)?;
+            tx.execute("INSERT OR REPLACE INTO private.acquisition_waits(owner_job,acquisition_job) SELECT owner_job,acquisition_job FROM private.acquisition_links WHERE owner_job=? AND input_key=?",params![spec.id.to_string(),collector_app::acquisition_key(input)?]).map_err(storage)?;
+            tx.execute(
+                "UPDATE private.jobs SET phase=CASE WHEN (SELECT COUNT(*) FROM private.acquisition_links WHERE acquisition_job=(SELECT acquisition_job FROM private.acquisition_links WHERE owner_job=jobs.id LIMIT 1))>1 THEN 'waiting_shared_provider' ELSE 'waiting_provider' END WHERE id=? AND state='queued'",
+                [spec.id.to_string()],
+            )
+            .map_err(storage)?;
+        }
         self.record_command(&tx, &spec.id)?;
         tx.commit().map_err(storage)?;
         Ok(spec.id)
@@ -861,30 +903,61 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        let mut dispatch = lock(&self.job_dispatch)?;
         let candidate: Option<String> = tx
             .query_row(
-                "SELECT candidate.id FROM private.jobs candidate
+                "WITH active AS (
+                   SELECT id,kind,(kind=?3 OR (kind='preservation_import'
+                     AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
+                   FROM private.jobs WHERE state IN ('running','cancel_requested') AND lease_expires>?2
+                 ), runnable AS (
+                   SELECT id,kind,created_at,user_id,json_extract(request,'$.import_id') AS import_id,
+                     (kind=?3 OR (kind='preservation_import' AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
+                   FROM private.jobs
+                   WHERE (state='queued' AND phase='queued') OR
+                     (state='running' AND claim_token IS NOT NULL AND
+                       (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2))
+                 )
+                 SELECT candidate.id FROM runnable candidate
                  WHERE (
-                   (candidate.state='queued' AND candidate.phase='queued') OR
-                   (candidate.state='running' AND
-                     candidate.claim_token IS NOT NULL AND
-                     (candidate.worker_instance IS NULL OR candidate.worker_instance<>? OR candidate.lease_expires<=?))
+                   (SELECT COUNT(*) FROM active
+                    WHERE active.id<>candidate.id
+                      AND (active.kind='provider_acquisition')=(candidate.kind='provider_acquisition'))
+                      < CASE WHEN candidate.kind='provider_acquisition' THEN ?5 ELSE ?6 END
                  )
-                 AND NOT EXISTS(
-                   SELECT 1 FROM private.jobs active
-                   WHERE active.user_id=candidate.user_id
-                     AND active.state IN ('running','cancel_requested')
-                     AND active.lease_expires>?
-                     AND active.id<>candidate.id
-                 )
+                 AND (NOT candidate.is_copy OR (
+                   (SELECT COUNT(*) FROM active
+                    WHERE active.id<>candidate.id AND active.is_copy)< ?7
+                 ))
                  AND (
-                   candidate.state='running' OR
-                   (SELECT COUNT(*) FROM private.jobs active
-                    WHERE active.state IN ('running','cancel_requested')
-                      AND active.lease_expires>?) < 2
+                   candidate.kind='provider_acquisition'
+                   OR NOT EXISTS (
+                     SELECT 1 FROM runnable waiting
+                     WHERE waiting.kind!='provider_acquisition'
+                       AND waiting.is_copy!=candidate.is_copy
+                   )
+                   OR (
+                     SELECT COUNT(*) FROM active
+                     WHERE active.id<>candidate.id
+                       AND active.kind!='provider_acquisition'
+                       AND active.is_copy=candidate.is_copy
+                   ) < MAX(1,?6-1)
                  )
-                 ORDER BY candidate.created_at,candidate.id LIMIT 1",
-                params![worker_instance, now, now, now],
+                 ORDER BY CASE WHEN candidate.kind='import_publication'
+                     AND candidate.user_id||':'||candidate.import_id=?9 THEN 0
+                   WHEN candidate.kind='provider_acquisition'
+                     OR candidate.is_copy=?4 THEN 1 ELSE 2 END,
+                   CASE WHEN candidate.kind IN ('metadata_resolution','metadata_existing') THEN
+                     CASE WHEN ?10 THEN -1 ELSE 10 END
+                     WHEN candidate.kind IN ('import_analysis','import_publication') THEN
+                     COALESCE((SELECT CAST(key AS INTEGER) FROM json_each(?8)
+                       WHERE value=candidate.user_id||':'||candidate.import_id),9) ELSE 9 END,
+                   candidate.created_at,candidate.id LIMIT 1",
+                params![worker_instance, now, collector_app::IMPORT_COPY_JOB_KIND,
+                    dispatch.prefers_copy(), collector_app::PROVIDER_JOB_SLOTS,
+                    dispatch.settings.processing_workers, dispatch.settings.copy_workers,
+                    serde_json::to_string(&dispatch.preferred_imports()).map_err(storage)?,
+                    dispatch.preferred_publication(), dispatch.prefers_metadata()],
                 |row| row.get(0),
             )
             .optional()
@@ -946,6 +1019,11 @@ impl Store {
             .optional()
             .map_err(storage)?;
         tx.commit().map_err(storage)?;
+        dispatch.admitted(
+            &row.3,
+            row.0.parse().map_err(storage)?,
+            &serde_json::from_str::<serde_json::Value>(&row.4).map_err(storage)?,
+        );
         let created_at = chrono::DateTime::from_timestamp(row.8, 0)
             .ok_or_else(|| Error::Storage("job creation timestamp is invalid".into()))?;
         Ok(Some(JobClaim {
@@ -991,7 +1069,7 @@ impl Store {
                    completed_units=CASE WHEN phase<>? OR updated_at<? THEN ? ELSE completed_units END,
                    lease_expires=?,
                    updated_at=CASE WHEN phase<>? OR updated_at<? THEN ? ELSE updated_at END
-                 WHERE id=? AND claim_token=? AND state='running' AND completed_units<=? AND ?<=total_units",
+                 WHERE id=? AND claim_token=? AND state='running' AND completed_units<=? AND ?<=total_units AND lease_expires>?",
                 params![
                     phase,
                     now,
@@ -1007,6 +1085,7 @@ impl Store {
                     claim_token,
                     completed_units,
                     completed_units,
+                    now,
                 ],
             )
             .map_err(storage)?;
@@ -1029,11 +1108,12 @@ impl Store {
         let changed = lock(&self.db)?
             .execute(
                 "UPDATE private.jobs SET lease_expires=?
-                 WHERE id=? AND claim_token=? AND state='running'",
+                 WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
                 params![
                     now.saturating_add(lease_seconds),
                     id.to_string(),
                     claim_token,
+                    now,
                 ],
             )
             .map_err(storage)?;
@@ -1049,8 +1129,11 @@ impl Store {
         claim_token: &str,
         result: serde_json::Value,
     ) -> Result<()> {
-        let db = lock(&self.db)?;
-        let prior: Option<String> = db
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let prior: Option<String> = tx
             .query_row(
                 "SELECT result FROM private.jobs WHERE id=? AND claim_token=? AND state='running'",
                 params![id.to_string(), claim_token],
@@ -1075,7 +1158,7 @@ impl Store {
         if result.len() > 1024 * 1024 {
             return Err(Error::Invalid("job result is too large".into()));
         }
-        let changed = db
+        let changed = tx
             .execute(
                 "UPDATE private.jobs SET state='completed',phase='completed',completed_units=total_units,result=?,error=NULL,worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=? WHERE id=? AND claim_token=? AND state='running'",
                 params![result, self.clock.now().timestamp(), id.to_string(), claim_token],
@@ -1084,7 +1167,16 @@ impl Store {
         if changed != 1 {
             return Err(Error::CommandInProgress);
         }
-        Ok(())
+        let value: serde_json::Value = serde_json::from_str(&result).map_err(storage)?;
+        if let Some(raw) = value
+            .get("completion")
+            .or(Some(&value))
+            .and_then(|v| v.get("snapshot_id"))
+            .and_then(|v| v.as_str())
+        {
+            Self::bind_snapshot(&tx, id, raw.parse().map_err(storage)?)?;
+        }
+        tx.commit().map_err(storage)
     }
 
     pub(crate) fn fail_job_record(
@@ -1129,8 +1221,8 @@ impl Store {
         let db = lock(&self.db)?;
         let cancelled: bool = db.query_row(
                 "SELECT state='cancel_requested' OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
-                 WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested')",
-                params![id.to_string(), claim_token],
+                 WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
+                params![id.to_string(), claim_token, self.clock.now().timestamp()],
                 |row| row.get(0),
             )
             .optional()
@@ -1194,6 +1286,14 @@ impl Store {
             if shared {
                 return Err(Error::Conflict);
             }
+        }
+        if kind == "game_catalog_scan" {
+            tx.execute("UPDATE private.jobs SET cancellation_requested=1,state=CASE WHEN state='queued' THEN 'cancelled' ELSE 'cancel_requested' END WHERE id IN (SELECT job_id FROM private.scan_requests WHERE kind='game_batch' AND owner=?) AND state IN ('queued','running','cancel_requested') AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND (r.kind<>'game_batch' OR r.owner<>?))",params![id.to_string(),id.to_string()]).map_err(storage)?;
+            tx.execute(
+                "DELETE FROM private.scan_requests WHERE kind='game_batch' AND owner=?",
+                [id.to_string()],
+            )
+            .map_err(storage)?;
         }
         let scan: bool = tx
             .query_row(
@@ -1336,6 +1436,7 @@ impl Store {
         }
     }
     pub(crate) fn retry_failed_job_record(&self, id: JobId, user: UserId) -> Result<JobId> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -1468,6 +1569,7 @@ impl Store {
             "error": error,
             "failed_at": failed_at,
         }));
+        tx.execute("DELETE FROM private.acquisition_links WHERE owner_job=? AND snapshot_id IS NULL AND acquisition_job IN (SELECT id FROM private.jobs WHERE state IN ('failed','cancelled'))",[id.to_string()]).map_err(storage)?;
         tx.execute(
             "UPDATE private.jobs SET state='queued',phase='queued',completed_units=0,
                attempt=attempt+1,error=NULL,result=?,cancellation_requested=0,
@@ -1491,6 +1593,10 @@ fn cancel_job_import(
     request: &str,
     now: i64,
 ) -> Result<()> {
+    // Removing an optional source copy does not cancel the preserved import.
+    if kind == "inbox_cleanup" {
+        return Ok(());
+    }
     let request: serde_json::Value = serde_json::from_str(request).map_err(storage)?;
     if let Some(import_id) = request.get("import_id").and_then(serde_json::Value::as_str) {
         // Generic Job cancellation must also settle guided provider work. Its
@@ -1601,6 +1707,9 @@ fn ensure_album_admission_capacity(
 }
 
 fn scan_key_for_spec(tx: &Connection, spec: &JobSpec) -> Result<Option<String>> {
+    if let Some(FrozenJobInput::GameIdentification(frozen)) = &spec.frozen_input {
+        return frozen.key().map(Some);
+    }
     if let Some(FrozenJobInput::Processing(frozen)) = &spec.frozen_input {
         let raw = frozen
             .snapshot_id
@@ -1669,6 +1778,10 @@ fn active_scan(
     id.map(|v| v.parse().map_err(storage)).transpose()
 }
 fn retain_scan_request(tx: &Connection, id: JobId, spec: &JobSpec) -> Result<()> {
+    let game_parent = spec
+        .request
+        .get("game_parent")
+        .and_then(serde_json::Value::as_str);
     let parent = spec
         .request
         .get("guided")
@@ -1680,14 +1793,54 @@ fn retain_scan_request(tx: &Connection, id: JobId, spec: &JobSpec) -> Result<()>
                 .and_then(serde_json::Value::as_str)
         })
         .flatten();
-    let owner = parent
+    if let Some(parent) = game_parent {
+        let representation = spec
+            .request
+            .get("representation_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(Error::Conflict)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO private.game_scan_members VALUES(?,?,?,?)",
+            params![
+                parent,
+                spec.item_id.ok_or(Error::Conflict)?.to_string(),
+                representation,
+                id.to_string()
+            ],
+        )
+        .map_err(storage)?;
+    }
+    if matches!(
+        spec.frozen_input,
+        Some(FrozenJobInput::GameIdentification(_))
+    ) && game_parent.is_none()
+        && parent.is_none()
+    {
+        tx.execute(
+            "INSERT OR IGNORE INTO private.game_direct_members VALUES(?,?,?)",
+            params![
+                spec.id.to_string(),
+                spec.user_id.to_string(),
+                id.to_string()
+            ],
+        )
+        .map_err(storage)?;
+    }
+    let owner = game_parent
+        .or(parent)
         .map(str::to_owned)
         .unwrap_or_else(|| spec.user_id.to_string());
     tx.execute(
         "INSERT OR IGNORE INTO private.scan_requests(job_id,kind,owner) VALUES(?,?,?)",
         params![
             id.to_string(),
-            if parent.is_some() { "import" } else { "direct" },
+            if game_parent.is_some() {
+                "game_batch"
+            } else if parent.is_some() {
+                "import"
+            } else {
+                "direct"
+            },
             owner
         ],
     )
@@ -1749,7 +1902,7 @@ impl Store {
 
 // Shared computation remains eligible while an independent owner needs it.
 // A committed publication may finish its private receipt after supersession.
-fn job_generation_obsolete(db: &rusqlite::Connection, id: JobId) -> Result<bool> {
+pub(crate) fn job_generation_obsolete(db: &rusqlite::Connection, id: JobId) -> Result<bool> {
     db.query_row("SELECT (EXISTS(SELECT 1 FROM items i WHERE i.id=COALESCE(jobs.item_id,(SELECT item_id FROM private.imports WHERE id=json_extract(jobs.request,'$.import_id'))) AND COALESCE(json_extract(i.record,'$.lifecycle.generation'),0)<>COALESCE((SELECT generation FROM private.item_job_generations g WHERE g.job_id=jobs.id),0)) AND NOT EXISTS(SELECT 1 FROM private.scan_requests r WHERE r.job_id=jobs.id AND r.kind='direct') AND NOT EXISTS(SELECT 1 FROM private.derivative_direct_requests r WHERE r.job_id=jobs.id) AND NOT (jobs.kind='import_publication' AND EXISTS(SELECT 1 FROM private.imports p JOIN captures c ON c.id=p.capture_id WHERE p.id=json_extract(jobs.request,'$.import_id')))) FROM private.jobs WHERE id=?", [id.to_string()], |row|row.get::<_,bool>(0)).optional().map_err(storage).map(|value|value.unwrap_or(false))
 }
 

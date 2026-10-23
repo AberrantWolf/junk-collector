@@ -454,7 +454,10 @@ fn write_selected_pcm(
                     "authorized PCM ended inside a recipe track",
                 ));
             }
-            for (frame, raw) in frames[..count].iter().zip(bytes.chunks_exact_mut(4)) {
+            for (frame, raw) in frames[..count]
+                .iter()
+                .zip(bytes.as_chunks_mut::<4>().0.iter_mut())
+            {
                 raw[..2].copy_from_slice(&frame[0].to_le_bytes());
                 raw[2..].copy_from_slice(&frame[1].to_le_bytes());
             }

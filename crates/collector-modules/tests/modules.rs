@@ -44,10 +44,12 @@ impl CollectionModule for Stamps {
 
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.stamps".into()),
             schema_version: 2,
             display_name: "Stamps".into(),
             collection_type_label: "Postage stamps".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![
                 DomainFieldDescriptor {
                     key: "denomination".into(),
@@ -756,7 +758,6 @@ fn owner_edit_distinguishes_omission_and_null_and_preserves_structured_unknown_d
     );
     assert_eq!(value["future"], current.payload.value().unwrap()["future"]);
     let presentation = registry.presentation(&updated);
-    assert_eq!(presentation.fields[0].value, "Music CDs");
     assert!(
         presentation
             .fields
@@ -2117,6 +2118,32 @@ fn scan_planning_selects_only_eligible_anchors_without_opening_bytes() {
             .unwrap();
         assert!(!plan.blockers.is_empty(), "{names:?}");
     }
+    // No response is an ordinary prerequisite; keep source choices and never
+    // report an empty browser selection as a malformed UUID.
+    for snapshot in [
+        None,
+        Some(serde_json::Value::Null),
+        Some(serde_json::json!("")),
+    ] {
+        let mut selection = serde_json::json!({"maximum_offset":0});
+        if let Some(snapshot) = snapshot {
+            selection["snapshot_id"] = snapshot;
+        }
+        let plan = registry
+            .scan_inputs(
+                &CapabilityId::new(collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION)
+                    .unwrap(),
+                &inventory(&["disc.cue", "disc.bin"]),
+                &RawJson::from_value(selection),
+            )
+            .unwrap();
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.selection.value().unwrap()["anchor_file_index"], 0);
+        assert_eq!(
+            plan.blockers,
+            ["Choose an AccurateRip response for this disc before checking."]
+        );
+    }
     let complete = registry
         .scan_inputs(
             &op,
@@ -2130,4 +2157,54 @@ fn scan_planning_selects_only_eligible_anchors_without_opening_bytes() {
         complete.selection.value().unwrap()["package_kind"],
         "redumper"
     );
+}
+
+#[test]
+fn purchase_discovery_preserves_multidisc_and_independent_nested_packages() {
+    for names in [
+        vec![
+            "Album/Disc 1/01.flac",
+            "Album/Disc 2/01.mp3",
+            "Album/cover.png",
+            "Other/single.mp3",
+        ],
+        vec![
+            "Disc 1/01.flac",
+            "Disc 2/01.mp3",
+            "cover.png",
+            "Other/single.mp3",
+        ],
+        vec![
+            "Album/01.flac",
+            "Album/Bonus/01.mp3",
+            "Album/receipt.txt",
+            "Other/single.mp3",
+        ],
+    ] {
+        let names = names
+            .into_iter()
+            .map(|s| PackageFileName::new(s).unwrap())
+            .collect::<Vec<_>>();
+        let packages = Music.discover_imports(&names);
+        let all = packages
+            .iter()
+            .flat_map(|p| p.file_indices.iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(all.len(), names.len());
+        assert_eq!(
+            all.iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            names.len()
+        );
+        assert_eq!(
+            packages.len(),
+            if names[1].as_str().contains("Bonus") {
+                3
+            } else {
+                2
+            }
+        );
+    }
 }

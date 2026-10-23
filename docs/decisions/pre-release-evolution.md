@@ -1,5 +1,10 @@
 # Pre-release contract and storage evolution
 
+**Scope update (2026-10-09):** use [remaining work](../remaining-work.md)
+and [home-lab policy](home-lab-scope.md). Older future contracts/order and blanket
+history requirements below need reassessment. Preserve actual data/recovery and
+valid current boundaries; Phono Junk is no longer a target.
+
 Accepted 2026-09-11 after the user's W4.2 review request. This policy overrides
 compatibility-only requirements in earlier wave plans, schema reservations and
 API migration notes. It does not change product scope or preservation guarantees.

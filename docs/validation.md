@@ -1,12 +1,116 @@
 # Validation recorded for the foundation
 
+## Digital purchases — 2026-10-19
+
+See [HL-02 implementation and acceptance evidence](validation/digital-purchases-2026-10-19.md).
+HL-02 is delivered. Independent format vectors, privacy/recovery checks, real
+Chrome and actual Trash Amp online/download/offline GUI journeys passed. Broader
+LAN/device qualification remains in the consolidated queue.
+
+## Automatic standard-game identification — 2026-10-10
+
+[Delivery validation](validation/game-identification-2026-10-10.md) records shared
+DAT/format vectors, finite catalog policy, source-bound matches, paged activation
+recovery, durable requester ownership, manual authority and real offline browser
+upload/activation/identification. The [supported matrix](game-identification.md)
+limits the capability claim; this delivery does not qualify universal game formats.
+
+## AccurateRip response selection repair — 2026-10-09
+
+Cause: the check panel chose from collection-wide saved responses, preferring an
+active/newest response without checking its disc identity. The worker's frozen
+layout guard correctly refused a foreign query before computing audio checksums.
+
+Local regression: the real music service/store workflow accepts its matching
+query and blocks independent changes to track count, AccurateRip ID1, ID2 and
+CDDB ID before Job admission. The same workflow resolves the query from import analysis before a separate
+structure check, with the archived audio temporarily unavailable, proving that
+planning reads recorded evidence rather than audio. An absent snapshot choice
+still returns that query. Existing checksum/snapshot/reindex assertions remain.
+`node web/tests/accuraterip-snapshots.mjs` uses the real React processing panel with
+explicit offline API fixtures: three equal-track-count discs, stale remembered
+foreign response, matching response on the second page, missing-match guidance,
+correct submission, and source-specific selection after acquisition refresh.
+
+Passed: architecture/document links, formatting, workspace tests (the existing
+owned-dump and scale gates remain ignored), strict workspace Clippy, web TypeScript
+check/build, generated API contract check, the focused browser regression and the
+full temporary-server browser smoke journey on Chrome 153.0.8010.37. The final
+empty-choice/import-evidence regression was rerun after the workspace suite;
+Clippy and the Rust server were rebuilt after that correction. Smoke includes the
+real synthetic AccurateRip acquisition/check workflow and embedded-asset equality.
+Real owned albums and live AccurateRip remain unqualified; no claim is made that this selection repair proves
+their PCM matches. Originals, provider responses and existing evidence are retained.
+
+Follow-up recovery regression (same day): absent/null/empty reference selections
+produce one ordinary prerequisite and retain the eligible source anchor. Scan-plan
+eligibility returns the actual current import-analysis observation ID. The real
+service acquires a valid response from that imported layout before any dedicated
+structure Job. The browser fixture uses an import-only nested layout and asserts
+the fetch action, retained source choice, absence of UUID errors, omitted empty
+reference field and correct acquisition observation ID. Envelope/selection reference
+mismatch remains blocked. Passed: the module planning regression, the real
+music service/store acquisition/check/reindex regression, the updated offline
+browser regression, architecture/document links, formatting, workspace tests,
+strict workspace Clippy, TypeScript check/build, generated API contracts and the
+full Chrome temporary-server smoke journey. The final admission-envelope guard
+and retained multi-anchor fetch eligibility adjustment were followed by the focused
+store workflow, Clippy and a Rust server rebuild. Owned-disc/live-provider and
+explicitly ignored scale qualification remain outstanding.
+
+## File-check progress — 2026-10-09
+
+Read-only process inspection showed the existing home-server debug process using
+98.7% CPU while its processing counter remained zero. This establishes activity,
+not the state/outcome of a particular disc. The processing executor previously
+never advanced its admitted source-byte counter during checksum work. That work
+has variable offset coverage and cannot honestly use source bytes as a percentage.
+
+Regression: application Job DTOs serialize typed indeterminate progress for active
+processing; measured encoding and terminal Jobs retain their existing measured
+presentation. The real React panel fixture renders the AccurateRip computation
+phase and a progress element without a value, and omits the false `0 of` counter.
+Existing real acquisition/check/source-recheck/reindex tests still pass. Worker
+phase updates retain cancellation/claim fencing; no active installation was
+restarted or its Job modified. Shared disc and AccurateRip crates now build with
+optimization in the development profile. No live whole-disc throughput/ETA claim
+is made. Passed: architecture/document links, formatting, workspace tests
+(existing owned-dump/scale gates remain ignored), strict workspace Clippy,
+TypeScript check/build, generated API contract check, the focused real-panel
+browser regression and the full temporary-server Chrome smoke journey. The Rust
+server was rebuilt with current embedded assets and optimized shared audio crates.
+
+## Documentation consolidation — 2026-10-09
+
+Remaining work is consolidated in [the home-lab queue](remaining-work.md).
+The unnecessary backlog archive, obsolete wave queues/music-first proposal and
+superseded assignment prompts were removed. Useful unfinished scope and advanced
+security design are consolidated in that file; dated implementation evidence remains. Release scope/status/development instructions and
+older handoff pointers now follow [the revised policy](decisions/home-lab-scope.md):
+Phono is retired, proposed contracts need reassessment, repeated lookups do not
+require permanent collection provenance, and advanced security/scale work is deferred
+unless practically needed. No runtime, archive or sibling data was changed.
+
+Validation: `python3 scripts/check_architecture.py` passed (architecture, document
+file links and fixture manifests); changed-document fragment/reference coverage and
+`git diff --check` passed. Runtime suites were not rerun for these prose-only edits.
+Existing qualification gaps stay open; none was accepted by reprioritization.
+
+## Recent TODO delivery — 2026-10-09
+
+[October validation](validation/october-todos.md) records music-only controls,
+no-active-catalog import results, manual DAT upload/review/activation, offline
+existing-game matching and Rust 1.99 release/container qualification. It retains
+separate shared-library strict-Clippy findings and the temporary-copy Phono lockfile
+adjustment. Physical LA3/PJ1 qualification is unchanged.
+
 ## Collection lists and playlists — 2026-10-03
 
 [Collection-list validation](validation/collection-lists.md) records portable ordered
 lists, role boundaries, recovery, source resolution and real playlist playback.
 CL1 is locally accepted: repository gates and the real Chrome playlist/shuffle,
-mobile and keyboard journeys passed. The [delivery ledger](collection-lists-plan.md)
-records the remaining scope and next handoff.
+mobile and keyboard journeys passed. The [delivery record](collection-lists-plan.md) records implementation and
+acceptance; [remaining work](remaining-work.md) is the only work queue.
 
 ## Catalog startup and write performance — 2026-10-03
 
@@ -4084,3 +4188,163 @@ Git passed four adapter unit tests and the two-real-server integration test for
 streaming, downloading, editing and offline retention. Its five Collector
 manifest dependencies were changed only in the temporary copy. The real checkout
 was not modified. The CI-only follow-up does not change that tested Rust source.
+
+
+## Compact album format availability — 2026-10-09
+
+User-requested presentation change in the shared album browse/preparation component.
+Track names and list/queue controls take priority over small inline format labels.
+Ready downloads show a check, preparation a plus, active work an ellipsis, and
+unavailable profiles a minus with native disclosure of the complete reason.
+FLAC and distinct Opus bitrates retain their full accessible names; visible Opus
+labels shorten `kbps` to `k`. File sizes remain in download names/hover text.
+Container-width layout keeps narrow desktop album panels from squeezing titles;
+mobile wraps the labels beneath track controls. No API, preparation policy,
+playback selection, authorization or storage changes.
+
+Validation: architecture/document links, Rust formatting, workspace tests, strict
+workspace/all-target Clippy, TypeScript check, web build and embedded-server rebuild
+passed. Browser smoke uses a temporary profile/server and virtual WebAuthn;
+Chrome 153.0.8010.37 exercised preparation, authenticated downloads, actual FLAC
+playback, queue/list actions and revocation. Desktop (1440×1000 viewport) and
+mobile (390×844) track-row screenshots were inspected with real fixture rows and
+unavailable Opus profiles. Test-only screenshot instrumentation is removed after
+review; no substitute production responses or permanent icon assets were added.
+
+
+### Entry-panel edge repair — 2026-10-09
+
+The desktop selected-entry panel now occupies the rightmost 360px from the top
+of the viewport to the measured player-dock boundary (or the viewport bottom
+without a dock). Its explicit viewport-based height and existing overflow keep
+long albums independently scrollable. The library reserves that width for all
+headers and controls, not just the results grid. The old right gutter and
+shortened scroll area no longer leave exposed page background around the panel.
+Shell bottom padding reserves exactly the dock height rather than adding another
+20px of blank scrolling space.
+The panel background and sticky Back to results control share one continuous
+surface. Mobile/tablet retain their ordinary full-page entry layout.
+
+Targeted navigation acceptance passed with the rebuilt server: panel top/right
+edges match the viewport, its bottom meets the dock within one pixel, and the
+library toolbar ends before the panel. Desktop 1360×980 and mobile 390×844
+screenshots were inspected; mobile has no horizontal overflow. The album smoke
+also checks top/middle/bottom panel scroll positions and library-page scrolling.
+Navigation and album smoke workflows passed. All geometry/screenshot
+instrumentation is temporary and removed after review.
+
+
+### Compact track-led album browsing — 2026-10-09
+
+Album browsing now uses a small cover/title header and a quiet track list. Each
+track has one ellipsized title line and one format line; Opus is named once before
+its distinct bitrates. Track/list/queue actions, album management and refresh use
+native overflow popovers. Native light dismissal and Escape retain the containing
+album/editor and return focus to the trigger. The application and shared dialog
+Escape handlers defer to an open popover. Popovers use the top layer so scroll
+areas cannot clip their actions. Available downloads retain full accessible format
+names and sizes; unavailable reasons and unsupported-playback help remain readable.
+
+Disc details/checks, inventory facts, descriptive metadata, evidence and stored files
+remain present behind collapsed disclosures. The dedicated preparation task keeps
+its working plan/progress controls. Artwork failure still offers retry in the small
+header, and removed albums retain their restore action and explanatory state.
+No application policy, data or availability mechanism changes.
+
+Automated UI acceptance checks feature visibility, collapsed diagnostics, functional
+management/list/queue commands, keyboard menu dismissal/focus and actual playback.
+The old `display: grid` assertion is removed: a particular layout mechanism is not
+a product guarantee. Pixel heights are visual-review evidence, not unit-test
+contracts. Screenshots at desktop 1440×1000 and mobile 390×1000 are captured for
+review. Browse and FX-05 journeys exercise artwork retry, late/failed evidence,
+retained-original playback, replacement, removal and restoration through menus.
+Their stale upload/completion wording selectors now use the actual current controls;
+no production success behavior was changed to satisfy those old expectations.
+
+
+Acceptance passed: TypeScript/web build and embedded-server rebuild, architecture/
+document checks, Rust formatting, full browser smoke, browse and FX-05 journeys.
+The focused `test:actions` browser fixture checks the actual shared popover/dialog
+components: keyboard opening, Escape preserving the editor and restoring focus,
+action execution/dismissal, outside-click dismissal and separate editor closure.
+Desktop/mobile screenshots confirm the compact two-line rows. Workspace Rust tests
+and strict Clippy passed earlier in this delivery; this pass changes presentation
+and browser tests only.
+
+## AccurateRip browsing shortcut — 2026-10-09
+
+Album browse rows expose recorded status per current visible original rather than
+the separate inventory Identity flag. The column and album menu open the existing
+check workspace directly; focused operations only include preservation masters.
+Results are resolved against committed source fingerprints, without audio reads
+in presentation. A verified fraction describes originals, not missing album discs.
+
+Focused browser acceptance covers unchecked, verified, partial, mismatch, no-data,
+incomplete-search, ambiguous-offset, unavailable and unsupported labels; empty and
+reader-only states; and keyboard activation of the correct album. The real-server
+smoke journey opens AccurateRip from the album menu, runs structure and synthetic
+AccurateRip checks, confirms that another unchecked original stays unchecked,
+then opens checks directly from the refreshed list column.
+
+Passed: architecture/link checks, Rust formatting, full Rust workspace tests,
+strict workspace Clippy, generated API contract check, TypeScript check, web build
+and embedded-server rebuild; `test:audio-checks`, `test:browse` and full
+`test:smoke`. Desktop/mobile screenshots were inspected. Album locators now
+explicitly distinguish opening an album from its independent AccurateRip shortcut.
+The existing nested Work & history browser-Back issue is recorded under HL-08;
+this journey returns to the list through Library navigation.
+
+Dated follow-up (2026-10-18): the explicit Library return defect is now repaired;
+see the [nested-work navigation regression](validation/library-work-return-2026-10-18.md).
+
+Live owned-disc AccurateRip qualification remains unperformed; this delivery does
+not broaden the verifier's existing evidence or coverage claims.
+
+
+## Concurrent processing and provider response reuse — 2026-10-10
+
+See [delivery validation](validation/concurrent-processing.md) for transactional
+scheduling, durable shared ownership, response reuse, conversion interruption tests,
+real browser fixtures and local FLAC performance measurements. No live archive was
+converted; live-provider/owned-disc qualification and hashing redesign remain separate.
+
+## SQ Relax Vol. 2 live AccurateRip lookup — 2026-10-10
+
+Read-only investigation of **SQ Relax - Krystelle's Chillwave Vol. 2** in the
+local running installation confirmed the current “No data” result for its exact
+preserved disc layout. The live archive/private state was not modified and no
+results were submitted externally.
+
+- Decoded the original 180-byte redumper TOC independently of Collector/shared
+  libraries. Its 21 track starts agree with the original dump log; first LBA is 0
+  and lead-out is 312008. Independently computed AccurateRip/FreeDB IDs are
+  `00350715-03223214-19104015`, matching recorded structure and verification inputs.
+  The ID/URL calculation was cross-checked against the
+  [Python Audio Tools source](https://github.com/tuffy/python-audio-tools/blob/master/audiotools/accuraterip.py).
+- Fresh HTTPS and HTTP requests to
+  [the exact AccurateRip entry](https://www.accuraterip.com/accuraterip/5/1/7/dBAR-021-00350715-03223214-19104015.bin)
+  both returned HTTP 404, 1245 bytes, SHA-256
+  `dc1d54dab6ec8c00f70137927504e4f222c8395f10760b6beecfcfa94e08249f`.
+  This exactly matches retained snapshot `5a12cd95-7b86-5a0b-9777-65b0fbdcd07d`;
+  its recorded length/digest were verified against its actual small response bytes.
+- A known-positive control on the same HTTPS endpoint returned HTTP 200 and
+  157 bytes. Its decoded DBAR header matched all expected values:
+  16 tracks, `0028c27c-01f34071-d0114a10`.
+- Reviewed provider handling and UI status mapping: HTTP 404 becomes typed
+  `no_data`; network failures and other unsuccessful HTTP statuses are errors.
+  The row displays the current original's recorded `no_data` result.
+
+This establishes missing database data for this TOC at the time of the check,
+not absence for every pressing or proof of audio accuracy. No full audio-payload
+scan or new verification run was performed. AccurateRip submission investigation
+remains an HL-08 follow-up.
+
+Dated follow-up (2026-10-18): the bounded
+[contribution investigation](accuraterip-contribution-investigation.md) is complete,
+with a supported Windows external-tool recommendation and explicit blockers to
+Collector submission. No results were submitted or new lookup performed.
+
+## Container install/update packaging — 2026-10-19
+
+See [container packaging checks and execution limits](validation/container-packaging-2026-10-19.md)
+and the separate [actual NAS preservation/recovery drill](validation/synology-deployment-2026-10-19.md).

@@ -1,0 +1,4 @@
+# Disposable test tools only; never run this image against live Collector roots.
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends btrfs-progs && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["btrfs"]

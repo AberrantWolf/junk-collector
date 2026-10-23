@@ -54,7 +54,7 @@ impl Store {
                 .prepare(
                     "SELECT id FROM items WHERE id>? AND deleted=1 AND (
                    EXISTS(SELECT 1 FROM private.guided_ingest_intents g
-                          WHERE g.target_item_id=items.id AND g.cancelled=0)
+                          WHERE g.target_item_id=items.id AND g.cancelled=0 AND g.settled=0)
                    OR EXISTS(SELECT 1 FROM private.imports p
                           WHERE p.item_id=items.id AND p.phase NOT IN ('published','cancelled'))
                    OR EXISTS(SELECT 1 FROM private.jobs j
@@ -113,7 +113,7 @@ impl Store {
         .map_err(storage)?;
         tx.execute(
             "UPDATE private.guided_ingest_intents
-             SET cancelled=1,settled=1,updated_at=? WHERE target_item_id=? AND cancelled=0",
+             SET cancelled=1,settled=1,updated_at=? WHERE target_item_id=? AND cancelled=0 AND settled=0",
             params![now, id.to_string()],
         )
         .map_err(storage)?;
@@ -349,11 +349,8 @@ impl Store {
                 params![import.to_string(),context.item_id.to_string(),collection.to_string(),context.generation], |row|row.get::<_,bool>(0)
             ).map_err(storage)?,
             collector_app::ItemEffectSource::Snapshot(snapshot) => db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN snapshots s ON s.id=?1
-                 WHERE j.item_id=?2 AND j.collection_id=?3 AND s.collection_id=?3
-                 AND j.state='completed'
-                 AND COALESCE(json_extract(j.result,'$.completion.snapshot_id'),json_extract(j.result,'$.snapshot_id'))=s.id
-                 AND COALESCE((SELECT generation FROM private.item_job_generations v WHERE v.job_id=j.id),0)=?4)",
+                "SELECT EXISTS(SELECT 1 FROM private.snapshot_bindings b JOIN snapshots s ON s.id=b.snapshot_id
+                 WHERE b.snapshot_id=?1 AND b.item_id=?2 AND s.collection_id=?3 AND b.generation=?4)",
                 params![snapshot.to_string(),context.item_id.to_string(),collection.to_string(),context.generation], |row|row.get::<_,bool>(0)
             ).map_err(storage)?,
         };

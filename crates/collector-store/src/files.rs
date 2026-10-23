@@ -3,6 +3,12 @@ use sha2::{Digest as _, Sha256};
 use std::io::{Read, Seek, SeekFrom};
 
 const CHUNK_LIMIT: usize = 8 * 1024 * 1024;
+
+enum ExistingAsset {
+    Reject,
+    Reuse { restore_archived: Option<Revision> },
+}
+
 pub(crate) fn safe_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 1024
@@ -661,6 +667,7 @@ impl Store {
                 ));
             }
             files.push(StoredFile {
+                visibility: file.visibility.unwrap_or(Visibility::Shared),
                 name: file.name.clone(),
                 bytes: length,
                 digest,
@@ -676,6 +683,7 @@ impl Store {
             Some(capture) => capture,
             None => {
                 let capture = Capture {
+                    purchase: None,
                     id: upload.capture_id,
                     collection_id: item.collection_id,
                     revision: Revision(1),
@@ -1169,6 +1177,34 @@ impl Store {
         bytes: &[u8],
         context: collector_app::AssetWriteContext,
     ) -> Result<AssetState> {
+        self.write_asset_record(asset_id, command, bytes, context, ExistingAsset::Reject)
+    }
+
+    pub(crate) fn materialize_provider_artwork_record(
+        &self,
+        asset_id: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+        context: collector_app::ItemEffectContext,
+        restore_archived: Option<Revision>,
+    ) -> Result<AssetState> {
+        self.write_asset_record(
+            asset_id,
+            command,
+            bytes,
+            collector_app::AssetWriteContext::Item(context),
+            ExistingAsset::Reuse { restore_archived },
+        )
+    }
+
+    fn write_asset_record(
+        &self,
+        asset_id: AssetId,
+        command: CreateAssetCommand,
+        bytes: &[u8],
+        context: collector_app::AssetWriteContext,
+        existing: ExistingAsset,
+    ) -> Result<AssetState> {
         let CreateAssetCommand {
             collection_id,
             subject,
@@ -1176,38 +1212,46 @@ impl Store {
             visibility,
             alt_text,
         } = command;
-        if bytes.len() > 20 * 1024 * 1024 || alt_text.len() > 4096 {
-            return Err(Error::Invalid("image exceeds upload limit".into()));
+        if bytes.len() > collector_app::MAX_ASSET_BYTES || alt_text.len() > 4096 {
+            return Err(Error::Invalid("asset exceeds upload limit".into()));
         }
-        if !matches!(kind, AssetKind::Cover | AssetKind::Photo | AssetKind::Scan) {
-            return Err(Error::Invalid("unsupported image asset kind".into()));
-        }
-        let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
-            .with_guessed_format()
-            .map_err(storage)?;
-        let format = reader
-            .format()
-            .ok_or_else(|| Error::Invalid("unsupported image".into()))?;
-        let (extension, media_type) = match format {
-            image::ImageFormat::Png => ("png", "image/png"),
-            image::ImageFormat::Jpeg => ("jpg", "image/jpeg"),
-            image::ImageFormat::WebP => ("webp", "image/webp"),
-            _ => return Err(Error::Invalid("use PNG, JPEG, or WebP".into())),
+        let (extension, media_type, thumbnail) = if kind == AssetKind::Document {
+            let format = junk_libs_core::document::classify(bytes, collector_app::MAX_ASSET_BYTES)
+                .map_err(|e| Error::Invalid(e.to_string()))?;
+            (format.extension(), format.media_type(), None)
+        } else {
+            if !matches!(kind, AssetKind::Cover | AssetKind::Photo | AssetKind::Scan) {
+                return Err(Error::Invalid("unsupported asset kind".into()));
+            }
+            let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
+                .map_err(storage)?;
+            let format = reader
+                .format()
+                .ok_or_else(|| Error::Invalid("unsupported image".into()))?;
+            let (extension, media_type) = match format {
+                image::ImageFormat::Png => ("png", "image/png"),
+                image::ImageFormat::Jpeg => ("jpg", "image/jpeg"),
+                image::ImageFormat::WebP => ("webp", "image/webp"),
+                _ => return Err(Error::Invalid("use PNG, JPEG, or WebP".into())),
+            };
+            let mut limits = image::Limits::default();
+            limits.max_image_width = Some(12000);
+            limits.max_image_height = Some(12000);
+            limits.max_alloc = Some(256 * 1024 * 1024);
+            reader.limits(limits);
+            let image = reader
+                .decode()
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            let mut thumbnail = std::io::Cursor::new(Vec::new());
+            image
+                .thumbnail(192, 192)
+                .write_to(&mut thumbnail, image::ImageFormat::Png)
+                .map_err(storage)?;
+            let thumbnail = thumbnail.into_inner();
+            (extension, media_type, Some(thumbnail))
         };
-        let mut limits = image::Limits::default();
-        limits.max_image_width = Some(12000);
-        limits.max_image_height = Some(12000);
-        limits.max_alloc = Some(256 * 1024 * 1024);
-        reader.limits(limits);
-        let image = reader
-            .decode()
-            .map_err(|error| Error::Invalid(error.to_string()))?;
-        let mut thumbnail = std::io::Cursor::new(Vec::new());
-        image
-            .thumbnail(192, 192)
-            .write_to(&mut thumbnail, image::ImageFormat::Png)
-            .map_err(storage)?;
-        let thumbnail = thumbnail.into_inner();
+        let digest = Digest::sha256(bytes);
 
         let _writer = lock(&self.writer)?;
         let _publication_gate = lock(&self.job_publication_gate)?;
@@ -1216,23 +1260,57 @@ impl Store {
                 return Err(Error::Conflict);
             }
             self.validate_item_effect(context, collection_id)?;
+            if matches!(existing, ExistingAsset::Reuse { .. })
+                && let collector_app::ItemEffectSource::Job { id, claim } = context.source
+                && self.cancellation_requested_record(id, &claim.to_string())?
+            {
+                return Err(Error::JobCancelled);
+            }
         }
         if self.asset_subject_collection_record(subject)? != collection_id {
             return Err(Error::Invalid(
                 "asset subject is outside the selected collection".into(),
             ));
         }
-        if lock(&self.db)?
-            .query_row(
-                "SELECT 1 FROM assets WHERE id=?",
-                [asset_id.to_string()],
-                |_| Ok(()),
-            )
-            .optional()
-            .map_err(storage)?
-            .is_some()
-        {
-            return Err(Error::IdempotencyConflict);
+        match self.asset_record_v3(asset_id) {
+            Ok(mut current) => {
+                let ExistingAsset::Reuse { restore_archived } = existing else {
+                    return Err(Error::IdempotencyConflict);
+                };
+                if current.collection_id != collection_id
+                    || current.asset.subject != subject
+                    || current.asset.kind != kind
+                    || current.asset.media_type != media_type
+                    || current.asset.file.digest != digest
+                    || current.asset.file.bytes != ByteLength(bytes.len() as u64)
+                {
+                    return Err(Error::IdempotencyConflict);
+                }
+                if !current.deleted {
+                    // Preserve curated visibility and alternative text on reuse.
+                    return self.asset_state_record(asset_id);
+                }
+                if restore_archived != Some(current.revision) {
+                    return Err(Error::Conflict);
+                }
+                current.revision =
+                    Revision(current.revision.0.checked_add(1).ok_or(Error::Conflict)?);
+                current.deleted = false;
+                current.updated_at = self.clock.now();
+                let collection = collection_path(&*lock(&self.db)?, &self.archive, collection_id)?;
+                return self.publish_asset_state(current, &collection, false);
+            }
+            Err(Error::NotFound) => {
+                if matches!(
+                    existing,
+                    ExistingAsset::Reuse {
+                        restore_archived: Some(_)
+                    }
+                ) {
+                    return Err(Error::Conflict);
+                }
+            }
+            Err(error) => return Err(error),
         }
         let collection = collection_path(&*lock(&self.db)?, &self.archive, collection_id)?;
         let staging = self
@@ -1242,7 +1320,9 @@ impl Store {
         fs::create_dir_all(&staging).map_err(storage)?;
         let original_name = format!("original.{extension}");
         write_new_or_verify(&staging.join(&original_name), bytes)?;
-        write_new_or_verify(&staging.join("thumbnail.png"), &thumbnail)?;
+        if let Some(thumbnail) = &thumbnail {
+            write_new_or_verify(&staging.join("thumbnail.png"), thumbnail)?;
+        }
         sync_directory(&staging)?;
         sync_directory(
             staging
@@ -1256,14 +1336,16 @@ impl Store {
             visibility,
             media_type: media_type.into(),
             file: StoredFile {
+                visibility: Default::default(),
                 name: original_name,
                 bytes: ByteLength(bytes.len() as u64),
-                digest: Digest::sha256(bytes),
+                digest,
             },
-            thumbnail: Some(StoredFile {
+            thumbnail: thumbnail.as_ref().map(|thumbnail| StoredFile {
+                visibility: Default::default(),
                 name: "thumbnail.png".into(),
                 bytes: ByteLength(thumbnail.len() as u64),
-                digest: Digest::sha256(&thumbnail),
+                digest: Digest::sha256(thumbnail),
             }),
             alt_text,
         };
@@ -1271,27 +1353,22 @@ impl Store {
             .join("assets")
             .join(asset_id.to_string())
             .join("payload");
+        let mut legacy_payloads = vec![archive_v3::LegacyPayloadV3 {
+            role: "original".into(),
+            relative_path: relative(&self.archive, &payload_root.join(&asset.file.name))?,
+            sha256: asset.file.digest.hex.clone(),
+        }];
+        if let Some(thumbnail) = &asset.thumbnail {
+            legacy_payloads.push(archive_v3::LegacyPayloadV3 {
+                role: "thumbnail".into(),
+                relative_path: relative(&self.archive, &payload_root.join(&thumbnail.name))?,
+                sha256: thumbnail.digest.hex.clone(),
+            });
+        }
         let record = archive_v3::AssetRecordV3 {
             collection_id,
             revision: Revision(1),
-            legacy_payloads: vec![
-                archive_v3::LegacyPayloadV3 {
-                    role: "original".into(),
-                    relative_path: relative(&self.archive, &payload_root.join(&asset.file.name))?,
-                    sha256: asset.file.digest.hex.clone(),
-                },
-                archive_v3::LegacyPayloadV3 {
-                    role: "thumbnail".into(),
-                    relative_path: relative(&self.archive, &payload_root.join("thumbnail.png"))?,
-                    sha256: asset
-                        .thumbnail
-                        .as_ref()
-                        .expect("thumbnail was created")
-                        .digest
-                        .hex
-                        .clone(),
-                },
-            ],
+            legacy_payloads,
             asset,
             deleted: false,
             updated_at: self.clock.now(),
@@ -1624,13 +1701,40 @@ impl Store {
     }
     /// Inventory a server-admin configured inbox directory. Reject symlinks and special files.
     pub fn inventory_directory(source: &Path) -> Result<Vec<UploadFile>> {
-        fn walk(root: &Path, path: &Path, out: &mut Vec<UploadFile>, depth: usize) -> Result<()> {
+        Self::inventory_directory_retaining(source, &[])
+    }
+
+    /// Existing accepted inventories retain their exact housekeeping originals on recovery.
+    pub fn inventory_directory_retaining(
+        source: &Path,
+        retained: &[String],
+    ) -> Result<Vec<UploadFile>> {
+        fn walk(
+            root: &Path,
+            path: &Path,
+            out: &mut Vec<UploadFile>,
+            depth: usize,
+            retained: &[String],
+        ) -> Result<()> {
             if depth > 32 || out.len() > 4096 {
                 return Err(Error::Invalid(
                     "package is too deeply nested or contains too many files".into(),
                 ));
             }
             let metadata = fs::symlink_metadata(path).map_err(storage)?;
+            let relative = path
+                .strip_prefix(root)
+                .map_err(storage)?
+                .to_str()
+                .ok_or_else(|| Error::Invalid("package names must be UTF-8".into()))?;
+            if collector_app::is_intake_housekeeping(relative, metadata.is_dir())
+                && !retained.iter().any(|name| {
+                    name == relative
+                        || (metadata.is_dir() && name.starts_with(&format!("{relative}/")))
+                })
+            {
+                return Ok(());
+            }
             if metadata.file_type().is_symlink() {
                 return Err(Error::Invalid(
                     "inbox packages cannot contain symlinks".into(),
@@ -1638,7 +1742,13 @@ impl Store {
             }
             if metadata.is_dir() {
                 for entry in fs::read_dir(path).map_err(storage)? {
-                    walk(root, &entry.map_err(storage)?.path(), out, depth + 1)?;
+                    walk(
+                        root,
+                        &entry.map_err(storage)?.path(),
+                        out,
+                        depth + 1,
+                        retained,
+                    )?;
                 }
             } else if metadata.is_file() {
                 let name = path
@@ -1649,6 +1759,7 @@ impl Store {
                     .to_owned();
                 safe_name(&name)?;
                 out.push(UploadFile {
+                    visibility: Default::default(),
                     name,
                     bytes: ByteLength(metadata.len()),
                     sha256: None,
@@ -1661,7 +1772,7 @@ impl Store {
             Ok(())
         }
         let mut files = Vec::new();
-        walk(source, source, &mut files, 0)?;
+        walk(source, source, &mut files, 0, retained)?;
         files.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(files)
     }

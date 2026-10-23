@@ -3,6 +3,46 @@
 use crate::*;
 use std::collections::BTreeSet;
 
+/// A sibling disc can append preservation evidence without changing the reviewed
+/// album inventory. Only references proven to belong to this intake may advance
+/// its publication fence; manual inventory/metadata changes still conflict.
+pub fn grouped_publication_revision_is_evidence_only(
+    previous: &Item,
+    current: &Item,
+    previous_evidence: &std::collections::BTreeMap<EvidenceId, String>,
+    current_evidence: &std::collections::BTreeMap<EvidenceId, String>,
+    sibling_evidence: &BTreeSet<EvidenceId>,
+) -> Result<bool> {
+    if previous.id != current.id
+        || previous.collection_id != current.collection_id
+        || previous.revision >= current.revision
+        || current.deleted
+        || current_evidence.len() <= previous_evidence.len()
+        || previous_evidence
+            .iter()
+            .any(|(id, digest)| current_evidence.get(id) != Some(digest))
+        || current_evidence
+            .keys()
+            .any(|id| !previous_evidence.contains_key(id) && !sibling_evidence.contains(id))
+    {
+        return Ok(false);
+    }
+    let mut current = current.clone();
+    let mut previous = previous.clone();
+    // Captures and Assets have independent revision fences. The caller supplies
+    // archive Item records, without those hydrated compatibility projections.
+    current.captures.clear();
+    current.assets.clear();
+    previous.captures.clear();
+    previous.assets.clear();
+    current.revision = previous.revision;
+    current.updated_at = previous.updated_at;
+    Ok(
+        serde_json::to_value(previous).map_err(|error| Error::Storage(error.to_string()))?
+            == serde_json::to_value(current).map_err(|error| Error::Storage(error.to_string()))?,
+    )
+}
+
 pub const INTAKE_PACKAGE_LIMIT: u32 = 10_000;
 pub const INTAKE_FILE_LIMIT: u32 = 100_000;
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -53,7 +93,8 @@ pub enum IntakeDestination {
     Separate,
     AlbumGroup {
         key: String,
-        title: String,
+        #[serde(default)]
+        title: Option<String>,
         copy_key: String,
     },
     Existing {
@@ -199,13 +240,14 @@ impl CollectionService {
         self.execute_command(actor,context,"intake.discover",&command,|effects| {
             let eligibility=self.content_write_eligibility(actor,command.collection_id)?;
             crate::guided_ingest::validate_intake_files(&command.files,INTAKE_FILE_LIMIT as usize)?;
-            let names=command.files.iter().map(|f|PackageFileName::new(f.name.clone())).collect::<Result<Vec<_>>>()?;
+            let files=command.files.iter().filter(|file| !is_intake_housekeeping(&file.name,false)).cloned().collect::<Vec<_>>();
+            let names=files.iter().map(|f|PackageFileName::new(f.name.clone())).collect::<Result<Vec<_>>>()?;
             let found=self.modules.discover_imports(&eligibility.owner,&names)?;
             if found.len()>INTAKE_PACKAGE_LIMIT as usize {return Err(Error::Invalid("This folder contains more than 10,000 packages. Select a smaller folder or split it into separate intakes.".into()));}
             let mut used=BTreeSet::new();let mut selections=Vec::new();
-            for p in found {let files=p.file_indices.into_iter().map(|index|{if !used.insert(index){return Err(Error::Invalid("Overlapping discovered packages".into()));}command.files.get(index).cloned().ok_or_else(||Error::Invalid("Invalid discovered file".into()))}).collect::<Result<Vec<_>>>()?;selections.push(IngestPackageSelection{source:ImportSourceSummary{kind:ImportSourceKind::Browser,label:None,package_name:p.label},files,anchor_file_index:None});}
+            for p in found {let files=p.file_indices.into_iter().map(|index|{if !used.insert(index){return Err(Error::Invalid("Overlapping discovered packages".into()));}files.get(index).cloned().ok_or_else(||Error::Invalid("Invalid discovered file".into()))}).collect::<Result<Vec<_>>>()?;selections.push(IngestPackageSelection{purchase:None,source:ImportSourceSummary{kind:ImportSourceKind::Browser,label:None,package_name:p.label},files,anchor_file_index:None});}
             let mut packages=Vec::new();for page in selections.chunks(64){packages.extend(self.plan_ingest(actor,PlanIngestCommand{collection_id:command.collection_id,packages:page.to_vec()})?.packages);}
-            let unassigned=command.files.iter().enumerate().filter(|(i,_)|!used.contains(i)).map(|(_,f)|f.name.clone()).collect::<Vec<_>>();
+            let unassigned=files.iter().enumerate().filter(|(i,_)|!used.contains(i)).map(|(_,f)|f.name.clone()).collect::<Vec<_>>();
             effects.freeze_intake_discovery(actor.user_id,IntakeDiscovery{id:deterministic_job_id(actor.user_id,"intake.discover",context.key()),collection_id:command.collection_id,package_count:packages.len() as u32,unassigned_count:unassigned.len() as u32},packages,unassigned)
         })
     }
@@ -309,7 +351,7 @@ impl CollectionService {
                             copy_key,
                         } => {
                             validate_intake_label(key)?;
-                            validate_intake_label(title)?;
+                            if let Some(title) = title { validate_intake_label(title)?; }
                             validate_intake_label(copy_key)?;
                         }
                         IntakeDestination::Existing {
@@ -388,7 +430,9 @@ impl CollectionService {
                         copy_key,
                     } => {
                         validate_intake_label(key)?;
-                        validate_intake_label(title)?;
+                        if let Some(title) = title {
+                            validate_intake_label(title)?;
+                        }
                         validate_intake_label(copy_key)?;
                     }
                     IntakeDestination::Existing {
@@ -506,6 +550,7 @@ impl CollectionService {
                     _ => None,
                 };
                 let command = StartIngestCommand {
+                    purchase: None,
                     clean_reimport: None,
                     plan: IngestPlan {
                         collection_id: intake.session.collection_id,
@@ -551,7 +596,7 @@ impl CollectionService {
                             "intake.album",
                             &format!("{}:{key}", claim.id),
                         ));
-                        (copy_key.clone(), Some(title.clone()))
+                        (copy_key.clone(), title.clone())
                     }
                     IntakeDestination::Existing { copy_key, .. } => (copy_key.clone(), None),
                     IntakeDestination::Separate => (member.position.to_string(), None),

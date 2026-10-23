@@ -49,6 +49,27 @@ pub struct GrantAuthority {
     pub other_enabled_owners: u64,
 }
 
+/// Returns whether an explicit local recovery needs to publish a first Owner.
+/// Existing owners, even disabled ones, must use ordinary access/account recovery.
+pub fn recover_initial_owner(
+    account_enabled: bool,
+    current_role: Option<Role>,
+    has_owner: bool,
+) -> Result<bool> {
+    if !account_enabled {
+        return Err(Error::Invalid(
+            "disabled accounts cannot receive collection grants".into(),
+        ));
+    }
+    if current_role == Some(Role::Owner) {
+        return Ok(false);
+    }
+    if has_owner {
+        return Err(Error::Invalid("collection already has an Owner; use its normal access controls or recover that account".into()));
+    }
+    Ok(true)
+}
+
 pub fn grant_update(
     snapshot: &GrantAuthority,
     expected: Revision,

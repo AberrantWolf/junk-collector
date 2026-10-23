@@ -68,6 +68,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/collections/{id}/catalog-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["upload_catalog_snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/collections/{id}/catalog-upload/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["accept_catalog_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/collections/{id}/catalog-upload/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["inspect_catalog_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/default-user/{id}": {
         parameters: {
             query?: never;
@@ -660,6 +708,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{collection}/assets/{asset}/text-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["asset_text_preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{collection}/assets/{asset}/thumbnail": {
         parameters: {
             query?: never;
@@ -1204,6 +1268,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingests/{id}/inbox-cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cleanup_ingest_inbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ingests/{id}/retry": {
         parameters: {
             query?: never;
@@ -1454,6 +1534,22 @@ export interface paths {
         get: operations["evidence"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/identify-game": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["identify_game_entry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1796,6 +1892,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{item}/captures/{capture}/purchase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_digital_purchase"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{item}/client-playback": {
         parameters: {
             query?: never;
@@ -2060,6 +2172,38 @@ export interface paths {
             cookie?: never;
         };
         get: operations["pairing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playback/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["browser_grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playback/routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["routes"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2391,6 +2535,7 @@ export interface components {
             token: string;
         };
         AlbumGroupResult: {
+            automatic?: boolean;
             destination: components["schemas"]["ItemId"];
             group_id: components["schemas"]["TransactionId"];
             sources: components["schemas"]["ItemId"][];
@@ -2476,10 +2621,27 @@ export interface components {
             /** @enum {string} */
             state: "unavailable";
         };
+        BackupReminder: {
+            /** Format: int32 */
+            after_days: number;
+            /** Format: date-time */
+            checked_at: string;
+            externally_managed: boolean;
+            /** Format: date-time */
+            last_completed_at?: string | null;
+            status: components["schemas"]["BackupReminderStatus"];
+        };
+        /** @enum {string} */
+        BackupReminderStatus: "unknown" | "recent" | "due" | "failed" | "unconfirmed";
         /** @enum {string} */
         BadgeTone: "neutral" | "positive" | "warning" | "negative";
         Begin: {
             username: string;
+        };
+        BrowserPlaybackGrant: {
+            /** Format: date-time */
+            expires_at: string;
+            token: string;
         };
         /** @enum {string} */
         BulkLibraryKind: "metadata" | "music_preparation";
@@ -2550,6 +2712,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["CaptureId"];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
             representations: components["schemas"]["Representation"][];
             revision: components["schemas"]["Revision"];
         };
@@ -2574,8 +2737,54 @@ export interface components {
         CarrierId: string;
         /** @enum {string} */
         CarrierKind: "cartridge" | "optical_disc" | "tape" | "card" | "booklet" | "case" | "other";
+        CatalogCandidate: {
+            label: string;
+            matched_units: components["schemas"]["CatalogMatchedUnit"][];
+            provider: components["schemas"]["ModuleId"];
+            provider_record_id: string;
+        };
+        CatalogDetection: {
+            byte_domains: string[];
+            catalog?: string | null;
+            dialect: string;
+            reasons: string[];
+            status: components["schemas"]["GameDetectionStatus"];
+            system?: null | components["schemas"]["StandardGameSystem"];
+            system_choices: components["schemas"]["StandardGameSystem"][];
+            version: string;
+        };
         CatalogImportRequest: {
             source: string;
+        };
+        CatalogMatchResult: {
+            /** @enum {string} */
+            match: "inconclusive";
+            reason: string;
+        } | {
+            /** @enum {string} */
+            match: "no_match";
+        } | {
+            candidate: components["schemas"]["CatalogCandidate"];
+            /** @enum {string} */
+            match: "unique_complete_match";
+        } | {
+            candidates: components["schemas"]["CatalogCandidate"][];
+            /** @enum {string} */
+            match: "ambiguous_complete_matches";
+        } | {
+            candidates: components["schemas"]["CatalogCandidate"][];
+            /** @enum {string} */
+            match: "partial_identification";
+            /** Format: int32 */
+            matched_files: number;
+            /** Format: int32 */
+            total_files: number;
+        };
+        CatalogMatchedUnit: {
+            digest: components["schemas"]["Digest"];
+            source_file_id: components["schemas"]["PackageFileId"];
+            /** Format: int32 */
+            track_number?: number | null;
         };
         CatalogSnapshot: {
             digest: components["schemas"]["Digest"];
@@ -2585,6 +2794,8 @@ export interface components {
         };
         CatalogSnapshotStatus: {
             active: boolean;
+            identification_job_id?: null | components["schemas"]["JobId"];
+            inactive_reason?: string | null;
             snapshot: components["schemas"]["SnapshotRecord"];
         };
         CatalogSourceView: {
@@ -2594,6 +2805,23 @@ export interface components {
             catalog: string;
             id: string;
             system: string;
+        };
+        CatalogUploadEntry: {
+            corrections: components["schemas"]["UploadedDatCatalog"][];
+            detection: components["schemas"]["CatalogDetection"];
+            name: string;
+            upload?: null | components["schemas"]["UploadedDatCatalog"];
+        };
+        /** @description Browser batch of binary DAT/ZIP uploads; parsing uses bounded multipart chunks. */
+        CatalogUploadForm: {
+            files: string[];
+        };
+        CatalogUploadPreview: {
+            entries: components["schemas"]["CatalogUploadEntry"][];
+            expanded_bytes: components["schemas"]["ByteLength"];
+            ignored: string[];
+            /** Format: int32 */
+            member_count: number;
         };
         ChangePassword: {
             confirmation: string;
@@ -2606,6 +2834,9 @@ export interface components {
             reset_artwork: boolean;
             reset_metadata: boolean;
             retained_representation?: null | components["schemas"]["RepresentationId"];
+        };
+        CleanupInboxCommand: {
+            source_is_idle: boolean;
         };
         ClientAlbum: {
             artist: string;
@@ -2773,6 +3004,7 @@ export interface components {
             name: string;
         };
         CreateCollectionList: {
+            kind?: null | components["schemas"]["CollectionListKind"];
             name: string;
         };
         CreateIntake: {
@@ -2785,11 +3017,54 @@ export interface components {
             prepare_music?: boolean;
         };
         CurrencyCode: string;
+        DatUploadMetadata: {
+            byte_domain: string;
+            catalog: string;
+            system: string;
+        };
+        DbarQuery: {
+            /** Format: int32 */
+            accuraterip_id1: number;
+            /** Format: int32 */
+            accuraterip_id2: number;
+            /** Format: int32 */
+            cddb_id: number;
+            /** Format: int32 */
+            track_count: number;
+        };
         /** Format: uuid */
         DeviceId: string;
         Digest: {
             algorithm: components["schemas"]["HashAlgorithm"];
             hex: string;
+        };
+        /** @description Acquisition facts belong to the purchased package, independently of physical copies. */
+        DigitalPurchase: {
+            cost?: null | components["schemas"]["Money"];
+            /** Format: date */
+            date?: string | null;
+            order_reference?: string | null;
+            source_url?: string | null;
+            store?: string | null;
+        };
+        DiscAudioManifest: {
+            anchor_file_index: number;
+            data_tracks: number[];
+            tracks: components["schemas"]["DiscAudioTrack"][];
+            /** Format: int32 */
+            version: number;
+        };
+        DiscAudioTrack: {
+            /** Format: int64 */
+            frame_count: number;
+            /** Format: int32 */
+            position: number;
+            /** Format: int64 */
+            source_end_frame: number;
+            /** Format: int64 */
+            source_start_frame: number;
+            /** Format: int64 */
+            start_frame: number;
         };
         DiscardIngestCommand: {
             /** Format: int64 */
@@ -2813,6 +3088,10 @@ export interface components {
             possession: components["schemas"]["ReturnedPossession"];
             reason: string;
         };
+        DocumentTextPreview: {
+            text: string;
+            truncated: boolean;
+        };
         /**
          * @description A bounded owner-mediated patch. The raw object preserves JSON scalar types;
          *     each owner deserializes it into its own typed patch where missing and null are
@@ -2834,6 +3113,10 @@ export interface components {
             maximum_bytes: number;
             /** @enum {string} */
             type: "text";
+        } | {
+            /** @enum {string} */
+            type: "choice";
+            values: string[];
         } | {
             /** Format: int64 */
             maximum: number;
@@ -2894,12 +3177,106 @@ export interface components {
         EvidenceKind: "integrity" | "structure" | "game_catalog" | "accurate_rip" | "reconstruction" | "derivative_validation";
         /** @enum {string} */
         EvidenceOutcome: "passed" | "failed" | "inconclusive" | "unsupported";
+        Exposure: {
+            public_administration?: boolean;
+            public_curation?: boolean;
+        };
         FeaturesResponse: {
             administration: boolean;
             curation: boolean;
             default_username?: string | null;
             multi_user: boolean;
             passkeys: boolean;
+            passkeys_unavailable_reason?: null | components["schemas"]["UnavailableReason"];
+        };
+        GameCatalogIdentification: {
+            byte_domain: string;
+            catalog: components["schemas"]["CatalogMatchResult"];
+            snapshot_digest: components["schemas"]["Digest"];
+            snapshot_id: components["schemas"]["SnapshotId"];
+            system: string;
+        };
+        /** @enum {string} */
+        GameDetectionStatus: "recognized" | "ambiguous" | "unrecognized" | "malformed" | "unsupported";
+        GameFileDigest: {
+            bytes: components["schemas"]["ByteLength"];
+            digests: components["schemas"]["Digest"][];
+            domain: components["schemas"]["NormalizedByteDomain"];
+            file_id: components["schemas"]["PackageFileId"];
+        };
+        GameFormatInspection: {
+            file_id: components["schemas"]["PackageFileId"];
+            reason: string;
+            status: components["schemas"]["GameDetectionStatus"];
+        };
+        GameIdentification: {
+            analyses: components["schemas"]["GameProcessingResult"][];
+            candidates: components["schemas"]["MetadataCandidateObservation"][];
+            catalogs: components["schemas"]["GameCatalogIdentification"][];
+            inspections: components["schemas"]["GameFormatInspection"][];
+            limitations: string[];
+            status: components["schemas"]["GameDetectionStatus"];
+        };
+        GameProcessingResult: {
+            audio: components["schemas"]["DiscAudioManifest"];
+            /** @enum {string} */
+            result: "cd_audio";
+        } | {
+            files: components["schemas"]["GameFileDigest"][];
+            /** @enum {string} */
+            result: "hashes";
+        } | {
+            /** @enum {string} */
+            result: "track_hashes";
+            tracks: components["schemas"]["GameTrackDigest"][];
+        } | {
+            fields: {
+                [key: string]: components["schemas"]["GameStructureValue"];
+            };
+            format: string;
+            /** @enum {string} */
+            result: "structure";
+        } | {
+            catalog: components["schemas"]["CatalogMatchResult"];
+            /** @enum {string} */
+            result: "catalog_match";
+        };
+        GameStructureValue: {
+            /** @enum {string} */
+            type: "text";
+            value: string;
+        } | {
+            /** @enum {string} */
+            type: "unsigned";
+            /** Format: int64 */
+            value: number;
+        } | {
+            /** @enum {string} */
+            type: "signed";
+            /** Format: int64 */
+            value: number;
+        } | {
+            /** @enum {string} */
+            type: "boolean";
+            value: boolean;
+        } | {
+            /** @enum {string} */
+            type: "bytes";
+            value: components["schemas"]["ByteLength"];
+        };
+        GameTrackDigest: {
+            bytes: components["schemas"]["ByteLength"];
+            digests: components["schemas"]["Digest"][];
+            domain: components["schemas"]["NormalizedByteDomain"];
+            /** Format: int64 */
+            source_byte_offset: number;
+            source_file_id: components["schemas"]["PackageFileId"];
+            /** Format: int32 */
+            synthetic_postgap_frames: number;
+            /** Format: int32 */
+            synthetic_pregap_frames: number;
+            /** Format: int32 */
+            track_number: number;
         };
         GeoCoordinate: {
             /** Format: double */
@@ -2958,6 +3335,7 @@ export interface components {
             digest?: null | components["schemas"]["Digest"];
             name: string;
             received_bytes: components["schemas"]["ByteLength"];
+            visibility?: components["schemas"]["Visibility"];
         };
         /** Format: uuid */
         ImportId: string;
@@ -3002,6 +3380,16 @@ export interface components {
             source: components["schemas"]["ImportSourceSummary"];
             /** Format: date-time */
             updated_at: string;
+        };
+        InboxCleanupView: {
+            completed: boolean;
+            error?: string | null;
+            job_id: components["schemas"]["JobId"];
+            recovery_directory?: string | null;
+            removed_bytes: components["schemas"]["ByteLength"];
+            retained_files: boolean;
+            state: components["schemas"]["JobState"];
+            total_bytes: components["schemas"]["ByteLength"];
         };
         InboxImport: {
             expected_revision: components["schemas"]["Revision"];
@@ -3051,6 +3439,7 @@ export interface components {
             attempts: components["schemas"]["IngestAttemptView"][];
             cleanup?: null | components["schemas"]["IngestDiscardResult"];
             import: components["schemas"]["ImportView"];
+            inbox_cleanup?: null | components["schemas"]["InboxCleanupView"];
             steps: components["schemas"]["IngestStepView"][];
             summary: components["schemas"]["IngestSummary"];
         };
@@ -3065,10 +3454,12 @@ export interface components {
         IngestPackageSelection: {
             anchor_file_index?: number | null;
             files: components["schemas"]["UploadFile"][];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
             source: components["schemas"]["ImportSourceSummary"];
         };
         IngestPermissions: {
             can_cancel: boolean;
+            can_clean_inbox: boolean;
             can_correct_association: boolean;
             can_discard: boolean;
             can_resume_upload: boolean;
@@ -3086,10 +3477,12 @@ export interface components {
             default_title: string;
             files: components["schemas"]["UploadFile"][];
             metadata_available: boolean;
+            music_actions_available?: boolean;
             /** Format: int32 */
             position: number;
             preparation_available: boolean;
             preparation_reason?: string | null;
+            purchase?: null | components["schemas"]["DigitalPurchase"];
             source: components["schemas"]["ImportSourceSummary"];
         };
         IngestRejectedPackage: {
@@ -3125,7 +3518,21 @@ export interface components {
             total_bytes: components["schemas"]["ByteLength"];
             /** Format: date-time */
             updated_at: string;
+            work: components["schemas"]["IngestWork"][];
         };
+        IngestWork: {
+            /** Format: int32 */
+            jobs: number;
+            kind: string;
+            phase: string;
+            shared: boolean;
+            state: components["schemas"]["IngestWorkState"];
+        };
+        /**
+         * @description Current execution only; workflow outcome and preservation are independent.
+         * @enum {string}
+         */
+        IngestWorkState: "running" | "queued" | "waiting" | "cancelling";
         IntakeDestination: {
             /** @enum {string} */
             destination: "separate";
@@ -3134,7 +3541,7 @@ export interface components {
             /** @enum {string} */
             destination: "album_group";
             key: string;
-            title: string;
+            title?: string | null;
         } | {
             copy_key: string;
             /** @enum {string} */
@@ -3235,6 +3642,8 @@ export interface components {
         };
         /** @description Archive-owned current workflow and capture selection. Historical captures stay addressable. */
         ItemLifecycle: {
+            /** @description An explicit group undo preserves the user's choice to keep entries apart. */
+            automatic_grouping_disabled?: boolean;
             /** Format: int64 */
             automatic_metadata_through: number;
             /** Format: int64 */
@@ -3262,9 +3671,22 @@ export interface components {
         };
         /** Format: uuid */
         JobId: string;
+        /** @enum {string} */
+        JobProgressKind: "measured" | "indeterminate";
         JobResultView: {
             /** @enum {string} */
+            kind: "game_identification";
+            observation_id: components["schemas"]["ObservationId"];
+            status: components["schemas"]["GameDetectionStatus"];
+        } | {
+            /** Format: int64 */
+            completed: number;
+            /** @enum {string} */
+            kind: "game_catalog_scan";
+        } | {
+            /** @enum {string} */
             kind: "catalog_snapshot";
+            response_status?: null | components["schemas"]["ProviderResponseStatus"];
             snapshot_id: components["schemas"]["SnapshotId"];
         };
         /** @enum {string} */
@@ -3284,6 +3706,8 @@ export interface components {
             kind: string;
             limitation?: string | null;
             phase: string;
+            progress_kind: components["schemas"]["JobProgressKind"];
+            provider_status?: null | components["schemas"]["ProviderResponseStatus"];
             result?: null | components["schemas"]["JobResultView"];
             retryable: boolean;
             state: components["schemas"]["JobState"];
@@ -3361,6 +3785,21 @@ export interface components {
         };
         /** Format: uuid */
         LoanId: string;
+        /** @description Authenticated control-plane advertisement; each endpoint has the same server identity. */
+        LocalPlaybackDescriptor: {
+            endpoints: components["schemas"]["LocalPlaybackEndpoint"][];
+            remote_media_allowed: boolean;
+            server_id: components["schemas"]["ServerId"];
+        };
+        LocalPlaybackEndpoint: {
+            certificate_pem: string;
+            /** @description SHA-256 of the DER leaf, as required by WebTransport serverCertificateHashes. */
+            certificate_sha256: string;
+            /** Format: date-time */
+            expires_at: string;
+            https_url: string;
+            webtransport_url: string;
+        };
         LocalizedText: {
             language: components["schemas"]["LanguageTag"];
             text: string;
@@ -3441,6 +3880,26 @@ export interface components {
             provider: components["schemas"]["ModuleId"];
             provider_record_id: string;
             provider_record_version?: string | null;
+        };
+        MetadataCandidateObservation: {
+            artwork?: null | components["schemas"]["AssetId"];
+            /**
+             * @description A provider's complete identity assertion is ranked before all partial
+             *     identifier or layout evidence. It is descriptive identity evidence, not
+             *     integrity or catalog verification.
+             */
+            complete_identity: boolean;
+            identity: components["schemas"]["MetadataCandidateIdentity"];
+            observation: Record<string, never>;
+            /**
+             * Format: int32
+             * @description Lower values are preferred. Policy supplies this value; array order never
+             *     participates in resolution.
+             */
+            provider_priority: number;
+            strength: components["schemas"]["MatchStrength"];
+            subtitle?: null | components["schemas"]["MetadataText"];
+            title: components["schemas"]["MetadataText"];
         };
         MetadataCandidateView: {
             accepted_automatically: boolean;
@@ -3531,6 +3990,7 @@ export interface components {
             artwork_options: components["schemas"]["MetadataArtworkOption"][];
             item_id: components["schemas"]["ItemId"];
             outcome?: null | components["schemas"]["MetadataRefreshOutcome"];
+            response_status?: null | components["schemas"]["ProviderResponseStatus"];
             snapshot_id: components["schemas"]["SnapshotId"];
         };
         MetadataResolutionView: {
@@ -3544,14 +4004,17 @@ export interface components {
             candidates: components["schemas"]["MetadataCandidateView"][];
             catalog_sources: components["schemas"]["MetadataCatalogSourceView"][];
             display: components["schemas"]["ResolvedMetadataDisplay"];
+            identification?: null | components["schemas"]["GameIdentification"];
             item_id: components["schemas"]["ItemId"];
             lookup_choices: components["schemas"]["MetadataLookupChoice"][];
             permissions: components["schemas"]["MetadataPermissions"];
             preferred_language: components["schemas"]["LanguageTag"];
             proposed_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
             providers: components["schemas"]["MetadataProviderView"][];
+            recognized_systems: components["schemas"]["StandardGameSystem"][];
             review_reasons: components["schemas"]["MetadataReviewReason"][];
             revision: components["schemas"]["Revision"];
+            terms: components["schemas"]["MetadataTerms"];
         };
         MetadataState: {
             candidates: components["schemas"]["MetadataCandidate"][];
@@ -3559,6 +4022,12 @@ export interface components {
                 [key: string]: unknown;
             };
             selected?: string | null;
+        };
+        MetadataTerms: {
+            choice: string;
+            plural: string;
+            singular: string;
+            subtitle: string;
         };
         MetadataText: {
             language?: null | components["schemas"]["LanguageTag"];
@@ -3572,6 +4041,9 @@ export interface components {
         MetadataValueSource: {
             /** @enum {string} */
             source: "manual";
+        } | {
+            /** @enum {string} */
+            source: "provisional";
         } | {
             identity: components["schemas"]["MetadataCandidateIdentity"];
             /** @enum {string} */
@@ -3593,8 +4065,10 @@ export interface components {
             display_name: string;
             fields: components["schemas"]["DomainFieldDescriptor"][];
             id: components["schemas"]["ModuleId"];
+            metadata_terms: components["schemas"]["MetadataTerms"];
             /** Format: int32 */
             schema_version: number;
+            supports_listening?: boolean;
         };
         ModuleId: string;
         ModulePresentation: {
@@ -3638,6 +4112,8 @@ export interface components {
             /** Format: int32 */
             total_tracks: number;
         };
+        /** @enum {string} */
+        MusicAlbumSelection: "included" | "excluded" | "needs_review";
         MusicAlbumSourcePlan: {
             /** Format: int32 */
             already_available: number;
@@ -3650,6 +4126,19 @@ export interface components {
             source_representation_id: components["schemas"]["RepresentationId"];
             /** Format: int32 */
             track_count: number;
+        };
+        MusicAudioFormat: {
+            /** Format: int32 */
+            bits_per_sample?: number | null;
+            /** Format: int32 */
+            channels: number;
+            codec: string;
+            /** Format: int32 */
+            delay_frames?: number | null;
+            /** Format: int32 */
+            padding_frames?: number | null;
+            /** Format: int32 */
+            sample_rate: number;
         };
         /** @enum {string} */
         MusicDiscMatchState: "no_release" | "no_layout" | "disc_id_matched" | "curator_assigned" | "single_medium" | "needs_assignment" | "disc_id_not_listed" | "ambiguous_disc_id" | "assignment_conflicts_with_disc_id" | "track_layout_mismatch";
@@ -3731,22 +4220,27 @@ export interface components {
             /** Format: int64 */
             duration_ms?: number | null;
             item_id: components["schemas"]["ItemId"];
+            source_representation_id?: null | components["schemas"]["RepresentationId"];
             title: string;
             /** Format: int32 */
             track_position: number;
         };
         MusicTrackAvailability: {
+            album_selection?: components["schemas"]["MusicAlbumSelection"];
+            audio_format?: null | components["schemas"]["MusicAudioFormat"];
             /** @description Current actor, module, source and encoder permit explicit preparation. */
             can_prepare: boolean;
             capture_id: components["schemas"]["CaptureId"];
             /** Format: int32 */
             disc_position?: number | null;
-            /** @description Exact track-local integer stereo PCM frame count. */
+            /** Format: int32 */
+            display_position?: number | null;
+            /** @description Decoded track-local frames; MP3 gapless knowledge is separate in audio_format. */
             frame_count: components["schemas"]["PcmFrame"];
-            profile: components["schemas"]["ConversionProfile"];
+            profile?: null | components["schemas"]["ConversionProfile"];
             source_label: string;
             source_representation_id: components["schemas"]["RepresentationId"];
-            /** @description Exact coordinate in the source's integer stereo PCM timeline. */
+            /** @description Coordinate in the source PCM timeline at sample_rate(), with native channels. */
             start_frame: components["schemas"]["PcmFrame"];
             state: components["schemas"]["MusicTrackAvailabilityState"];
             title: string;
@@ -3804,6 +4298,11 @@ export interface components {
             administrator?: boolean;
             password: string;
             username: string;
+        };
+        NormalizedByteDomain: {
+            name: string;
+            /** Format: int32 */
+            version: number;
         };
         /** Format: uuid */
         ObservationId: string;
@@ -3916,6 +4415,8 @@ export interface components {
         Page_CatalogSnapshotStatus: {
             items: {
                 active: boolean;
+                identification_job_id?: null | components["schemas"]["JobId"];
+                inactive_reason?: string | null;
                 snapshot: components["schemas"]["SnapshotRecord"];
             }[];
             next_cursor?: string | null;
@@ -3962,10 +4463,12 @@ export interface components {
                 default_title: string;
                 files: components["schemas"]["UploadFile"][];
                 metadata_available: boolean;
+                music_actions_available?: boolean;
                 /** Format: int32 */
                 position: number;
                 preparation_available: boolean;
                 preparation_reason?: string | null;
+                purchase?: null | components["schemas"]["DigitalPurchase"];
                 source: components["schemas"]["ImportSourceSummary"];
             }[];
             next_cursor?: string | null;
@@ -3988,6 +4491,7 @@ export interface components {
                 total_bytes: components["schemas"]["ByteLength"];
                 /** Format: date-time */
                 updated_at: string;
+                work: components["schemas"]["IngestWork"][];
             }[];
             next_cursor?: string | null;
         };
@@ -4050,6 +4554,8 @@ export interface components {
                 kind: string;
                 limitation?: string | null;
                 phase: string;
+                progress_kind: components["schemas"]["JobProgressKind"];
+                provider_status?: null | components["schemas"]["ProviderResponseStatus"];
                 result?: null | components["schemas"]["JobResultView"];
                 retryable: boolean;
                 state: components["schemas"]["JobState"];
@@ -4108,16 +4614,19 @@ export interface components {
                 id: components["schemas"]["CollectionId"];
                 name: string;
                 revision: components["schemas"]["Revision"];
+                supports_listening: boolean;
             }[];
             next_cursor?: string | null;
         };
         Page_PresentedItem: {
             items: {
+                accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
                 assets: components["schemas"]["PresentedAsset"][];
                 captures: components["schemas"]["PresentedCapture"][];
                 collection_id: components["schemas"]["CollectionId"];
                 content_permissions: components["schemas"]["ContentPermissions"];
                 deleted: boolean;
+                digital_audio: boolean;
                 domain: components["schemas"]["PresentedModuleData"];
                 effective_metadata: components["schemas"]["ResolvedMetadataDisplay"];
                 effective_permissions: components["schemas"]["EffectivePermissions"];
@@ -4135,6 +4644,7 @@ export interface components {
                 revision: components["schemas"]["Revision"];
                 specimens: components["schemas"]["PresentedSpecimen"][];
                 subtitle: string;
+                supports_listening: boolean;
                 title: string;
                 translations: components["schemas"]["LocalizedText"][];
                 /** Format: date-time */
@@ -4267,6 +4777,11 @@ export interface components {
             collection_id: components["schemas"]["CollectionId"];
             packages: components["schemas"]["IngestPackageSelection"][];
         };
+        PlaybackTarget: {
+            file_index: number;
+            item_id: components["schemas"]["ItemId"];
+            representation_id: components["schemas"]["RepresentationId"];
+        };
         /** @enum {string} */
         Possession: "present" | "lent" | "elsewhere" | "unknown";
         PreparationCareEntry: {
@@ -4306,13 +4821,22 @@ export interface components {
             updated_at: string;
             visibility?: null | components["schemas"]["Visibility"];
         };
+        /**
+         * @description Recorded checks for visible, currently associated originals. This is not an
+         *     album-coverage claim: missing discs and unchecked originals remain distinct.
+         */
+        PresentedAudioCheck: {
+            source_id: components["schemas"]["RepresentationId"];
+            status?: null | components["schemas"]["AudioVerificationStatus"];
+        };
         PresentedCapture: {
             association: components["schemas"]["CaptureAssociation"];
             collection_id: components["schemas"]["CollectionId"];
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["CaptureId"];
-            representations: components["schemas"]["Representation"][];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
+            representations: components["schemas"]["PresentedRepresentation"][];
             revision: components["schemas"]["Revision"];
         };
         PresentedCollection: {
@@ -4324,6 +4848,7 @@ export interface components {
             id: components["schemas"]["CollectionId"];
             name: string;
             revision: components["schemas"]["Revision"];
+            supports_listening: boolean;
         };
         PresentedEvidence: {
             catalog?: null | components["schemas"]["CatalogSnapshot"];
@@ -4340,16 +4865,25 @@ export interface components {
             provenance_limitation?: string | null;
             representation_id: components["schemas"]["RepresentationId"];
         };
+        PresentedFile: {
+            bytes: components["schemas"]["ByteLength"];
+            digest: components["schemas"]["Digest"];
+            index: number;
+            name: string;
+            visibility: components["schemas"]["Visibility"];
+        };
         /**
          * @description Explicit response shape: unrestricted stored Item records are never
          *     flattened into a transport response.
          */
         PresentedItem: {
+            accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
             assets: components["schemas"]["PresentedAsset"][];
             captures: components["schemas"]["PresentedCapture"][];
             collection_id: components["schemas"]["CollectionId"];
             content_permissions: components["schemas"]["ContentPermissions"];
             deleted: boolean;
+            digital_audio: boolean;
             domain: components["schemas"]["PresentedModuleData"];
             effective_metadata: components["schemas"]["ResolvedMetadataDisplay"];
             effective_permissions: components["schemas"]["EffectivePermissions"];
@@ -4367,6 +4901,7 @@ export interface components {
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["PresentedSpecimen"][];
             subtitle: string;
+            supports_listening: boolean;
             title: string;
             translations: components["schemas"]["LocalizedText"][];
             /** Format: date-time */
@@ -4380,6 +4915,14 @@ export interface components {
             payload?: unknown;
             /** Format: int32 */
             schema_version: number;
+        };
+        PresentedRepresentation: {
+            files: components["schemas"]["PresentedFile"][];
+            format: string;
+            id: components["schemas"]["RepresentationId"];
+            profile?: null | components["schemas"]["ConversionProfile"];
+            role: components["schemas"]["RepresentationRole"];
+            source?: null | components["schemas"]["RepresentationId"];
         };
         PresentedSpecimen: {
             acquisition?: null | components["schemas"]["Acquisition"];
@@ -4439,6 +4982,8 @@ export interface components {
             provider: components["schemas"]["ModuleId"];
             value: string;
         };
+        /** @enum {string} */
+        ProviderResponseStatus: "waiting" | "shared" | "downloaded" | "unchanged";
         PublishProviderArtworkCommand: {
             snapshot_id: components["schemas"]["SnapshotId"];
         };
@@ -4471,6 +5016,9 @@ export interface components {
         ResolvedMetadataDisplay: {
             artwork?: null | components["schemas"]["AssetId"];
             candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+            domain_fields?: {
+                [key: string]: components["schemas"]["ResolvedMetadataText"];
+            };
             resolution: components["schemas"]["MetadataResolutionKind"];
             subtitle?: null | components["schemas"]["ResolvedMetadataText"];
             title: components["schemas"]["ResolvedMetadataText"];
@@ -4547,6 +5095,8 @@ export interface components {
         };
         SaveItemEnvelope: components["schemas"]["SaveItemCommandEnvelope"] | components["schemas"]["SaveItemEditCommandEnvelope"] | components["schemas"]["Wave1SaveItemEnvelope"];
         ScanPlan: {
+            accuraterip_query?: null | components["schemas"]["DbarQuery"];
+            accuraterip_structure_observation_id?: null | components["schemas"]["ObservationId"];
             blockers: string[];
             command: components["schemas"]["StartProcessingCommand"];
             files: components["schemas"]["IngestAnchorChoice"][];
@@ -4558,6 +5108,15 @@ export interface components {
         ScanState: "ready" | "blocked" | "running" | "cancelling" | "completed" | "failed" | "changed";
         /** Format: uuid */
         ServerId: string;
+        ServerSettingsView: {
+            backup_reminder?: null | components["schemas"]["BackupReminder"];
+            current_user_id: components["schemas"]["UserId"];
+            default_user_id: components["schemas"]["UserId"];
+            exposure: components["schemas"]["Exposure"];
+            ingress: string;
+            multi_user: boolean;
+            server_id: components["schemas"]["ServerId"];
+        };
         /** Format: uuid */
         SessionId: string;
         SessionView: {
@@ -4572,6 +5131,7 @@ export interface components {
         /** Format: uuid */
         SnapshotId: string;
         SnapshotRecord: {
+            acquisition_key?: string | null;
             bytes: components["schemas"]["ByteLength"];
             collection_id: components["schemas"]["CollectionId"];
             /** Format: date-time */
@@ -4614,6 +5174,12 @@ export interface components {
             import: components["schemas"]["ImportView"];
             job_id: components["schemas"]["JobId"];
         };
+        StandardGameSystem: {
+            aliases: string[];
+            byte_domain: string;
+            id: string;
+            name: string;
+        };
         StartEnrollment: {
             device_name: string;
         };
@@ -4624,6 +5190,7 @@ export interface components {
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
             plan: components["schemas"]["IngestPlan"];
             prepare_music?: boolean;
+            purchase?: null | components["schemas"]["DigitalPurchase"];
         };
         StartIntake: {
             expected_revision: components["schemas"]["Revision"];
@@ -4651,9 +5218,12 @@ export interface components {
             bytes: components["schemas"]["ByteLength"];
             digest: components["schemas"]["Digest"];
             name: string;
+            visibility?: components["schemas"]["Visibility"];
         };
         /** Format: uuid */
         TransactionId: string;
+        /** @enum {string} */
+        UnavailableReason: "not_configured" | "dns_name_required";
         UpdateAssetCommand: {
             alt_text: string;
             visibility: components["schemas"]["Visibility"];
@@ -4665,6 +5235,10 @@ export interface components {
         UpdateCollectionList: {
             change: components["schemas"]["CollectionListChange"];
             expected_revision: components["schemas"]["Revision"];
+        };
+        UpdateDigitalPurchase: {
+            expected_revision: components["schemas"]["Revision"];
+            purchase?: null | components["schemas"]["DigitalPurchase"];
         };
         UpdateMetadataAuthorityCommand: {
             change: components["schemas"]["MetadataAuthorityChange"];
@@ -4689,6 +5263,12 @@ export interface components {
             bytes: components["schemas"]["ByteLength"];
             name: string;
             sha256?: string | null;
+            visibility?: null | components["schemas"]["Visibility"];
+        };
+        UploadedDatCatalog: {
+            bytes: components["schemas"]["ByteLength"];
+            digest: components["schemas"]["Digest"];
+            metadata: components["schemas"]["DatUploadMetadata"];
         };
         /** Format: uuid */
         UserId: string;
@@ -4960,6 +5540,143 @@ export interface operations {
             };
         };
     };
+    upload_catalog_snapshot: {
+        parameters: {
+            query: {
+                system: string;
+                catalog: string;
+                byte_domain: string;
+            };
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    accept_catalog_upload: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadedDatCatalog"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    inspect_catalog_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["CatalogUploadForm"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogUploadPreview"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     reassign_default_user: {
         parameters: {
             query?: never;
@@ -5143,7 +5860,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ServerSettingsView"];
                 };
             };
             403: {
@@ -6368,6 +7085,46 @@ export interface operations {
                 content?: never;
             };
             416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    asset_text_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection: components["schemas"]["CollectionId"];
+                asset: components["schemas"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTextPreview"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7851,6 +8608,57 @@ export interface operations {
             };
         };
     };
+    cleanup_ingest_inbox: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupInboxCommand"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobId"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     retry_ingest: {
         parameters: {
             query?: never;
@@ -8535,6 +9343,41 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    identify_game_entry: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobId"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9698,6 +10541,58 @@ export interface operations {
             };
         };
     };
+    update_digital_purchase: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                item: components["schemas"]["ItemId"];
+                capture: components["schemas"]["CaptureId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDigitalPurchase"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresentedCapture"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     client_album_playback: {
         parameters: {
             query?: {
@@ -10380,6 +11275,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Pairing"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    browser_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybackTarget"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPlaybackGrant"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    routes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalPlaybackDescriptor"];
                 };
             };
             401: {

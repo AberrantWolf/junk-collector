@@ -4,7 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/collector-server"]
 
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.4"
 edition = "2024"
 license = "MIT"
 
@@ -32,13 +32,13 @@ utoipa-axum = "0.2"
 url = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 httpdate = "1"
-junk-libs-audio = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
-junk-libs-accuraterip = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
-junk-libs-core = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
-junk-libs-disc = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
-junk-libs-disc-id = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
-junk-libs-game-formats = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
-junk-libs-dat = { git = "https://github.com/AberrantWolf/junk-libs", tag = "v0.1.0" }
+junk-libs-audio = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-accuraterip = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-core = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-disc = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-disc-id = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-game-formats = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
+junk-libs-dat = { git = "https://github.com/AberrantWolf/junk-libs", rev = "193e0a88faaa0c3d5636976932f120c237831ad0" }
 
 [profile.release]
 lto = "thin"
@@ -46,4 +46,12 @@ strip = true
 
 # Optimize snapshot checks and prepared-media transfers in debug server builds.
 [profile.dev.package.sha2]
+opt-level = 3
+
+# Audio checks stream whole discs through shared decoding/checksum loops.
+# Keep development servers usable without changing the algorithms or coverage.
+[profile.dev.package.junk-libs-disc]
+opt-level = 3
+
+[profile.dev.package.junk-libs-accuraterip]
 opt-level = 3

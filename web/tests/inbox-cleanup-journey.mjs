@@ -1,0 +1,55 @@
+// Actual web opt-in, changed-source refusal, retry and preserved downloads.
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {expect} from '@playwright/test';
+
+export async function inboxCleanupJourney(page,{importId,itemId,source,scratch,restartServer}){
+ const original=await readFile(path.join(source,'.unknown'));
+ const url=new URL(page.url());url.searchParams.set('work',`import:${importId}`);
+ await page.goto(url.href);
+ const cleanup=page.getByRole('region',{name:'Inbox source cleanup'});
+ await cleanup.getByRole('button',{name:'Remove imported inbox files',exact:true}).waitFor();
+ const remove=cleanup.getByRole('button',{name:'Remove imported inbox files',exact:true});
+ await expect(remove).toBeDisabled();
+ assert.deepEqual(await readFile(path.join(source,'.unknown')),original);
+ await writeFile(path.join(source,'.unknown'),Buffer.alloc(original.length,0x42));
+ const confirm=cleanup.getByRole('checkbox',{name:/Copying and editing this source package have finished/});
+ await confirm.check();await remove.click();
+ await expect(cleanup.getByRole('alert')).toContainText(/differs|changed/,{timeout:30000});
+ assert.equal((await readFile(path.join(source,'.unknown')))[0],0x42);
+ const detail=await page.evaluate(async id=>(await(await fetch(`/api/v1/ingests/${id}`)).json()),importId);
+ assert.equal(detail.inbox_cleanup.removed_bytes,0);
+ assert.equal(detail.summary.outcome,'succeeded','Optional cleanup failure changed the preserved import outcome');
+ await writeFile(path.join(source,'.unknown'),original);
+ await confirm.check();
+ const response=page.waitForResponse(response=>response.url().endsWith(`/ingests/${importId}/inbox-cleanup`)&&response.request().method()==='POST');
+ await cleanup.getByRole('button',{name:'Retry inbox cleanup',exact:true}).click();
+ const accepted=await response;assert.equal(accepted.status(),202);
+ const receipt=accepted.request().headers()['idempotency-key'];
+ await page.reload({waitUntil:'domcontentloaded'});
+ await expect(cleanup.getByRole('status')).toContainText('Inbox cleanup complete',{timeout:30000});
+ const recovery=path.join(path.dirname(source),`.collector-cleanup-${importId}`,'package');
+ assert.equal(await readFile(path.join(recovery,'.DS_Store'),'utf8'),'housekeeping');
+ await assert.rejects(readFile(path.join(recovery,'.unknown')),{code:'ENOENT'});
+ await assert.rejects(readFile(path.join(source,'.unknown')),{code:'ENOENT'});
+ const item=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),itemId);
+ const capture=item.captures.find(c=>c.id===detail.import.capture_id);
+ const master=capture.representations.find(r=>r.id===detail.import.representation_id);
+ const file=master.files.find(f=>f.name==='.unknown');
+ const downloaded=await page.evaluate(async ({item,representation,index})=>{const r=await fetch(`/api/v1/items/${item}/representations/${representation}/${index}`);return {status:r.status,bytes:Array.from(new Uint8Array(await r.arrayBuffer()))};},{item:itemId,representation:master.id,index:file.index});
+ assert.equal(downloaded.status,200);assert.deepEqual(Buffer.from(downloaded.bytes),original);
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Cleanup recovery path overflows the phone layout');
+ await page.screenshot({path:path.join(scratch,'inbox-cleanup-mobile.png'),fullPage:true});
+ await mkdir(source);await writeFile(path.join(source,'.unknown'),'new package must survive receipt replay');
+ await restartServer();await page.reload({waitUntil:'domcontentloaded'});
+ await expect(cleanup.getByRole('status')).toContainText('Inbox cleanup complete');
+ const replay=await page.evaluate(async ({id,key})=>{const r=await fetch(`/api/v1/ingests/${id}/inbox-cleanup`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({source_is_idle:true})});return r.status;},{id:importId,key:receipt});
+ assert.equal(replay,202);assert.equal(await readFile(path.join(source,'.unknown'),'utf8'),'new package must survive receipt replay');
+ const work=await page.evaluate(async id=>(await(await fetch('/api/v1/work/entry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'import',id})})).json()),importId);
+ assert.equal(work.status,'completed','A prior rejected cleanup kept completed work marked failed');
+ assert.equal(await cleanup.getByRole('checkbox').count(),0);
+ await page.setViewportSize({width:1440,height:1000});
+ console.log('HL-09 cleanup passed: explicit web opt-in, changed-source refusal, retry/reload, retained housekeeping, archive download, phone layout, restart and safe command replay.');
+}

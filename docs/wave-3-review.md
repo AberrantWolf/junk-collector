@@ -3,7 +3,7 @@
 Initial review date: 2026-09-10; corrective review: 2026-09-11. The original
 commit/check inventory below records the first local integration checkpoint.
 The follow-up at the end records validated corrections included in the subsequent review-fix commit. The child-by-child implementation record and commit inventory remain
-in [the live ledger](wave-3-plan.md).
+in [dated validation](validation.md).
 
 ## Acceptance trace
 

@@ -1,5 +1,10 @@
 # Reuse, extraction, and fixture map (D01)
 
+**Scope update (2026-10-09):** use [remaining work](../remaining-work.md)
+and [home-lab policy](home-lab-scope.md). Older future contracts/order and blanket
+history requirements below need reassessment. Preserve actual data/recovery and
+valid current boundaries; Phono Junk is no longer a target.
+
 Schema reservations below record earlier planning, not fixed compatibility obligations. New work follows [pre-release evolution](pre-release-evolution.md) and actual persisted state.
 
 Status: accepted inventory gate, 2026-09-09. This is a read-only assessment. An

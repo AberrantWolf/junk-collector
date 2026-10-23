@@ -1,0 +1,69 @@
+<!doctype html><meta charset="utf-8"><title>Collector transport primitive experiment</title>
+<style>body{max-width:900px;margin:40px auto;font:17px system-ui;padding:20px}button{padding:12px}pre{white-space:pre-wrap;font-size:14px}</style>
+<h1>Direct encrypted transport experiment</h1>
+<p>Loopback-only primitive test. This does not test Collector media, cross-LAN routing, authentication or VPN behavior. No certificate imports, browser flags, STUN or TURN services.</p>
+<button id="run">Run bounded experiments</button><pre id="result">Ready</pre>
+<script type="module">
+const output=document.querySelector('#result'), button=document.querySelector('#run');
+function check(ok,message){if(!ok)throw Error(message);}
+async function bounded(p,ms=6000){let timer;try{return await Promise.race([p,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('deadline')),ms);})]);}finally{clearTimeout(timer);}}
+const bytes=n=>Uint8Array.from({length:n},(_,i)=>i%251);
+const hex=b=>Array.from(new Uint8Array(b),v=>v.toString(16).padStart(2,'0')).join('');
+async function wt(hash){
+ const transport=new WebTransport('https://127.0.0.1:19979/experiment',{serverCertificateHashes:[{algorithm:'sha-256',value:new Uint8Array(hash)}]});
+ transport.closed.catch(()=>{});
+ try{
+  await bounded(transport.ready);
+  const stream=await transport.createBidirectionalStream(), writer=stream.writable.getWriter(), reader=stream.readable.getReader();
+  const payload=bytes(65536), received=new Uint8Array(payload.length);let total=0;
+  const reading=(async()=>{while(true){const {value,done}=await reader.read();if(done)break;check(total+value.length<=received.length,'excess data');received.set(value,total);total+=value.length;}})();
+  await writer.write(payload);await writer.close();await bounded(reading);
+  check(total===payload.length&&received.every((v,i)=>v===payload[i]),'echo mismatch');
+  return {bytes:total,sha256:hex(await crypto.subtle.digest('SHA-256',received)),certificateImport:false};
+ }finally{transport.close();}
+}
+async function rejection(p){try{await bounded(p,4000);return false;}catch(e){return e.message!=='deadline';}}
+async function rtc(){
+ const left=new RTCPeerConnection({iceServers:[]}),right=new RTCPeerConnection({iceServers:[]});
+ const channel=left.createDataChannel('bounded-bytes');channel.binaryType='arraybuffer';
+ let candidateErrors=[];
+ left.onicecandidate=e=>{if(e.candidate)right.addIceCandidate(e.candidate).catch(e=>candidateErrors.push(e.message));};
+ right.onicecandidate=e=>{if(e.candidate)left.addIceCandidate(e.candidate).catch(e=>candidateErrors.push(e.message));};
+ const expected=bytes(1048576), received=new Uint8Array(expected.length);let total=0;
+ let resolveData,rejectData;const data=new Promise((resolve,reject)=>{resolveData=resolve;rejectData=reject;});
+ right.ondatachannel=e=>{e.channel.binaryType='arraybuffer';e.channel.onmessage=message=>{try{const chunk=new Uint8Array(message.data);check(total+chunk.length<=received.length,'excess data');received.set(chunk,total);total+=chunk.length;if(total===received.length)resolveData();}catch(e){rejectData(e);}};};
+ try{
+  const opened=new Promise((resolve,reject)=>{channel.onopen=resolve;channel.onerror=()=>reject(Error('data channel failure'));});
+  await left.setLocalDescription(await left.createOffer());await right.setRemoteDescription(left.localDescription);
+  await right.setLocalDescription(await right.createAnswer());await left.setRemoteDescription(right.localDescription);
+  await bounded(opened);
+  channel.bufferedAmountLowThreshold=65536;
+  for(let offset=0;offset<expected.length;offset+=16384){
+   if(channel.bufferedAmount>131072)await bounded(new Promise(resolve=>channel.addEventListener('bufferedamountlow',resolve,{once:true})));
+   channel.send(expected.slice(offset,offset+16384));
+  }
+  await bounded(data);check(received.every((v,i)=>v===expected[i]),'data mismatch');
+  check(left.sctp.transport.state==='connected','DTLS is not connected');
+  const stats=await left.getStats();let selected;
+  stats.forEach(v=>{if(v.type==='candidate-pair'&&v.state==='succeeded'&&v.nominated)selected=v;});
+  const local=selected&&stats.get(selected.localCandidateId),remote=selected&&stats.get(selected.remoteCandidateId);
+  return {bytes:total,sha256:hex(await crypto.subtle.digest('SHA-256',received)),dtls:left.sctp.transport.state,localCandidate:local?.candidateType??'not reported',remoteCandidate:remote?.candidateType??'not reported',iceCandidateErrors:candidateErrors.length,iceServers:0};
+ }finally{channel.close();left.close();right.close();}
+}
+button.onclick=async()=>{
+ button.disabled=true;const results={userAgent:navigator.userAgent,secureContext:isSecureContext,webTransportAvailable:typeof WebTransport!=='undefined',peerConnectionAvailable:typeof RTCPeerConnection!=='undefined'};
+ output.textContent=JSON.stringify(results,null,2)+'\nRunning…';
+ if(results.webTransportAvailable){
+  const {hash}=await (await fetch('/config')).json();
+  try{results.webTransport=await wt(hash);}catch(e){results.webTransport={error:e.name+': '+e.message};}
+  try{const wrong=hash.slice();wrong[0]^=255;results.wrongPinRejected=await rejection(wt(wrong));}catch(e){results.wrongPinRejected={error:e.message};}
+  let plain;
+  try{plain=new WebTransport('https://127.0.0.1:19979/experiment');plain.closed.catch(()=>{});results.withoutPinRejected=await rejection(plain.ready);}catch(e){results.withoutPinRejected={error:e.message};}finally{plain?.close();}
+ }
+ if(results.peerConnectionAvailable){try{results.webRTC=await rtc();}catch(e){results.webRTC={error:e.name+': '+e.message};}}
+ try{await bounded(fetch('https://127.0.0.1:19980/'));results.ordinaryHttpsRejected=false;}catch(e){results.ordinaryHttpsRejected=true;}
+ output.textContent=JSON.stringify(results,null,2);
+ await fetch('/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(results)});
+ button.disabled=false;
+};
+</script>

@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 
 const FORMAT: u32 = 5;
-pub(crate) const CATALOG_SCHEMA: u32 = 13;
+pub(crate) const CATALOG_SCHEMA: u32 = 15;
 pub(crate) const TABLES: &[&str] = &[
     "collections",
     "collection_lists",
@@ -216,8 +216,8 @@ pub(crate) fn published_in_transaction(
     seal(db, archive)
 }
 
-/// A corrupt rebuildable SQLite file is retained for diagnosis. Private state is
-/// a separate database and is never replaced by projection recovery.
+/// Retain corrupt or obsolete catalog files for diagnosis. Private state lives
+/// in a separate database and is never replaced by projection recovery.
 pub(crate) fn open_catalog(state: &Path) -> Result<Connection> {
     let path = state.join("catalog.sqlite");
     let db = Connection::open(&path).map_err(storage)?;
@@ -234,11 +234,16 @@ pub(crate) fn open_catalog(state: &Path) -> Result<Connection> {
         }
         Err(error) => return Err(storage(error)),
     };
+    let mut obsolete = false;
     if !corrupt {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)?;
+        // Catalog rows are disposable. Recreate the SQLite schema before replay,
+        // rather than applying current inserts to tables from an older release.
+        obsolete = version != 0 && version < CATALOG_SCHEMA;
         if version == CATALOG_SCHEMA {
+            obsolete = !music_search::schema_is_current(&db)?;
             let mut required = TABLES
                 .iter()
                 .map(|name| name.to_string())
@@ -278,18 +283,22 @@ pub(crate) fn open_catalog(state: &Path) -> Result<Connection> {
             }
         }
     }
-    if !corrupt {
+    if !corrupt && !obsolete {
         return Ok(db);
     }
     drop(db);
+    let reason = if corrupt { "corrupt" } else { "obsolete" };
     let suffix = TransactionId::new();
     for name in ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm"] {
         let source = state.join(name);
         if source.exists() {
-            fs::rename(source, state.join(format!("{name}.corrupt-{suffix}"))).map_err(storage)?;
+            fs::rename(source, state.join(format!("{name}.{reason}-{suffix}"))).map_err(storage)?;
         }
     }
     sync_directory(state)?;
-    tracing::warn!("corrupt catalog retained; rebuilding projection from archive");
+    tracing::warn!(
+        reason,
+        "catalog retained; rebuilding projection from archive"
+    );
     Connection::open(path).map_err(storage)
 }

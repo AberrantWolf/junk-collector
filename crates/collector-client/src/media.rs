@@ -35,6 +35,7 @@ impl MediaCancellation {
 
 pub struct RangeReader {
     client: EnrolledClient,
+    route: crate::local_playback::MediaRoute,
     runtime: tokio::runtime::Runtime,
     url: url::Url,
     length: u64,
@@ -60,14 +61,21 @@ impl EnrolledClient {
             client: crate::credential_http_client(&self.enrolled)?,
             enrolled: self.enrolled.clone(),
         };
-        let url = self.api_url(&format!(
-            "api/v1/items/{item}/representations/{representation}/{file_index}"
-        ))?;
-        let request = worker_client.request(reqwest::Method::HEAD, url.clone())?;
+        let path = format!("api/v1/items/{item}/representations/{representation}/{file_index}");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|_| Error::Unavailable("media runtime unavailable".into()))?;
+        cancellation.check().map_err(|_| Error::JobCancelled)?;
+        let route = runtime.block_on(async {
+            tokio::select! { result=worker_client.media_route()=>result,
+                _=async {while !cancellation.is_cancelled() {tokio::time::sleep(Duration::from_millis(20)).await;}}=>Err(Error::JobCancelled)}
+        })?;
+        let url = route
+            .base
+            .join(&path)
+            .map_err(|_| Error::Invalid("media URL invalid".into()))?;
+        let request = route.request(&worker_client, reqwest::Method::HEAD, url.clone())?;
         let response = runtime
             .block_on(cancellable(&cancellation, async {
                 request
@@ -106,6 +114,7 @@ impl EnrolledClient {
             .to_owned();
         Ok(RangeReader {
             client: worker_client,
+            route,
             runtime,
             url,
             length,
@@ -123,18 +132,54 @@ impl Drop for RangeReader {
     }
 }
 impl RangeReader {
+    pub fn is_local(&self) -> bool {
+        self.route.local
+    }
     pub fn length(&self) -> u64 {
         self.length
     }
     fn fetch(&mut self) -> io::Result<()> {
+        match self.fetch_once() {
+            Ok(()) => Ok(()),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Other
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::ConnectionAborted
+                ) =>
+            {
+                // Refresh trust after a network change or automatic certificate rotation.
+                // Reuse only the exact immutable representation, never a public retry URL.
+                let route = self
+                    .runtime
+                    .block_on(cancellable(&self.cancellation, async {
+                        self.client
+                            .media_route()
+                            .await
+                            .map_err(|error| io::Error::other(error.to_string()))
+                    }))?;
+                let url = route
+                    .base
+                    .join(self.url.path().trim_start_matches('/'))
+                    .map_err(io::Error::other)?;
+                self.route = route;
+                self.url = url;
+                self.fetch_once()
+            }
+            Err(error) => Err(error),
+        }
+    }
+    fn fetch_once(&mut self) -> io::Result<()> {
         self.cancellation.check()?;
         let end = self
             .position
             .saturating_add(CHUNK as u64 - 1)
             .min(self.length - 1);
         let request = self
-            .client
-            .request(reqwest::Method::GET, self.url.clone())
+            .route
+            .request(&self.client, reqwest::Method::GET, self.url.clone())
             .map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::PermissionDenied,

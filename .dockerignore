@@ -2,3 +2,7 @@
 .collector
 target
 web/node_modules
+deploy/container/.env
+deploy/container/.env.before-update
+deploy/container/collector.toml
+*.tar.gz

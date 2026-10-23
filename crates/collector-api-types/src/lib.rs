@@ -2,6 +2,38 @@
 use collector_core::*;
 use serde::{Deserialize, Serialize};
 
+/// Authenticated control-plane advertisement; each endpoint has the same server identity.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LocalPlaybackDescriptor {
+    pub server_id: ServerId,
+    pub endpoints: Vec<LocalPlaybackEndpoint>,
+    pub remote_media_allowed: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LocalPlaybackEndpoint {
+    pub https_url: String,
+    pub webtransport_url: String,
+    pub certificate_pem: String,
+    /// SHA-256 of the DER leaf, as required by WebTransport serverCertificateHashes.
+    pub certificate_sha256: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackTarget {
+    pub item_id: ItemId,
+    pub representation_id: RepresentationId,
+    pub file_index: usize,
+}
+
+#[derive(Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct BrowserPlaybackGrant {
+    pub token: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CollectionListSummary {
     pub id: CollectionListId,
@@ -28,6 +60,7 @@ pub struct ListEntriesQuery {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateCollectionList {
+    pub kind: Option<CollectionListKind>,
     pub name: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -109,20 +142,55 @@ pub enum MusicTrackAvailabilityState {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MusicTrackAvailability {
+    #[serde(default)]
+    pub album_selection: MusicAlbumSelection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_position: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_format: Option<MusicAudioFormat>,
     pub capture_id: CaptureId,
     pub source_label: String,
     pub disc_position: Option<u16>,
     pub source_representation_id: RepresentationId,
     pub track_position: u16,
-    /// Exact coordinate in the source's integer stereo PCM timeline.
+    /// Coordinate in the source PCM timeline at sample_rate(), with native channels.
     pub start_frame: PcmFrame,
-    /// Exact track-local integer stereo PCM frame count.
+    /// Decoded track-local frames; MP3 gapless knowledge is separate in audio_format.
     pub frame_count: PcmFrame,
     pub title: String,
-    pub profile: ConversionProfile,
+    pub profile: Option<ConversionProfile>,
     pub state: MusicTrackAvailabilityState,
     /// Current actor, module, source and encoder permit explicit preparation.
     pub can_prepare: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicAlbumSelection {
+    #[default]
+    Included,
+    Excluded,
+    NeedsReview,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MusicAudioFormat {
+    pub codec: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: Option<u32>,
+    pub delay_frames: Option<u32>,
+    pub padding_frames: Option<u32>,
+}
+impl MusicTrackAvailability {
+    pub fn sample_rate(&self) -> u32 {
+        self.audio_format
+            .as_ref()
+            .map_or(44_100, |format| format.sample_rate)
+    }
+    pub fn primary_playback(&self) -> bool {
+        self.profile.is_none() || self.profile == Some(ConversionProfile::Flac)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -133,6 +201,8 @@ pub struct MusicSearchQuery {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MusicSearchRecord {
+    #[serde(default)]
+    pub source_representation_id: Option<RepresentationId>,
     pub duration_ms: Option<u64>,
     pub item_id: ItemId,
     pub title: String,

@@ -1,5 +1,13 @@
 # Web navigation redesign — 2026-10-07
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 ## Problem and decision
 
 The left rail mixed destinations, a persistent collection filter, management
@@ -81,21 +89,3 @@ Screenshots from the temporary real-server fixture:
 `/tmp/collector-navigation-mobile-menu.png`. The fixture contains actual saved
 inventory entries and honest missing-artwork placeholders. It does not represent
 qualified audio captures or matching evidence.
-
-## Ready-to-send continuation
-
-Read this ledger and implementation status. Keep the navigation roles and visible
-collection scope while improving individual workspaces. Run the real-server
-navigation acceptance and the affected browse/playback journeys after shell
-changes. Do not reintroduce the duplicate Work & history sidebar entry or use
-Manage collections to open an entry form. Physical native/second-device
-qualification belongs to the existing account/PJ1/LA3 ledgers and remains open.
-
-Full Chrome 153 browser smoke passed on the final rebuilt assets: sign-in/expiry,
-management bundles, inventory, role-aware artwork, collection creation/search and
-permission denial, WebAuthn, mobile layouts, interrupted folder upload, metadata,
-grouping, FLAC preparation, Activity, collection lists/receipt recovery and actual
-playback (start, pause/resume, seek, next/previous, natural end, reload and grant
-revocation). Retired sidebar selectors in current smoke journeys now use Activity
-or the explicit collection disclosure. No new native or second-device acceptance
-claim is made by this web delivery.

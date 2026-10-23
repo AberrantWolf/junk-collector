@@ -21,6 +21,7 @@ export function requestErrorMessage(error:unknown,forbiddenMessage?:string):stri
 
 let authentication:AuthenticationCoordinator|undefined;
 let identity:AuthenticationIdentity|undefined;
+export function getApiIdentity(){return identity?{...identity}:undefined;}
 export function setApiIdentity(value?:AuthenticationIdentity){
  if(identity?.user_id!==value?.user_id){authentication?.cancel();window.dispatchEvent(new CustomEvent('collector-api-identity-changed',{detail:{userId:value?.user_id}}));}
  identity=value?{...value}:undefined;
@@ -71,7 +72,7 @@ async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean
  return result;
 }
 
-export {useMusicQueue,addMusicTracks} from './music-queue';
+export {useMusicQueue,addMusicTracks,startMusicTracks} from './music-queue';
 export type {QueuedTrack} from './music-queue';
 
 export {OperationScope} from './operation-scope';

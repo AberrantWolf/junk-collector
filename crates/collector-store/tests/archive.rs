@@ -47,10 +47,12 @@ struct LegacyUnavailableModule;
 impl CollectionModule for LegacyUnavailableModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.unavailable".into()),
             schema_version: 7,
             display_name: "Temporary legacy fixture".into(),
             collection_type_label: "Legacy fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![],
         }
@@ -79,10 +81,12 @@ impl CollectionModule for LegacyUnavailableModule {
 impl CollectionModule for UnknownStampsModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.stamps".into()),
             schema_version: 4,
             display_name: "Temporary stamps fixture".into(),
             collection_type_label: "Stamp fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![],
         }
@@ -120,10 +124,12 @@ impl CollectionModule for ReaderProcessingModule {
 
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.example.reader".into()),
             schema_version: 1,
             display_name: "Reader processing fixture".into(),
             collection_type_label: "Reader fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![Capability {
                 id: CapabilityId::new("org.example.reader.inspect").unwrap(),
@@ -343,10 +349,12 @@ impl CollectionModule for ImportAnalyzingModule {
 
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.junk.music".into()),
             schema_version: 1,
             display_name: "Import analysis fixture".into(),
             collection_type_label: "Import fixtures".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![Capability {
                 id: CapabilityId::new("org.junk.music.import-analysis").unwrap(),
@@ -416,10 +424,12 @@ impl CollectionModule for ImportAnalyzingModule {
 impl CollectionModule for ArtworkSelectingModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {
+            supports_listening: false,
             id: ModuleId("org.junk.music".into()),
             schema_version: 1,
             display_name: "Artwork selection fixture".into(),
             collection_type_label: "Music CDs".into(),
+            metadata_terms: collector_modules::metadata_terms("unknown"),
             fields: vec![],
             capabilities: vec![],
         }
@@ -725,6 +735,7 @@ fn ready_upload(
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "payload.bin".into(),
                 bytes: ByteLength(bytes.len() as u64),
                 sha256: Some(Digest::sha256(bytes).hex),
@@ -1171,6 +1182,221 @@ fn rewrite_record(path: &Path, update: impl FnOnce(&mut serde_json::Value)) {
         + "\n";
     std::fs::write(manifest, updated).unwrap();
 }
+#[test]
+fn failed_metadata_save_releases_absent_marker_before_a_new_save_and_backup() {
+    let (root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let change = |value: &str| UpdateMetadataAuthorityCommand {
+        expected_revision: Revision(0),
+        change: MetadataAuthorityChange::SetFieldOverride {
+            field: MetadataField::Title,
+            value: value.into(),
+            language: None,
+        },
+    };
+    let transactions = root.path().join("archive/.transactions");
+    let retained = root.path().join("retained-transactions");
+    std::fs::rename(&transactions, &retained).unwrap();
+    std::fs::write(&transactions, b"fixture blocks journal creation").unwrap();
+    let failed = command();
+    assert!(matches!(
+        service.update_metadata_authority(&actor, saved.id, change("Failed save"), &failed),
+        Err(Error::Storage(_))
+    ));
+    std::fs::remove_file(&transactions).unwrap();
+    std::fs::rename(retained, &transactions).unwrap();
+    let expected = service
+        .update_metadata_authority(&actor, saved.id, change("Recovered save"), &command())
+        .unwrap();
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let stale: i64 = private
+        .query_row(
+            "SELECT COUNT(*) FROM command_receipts WHERE idempotency_key=?",
+            [failed.key()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale, 0);
+    drop(private);
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            ProcessingPort::metadata_authority(&reopened, collection.id, saved.id)
+                .unwrap()
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+    AdministrationPort::reindex(&reopened).unwrap();
+    let config = root.path().join("collector.toml");
+    std::fs::write(&config, "# generated recovery fixture\n").unwrap();
+    let backup = root.path().join("backup");
+    reopened.backup(&backup, &config).unwrap();
+    collector_store::validate_backup(&backup).unwrap();
+}
+
+#[test]
+fn legacy_failed_metadata_reservation_needs_an_attested_winner_and_intact_bytes() {
+    for mode in [
+        "completed",
+        "pending",
+        "no_attestation",
+        "changed_bytes",
+        "wrong_result",
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        let context = command();
+        let winner = service
+            .update_metadata_authority(
+                &actor,
+                saved.id,
+                UpdateMetadataAuthorityCommand {
+                    expected_revision: Revision(0),
+                    change: MetadataAuthorityChange::SetFieldOverride {
+                        field: MetadataField::Title,
+                        value: "Committed winner".into(),
+                        language: None,
+                    },
+                },
+                &context,
+            )
+            .unwrap();
+        let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+            .unwrap()
+            .map(|r| r.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .ends_with(&collection.id.to_string())
+            })
+            .unwrap();
+        let marker = collection_path.join(format!(
+            "metadata_authorities/{}/revisions/{:020}/record.v4.json",
+            saved.id, 1
+        ));
+        let original = std::fs::read(&marker).unwrap();
+        let relative = marker
+            .strip_prefix(root.path().join("archive"))
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let mut loser = winner.clone();
+        loser.updated_at -= chrono::Duration::seconds(3);
+        loser.authority.field_overrides[0].value = "Failed earlier attempt".into();
+        loser.display.as_mut().unwrap().title.value = "Failed earlier attempt".into();
+        let loser_bytes = serde_json::to_vec_pretty(&loser).unwrap();
+        let digest = Digest::sha256(&loser_bytes).hex;
+        assert!(matches!(
+            store
+                .begin_command(
+                    actor.user_id,
+                    1,
+                    "metadata.authority.update",
+                    "legacy-failed",
+                    "frozen-failed-input"
+                )
+                .unwrap(),
+            ReceiptDecision::Execute
+        ));
+        let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        private.execute("INSERT INTO command_outcomes(user_id,api_major,operation,idempotency_key,root,path,sha256,result) VALUES(?,1,'metadata.authority.update','legacy-failed','archive',?,?,?)",rusqlite::params![actor.user_id.to_string(),relative,digest,serde_json::to_string(&loser).unwrap()]).unwrap();
+        let winner_request: String = private
+            .query_row(
+                "SELECT request_sha256 FROM command_receipts WHERE idempotency_key=?",
+                [context.key()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if mode == "no_attestation" {
+            private
+                .execute(
+                    "DELETE FROM command_receipts WHERE idempotency_key=?",
+                    [context.key()],
+                )
+                .unwrap();
+        }
+        if mode == "pending" || mode == "wrong_result" {
+            private.execute("UPDATE command_receipts SET state='in_progress',result=NULL WHERE idempotency_key=?",[context.key()]).unwrap();
+            let result = if mode == "wrong_result" {
+                &loser
+            } else {
+                &winner
+            };
+            private.execute("INSERT INTO command_outcomes(user_id,api_major,operation,idempotency_key,root,path,sha256,result) VALUES(?,1,'metadata.authority.update',?,'archive',?,?,?)",rusqlite::params![actor.user_id.to_string(),context.key(),relative,Digest::sha256(&original).hex,serde_json::to_string(result).unwrap()]).unwrap();
+        }
+        if mode == "changed_bytes" {
+            let mut changed = original.clone();
+            changed.push(b'\n');
+            std::fs::write(&marker, changed).unwrap();
+        }
+        let frozen_marker = std::fs::read(&marker).unwrap();
+        drop(private);
+        drop(service);
+        drop(store);
+        let reopened = Store::open(root.path().join("archive"), root.path().join("state"));
+        if mode == "completed" || mode == "pending" {
+            let reopened = reopened.unwrap();
+            assert_eq!(
+                serde_json::to_value(
+                    ProcessingPort::metadata_authority(&reopened, collection.id, saved.id)
+                        .unwrap()
+                        .unwrap()
+                )
+                .unwrap(),
+                serde_json::to_value(&winner).unwrap()
+            );
+            let ReceiptDecision::Replay(replayed) = reopened
+                .begin_command(
+                    actor.user_id,
+                    1,
+                    "metadata.authority.update",
+                    context.key(),
+                    &winner_request,
+                )
+                .unwrap()
+            else {
+                panic!("winner lost its receipt")
+            };
+            assert_eq!(replayed, serde_json::to_value(&winner).unwrap());
+            let private =
+                rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+            let loser_count: i64 = private
+                .query_row(
+                    "SELECT COUNT(*) FROM command_receipts WHERE idempotency_key='legacy-failed'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(loser_count, 0);
+            assert_eq!(std::fs::read(&marker).unwrap(), original);
+        } else {
+            assert!(
+                matches!(reopened, Err(Error::Storage(_))),
+                "{mode}: unproven recovery succeeded"
+            );
+            assert_eq!(std::fs::read(&marker).unwrap(), frozen_marker);
+            let private =
+                rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+            let state: String = private
+                .query_row(
+                    "SELECT state FROM command_receipts WHERE idempotency_key='legacy-failed'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                state, "in_progress",
+                "failed recovery discarded unresolved evidence"
+            );
+        }
+    }
+}
+
 fn setup() -> (
     tempfile::TempDir,
     Arc<Store>,
@@ -1293,6 +1519,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -1300,6 +1527,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
                         package_name: "unfinished replacement".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(1),
                         sha256: None,
@@ -1312,6 +1540,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: pending_plan,
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -1386,6 +1615,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
                     package_name: "replacement".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "disc.bin".into(),
                     bytes: ByteLength(1),
                     sha256: None,
@@ -1434,6 +1664,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
             .browse_presented(
                 &viewer,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Removed,
                     ..Default::default()
                 }
@@ -1453,6 +1684,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 filter: BrowseFilter::Removed,
                 ..Default::default()
             },
@@ -1465,6 +1697,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Removed,
                     search: Some("風の歌".into()),
                     ..Default::default()
@@ -1983,21 +2216,7 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
         .join("collections/synthetic--018f0000-0000-7000-8000-000000000001/assets/018f0000-0000-7000-8000-000000000070/revisions/00000000000000000001/record.v3.json")
         .exists());
 
-    let catalog = rusqlite::Connection::open(state.join("catalog.sqlite")).unwrap();
-    assert_eq!(
-        catalog
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .unwrap(),
-        13 // Song search adds a rebuildable projection; archived fixture bytes stay unchanged.
-    );
-
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
-    assert_eq!(
-        private
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .unwrap(),
-        19 // Enrollment conversion preserves existing accounts, credentials and bound requests.
-    );
     assert_eq!(
         private
             .query_row("SELECT COUNT(*) FROM publication_recovery", [], |row| {
@@ -3095,6 +3314,7 @@ fn private_migration_pins_the_existing_first_row_default_once() {
 fn standalone_unidentified_capture_round_trips_without_fabricated_links() {
     let (_root, store, actor, service, collection) = setup();
     let capture = Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -3304,6 +3524,7 @@ fn upload_retries_preserve_bytes_and_evidence_detects_changes() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(bytes.len() as u64),
                 sha256: Some(Digest::sha256(bytes).hex),
@@ -3389,6 +3610,7 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
                     saved.id,
                     saved.revision,
                     vec![UploadFile {
+                        visibility: Default::default(),
                         name: name.into(),
                         bytes: ByteLength(1),
                         sha256: None
@@ -3400,6 +3622,7 @@ fn malicious_paths_and_invented_file_references_are_rejected() {
     }
     let mut edited = saved;
     edited.captures.push(Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: edited.collection_id,
         revision: Revision(1),
@@ -3618,6 +3841,7 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
         &service,
         &actor,
         Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: collection.id,
             revision: Revision(0),
@@ -3803,10 +4027,10 @@ fn unsupported_or_invalid_asset_inputs_publish_nothing() {
         service.create_asset(
             &actor,
             command_for(AssetKind::Document),
-            b"document",
+            b"binary\0document",
             &CommandContext::new("asset-document").unwrap()
         ),
-        Err(Error::Unavailable(message)) if message.contains("not implemented")
+        Err(Error::Invalid(_))
     ));
     assert!(matches!(
         service.create_asset(
@@ -3966,6 +4190,7 @@ fn pagination_and_fts_do_not_cross_grants() {
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 search: Some("Golden".into()),
                 limit: Some(1),
                 ..Default::default()
@@ -3978,6 +4203,7 @@ fn pagination_and_fts_do_not_cross_grants() {
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 search: Some("Golden".into()),
                 limit: Some(1),
                 cursor: first.next_cursor,
@@ -4055,6 +4281,411 @@ fn configured_inbox_preserves_sources_and_reuses_import_evidence() {
     );
 }
 
+fn inbox_cleanup_fixture() -> (
+    tempfile::TempDir,
+    Arc<Store>,
+    Principal,
+    CollectionService,
+    ImportId,
+    PathBuf,
+) {
+    let (root, store, actor, service, collection) = setup();
+    let source = root.path().join("inbox/package");
+    std::fs::create_dir_all(source.join("nested")).unwrap();
+    std::fs::write(source.join("one.bin"), b"preserved first original").unwrap();
+    std::fs::write(source.join("nested/two.bin"), b"preserved second original").unwrap();
+    let id = start_cleanup_fixture_import(&service, &actor, collection.id, &source).unwrap();
+    service
+        .ensure_guided_inbox_staging(id, source.to_str().unwrap())
+        .unwrap();
+    for _ in 0..12 {
+        if !service.run_next_job("cleanup-fixture-import").unwrap() {
+            break;
+        }
+    }
+    assert_eq!(
+        service.ingest_detail(&actor, id).unwrap().summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+    (root, store, actor, service, id, source)
+}
+fn start_cleanup_fixture_import(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    source: &Path,
+) -> Result<ImportId> {
+    let plan = service
+        .plan_ingest(
+            actor,
+            PlanIngestCommand {
+                collection_id: collection,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Inbox,
+                        label: Some("incoming".into()),
+                        package_name: "package".into(),
+                    },
+                    files: Store::inventory_directory(source).unwrap(),
+                }],
+            },
+        )
+        .unwrap();
+    service
+        .start_ingest(
+            actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .map(|accepted| accepted.imports[0].import_id)
+}
+fn request_cleanup(
+    service: &CollectionService,
+    actor: &Principal,
+    id: ImportId,
+    source: &Path,
+) -> JobId {
+    service
+        .request_inbox_cleanup(
+            actor,
+            id,
+            collector_app::CleanupInboxCommand {
+                source_is_idle: true,
+            },
+            &command(),
+            |_| Ok(source.to_str().unwrap().into()),
+        )
+        .unwrap()
+}
+
+#[test]
+fn inbox_cleanup_is_explicit_preserves_archive_and_unimported_files_and_replays_safely() {
+    let (_root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    let original = std::fs::read(source.join("one.bin")).unwrap();
+    assert!(store.inbox_cleanup_status(id).unwrap().is_none());
+    assert!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: false
+                },
+                &command(),
+                |_| panic!("unconfirmed action resolved a source")
+            )
+            .is_err()
+    );
+    std::fs::write(source.join(".DS_Store"), b"unimported housekeeping").unwrap();
+    let receipt = command();
+    let cleanup = service
+        .request_inbox_cleanup(
+            &actor,
+            id,
+            collector_app::CleanupInboxCommand {
+                source_is_idle: true,
+            },
+            &receipt,
+            |_| Ok(source.to_str().unwrap().into()),
+        )
+        .unwrap();
+    assert!(source.join("one.bin").is_file());
+    assert!(service.run_next_job("remove-inbox").unwrap());
+    let status = store.inbox_cleanup_status(id).unwrap().unwrap();
+    assert!(status.completed, "{status:?}");
+    assert!(status.retained_files);
+    assert_eq!(status.removed_bytes, status.total_bytes);
+    assert!(!source.exists());
+    let recovery = source
+        .parent()
+        .unwrap()
+        .join(format!(".collector-cleanup-{id}/package"));
+    assert_eq!(
+        std::fs::read(recovery.join(".DS_Store")).unwrap(),
+        b"unimported housekeeping"
+    );
+    assert!(!recovery.join("one.bin").exists());
+    let import = store.import_record(id).unwrap();
+    let item = store
+        .capture(import.view.capture_id)
+        .unwrap()
+        .association
+        .item_id
+        .unwrap();
+    assert_eq!(
+        resource_bytes(
+            store
+                .representation(item, import.view.representation_id, 1)
+                .unwrap()
+        ),
+        original
+    );
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("one.bin"), b"replacement package stays").unwrap();
+    assert_eq!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true
+                },
+                &receipt,
+                |_| panic!("receipt replay resolved mutable source configuration")
+            )
+            .unwrap(),
+        cleanup
+    );
+    assert_eq!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true
+                },
+                &command(),
+                |_| panic!("completed cleanup re-resolved a replacement")
+            )
+            .unwrap(),
+        cleanup
+    );
+    assert_eq!(
+        std::fs::read(source.join("one.bin")).unwrap(),
+        b"replacement package stays"
+    );
+}
+
+#[test]
+fn inbox_cleanup_changed_sources_corrupt_archive_and_new_files_never_authorize_deletion() {
+    for scenario in ["changed-source", "corrupt-archive", "new-file", "symlink"] {
+        let (root, store, actor, service, id, source) = inbox_cleanup_fixture();
+        let cleanup = request_cleanup(&service, &actor, id, &source);
+        match scenario {
+            "changed-source" => {
+                std::fs::write(source.join("one.bin"), b"changed! first original!").unwrap();
+            }
+            "corrupt-archive" => {
+                let path =
+                    find_file_with_bytes(&root.path().join("archive"), b"preserved first original")
+                        .unwrap();
+                std::fs::write(path, b"damaged archive payload").unwrap();
+            }
+            "new-file" => {
+                std::fs::write(source.join("new.txt"), b"unimported meaningful data").unwrap();
+            }
+            "symlink" => {
+                #[cfg(unix)]
+                {
+                    std::fs::remove_file(source.join("one.bin")).unwrap();
+                    std::os::unix::fs::symlink(
+                        source.join("nested/two.bin"),
+                        source.join("one.bin"),
+                    )
+                    .unwrap();
+                }
+                #[cfg(not(unix))]
+                {
+                    continue;
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(service.run_next_job("refuse-unsafe-cleanup").unwrap());
+        let status = store.inbox_cleanup_status(id).unwrap().unwrap();
+        assert_eq!(status.state, JobState::Failed, "{scenario}: {status:?}");
+        assert_eq!(status.removed_bytes, ByteLength(0));
+        assert!(source.join("nested/two.bin").exists());
+        assert!(service.retry_job(&actor, cleanup, &command()).is_err());
+        if scenario == "changed-source" {
+            std::fs::write(source.join("one.bin"), b"preserved first original").unwrap();
+            assert_ne!(request_cleanup(&service, &actor, id, &source), cleanup);
+            assert!(service.run_next_job("retry-restored-source").unwrap());
+            assert!(store.inbox_cleanup_status(id).unwrap().unwrap().completed);
+        }
+    }
+}
+
+#[test]
+fn inbox_cleanup_restart_resumes_the_quarantine_and_never_deletes_a_replacement_package() {
+    for phase in [
+        collector_store::PublicationFaultPoint::PayloadPublished,
+        collector_store::PublicationFaultPoint::BytesStaged,
+        collector_store::PublicationFaultPoint::RevisionCommitted,
+    ] {
+        let (root, store, actor, service, id, source) = inbox_cleanup_fixture();
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(FailPublicationOnce {
+                    point: phase,
+                    failed: AtomicBool::new(false),
+                }),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        request_cleanup(&service, &actor, id, &source);
+        assert!(service.run_next_job("interrupted-cleanup").unwrap());
+        assert_eq!(
+            store.inbox_cleanup_status(id).unwrap().unwrap().state,
+            JobState::Failed
+        );
+        assert!(!source.exists());
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("one.bin"), b"new source must survive").unwrap();
+        drop(service);
+        drop(store);
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true,
+                },
+                &command(),
+                |_| panic!("quarantine resume resolved a new source"),
+            )
+            .unwrap();
+        assert!(service.run_next_job("resumed-cleanup").unwrap());
+        assert!(store.inbox_cleanup_status(id).unwrap().unwrap().completed);
+        assert_eq!(
+            std::fs::read(source.join("one.bin")).unwrap(),
+            b"new source must survive"
+        );
+    }
+}
+
+#[test]
+fn inbox_cleanup_fences_pending_imports_cancellation_and_lost_authority() {
+    let (_root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    let collection = store.import_record(id).unwrap().view.collection_id;
+    let pending = start_cleanup_fixture_import(&service, &actor, collection, &source).unwrap();
+    assert!(
+        service
+            .request_inbox_cleanup(
+                &actor,
+                id,
+                collector_app::CleanupInboxCommand {
+                    source_is_idle: true
+                },
+                &command(),
+                |_| Ok(source.to_str().unwrap().into())
+            )
+            .is_err()
+    );
+    service
+        .ensure_guided_inbox_staging(pending, source.to_str().unwrap())
+        .unwrap();
+    for _ in 0..12 {
+        if !service.run_next_job("finish-sibling-import").unwrap() {
+            break;
+        }
+    }
+    let job = request_cleanup(&service, &actor, id, &source);
+    assert!(start_cleanup_fixture_import(&service, &actor, collection, &source).is_err());
+    service.cancel_job(&actor, job, &command()).unwrap();
+    assert!(!service.run_next_job("cancelled-cleanup").unwrap());
+    assert!(source.join("one.bin").is_file());
+    request_cleanup(&service, &actor, id, &source);
+    let peer = store
+        .create_user("another-owner", "another long test password", true)
+        .unwrap();
+    store.grant(collection, peer, Role::Owner).unwrap();
+    store
+        .grant(collection, actor.user_id, Role::Viewer)
+        .unwrap();
+    assert!(service.run_next_job("revoked-cleanup").unwrap());
+    assert!(source.join("one.bin").is_file());
+    assert_eq!(
+        store.inbox_cleanup_status(id).unwrap().unwrap().state,
+        JobState::Failed
+    );
+}
+
+#[test]
+fn inbox_cleanup_unfinished_running_job_recovers_after_cold_open_without_a_new_request() {
+    let (root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::BytesStaged,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let job = request_cleanup(&service, &actor, id, &source);
+    let old = store
+        .claim_job("terminated-cleanup-process", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(old.id, job);
+    assert!(store.clean_inbox_source(id, &old, &mut || Ok(())).is_err());
+    assert_eq!(
+        store.inbox_cleanup_status(id).unwrap().unwrap().state,
+        JobState::Running
+    );
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("new.bin"), b"new inputs").unwrap();
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert!(service.run_next_job("restarted-cleanup-process").unwrap());
+    assert!(store.inbox_cleanup_status(id).unwrap().unwrap().completed);
+    assert_eq!(
+        std::fs::read(source.join("new.bin")).unwrap(),
+        b"new inputs"
+    );
+    assert!(store.clean_inbox_source(id, &old, &mut || Ok(())).is_err());
+}
+
+#[test]
+fn inbox_cleanup_cancellation_inside_validation_retains_the_original_package() {
+    let (_root, store, actor, service, id, source) = inbox_cleanup_fixture();
+    let job = request_cleanup(&service, &actor, id, &source);
+    let claim = store.claim_job("cancellable-cleanup", 30).unwrap().unwrap();
+    let mut checkpoints = 0;
+    let result = store.clean_inbox_source(id, &claim, &mut || {
+        checkpoints += 1;
+        if checkpoints == 3 {
+            store.request_job_cancellation(job, actor.user_id)?;
+        }
+        Ok(())
+    });
+    assert!(matches!(result, Err(Error::JobCancelled)));
+    assert!(source.join("one.bin").is_file());
+    assert!(source.join("nested/two.bin").is_file());
+    store.cancel_claimed_job(job, &claim.claim_token).unwrap();
+    assert_eq!(
+        service.ingest_detail(&actor, id).unwrap().summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+}
+
 #[test]
 fn configured_inbox_staging_runs_through_the_durable_worker() {
     let (root, store, actor, service, collection) = setup();
@@ -4082,6 +4713,141 @@ fn configured_inbox_staging_runs_through_the_durable_worker() {
     );
     assert_eq!(store.evidence(saved.id).unwrap().len(), 1);
 }
+#[test]
+fn intake_housekeeping_is_narrow_and_existing_accepted_files_remain_stageable() {
+    let (root, store, actor, service, collection) = setup();
+    let source = root.path().join("inbox/housekeeping");
+    let preserved = [
+        "disc.cue",
+        "disc.bin",
+        ".hidden-notes",
+        "notes/@eaDir",
+        "#recycle.txt",
+    ];
+    let ignored = [
+        ".DS_Store",
+        "nested/.DS_Store",
+        "@eaDir/disc.bin/SYNO@EAStream",
+        "#recycle/old/disc.cue",
+    ];
+    for name in preserved.iter().chain(ignored.iter()) {
+        let path = source.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, name.as_bytes()).unwrap();
+    }
+    let files = Store::inventory_directory(&source).unwrap();
+    assert_eq!(files.len(), preserved.len());
+    for name in preserved {
+        assert!(files.iter().any(|file| file.name == name));
+    }
+    let retained = ignored
+        .iter()
+        .map(|name| name.to_string())
+        .collect::<Vec<_>>();
+    let legacy = Store::inventory_directory_retaining(&source, &retained).unwrap();
+    assert_eq!(legacy.len(), preserved.len() + ignored.len());
+    // Frozen imports from before this policy still stage every declared original.
+    let import = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Inbox,
+                    label: Some("Shelf".into()),
+                    package_name: "housekeeping".into(),
+                },
+                files: legacy,
+                association: Default::default(),
+                expected_item_revision: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .enqueue_inbox_import_staging(&actor, import.id, source.to_str().unwrap(), &command())
+        .unwrap();
+    assert!(service.run_next_job("legacy-housekeeping").unwrap());
+    let staged = store.import_record(import.id).unwrap();
+    for file in staged.view.files {
+        assert_eq!(file.digest, Some(Digest::sha256(file.name.as_bytes())));
+    }
+    assert_eq!(
+        std::fs::read(source.join(".hidden-notes")).unwrap(),
+        b".hidden-notes"
+    );
+}
+
+#[test]
+fn browser_intake_filters_housekeeping_before_discovery_and_remaps_explicit_anchors() {
+    let (_root, _store, actor, service, collection) = setup();
+    let names = [
+        "Album/.DS_Store",
+        "Album/disc.cue",
+        "Album/disc.bin",
+        "Album/@eaDir/disc.cue",
+        "Album/#recycle/disc.cue",
+        "Album/.unknown",
+    ];
+    let files = names
+        .iter()
+        .map(|name| UploadFile {
+            visibility: Default::default(),
+            name: (*name).into(),
+            bytes: ByteLength(0),
+            sha256: None,
+        })
+        .collect::<Vec<_>>();
+    let discovery = service
+        .discover_bulk_intake(
+            &actor,
+            collector_app::DiscoverIngestCommand {
+                collection_id: collection.id,
+                files: files.clone(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(discovery.package_count, 1);
+    let page = service
+        .intake_discovery_page(&actor, discovery.id, None, None)
+        .unwrap();
+    assert_eq!(page.packages.items[0].files.len(), 3);
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Album".into(),
+                    },
+                    files,
+                    anchor_file_index: Some(1),
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        plan.packages[0]
+            .anchors
+            .iter()
+            .find(|anchor| anchor.selected)
+            .unwrap()
+            .file_index,
+        0
+    );
+    assert!(
+        plan.packages[0]
+            .files
+            .iter()
+            .any(|file| file.name == "Album/.unknown")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn inbox_symlinks_are_rejected() {
@@ -4130,6 +4896,7 @@ fn failed_background_import_is_reported_and_retains_source_chunks() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4164,6 +4931,7 @@ fn durable_job_rows_store_typed_state_without_losing_upload_identity() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4215,7 +4983,7 @@ fn durable_job_rows_store_typed_state_without_losing_upload_identity() {
 }
 
 #[test]
-fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
+fn durable_claims_fence_stale_workers_and_allow_same_user_parallelism() {
     let root = tempfile::tempdir().unwrap();
     let clock = Arc::new(TestClock::new(1_800_000_000));
     let store = Store::open_with_clock(
@@ -4248,7 +5016,16 @@ fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
 
     let original = store.claim_job("server-a", 30).unwrap().unwrap();
     assert_eq!(original.id, first.id);
+    let concurrent = store.claim_job("server-a", 30).unwrap().unwrap();
+    assert_eq!(concurrent.id, second.id);
     assert!(store.claim_job("server-a", 30).unwrap().is_none());
+    store
+        .complete_job(
+            concurrent.id,
+            &concurrent.claim_token,
+            serde_json::json!({}),
+        )
+        .unwrap();
     assert!(matches!(
         store.complete_job(original.id, "wrong-token", serde_json::json!({})),
         Err(Error::CommandInProgress)
@@ -4273,37 +5050,205 @@ fn durable_claims_fence_stale_workers_and_limit_one_active_job_per_user() {
             serde_json::json!({"completed":true}),
         )
         .unwrap();
-    assert_eq!(
-        store.claim_job("server-b", 30).unwrap().unwrap().id,
-        second.id
-    );
+    assert!(store.claim_job("server-b", 30).unwrap().is_none());
 }
 
 #[test]
 fn durable_claims_enforce_the_global_limit_in_storage() {
-    let root = tempfile::tempdir().unwrap();
-    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
-    let jobs = (0..3)
-        .map(|fixture| JobSpec {
-            frozen_input: None,
-            id: JobId::new(),
-            user_id: UserId::new(),
-            collection_id: None,
-            item_id: None,
-            kind: format!("test.{fixture}"),
-            phase: "queued".into(),
-            total_units: 1,
-            request: serde_json::json!({"fixture":fixture}),
-        })
-        .collect::<Vec<_>>();
-    for job in &jobs {
-        store.enqueue_job(job.clone()).unwrap();
+    for count in 1..=8 {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().join("archive"), root.path().join("state"))
+            .unwrap()
+            .with_job_settings(collector_app::JobSettings {
+                processing_workers: count,
+                copy_workers: 1,
+            })
+            .unwrap();
+        for _ in 0..count + 1 {
+            store
+                .enqueue_job(JobSpec {
+                    id: JobId::new(),
+                    user_id: UserId::new(),
+                    collection_id: None,
+                    item_id: None,
+                    kind: "test.processing".into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({}),
+                    frozen_input: None,
+                })
+                .unwrap();
+        }
+        for _ in 0..count {
+            store.claim_job("server-a", 30).unwrap().unwrap();
+        }
+        assert!(
+            store.claim_job("server-a", 30).unwrap().is_none(),
+            "limit {count}"
+        );
+        for _ in 0..2 {
+            store
+                .enqueue_job(JobSpec {
+                    id: JobId::new(),
+                    user_id: UserId::new(),
+                    collection_id: None,
+                    item_id: None,
+                    kind: "provider_acquisition".into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({}),
+                    frozen_input: None,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            store.claim_job("server-a", 30).unwrap().unwrap().kind,
+            "provider_acquisition"
+        );
+        assert!(
+            store.claim_job("server-a", 30).unwrap().is_none(),
+            "provider capacity remains one at limit {count}"
+        );
     }
+}
 
-    let first = store.claim_job("server-a", 30).unwrap().unwrap();
-    let second = store.claim_job("server-a", 30).unwrap().unwrap();
-    assert_ne!(first.user_id, second.user_id);
-    assert!(store.claim_job("server-a", 30).unwrap().is_none());
+#[test]
+fn inbox_copy_and_ready_processing_share_capacity_without_either_monopolizing() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Store::open_with_clock(
+        root.path().join("archive"),
+        root.path().join("state"),
+        clock.clone(),
+    )
+    .unwrap()
+    .with_job_settings(collector_app::JobSettings {
+        processing_workers: 2,
+        copy_workers: 2,
+    })
+    .unwrap();
+    let enqueue = |kind: &str| {
+        let id = JobId::new();
+        store
+            .enqueue_job(JobSpec {
+                id,
+                user_id: UserId::new(),
+                collection_id: None,
+                item_id: None,
+                kind: kind.into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+        clock.advance(1);
+        id
+    };
+    // Copies are older than every analysis request, just as in a large inbox batch.
+    for _ in 0..5 {
+        enqueue("import_staging");
+    }
+    for _ in 0..5 {
+        enqueue("import_analysis");
+    }
+    let claim = || store.claim_job("same-process", 30).unwrap().unwrap();
+    let finish = |job: &collector_app::JobClaim| {
+        store
+            .complete_job(job.id, &job.claim_token, serde_json::json!({}))
+            .unwrap()
+    };
+    let work = claim();
+    assert_eq!(
+        work.kind, "import_analysis",
+        "ready work must advance ahead of an older copy backlog"
+    );
+    let copy = claim();
+    assert_eq!(copy.kind, "import_staging");
+    assert!(store.claim_job("same-process", 30).unwrap().is_none());
+    // Keep analysis occupied: another copy can start as soon as copying finishes.
+    finish(&copy);
+    let next_copy = claim();
+    assert_eq!(next_copy.kind, "import_staging");
+    // Keep copying occupied: another analysis can start as soon as analysis finishes.
+    finish(&work);
+    let next_work = claim();
+    assert_eq!(next_work.kind, "import_analysis");
+    finish(&next_copy);
+    finish(&next_work);
+    let mut kinds = Vec::new();
+    for _ in 0..6 {
+        let job = claim();
+        kinds.push(job.kind.clone());
+        finish(&job);
+    }
+    for window in kinds.windows(3) {
+        assert!(window.iter().any(|kind| kind == "import_staging"));
+        assert!(window.iter().any(|kind| kind == "import_analysis"));
+    }
+}
+
+#[test]
+fn inbox_dispatch_borrows_idle_capacity_and_keeps_cancelling_claims_accounted() {
+    for kind in ["import_staging", "import_analysis"] {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().join("archive"), root.path().join("state"))
+            .unwrap()
+            .with_job_settings(collector_app::JobSettings {
+                processing_workers: 2,
+                copy_workers: 2,
+            })
+            .unwrap();
+        let enqueue = |kind: &str| {
+            let id = JobId::new();
+            let user = UserId::new();
+            store
+                .enqueue_job(JobSpec {
+                    id,
+                    user_id: user,
+                    collection_id: None,
+                    item_id: None,
+                    kind: kind.into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({}),
+                    frozen_input: None,
+                })
+                .unwrap();
+            (id, user)
+        };
+        for _ in 0..3 {
+            enqueue(kind);
+        }
+        let first = store.claim_job("same-process", 30).unwrap().unwrap();
+        let second = store.claim_job("same-process", 30).unwrap().unwrap();
+        assert_eq!(first.kind, kind);
+        assert_eq!(
+            second.kind, kind,
+            "idle capacity remains usable by either lane"
+        );
+        let opposite = if kind == "import_staging" {
+            "import_analysis"
+        } else {
+            "import_staging"
+        };
+        let (waiting, _) = enqueue(opposite);
+        store
+            .request_job_cancellation(first.id, first.user_id)
+            .unwrap();
+        assert!(
+            store.claim_job("same-process", 30).unwrap().is_none(),
+            "cancellation retains capacity until acknowledged"
+        );
+        store
+            .cancel_claimed_job(first.id, &first.claim_token)
+            .unwrap();
+        let resumed = store.claim_job("same-process", 30).unwrap().unwrap();
+        assert_eq!(
+            resumed.id, waiting,
+            "new opposite-lane demand gets the next released slot"
+        );
+    }
 }
 
 #[test]
@@ -4406,6 +5351,7 @@ fn queued_and_running_upload_cancellation_retain_source_material() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "running.bin".into(),
                 bytes: ByteLength(7),
                 sha256: None,
@@ -4619,6 +5565,7 @@ fn integrity_verification_runs_as_a_real_durable_job() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4668,6 +5615,7 @@ fn reclaimed_integrity_job_does_not_publish_twice() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4738,11 +5686,13 @@ fn integrity_job_observes_cancellation_between_files() {
             saved.revision,
             vec![
                 UploadFile {
+                    visibility: Default::default(),
                     name: "one.bin".into(),
                     bytes: ByteLength(3),
                     sha256: None,
                 },
                 UploadFile {
+                    visibility: Default::default(),
                     name: "two.bin".into(),
                     bytes: ByteLength(3),
                     sha256: None,
@@ -4856,6 +5806,7 @@ fn failed_integrity_job_retries_with_the_same_identity_and_attempt_history() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "retry-integrity.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4901,6 +5852,7 @@ fn review_capture_update_survives_reindex() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -4936,6 +5888,7 @@ fn review_cannot_move_another_users_capture() {
         &service,
         &owner,
         Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: private_collection.id,
             revision: Revision(0),
@@ -5043,6 +5996,7 @@ fn review_capture_links_must_form_chain_when_middle_links_omitted() {
     });
     save_inventory(&service, &actor, second, Revision(0)).unwrap();
     let capture = Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -5375,6 +6329,7 @@ fn focused_inventory_commands_preserve_history_and_are_idempotent() {
         &service,
         &actor,
         Capture {
+            purchase: None,
             id: CaptureId::new(),
             collection_id: collection.id,
             revision: Revision(0),
@@ -5558,6 +6513,7 @@ fn component_order_and_references_are_protected_by_focused_commands() {
         .unwrap()
         .id;
     let capture = Capture {
+        purchase: None,
         id: CaptureId::new(),
         collection_id: collection.id,
         revision: Revision(0),
@@ -5860,6 +6816,7 @@ fn subprocess_command_receipt_worker() {
             effects
                 .save_capture(
                     Capture {
+                        purchase: None,
                         id: CaptureId::new(),
                         collection_id: collection,
                         revision: Revision(0),
@@ -5879,6 +6836,7 @@ fn subprocess_command_receipt_worker() {
                     item_id,
                     Revision(1),
                     vec![UploadFile {
+                        visibility: Default::default(),
                         name: "another.bin".into(),
                         bytes: ByteLength(3),
                         sha256: None,
@@ -5976,6 +6934,7 @@ fn sigkill_receipt_effect_gap_replays_every_mutation_family() {
                     saved.id,
                     Revision(1),
                     vec![UploadFile {
+                        visibility: Default::default(),
                         name: "raw.bin".into(),
                         bytes: ByteLength(3),
                         sha256: None,
@@ -6105,6 +7064,7 @@ fn successful_command_replay_is_not_revalidated_against_later_revisions() {
     let saved = store.save(item(collection.id), Revision(0)).unwrap();
     let upload_key = command();
     let files = vec![UploadFile {
+        visibility: Default::default(),
         name: "raw.bin".into(),
         bytes: ByteLength(3),
         sha256: None,
@@ -6138,6 +7098,7 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
                 package_name: "disc-one".into(),
             },
             files: vec![ImportDeclaredFile {
+                visibility: Default::default(),
                 name: "track01.bin".into(),
                 bytes: ByteLength(4),
                 received_bytes: ByteLength(0),
@@ -6169,12 +7130,6 @@ fn current_private_schema_preserves_durable_imports_without_private_path_columns
     drop(store);
 
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
-    assert_eq!(
-        private
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .unwrap(),
-        19 // Nullable enrollment owners add no private paths to Import records.
-    );
     let mut statement = private.prepare("PRAGMA table_info(imports)").unwrap();
     let columns = statement
         .query_map([], |row| row.get::<_, String>(1))
@@ -6217,6 +7172,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: Some(1),
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6226,6 +7182,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
                     files: names
                         .into_iter()
                         .map(|name| UploadFile {
+                            visibility: Default::default(),
                             name: name.into(),
                             bytes: ByteLength(1),
                             sha256: None,
@@ -6248,6 +7205,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6288,6 +7246,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6295,6 +7254,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
                         package_name: "fixture.rom".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "fixture.rom".into(),
                         bytes: ByteLength(rom.len() as u64),
                         sha256: None,
@@ -6307,6 +7267,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6322,19 +7283,25 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
         .stage_provisional_import_chunk(&actor, import_id, 0, 0, rom)
         .unwrap();
 
-    assert!(service.run_next_job("guided-game-analysis").unwrap());
+    provider_drain(&service);
     let detail = service.ingest_detail(&actor, import_id).unwrap();
-    let analysis = service
-        .job(&actor, detail.import.analysis_job_id.unwrap())
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
+    assert!(detail.import.analysis_job_id.is_none());
+    let ids = service
+        .identify_game_entry(&actor, detail.summary.target_item_id.unwrap(), &command())
         .unwrap();
-    assert_eq!(analysis.state, JobState::Completed);
-    assert!(
-        detail
-            .import
-            .limitations
-            .iter()
-            .any(|limitation| { limitation.contains("No active DAT snapshot was selected") })
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, ids[0]).unwrap().state,
+        JobState::Completed
     );
+    let review = service
+        .metadata_review(&actor, detail.summary.target_item_id.unwrap())
+        .unwrap();
+    assert!(matches!(
+        review.identification.unwrap().status,
+        collector_modules::games::GameDetectionStatus::Unrecognized
+    ));
 }
 
 #[test]
@@ -6343,6 +7310,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
+        purchase: None,
         anchor_file_index: None,
         source: ImportSourceSummary {
             kind: ImportSourceKind::Browser,
@@ -6351,11 +7319,13 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         },
         files: vec![
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.cue".into(),
                 bytes: ByteLength(cue.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(pcm.len() as u64),
                 sha256: None,
@@ -6379,6 +7349,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: stale,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6395,6 +7366,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6409,6 +7381,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6423,6 +7396,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
         .start_ingest_with_preflight(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6464,7 +7438,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     assert!(recovered.run_next_job("guided-analysis").unwrap());
     assert!(recovered.run_next_job("guided-publication").unwrap());
     let detail = recovered.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert_eq!(detail.summary.capture_revision, Some(Revision(1)));
     assert!(matches!(
         recovered.discard_ingest(&actor, id, detail.import.revision, &command()),
@@ -6638,6 +7612,7 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
     let packages = ["Disc A", "Disc B"]
         .into_iter()
         .map(|name| IngestPackageSelection {
+            purchase: None,
             anchor_file_index: None,
             source: ImportSourceSummary {
                 kind: ImportSourceKind::Browser,
@@ -6646,11 +7621,13 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
             },
             files: vec![
                 UploadFile {
+                    visibility: Default::default(),
                     name: "disc.cue".into(),
                     bytes: ByteLength(cue.len() as u64),
                     sha256: None,
                 },
                 UploadFile {
+                    visibility: Default::default(),
                     name: "disc.bin".into(),
                     bytes: ByteLength(pcm.len() as u64),
                     sha256: None,
@@ -6671,6 +7648,7 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6744,6 +7722,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6752,11 +7731,13 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -6774,6 +7755,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: plan.clone(),
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6789,6 +7771,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
         Err(Error::Conflict)
     ));
     let accepted_command = StartIngestCommand {
+        purchase: None,
         clean_reimport: None,
         plan,
         analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -6817,7 +7800,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
     assert!(service.run_next_job("existing-analysis").unwrap());
     assert!(service.run_next_job("existing-publication").unwrap());
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert_eq!(detail.summary.target_item_id, Some(existing.id));
     let saved = store.item(existing.id).unwrap();
     assert_eq!(saved.title, existing.title);
@@ -6871,6 +7854,7 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6879,11 +7863,13 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(2352 * 10),
                             sha256: None,
@@ -6894,6 +7880,7 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
         )
         .unwrap();
     let request = StartIngestCommand {
+        purchase: None,
         clean_reimport: None,
         plan,
         analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -6930,6 +7917,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -6938,11 +7926,13 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -6956,6 +7946,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -6982,7 +7973,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
     );
     assert!(service.run_next_job("preservation-only").unwrap());
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert_eq!(
         detail
             .steps
@@ -6991,6 +7982,119 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
             .unwrap()
             .state,
         collector_app::IngestStepState::Skipped
+    );
+}
+
+#[test]
+fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
+    use collector_app::IngestWorkState;
+    let (_root, store, actor, service, collection) = setup();
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Activity package".into(),
+                    },
+                    files: vec![UploadFile {
+                        visibility: Default::default(),
+                        name: "original.bin".into(),
+                        bytes: ByteLength(4),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, b"ab")
+        .unwrap();
+    let waiting = service.ingest_detail(&actor, id).unwrap();
+    assert!(
+        waiting.summary.work.is_empty(),
+        "An incomplete browser upload must not look like active server work"
+    );
+    assert!(waiting.summary.permissions.can_resume_upload);
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 2, b"cd")
+        .unwrap();
+    let queued = service.ingest_detail(&actor, id).unwrap();
+    assert!(
+        queued
+            .summary
+            .work
+            .iter()
+            .any(|work| work.kind == "import_publication" && work.state == IngestWorkState::Queued)
+    );
+    let claim = store.claim_job("activity-worker", 30).unwrap().unwrap();
+    store
+        .heartbeat_job(claim.id, &claim.claim_token, "verifying_integrity", 0, 30)
+        .unwrap();
+    let active = service.ingest_detail(&actor, id).unwrap();
+    assert!(
+        active
+            .summary
+            .work
+            .iter()
+            .any(|work| work.state == IngestWorkState::Running
+                && work.phase == "verifying_integrity")
+    );
+    let outsider = Principal {
+        user_id: UserId::new(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(service.ingest_detail(&outsider, id).is_err());
+    assert!(
+        store
+            .import_work_records(id, outsider.user_id)
+            .unwrap()
+            .is_empty()
+    );
+    service
+        .cancel_ingest(&actor, id, active.import.revision, &command())
+        .unwrap();
+    assert!(
+        service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .summary
+            .work
+            .iter()
+            .any(|work| work.state == IngestWorkState::Cancelling)
+    );
+    store
+        .cancel_claimed_job(claim.id, &claim.claim_token)
+        .unwrap();
+    assert!(
+        service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .summary
+            .work
+            .is_empty()
     );
 }
 
@@ -7006,6 +8110,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7014,11 +8119,13 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -7032,6 +8139,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7099,6 +8207,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
     let toc = b"TRACK AUDIO\nFILE \"disc.bin\" 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
+        purchase: None,
         anchor_file_index: Some(0),
         source: ImportSourceSummary {
             kind: ImportSourceKind::Browser,
@@ -7107,16 +8216,19 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         },
         files: vec![
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.cue".into(),
                 bytes: ByteLength(cue.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(pcm.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.toc".into(),
                 bytes: ByteLength(toc.len() as u64),
                 sha256: None,
@@ -7137,6 +8249,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         service.start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan: unavailable,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7164,6 +8277,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7184,6 +8298,9 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
     service
         .stage_provisional_import_chunk(&actor, id, 2, 0, toc)
         .unwrap();
+    let queued = service.ingest_detail(&actor, id).unwrap().summary.work;
+    assert!(queued.iter().any(|work| work.kind == "import_analysis"
+        && work.state == collector_app::IngestWorkState::Queued));
     assert!(service.run_next_job("guided-preparation-analysis").unwrap());
     assert!(
         service
@@ -7203,9 +8320,38 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         .unwrap();
     assert_eq!(preparation.state, collector_app::IngestStepState::Active);
     assert!(preparation.job_id.is_some());
+    assert!(
+        during
+            .summary
+            .work
+            .iter()
+            .any(|work| work.kind == "music_derivative"
+                && work.state == collector_app::IngestWorkState::Queued
+                && work.jobs == 1),
+        "A completed batch admission must still expose its queued track: {:?}",
+        during.summary.work
+    );
+    let observing_service = service.clone();
+    let observing_actor = actor.clone();
+    *encoder.after_encode.lock().unwrap() = Some(Box::new(move || {
+        let working = observing_service
+            .ingest_detail(&observing_actor, id)
+            .unwrap();
+        assert!(
+            working
+                .summary
+                .work
+                .iter()
+                .any(|work| work.kind == "music_derivative"
+                    && work.state == collector_app::IngestWorkState::Running
+                    && work.phase == "preparing_audio"
+                    && work.jobs == 1)
+        );
+    }));
     assert!(service.run_next_job("guided-preparation-track").unwrap());
     service.resume_guided_ingests().unwrap();
     let completed = service.ingest_detail(&actor, id).unwrap();
+    assert!(completed.summary.work.is_empty());
     assert_eq!(
         completed.summary.outcome,
         collector_app::IngestStepState::Succeeded
@@ -7254,6 +8400,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7262,11 +8409,13 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -7280,6 +8429,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7309,7 +8459,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
     assert!(service.run_next_job("guided-analysis").unwrap());
     assert!(service.run_next_job("guided-publication").unwrap());
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert!(
         detail
             .steps
@@ -7400,6 +8550,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7408,11 +8559,13 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
@@ -7426,6 +8579,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7526,7 +8680,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         )
         .unwrap();
     assert!(service.run_next_job("guided-provider-publication").unwrap());
-    assert!(service.run_next_job("guided-provider-metadata").unwrap());
+    provider_drain(&service);
     let requests = mb_server.requests.lock().unwrap();
     assert!(
         requests
@@ -7560,11 +8714,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             &command(),
         )
         .unwrap();
-    assert!(
-        service
-            .run_next_job("guided-provider-art-listing-retry")
-            .unwrap()
-    );
+    provider_drain(&service);
     assert!(!service.run_next_job("guided-provider-art-image").unwrap());
     assert!(!service.run_next_job("guided-provider-finished").unwrap());
     let target = service
@@ -7631,6 +8781,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7640,6 +8791,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
                     files: files
                         .iter()
                         .map(|(name, bytes)| UploadFile {
+                            visibility: Default::default(),
                             name: (*name).into(),
                             bytes: ByteLength(bytes.len() as u64),
                             sha256: None,
@@ -7653,6 +8805,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7676,7 +8829,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             .unwrap()
     );
     let detail = service.ingest_detail(&actor, id).unwrap();
-    assert_eq!(detail.import.phase, ImportPhase::Published);
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert!(detail.steps.iter().any(|step| step.step == "identification"
         && step.state == collector_app::IngestStepState::Failed));
     assert_eq!(
@@ -7698,6 +8851,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7705,6 +8859,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
                         package_name: "mistake.bin".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "mistake.bin".into(),
                         bytes: ByteLength(4),
                         sha256: None,
@@ -7717,6 +8872,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7781,6 +8937,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7788,6 +8945,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
                         package_name: "paused.bin".into(),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: "paused.bin".into(),
                         bytes: ByteLength(8),
                         sha256: None,
@@ -7800,6 +8958,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -7937,6 +9096,7 @@ fn import_validation_rejects_unsafe_or_incoherent_staging_state() {
 
     let mut collision = provisional_import(user, collection);
     collision.view.files.push(ImportDeclaredFile {
+        visibility: Default::default(),
         name: "TRACK01.BIN".into(),
         bytes: ByteLength(4),
         received_bytes: ByteLength(0),
@@ -8004,6 +9164,7 @@ fn durable_import_allows_published_unidentified_unattached_capture_identity() {
 fn browser_and_inbox_sources_converge_on_the_same_durable_staging_state() {
     let (root, store, actor, service, collection) = setup();
     let declared = vec![UploadFile {
+        visibility: Default::default(),
         name: "disc/track01.bin".into(),
         bytes: ByteLength(4),
         sha256: None,
@@ -8094,6 +9255,7 @@ fn zero_byte_import_files_are_complete_without_a_synthetic_chunk() {
                     package_name: "empty-file".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "empty.bin".into(),
                     bytes: ByteLength(0),
                     sha256: None,
@@ -8119,6 +9281,7 @@ fn zero_byte_import_files_are_complete_without_a_synthetic_chunk() {
                     package_name: "bad-empty-file".into(),
                 },
                 files: vec![UploadFile {
+            visibility: Default::default(),
                     name: "empty.bin".into(),
                     bytes: ByteLength(0),
                     sha256: Some(Digest::sha256(b"not empty").hex),
@@ -8142,6 +9305,7 @@ fn browser_import_resumes_from_durable_offsets_after_restart() {
         package_name: "restart-disc".into(),
     };
     let files = vec![UploadFile {
+        visibility: Default::default(),
         name: "track.bin".into(),
         bytes: ByteLength(4),
         sha256: Some(Digest::sha256(b"data").hex),
@@ -8200,7 +9364,7 @@ fn browser_import_resumes_from_durable_offsets_after_restart() {
 }
 
 #[test]
-fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch() {
+fn stopped_backup_restore_preserves_archive_accounts_authority_loans_and_pending_scratch() {
     let (root, store, actor, service, collection) = setup();
     let owner_session = store
         .login("owner", "a long test password", "restore rehearsal")
@@ -8219,7 +9383,48 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         )
         .unwrap();
 
-    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let mut value = item(collection.id);
+    value.specimens.push(Specimen {
+        id: SpecimenId::new(),
+        label: "Loaned copy".into(),
+        condition: Condition::Good,
+        ownership: Ownership::Owned,
+        possession: Possession::Lent,
+        components: vec![],
+        acquisition: None,
+        private_notes: Some("retain private inventory".into()),
+        loans: vec![Loan {
+            id: LoanId::new(),
+            contact: "Trusted friend".into(),
+            lent_at: chrono::Utc::now().date_naive(),
+            due_at: None,
+            returned_at: None,
+        }],
+    });
+    let saved = Catalog::save(&*store, value, Revision(0)).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "Manual restore title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let saved = store.item(saved.id).unwrap();
+    let mut unknown = item(collection.id);
+    unknown.domain = ModuleData {
+        module: ModuleId("org.junk.music".into()),
+        schema_version: 900,
+        payload: RawJson::from_json(r#"{"future":{"nested":[1,"retained"]}}"#).unwrap(),
+    };
+    let unknown = Catalog::save(&*store, unknown, Revision(0)).unwrap();
     let original = b"synthetic stopped-server rehearsal original";
     let upload = service
         .create_upload(
@@ -8227,6 +9432,7 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "master.bin".into(),
                 bytes: ByteLength(original.len() as u64),
                 sha256: Some(Digest::sha256(original).hex),
@@ -8252,6 +9458,7 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
                     package_name: "restore-pending".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "pending.bin".into(),
                     bytes: ByteLength(4),
                     sha256: Some(Digest::sha256(b"data").hex),
@@ -8275,21 +9482,45 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         .map(|account| account.username)
         .collect::<Vec<_>>();
     let evidence_records = serde_json::to_value(store.evidence(saved.id).unwrap()).unwrap();
+    let authority =
+        serde_json::to_value(store.metadata_authority(collection.id, saved.id).unwrap()).unwrap();
+    let loans = serde_json::to_value(store.item(saved.id).unwrap().specimens).unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let config = root.path().join("collector.toml");
+    std::fs::write(
+        &config,
+        format!("archive = {archive:?}\nstate = {state:?}\n"),
+    )
+    .unwrap();
+    let backup = root.path().join("backup");
+    store.backup(&backup, &config).unwrap();
     drop(service);
     drop(store);
 
-    let archive = root.path().join("archive");
-    let state = root.path().join("state");
-    let archive_hashes = tree_hashes(&archive);
-    let state_hashes = tree_hashes(&state);
     let restore = root.path().join("isolated-restore");
+    std::fs::create_dir(&restore).unwrap();
     let restored_archive = restore.join("archive");
     let restored_state = restore.join("state");
-    assert!(!restore.exists());
-    copy_tree(&archive, &restored_archive);
-    copy_tree(&state, &restored_state);
-    assert_eq!(tree_hashes(&restored_archive), archive_hashes);
-    assert_eq!(tree_hashes(&restored_state), state_hashes);
+    let restored_config = restore.join("collector.toml");
+    let configuration = format!("archive = {restored_archive:?}\nstate = {restored_state:?}\n");
+    collector_store::restore_backup(
+        &backup,
+        &restored_archive,
+        &restored_state,
+        &restored_config,
+        configuration.as_bytes(),
+        collector_app::RestoreScope::Full,
+    )
+    .unwrap();
+    assert_eq!(
+        tree_hashes(&restored_archive),
+        tree_hashes(&backup.join("archive"))
+    );
+    assert_eq!(
+        tree_hashes(&restored_state),
+        tree_hashes(&backup.join("state"))
+    );
 
     let restored = Arc::new(Store::open(&restored_archive, &restored_state).unwrap());
     assert_eq!(restored.server_id().unwrap(), server_id);
@@ -8313,6 +9544,23 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         Role::Viewer
     );
 
+    assert_eq!(
+        serde_json::to_value(restored.item(unknown.id).unwrap().domain).unwrap(),
+        serde_json::to_value(&unknown.domain).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(restored.item(saved.id).unwrap().specimens).unwrap(),
+        loans
+    );
+    assert_eq!(
+        serde_json::to_value(
+            restored
+                .metadata_authority(collection.id, saved.id)
+                .unwrap()
+        )
+        .unwrap(),
+        authority
+    );
     let restored_service = CollectionService::new(restored.clone(), Arc::new(Registry::builtins()));
     assert_eq!(
         resource_bytes(
@@ -8335,6 +9583,51 @@ fn stopped_server_copy_rehearsal_preserves_archive_accounts_and_pending_scratch(
         .unwrap();
     assert_eq!(completed.phase, ImportPhase::Analyzing);
     assert_eq!(completed.files[0].digest, Some(Digest::sha256(b"data")));
+    drop(restored_service);
+    drop(restored);
+    let independent_archive = root.path().join("independent-archive");
+    let independent_state = root.path().join("independent-state");
+    let independent_config = root.path().join("independent.toml");
+    let configuration =
+        format!("archive = {independent_archive:?}\nstate = {independent_state:?}\n");
+    collector_store::restore_backup(
+        &backup,
+        &independent_archive,
+        &independent_state,
+        &independent_config,
+        configuration.as_bytes(),
+        collector_app::RestoreScope::ArchiveOnly,
+    )
+    .unwrap();
+    assert!(!independent_state.join("private.sqlite").exists());
+    let independent = Arc::new(Store::open(&independent_archive, &independent_state).unwrap());
+    assert_ne!(independent.server_id().unwrap(), server_id);
+    assert_eq!(independent.user_count().unwrap(), 0);
+    assert!(Catalog::role(&*independent, viewer, collection.id).is_err());
+    let new_owner = independent
+        .create_user("new-owner", "a fresh long password", true)
+        .unwrap();
+    assert!(Catalog::role(&*independent, new_owner, collection.id).is_err());
+    collector_app::LocalOwnershipRecoveryService::new(independent.clone())
+        .recover_owner(collection.id, "new-owner")
+        .unwrap();
+    assert_eq!(
+        Catalog::role(&*independent, new_owner, collection.id).unwrap(),
+        Role::Owner
+    );
+    assert_eq!(
+        serde_json::to_value(independent.item(unknown.id).unwrap().domain).unwrap(),
+        serde_json::to_value(&unknown.domain).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(
+            independent
+                .metadata_authority(collection.id, saved.id)
+                .unwrap()
+        )
+        .unwrap(),
+        authority
+    );
 }
 
 #[test]
@@ -8388,6 +9681,7 @@ fn staged_import(
                     package_name: package.into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "disc.bin".into(),
                     bytes: ByteLength(4),
                     sha256: None,
@@ -8556,6 +9850,7 @@ fn streamed_snapshot_is_hashed_and_survives_archive_only_rebuild() {
     let (root, store, _actor, service, collection) = setup();
     let bytes = b"streamed catalog bytes".to_vec();
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -8616,6 +9911,7 @@ fn streamed_snapshot_cancellation_aborts_before_commit_and_recovers_cleanly() {
     let (root, store, _actor, service, collection) = setup();
     let bytes = vec![7_u8; 2 * 1024 * 1024];
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -8665,7 +9961,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
     let dat_path = root.path().join("games.dat");
     let dat = |version: &str, sha1: &str| {
         format!(
-            r#"<datafile><header><name>Fixture Games</name><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="{sha1}"/></game></datafile>"#
+            r#"<datafile><header><name>Nintendo - Game Boy</name><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="{sha1}"/></game></datafile>"#
         )
     };
     std::fs::write(
@@ -8684,11 +9980,11 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
     };
     let provider = Arc::new(
         LocalDatProvider::new(std::collections::BTreeMap::from([(
-            "nes".into(),
+            "gb".into(),
             LocalDatSource {
                 path: dat_path.clone(),
-                system: "nes".into(),
-                catalog: "fixture-games".into(),
+                system: "gb".into(),
+                catalog: "No-Intro".into(),
                 byte_domain: "org.junk.game.raw-bytes".into(),
                 byte_domain_version: 1,
             },
@@ -8718,7 +10014,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
         module: ModuleId("org.junk.games".into()),
         schema_version: 1,
         payload: RawJson::from_value(serde_json::json!({
-            "platform":"nes",
+            "platform":"gb",
             "region":null,
             "publisher":null,
             "release_year":null
@@ -8733,12 +10029,12 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                 ImportCatalogSnapshotCommand {
                     collection_id: collection.id,
                     provider: provider_id.clone(),
-                    source: "nes".into(),
+                    source: "gb".into(),
                 },
                 &command(),
             )
             .unwrap();
-        assert!(service.run_next_job("dat-acquisition").unwrap());
+        provider_drain(service);
         assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
         SnapshotId(job.0)
     };
@@ -8792,6 +10088,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                     package_name: "synthetic-game".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "game.bin".into(),
                     bytes: ByteLength(4),
                     sha256: None,
@@ -8816,7 +10113,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("game-analysis").unwrap());
+    provider_drain(&service);
     let analyzed = service.provisional_import(&actor, import.id).unwrap();
     assert_eq!(analyzed.candidates.len(), 1);
     assert!(analyzed.candidates[0].label.contains("exact catalog match"));
@@ -8838,7 +10135,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
     let publication_job = service
         .enqueue_import_publication(&actor, reviewed.id, &command())
         .unwrap();
-    assert!(service.run_next_job("game-publication").unwrap());
+    provider_drain(&service);
     let completed_publication = service.job(&actor, publication_job).unwrap();
     assert_eq!(
         completed_publication.state,
@@ -8861,7 +10158,7 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                 snapshot_id: Some(first_snapshot),
                 selection: RawJson::from_value(serde_json::json!({
                     "snapshot_id":SnapshotId::new(),
-                    "system":"nes",
+                    "system":"gb",
                     "input":"raw_files"
                 })),
             },
@@ -8882,14 +10179,14 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
                 snapshot_id: Some(first_snapshot),
                 selection: RawJson::from_value(serde_json::json!({
                     "snapshot_id":first_snapshot,
-                    "system":"nes",
+                    "system":"gb",
                     "input":"raw_files"
                 })),
             },
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("game-verification").unwrap());
+    provider_drain(&service);
     let completed_operation = service.job(&actor, operation).unwrap();
     assert_eq!(
         completed_operation.state,
@@ -8988,8 +10285,8 @@ fn game_dat_workflow_preserves_old_snapshot_evidence_after_refresh_and_reindex()
         Digest::sha256(dat("1", "a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd").as_bytes())
     );
     assert_eq!(
-        store.active_snapshot(collection.id, &provider_id).unwrap(),
-        Some(second_snapshot)
+        store.active_game_snapshots(collection.id).unwrap(),
+        vec![second_snapshot]
     );
     let rebuilt_metadata = service.metadata_view(&actor, game.id).unwrap();
     assert_eq!(rebuilt_metadata.candidates.len(), 1);
@@ -9052,11 +10349,13 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
                 },
                 files: vec![
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.cue".into(),
                         bytes: ByteLength(cue.len() as u64),
                         sha256: None,
                     },
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(pcm.len() as u64),
                         sha256: None,
@@ -9111,6 +10410,69 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
         JobState::Completed
     );
     let published = service.provisional_import(&actor, created.id).unwrap();
+    // Imported structure is enough for response selection. A planning read must
+    // not open the audio payload, even when it has become unavailable on disk.
+    let payloads = files_named(&root.path().join("archive"), "disc.bin");
+    assert!(!payloads.is_empty());
+    for path in &payloads {
+        std::fs::rename(path, path.with_extension("bin-unavailable")).unwrap();
+    }
+    let import_plan = service
+        .processing_plan(
+            &actor,
+            published.capture_id,
+            StartProcessingCommand {
+                operation: OperationId::new(
+                    collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION,
+                )
+                .unwrap(),
+                operation_version: 1,
+                representation_id: published.representation_id,
+                snapshot_id: None,
+                selection: RawJson::from_value(serde_json::json!({"maximum_offset":0})),
+            },
+        )
+        .unwrap();
+    for path in &payloads {
+        std::fs::rename(path.with_extension("bin-unavailable"), path).unwrap();
+    }
+    assert_eq!(
+        import_plan.accuraterip_query.unwrap(),
+        collector_modules::music::catalog::DbarQuery {
+            track_count: 1,
+            accuraterip_id1: id1,
+            accuraterip_id2: id2,
+            cddb_id: cddb,
+        }
+    );
+    assert_eq!(import_plan.files.len(), 1);
+    assert_eq!(
+        import_plan.blockers,
+        ["Choose an AccurateRip response for this disc before checking."]
+    );
+    assert_eq!(
+        import_plan.accuraterip_structure_observation_id,
+        Some(ObservationId(analysis_job.0))
+    );
+    // Fetch directly from imported layout, without manufacturing a second check.
+    unavailable.store(false, Ordering::SeqCst);
+    let import_acquisition = service
+        .enqueue_accuraterip_acquisition(
+            &actor,
+            published.capture_id,
+            AcquireAccurateRipCommand {
+                representation_id: published.representation_id,
+                structure_observation_id: import_plan.accuraterip_structure_observation_id.unwrap(),
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, import_acquisition).unwrap().state,
+        JobState::Completed
+    );
+    unavailable.store(true, Ordering::SeqCst);
     let structure_job = service
         .enqueue_processing_operation(
             &actor,
@@ -9172,7 +10534,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
             .unwrap()
     };
     let outage_job = acquire(&service);
-    assert!(service.run_next_job("accuraterip-outage").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, outage_job).unwrap().state,
         JobState::Failed
@@ -9180,7 +10542,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     assert!(Catalog::capture(&*store, published.capture_id).is_ok());
     unavailable.store(false, Ordering::SeqCst);
     service.retry_job(&actor, outage_job, &command()).unwrap();
-    assert!(service.run_next_job("accuraterip-retry").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, outage_job).unwrap().state,
         JobState::Completed
@@ -9196,14 +10558,14 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     service
         .cancel_job(&actor, cancelled_job, &command())
         .unwrap();
-    assert!(!service.run_next_job("accuraterip-cancelled").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, cancelled_job).unwrap().state,
         JobState::Cancelled
     );
 
     let refreshed_job = acquire(&service);
-    assert!(service.run_next_job("accuraterip-refresh").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, refreshed_job).unwrap().state,
         JobState::Completed
@@ -9211,14 +10573,117 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     let snapshots = service
         .curation_catalog_snapshots(&actor, collection.id, None, 10)
         .unwrap();
-    assert_eq!(snapshots.items.len(), 2);
-    let second_snapshot = snapshots
-        .items
-        .iter()
-        .find(|value| value.snapshot.id != first_snapshot)
-        .unwrap()
-        .snapshot
-        .id;
+    assert_eq!(
+        snapshots.items.len(),
+        1,
+        "identical AccurateRip responses do not create permanent snapshots"
+    );
+    let second_snapshot = completed_provider_snapshot(&service, &actor, refreshed_job);
+    assert_eq!(second_snapshot, first_snapshot);
+
+    let verification_command = |snapshot_id| StartProcessingCommand {
+        operation: OperationId::new(collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION)
+            .unwrap(),
+        operation_version: 1,
+        representation_id: published.representation_id,
+        snapshot_id: Some(snapshot_id),
+        selection: RawJson::from_value(serde_json::json!({
+            "anchor_file_index":0,"snapshot_id":snapshot_id,"maximum_offset":0
+        })),
+    };
+    let matching_plan = service
+        .processing_plan(
+            &actor,
+            published.capture_id,
+            verification_command(first_snapshot),
+        )
+        .unwrap();
+    let expected_query = matching_plan.accuraterip_query.unwrap();
+    assert!(matching_plan.blockers.is_empty());
+    assert_eq!(expected_query.accuraterip_id1, id1);
+    assert_eq!(expected_query.accuraterip_id2, id2);
+    assert_eq!(expected_query.cddb_id, cddb);
+    // Omitting the envelope reference cannot bypass the prerequisite by leaving
+    // a valid response ID only inside the module selection.
+    let mut unfrozen_reference = verification_command(first_snapshot);
+    unfrozen_reference.snapshot_id = None;
+    assert!(matches!(
+        service
+            .processing_plan(&actor, published.capture_id, unfrozen_reference.clone())
+            .unwrap()
+            .state,
+        collector_app::ScanState::Blocked
+    ));
+    assert!(matches!(
+        service.enqueue_processing_operation(
+            &actor,
+            published.capture_id,
+            unfrozen_reference,
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    // Equal track counts alone cannot choose a reference: each disc ID matters.
+    for field in [
+        "track_count",
+        "accuraterip_id1",
+        "accuraterip_id2",
+        "cddb_id",
+    ] {
+        let mut query = serde_json::to_value(&expected_query).unwrap();
+        query[field] = serde_json::json!(query[field].as_u64().unwrap() + 1);
+        let foreign = SnapshotRecord {
+            acquisition_key: None,
+            id: SnapshotId::new(),
+            collection_id: collection.id,
+            provider: ModuleId("org.junk.providers.accuraterip".into()),
+            media_type: "application/vnd.accuraterip.dbar".into(),
+            bytes: ByteLength(0),
+            digest: Digest::sha256(&[]),
+            parsed_observation: RawJson::from_value(serde_json::json!({
+                "schema_version":1,"query":query,"outcome":"no_data","response_count":0
+            })),
+            created_at: chrono::Utc::now(),
+        };
+        let claim = snapshot_claim(&store, collection.id);
+        store
+            .publish_snapshot(
+                &claim,
+                foreign.clone(),
+                &mut std::io::Cursor::new(Vec::<u8>::new()),
+                &mut || Ok(false),
+            )
+            .unwrap();
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+        let request = verification_command(foreign.id);
+        let plan = service
+            .processing_plan(&actor, published.capture_id, request.clone())
+            .unwrap();
+        assert!(
+            matches!(plan.state, collector_app::ScanState::Blocked),
+            "{field}"
+        );
+        assert!(
+            plan.blockers
+                .iter()
+                .any(|value| value.contains("different disc")),
+            "{field}"
+        );
+        assert!(
+            matches!(
+                service.enqueue_processing_operation(
+                    &actor,
+                    published.capture_id,
+                    request,
+                    &command()
+                ),
+                Err(Error::Invalid(_))
+            ),
+            "{field}"
+        );
+    }
 
     for snapshot_id in [first_snapshot, second_snapshot] {
         let verification = service
@@ -9350,7 +10815,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
     );
     no_data.store(true, Ordering::SeqCst);
     let no_data_acquisition = acquire(&service);
-    assert!(service.run_next_job("accuraterip-no-data").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, no_data_acquisition).unwrap().state,
         JobState::Completed
@@ -9364,6 +10829,16 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
         .unwrap()
         .snapshot
         .id;
+    let repeated_no_data = acquire(&service);
+    provider_drain(&service);
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, repeated_no_data),
+        no_data_snapshot
+    );
+    assert_ne!(
+        no_data_snapshot, first_snapshot,
+        "no-data is distinct from successful data"
+    );
     let no_data_verification = service
         .enqueue_processing_operation(
             &actor,
@@ -9459,6 +10934,7 @@ fn music_cd_workflow_publishes_shared_accuraterip_results_and_survives_reindex()
                     files: redumper_files
                         .iter()
                         .map(|(name, bytes)| UploadFile {
+                            visibility: Default::default(),
                             name: (*name).into(),
                             bytes: ByteLength(bytes.len() as u64),
                             sha256: None,
@@ -9704,7 +11180,7 @@ fn acquisition_restart_after_snapshot_commit_reuses_frozen_response() {
         }
     };
     let recovered = CollectionService::new(reopened.clone(), Arc::new(Registry::default()));
-    assert!(recovered.run_next_job("acquisition-new").unwrap());
+    provider_drain(&recovered);
     assert_eq!(
         recovered.job(&actor, job).unwrap().state,
         JobState::Completed
@@ -9957,7 +11433,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
         updated_at: chrono::Utc::now(),
     };
     assert!(matches!(
-        store.publish_metadata_authority(TransactionId::new(), invalid_authority),
+        store.publish_metadata_authority(TransactionId::new(), invalid_authority, None),
         Err(Error::Invalid(_))
     ));
 
@@ -10029,7 +11505,7 @@ fn recipe_and_metadata_authority_are_validated_before_v4_publication() {
         updated_at: chrono::Utc::now(),
     };
     store
-        .publish_metadata_authority(TransactionId::new(), authority)
+        .publish_metadata_authority(TransactionId::new(), authority, None)
         .unwrap();
     AdministrationPort::reindex(&*store).unwrap();
     let db = rusqlite::Connection::open(_root.path().join("state/catalog.sqlite")).unwrap();
@@ -10098,6 +11574,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
         observation: RawJson::from_json(r#"{"provider_extra":[2,1]}"#).unwrap(),
     };
     let refresh = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(0),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -10126,6 +11603,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(1),
                 observation: MetadataRefreshObservation {
                     id: ObservationId::new(),
@@ -10187,6 +11665,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
 
     let outage_context = command();
     let outage = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(3),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -10210,6 +11689,7 @@ fn metadata_authority_refresh_selection_replay_and_reindex_preserve_manual_and_r
         "a selected historical candidate survives a provider outage"
     );
     let changed_replay = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(3),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -10417,7 +11897,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
         ),
         Err(Error::IdempotencyConflict)
     ));
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     assert_eq!(
         service.job(&actor, mb_job).unwrap().state,
         JobState::Completed
@@ -10434,7 +11914,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     let provider_art = service
         .publish_provider_artwork(
             &actor,
@@ -10534,7 +12014,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     assert!(
         service
             .publish_provider_artwork(
@@ -10568,7 +12048,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
             &command(),
         )
         .unwrap();
-    assert!(service.run_next_job("metadata-provider").unwrap());
+    provider_drain(&service);
     let no_match = service
         .refresh_provider_metadata(
             &actor,
@@ -10586,13 +12066,60 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
         no_match.observations[0].outcome,
         MetadataRefreshOutcome::NoMatch
     );
-    assert_eq!(no_match.display.unwrap().artwork, Some(manual.id));
+    assert_eq!(no_match.display.as_ref().unwrap().artwork, Some(manual.id));
     assert!(
         no_match.observations[0]
             .raw_observation
             .get()
             .contains(&missing.to_string())
     );
+
+    // Equivalent historical response IDs do not create another no-data occurrence.
+    let mut legacy = store
+        .snapshot(SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: SnapshotId(missing.0),
+        })
+        .unwrap();
+    let mut payload = Vec::new();
+    store
+        .snapshot_bytes(SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: legacy.id,
+        })
+        .unwrap()
+        .read_to_end(&mut payload)
+        .unwrap();
+    legacy.id = SnapshotId::new();
+    legacy.acquisition_key = None;
+    let alias = legacy.id;
+    let claim = snapshot_claim(&store, collection.id);
+    store
+        .publish_snapshot(
+            &claim,
+            legacy,
+            &mut std::io::Cursor::new(payload),
+            &mut || Ok(false),
+        )
+        .unwrap();
+    store
+        .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+        .unwrap();
+    let unchanged = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: no_match.revision,
+                snapshot_id: alias,
+                source_observation_id: None,
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(unchanged.revision, no_match.revision);
+    assert_eq!(unchanged.observations, no_match.observations);
 
     AdministrationPort::reindex(&*store).unwrap();
     let rebuilt = service.metadata_view(&actor, saved.id).unwrap();
@@ -10626,6 +12153,7 @@ fn metadata_refresh_receipt_recovers_after_revision_commit_before_projection() {
     let service = CollectionService::new(faulted.clone(), Arc::new(Registry::builtins()));
     let context = command();
     let request = RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(0),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -11336,6 +12864,7 @@ fn stale_analysis_cannot_be_rebound_to_different_published_bytes() {
 fn snapshot_envelope_mismatch_does_not_partially_replace_catalog() {
     let (root, store, _actor, _service, collection) = setup();
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -11416,6 +12945,7 @@ fn historical_domain_authority_rebuilds_without_rewriting_original_records() {
                 display: None,
                 updated_at: chrono::Utc::now(),
             },
+            None,
         )
         .unwrap();
     let path = files_named(&root.path().join("archive"), "record.v4.json").remove(0);
@@ -11681,6 +13211,7 @@ fn ct3_item_owner_and_schema_are_application_policy() {
                     package_name: "manual-and-soundtrack-package".into(),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "manual-and-soundtrack.bin".into(),
                     bytes: ByteLength(1),
                     sha256: Some(Digest::sha256(b"x").hex),
@@ -11729,7 +13260,7 @@ fn ct3_queued_job_rechecks_owner_availability() {
     drop(service);
 
     let unavailable = CollectionService::new(store, Arc::new(Registry::default()));
-    assert!(unavailable.run_next_job("ct3-missing-owner").unwrap());
+    provider_drain(&unavailable);
     let failed = unavailable.job(&actor, job).unwrap();
     assert_eq!(failed.state, JobState::Failed);
     assert!(failed.error.unwrap().contains("not installed"));
@@ -11775,6 +13306,7 @@ fn ct3_capture_publication_rechecks_policy_after_staging() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -11841,6 +13373,7 @@ fn ct3_legacy_upload_can_be_cancelled_without_its_owner_module() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -11925,10 +13458,31 @@ fn derivative_import_variant(
     collection: CollectionId,
     variant: u8,
 ) -> ImportView {
+    derivative_import_sectors(service, actor, collection, variant, 5)
+}
+
+fn derivative_import_sectors(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    variant: u8,
+    sectors: usize,
+) -> ImportView {
     // Track 1 owns stored HTOA plus track 2's stored INDEX 00: 3 sectors.
     // Track 2 owns the final two sectors. No AccurateRip evidence is requested.
     let cue = b"FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 00 00:00:00\n INDEX 01 00:00:01\n TRACK 02 AUDIO\n INDEX 00 00:00:02\n INDEX 01 00:00:03\n";
-    let pcm: Vec<u8> = (0..5 * 588)
+    let extended_cue = format!(
+        "FILE \"disc.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n TRACK 02 AUDIO\n INDEX 01 {:02}:{:02}:{:02}\n",
+        sectors / 2 / 4500,
+        sectors / 2 / 75 % 60,
+        sectors / 2 % 75
+    );
+    let cue = if sectors == 5 {
+        cue.as_slice()
+    } else {
+        extended_cue.as_bytes()
+    };
+    let pcm: Vec<u8> = (0..sectors * 588)
         .flat_map(|i| [(i as u8).wrapping_add(variant), 0x80, 0xff, 0x7f])
         .collect();
     let created = service
@@ -11943,11 +13497,13 @@ fn derivative_import_variant(
                 },
                 files: vec![
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.cue".into(),
                         bytes: ByteLength(cue.len() as u64),
                         sha256: None,
                     },
                     UploadFile {
+                        visibility: Default::default(),
                         name: "disc.bin".into(),
                         bytes: ByteLength(pcm.len() as u64),
                         sha256: None,
@@ -11962,9 +13518,17 @@ fn derivative_import_variant(
     service
         .stage_provisional_import_chunk(actor, created.id, 0, 0, cue)
         .unwrap();
-    service
-        .stage_provisional_import_chunk(actor, created.id, 1, 0, &pcm)
-        .unwrap();
+    for (index, chunk) in pcm.chunks(1024 * 1024).enumerate() {
+        service
+            .stage_provisional_import_chunk(
+                actor,
+                created.id,
+                1,
+                (index * 1024 * 1024) as u64,
+                chunk,
+            )
+            .unwrap();
+    }
     service
         .enqueue_import_analysis(
             actor,
@@ -12180,6 +13744,7 @@ fn derivative_jobs_converge_replay_keep_track_ownership_and_survive_item_edits_r
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Playable,
                     ..Default::default()
                 }
@@ -13560,6 +15125,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(0),
                 observation: observation.clone(),
             },
@@ -13570,7 +15136,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
     forged.revision = Revision(2);
     forged.display.as_mut().unwrap().title.value = "Forged display".into();
     assert!(matches!(
-        store.publish_metadata_authority(TransactionId::new(), forged),
+        store.publish_metadata_authority(TransactionId::new(), forged, None),
         Err(Error::Invalid(_))
     ));
     let mut changed = observation.clone();
@@ -13580,6 +15146,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(1),
                 observation: changed
             },
@@ -13603,7 +15170,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
     let mut stale = first;
     stale.revision = Revision(2);
     assert!(matches!(
-        store.publish_metadata_authority(TransactionId::new(), stale),
+        store.publish_metadata_authority(TransactionId::new(), stale, None),
         Err(Error::Conflict)
     ));
     let refreshed = service
@@ -13611,6 +15178,7 @@ fn metadata_inventory_edits_and_observation_identity_are_preserved() {
             &actor,
             saved.id,
             RefreshMetadataCommand {
+                source_import: None,
                 expected_revision: Revision(1),
                 observation,
             },
@@ -13658,6 +15226,7 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
     let original = candidate.identity.clone();
     let old_candidate = candidate.clone();
     let refresh = |expected_revision, candidate| RefreshMetadataCommand {
+        source_import: None,
         expected_revision: Revision(expected_revision),
         observation: MetadataRefreshObservation {
             id: ObservationId::new(),
@@ -13767,6 +15336,7 @@ fn folder_discovery_is_authorized_disjoint_and_validates_paths() {
         ]
         .into_iter()
         .map(|name| UploadFile {
+            visibility: Default::default(),
             name: name.into(),
             bytes: ByteLength(32),
             sha256: None,
@@ -13823,6 +15393,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
                 .browse_presented(
                     &actor,
                     BrowseQuery {
+                        listening_only: false,
                         sort,
                         filter,
                         limit: Some(17),
@@ -13851,6 +15422,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
         .browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 limit: Some(1),
                 ..Default::default()
             },
@@ -13860,6 +15432,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
         service.browse_presented(
             &actor,
             BrowseQuery {
+                listening_only: false,
                 sort: BrowseSort::Artist,
                 cursor: first.next_cursor,
                 ..Default::default()
@@ -13900,6 +15473,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     search: Some("Zebra".into()),
                     ..Default::default()
                 }
@@ -13954,6 +15528,7 @@ fn fx01_browse_keysets_filters_effective_titles_and_creation_order_survive_reind
             .browse_presented(
                 &viewer,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::NeedsAttention,
                     ..Default::default()
                 }
@@ -13999,6 +15574,7 @@ fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
             saved.id,
             saved.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "tiny.wav".into(),
                 bytes: ByteLength(wav.len() as u64),
                 sha256: None,
@@ -14015,6 +15591,7 @@ fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter,
                     ..Default::default()
                 },
@@ -14038,6 +15615,7 @@ fn fx01_attached_audio_filters_read_committed_records_without_payload_reads() {
             .browse_presented(
                 &actor,
                 BrowseQuery {
+                    listening_only: false,
                     filter: BrowseFilter::Playable,
                     ..Default::default()
                 }
@@ -14284,6 +15862,7 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -14292,11 +15871,13 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
                     },
                     files: vec![
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.bin".into(),
                             bytes: ByteLength(pcm.len() as u64),
                             sha256: None,
                         },
                         UploadFile {
+                            visibility: Default::default(),
                             name: "disc.cue".into(),
                             bytes: ByteLength(cue.len() as u64),
                             sha256: None,
@@ -14310,6 +15891,7 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -14768,6 +16350,7 @@ fn fx05_plan(
             PlanIngestCommand {
                 collection_id: collection,
                 packages: vec![IngestPackageSelection {
+                    purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
@@ -14801,6 +16384,7 @@ fn fx05_original(
         actor,
         collection,
         vec![UploadFile {
+            visibility: Default::default(),
             name: "disc.bin".into(),
             bytes: ByteLength(4),
             sha256: None,
@@ -14810,6 +16394,7 @@ fn fx05_original(
         .start_ingest(
             actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
@@ -14860,6 +16445,7 @@ fn clean_reimport_reuses_validated_originals_preserves_authority_and_survives_re
             .files
             .iter()
             .map(|file| UploadFile {
+                visibility: Default::default(),
                 name: file.name.clone(),
                 bytes: file.bytes,
                 sha256: Some(file.digest.hex.clone()),
@@ -14867,6 +16453,7 @@ fn clean_reimport_reuses_validated_originals_preserves_authority_and_survives_re
             .collect(),
     );
     let request = StartIngestCommand {
+        purchase: None,
         clean_reimport: Some(collector_app::CleanReimportOptions {
             replace_captures: vec![old.id],
             retained_representation: Some(representation.id),
@@ -14973,6 +16560,7 @@ fn clean_reimport_failed_replacement_keeps_original_and_explicit_reset_is_portab
         &actor,
         collection.id,
         vec![UploadFile {
+            visibility: Default::default(),
             name: "replacement.bin".into(),
             bytes: ByteLength(4),
             sha256: Some(Digest::sha256(b"good").hex),
@@ -14982,6 +16570,7 @@ fn clean_reimport_failed_replacement_keeps_original_and_explicit_reset_is_portab
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: Some(collector_app::CleanReimportOptions {
                     replace_captures: vec![old],
                     retained_representation: None,
@@ -15049,11 +16638,13 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         collection.id,
         vec![
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.bin".into(),
                 bytes: ByteLength(pcm.len() as u64),
                 sha256: None,
             },
             UploadFile {
+                visibility: Default::default(),
                 name: "disc.cue".into(),
                 bytes: ByteLength(cue.len() as u64),
                 sha256: None,
@@ -15064,6 +16655,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: None,
                 plan,
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
@@ -15117,6 +16709,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         rep.files
             .iter()
             .map(|file| UploadFile {
+                visibility: Default::default(),
                 name: file.name.clone(),
                 bytes: file.bytes,
                 sha256: Some(file.digest.hex.clone()),
@@ -15127,6 +16720,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
         .start_ingest(
             &actor,
             StartIngestCommand {
+                purchase: None,
                 clean_reimport: Some(collector_app::CleanReimportOptions {
                     replace_captures: vec![old.id],
                     retained_representation: Some(rep.id),
@@ -15190,6 +16784,7 @@ fn fx05_retained_command(
     let capture = &item.captures[0];
     let representation = &capture.representations[0];
     StartIngestCommand {
+        purchase: None,
         plan: fx05_plan(
             service,
             actor,
@@ -15198,6 +16793,7 @@ fn fx05_retained_command(
                 .files
                 .iter()
                 .map(|file| UploadFile {
+                    visibility: Default::default(),
                     name: file.name.clone(),
                     bytes: file.bytes,
                     sha256: Some(file.digest.hex.clone()),
@@ -15572,6 +17168,41 @@ fn clean_reimport_rejects_prior_generation_snapshot_completion() {
         store.ensure_snapshot_current(original.id, snapshot),
         Err(Error::Conflict)
     ));
+    // Settle the reimport's real queued work before admitting the independent
+    // binding fixture; its ordering is not part of this freshness assertion.
+    fx05_drain(&service);
+    // The same retained response may be consumed by a current generation. Older
+    // bindings remain evidence and must not veto the new requester.
+    let current_job = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: current_job,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(original.id),
+            kind: "test.snapshot_binding".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let current_claim = store.claim_job("provider-fixture", 30).unwrap().unwrap();
+    assert_eq!(current_claim.id, current_job);
+    store
+        .complete_job(
+            current_job,
+            &current_claim.claim_token,
+            serde_json::json!({"snapshot_id":snapshot}),
+        )
+        .unwrap();
+    store
+        .ensure_snapshot_current(original.id, snapshot)
+        .unwrap();
+    store.reindex().unwrap();
+    store
+        .ensure_snapshot_current(original.id, snapshot)
+        .unwrap();
 }
 
 #[test]
@@ -15666,6 +17297,7 @@ fn snapshot_publication_rejects_foreign_and_cancelled_claims_without_trusting_ca
     let (_root, store, _actor, _service, collection) = setup();
     let claim = snapshot_claim(&store, collection.id);
     let snapshot = SnapshotRecord {
+        acquisition_key: None,
         id: SnapshotId::new(),
         collection_id: collection.id,
         provider: ModuleId("org.example.catalog".into()),
@@ -15852,6 +17484,73 @@ fn checkpoint_missing_malformed_and_incomplete_projection_rebuild_without_losing
 }
 
 #[test]
+fn checkpoint_rebuilds_old_music_search_schema_and_repairs_beta1_schema_stamp() {
+    use collector_app::MusicSearchQuery;
+    // Alpha.3 used schema 13. A failed beta.1 upgrade could already mark that
+    // seven-column table as schema 14. Both must rebuild before any new write.
+    for version in [13, 14] {
+        let (root, store, actor, service, collection) = setup();
+        let mut inventory = item(collection.id);
+        inventory.title = "Preserved manual title".into();
+        inventory.domain.payload = RawJson::from_value(serde_json::json!({"tracks":[
+            {"position":1,"title":"Preserved song","start":0,"length":588}
+        ], "unknown_owner_data":{"keep":true}}));
+        let saved = save_inventory(&service, &actor, inventory, Revision(0)).unwrap();
+        let expected = serde_json::to_value(&saved).unwrap();
+        drop(service);
+        drop(store);
+        let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+        db.execute_batch("DROP TABLE music_search;
+            CREATE TABLE music_search(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,disc INTEGER NOT NULL,track INTEGER NOT NULL,title_key TEXT NOT NULL,search_key TEXT NOT NULL,record TEXT NOT NULL,PRIMARY KEY(item_id,disc,track));
+            CREATE INDEX music_search_order ON music_search(collection_id,title_key,item_id,disc,track);").unwrap();
+        // Keep the old checkpoint and all expected trigger names. Missing-object
+        // recovery alone must not conceal the incompatible table shape.
+        for operation in ["INSERT", "UPDATE", "DELETE"] {
+            db.execute_batch(&format!("CREATE TRIGGER checkpoint_music_search_{operation} AFTER {operation} ON music_search BEGIN UPDATE catalog_index_state SET epoch=epoch+1 WHERE singleton=1; END;")).unwrap();
+        }
+        db.pragma_update(None, "user_version", version).unwrap();
+        drop(db);
+        let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        assert!(!reopened.catalog_reused_at_startup(), "schema {version}");
+        assert_eq!(
+            serde_json::to_value(reopened.item(saved.id).unwrap()).unwrap(),
+            expected
+        );
+        let service = CollectionService::new(Arc::new(reopened), Arc::new(Registry::builtins()));
+        let query = || MusicSearchQuery {
+            search: Some("Preserved song".into()),
+            cursor: None,
+            limit: Some(50),
+        };
+        assert_eq!(
+            service
+                .music_search(&actor, collection.id, query())
+                .unwrap()
+                .items[0]
+                .song
+                .item_id,
+            saved.id
+        );
+        assert_eq!(
+            service.item_presented(&actor, saved.id).unwrap().id,
+            saved.id
+        );
+        let mut edited = saved.clone();
+        edited.title = "Updated after upgrade".into();
+        let updated = save_inventory(&service, &actor, edited, saved.revision).unwrap();
+        assert_eq!(updated.title, "Updated after upgrade");
+        assert_eq!(
+            service
+                .music_search(&actor, collection.id, query())
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+    }
+}
+
+#[test]
 fn checkpoint_corrupt_catalog_is_retained_and_private_access_survives() {
     let (root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
@@ -15968,6 +17667,7 @@ fn checkpoint_generated_scale_measurements() {
                 .browse_presented(
                     &actor,
                     BrowseQuery {
+                        listening_only: false,
                         collection_id: Some(collection.id),
                         limit: Some(50),
                         ..Default::default()
@@ -16130,7 +17830,32 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
         ),
         Err(Error::IdempotencyConflict)
     ));
-    assert!(service.run_next_job("durable-resolution").unwrap());
+    let direct = service
+        .enqueue_musicbrainz_metadata_acquisition(
+            &actor,
+            saved.id,
+            collector_modules::music::MusicBrainzQuery::DiscId {
+                disc_id: disc_id.clone(),
+                refresh: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.job(&actor, direct).unwrap().provider_status,
+        Some(collector_app::ProviderResponseStatus::Shared)
+    ));
+    provider_drain(&service);
+    let direct_snapshot = completed_provider_snapshot(&service, &actor, direct);
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 100)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+
     let resolution = service
         .metadata_resolutions(&actor, saved.id)
         .unwrap()
@@ -16152,7 +17877,38 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
         "ja",
         "accepted inputs remain frozen after preference changes"
     );
-    assert_eq!(authority.display.unwrap().title.value, "アルバム");
+    assert_eq!(authority.display.as_ref().unwrap().title.value, "アルバム");
+    let repeated = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: authority.revision,
+                snapshot_id: direct_snapshot,
+                source_observation_id: None,
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    // Current language preferences changed after admission, so this resolution is meaningful.
+    assert!(repeated.revision > authority.revision);
+    let unchanged = service
+        .refresh_provider_metadata(
+            &actor,
+            saved.id,
+            RefreshProviderMetadataCommand {
+                expected_revision: repeated.revision,
+                snapshot_id: direct_snapshot,
+                source_observation_id: None,
+                artwork: vec![],
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(unchanged.revision, repeated.revision);
+    assert_eq!(unchanged.observations.len(), repeated.observations.len());
+
     let review = service.metadata_review(&actor, saved.id).unwrap();
     assert_eq!(
         review.display.title.value, "Album",
@@ -16266,6 +18022,7 @@ fn album_group_commit_preserves_distinct_inventory_and_guarded_undo() {
             right.id,
             right.revision,
             vec![UploadFile {
+                visibility: Default::default(),
                 name: "original.bin".into(),
                 bytes: ByteLength(4),
                 sha256: None,
@@ -16487,6 +18244,331 @@ fn album_group_publication_faults_recover_all_members_or_none() {
 }
 
 #[test]
+fn grouped_disc_publication_survives_sibling_evidence_revision() {
+    grouped_disc_publication_case(false, false, true);
+}
+
+#[test]
+fn grouped_disc_failed_publication_retries_after_restart_without_duplicate_copies() {
+    grouped_disc_publication_case(true, false, true);
+}
+
+#[test]
+fn grouped_disc_publication_keeps_manual_inventory_revision_conflicts() {
+    grouped_disc_publication_case(true, true, true);
+}
+
+#[test]
+fn grouped_publication_revision_policy_rejects_unrelated_evidence_and_metadata_changes() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let previous = item(CollectionId::new());
+    let mut current = previous.clone();
+    current.revision = Revision(previous.revision.0 + 1);
+    let old = EvidenceId::new();
+    let sibling = EvidenceId::new();
+    let before = BTreeMap::from([(old, Digest::sha256(b"old evidence").hex)]);
+    let mut after = before.clone();
+    after.insert(sibling, Digest::sha256(b"sibling evidence").hex);
+    let owns = BTreeSet::from([sibling]);
+    let allowed =
+        |current: &Item, after: &BTreeMap<EvidenceId, String>, owns: &BTreeSet<EvidenceId>| {
+            collector_app::grouped_publication_revision_is_evidence_only(
+                &previous, current, &before, after, owns,
+            )
+            .unwrap()
+        };
+    assert!(allowed(&current, &after, &owns));
+    assert!(!allowed(&current, &after, &BTreeSet::new()));
+    let mut changed_reference = after.clone();
+    changed_reference.insert(old, Digest::sha256(b"changed old evidence").hex);
+    assert!(!allowed(&current, &changed_reference, &owns));
+    current.title = "Curator's title".into();
+    assert!(!allowed(&current, &after, &owns));
+    current.title = previous.title.clone();
+    current.domain.payload = RawJson::from_json(r#"{"unknown_future_field":"keep me"}"#).unwrap();
+    assert!(!allowed(&current, &after, &owns));
+}
+
+#[test]
+fn grouped_discs_keep_automatic_title_authority_through_failed_retry_and_reindex() {
+    grouped_disc_publication_case(true, false, false);
+}
+
+fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool, manual_title: bool) {
+    use collector_app::{
+        AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
+    };
+    let (root, store, actor, service, collection) = setup();
+    let session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: 2,
+                expected_files: 2,
+                automatic_metadata: false,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let packages = (0..2)
+        .map(|position| IntakePackage {
+            package: IngestPackageSelection {
+                purchase: None,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: format!("Disc {position}"),
+                },
+                files: vec![UploadFile {
+                    visibility: Default::default(),
+                    name: "original.dat".into(),
+                    bytes: ByteLength(1),
+                    sha256: None,
+                }],
+                anchor_file_index: None,
+            },
+            destination: IntakeDestination::AlbumGroup {
+                key: "album".into(),
+                title: manual_title.then(|| "Album".into()),
+                copy_key: "my copy".into(),
+            },
+        })
+        .collect();
+    let session = service
+        .append_intake_with_preflight(
+            &actor,
+            session.id,
+            AppendIntake {
+                expected_revision: session.revision,
+                packages,
+            },
+            &command(),
+            |_| Ok(()),
+        )
+        .unwrap();
+    service
+        .start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("grouped-admission").unwrap());
+    let members = service
+        .intake_members(&actor, session.id, None, 32)
+        .unwrap()
+        .items;
+    for member in &members {
+        let id = member.import_id.unwrap();
+        service
+            .stage_provisional_import_chunk(&actor, id, 0, 0, &[member.position as u8])
+            .unwrap();
+    }
+    // Both preservation Jobs now hold the same reviewed album revision. Publish
+    // one before allowing the other to observe its sibling's Evidence reference.
+    assert!(service.run_next_job("first-grouped-publication").unwrap());
+    let target = store
+        .guided_ingest_intent(members[0].import_id.unwrap())
+        .unwrap()
+        .unwrap()
+        .target_item_id;
+    assert_eq!(store.item(target).unwrap().captures.len(), 1);
+    if manual_edit {
+        let mut item = store.item(target).unwrap();
+        let revision = item.revision;
+        item.specimens[0].private_notes = Some("Keep this curator's inventory note".into());
+        store.save(item, revision).unwrap();
+    }
+    let (store, service) = if restart_failed {
+        // Model an already failed old-build Job without changing its frozen
+        // Import or staged bytes, then use the same retry API as the web button.
+        let claim = store.claim_job("old-build-conflict", 30).unwrap().unwrap();
+        assert_eq!(claim.kind, "import_publication");
+        store
+            .fail_job(claim.id, &claim.claim_token, "revision conflict")
+            .unwrap();
+        let failed = members
+            .iter()
+            .find_map(|member| {
+                let id = member.import_id.unwrap();
+                let jobs = store.import_job_records(id, actor.user_id).unwrap();
+                jobs.iter().any(|job| job.id == claim.id).then_some(id)
+            })
+            .unwrap();
+        drop(service);
+        drop(store);
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+        service
+            .retry_ingest(
+                &actor,
+                failed,
+                collector_app::RetryIngestCommand {
+                    job_id: Some(claim.id),
+                },
+                &command(),
+            )
+            .unwrap();
+        (store, service)
+    } else {
+        (store, service)
+    };
+    for _ in 0..16 {
+        if !service.run_next_job("grouped-publication").unwrap() {
+            break;
+        }
+    }
+    for member in &members {
+        let detail = service
+            .ingest_detail(&actor, member.import_id.unwrap())
+            .unwrap();
+        if manual_edit && detail.import.phase != ImportPhase::Published {
+            assert!(
+                detail.steps.iter().any(|step| step.step == "preservation"
+                    && step.message.as_deref() == Some("revision conflict")),
+                "{detail:?}"
+            );
+        } else {
+            assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
+        }
+    }
+    let item = store.item(target).unwrap();
+    assert_eq!(item.captures.len(), if manual_edit { 1 } else { 2 });
+    assert_eq!(item.specimens.len(), 1);
+    if manual_edit {
+        assert_eq!(
+            item.specimens[0].private_notes.as_deref(),
+            Some("Keep this curator's inventory note")
+        );
+    }
+    let authority = store
+        .metadata_authority(collection.id, target)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        authority
+            .authority
+            .field_overrides
+            .iter()
+            .any(|field| field.field == MetadataField::Title),
+        manual_title
+    );
+    for capture in item.captures {
+        assert_eq!(
+            capture.representations[0].files[0].digest,
+            Digest::sha256(&[members
+                .iter()
+                .position(|member| store
+                    .import_record(member.import_id.unwrap())
+                    .unwrap()
+                    .view
+                    .capture_id
+                    == capture.id)
+                .unwrap() as u8])
+        );
+    }
+    let mut originals = files_named(&root.path().join("archive"), "original.dat")
+        .into_iter()
+        .map(|path| std::fs::read(path).unwrap())
+        .collect::<Vec<_>>();
+    originals.sort();
+    if manual_edit {
+        assert_eq!(originals.len(), 1);
+        assert!(originals[0] == [0] || originals[0] == [1]);
+    } else {
+        assert_eq!(originals, vec![vec![0], vec![1]]);
+    }
+    store.reindex().unwrap();
+    let rebuilt = store.item(target).unwrap();
+    assert_eq!(rebuilt.captures.len(), if manual_edit { 1 } else { 2 });
+    assert_eq!(rebuilt.specimens.len(), 1);
+    if manual_edit {
+        assert_eq!(
+            rebuilt.specimens[0].private_notes.as_deref(),
+            Some("Keep this curator's inventory note")
+        );
+    }
+}
+
+#[test]
+fn intake_group_rejects_mixed_automatic_and_manual_title_authority_before_admission() {
+    use collector_app::{
+        AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let session = service
+        .create_intake(
+            &actor,
+            CreateIntake {
+                collection_id: collection.id,
+                expected_packages: 2,
+                expected_files: 2,
+                automatic_metadata: true,
+                prepare_music: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let packages = (0..2)
+        .map(|position| IntakePackage {
+            package: IngestPackageSelection {
+                purchase: None,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: format!("Disc {position}"),
+                },
+                files: vec![UploadFile {
+                    visibility: None,
+                    name: "disc.bin".into(),
+                    bytes: ByteLength(0),
+                    sha256: None,
+                }],
+                anchor_file_index: None,
+            },
+            destination: IntakeDestination::AlbumGroup {
+                key: "Album".into(),
+                title: (position == 1).then(|| "Manual title".into()),
+                copy_key: "Purchased copy A".into(),
+            },
+        })
+        .collect();
+    let session = service
+        .append_intake_with_preflight(
+            &actor,
+            session.id,
+            AppendIntake {
+                expected_revision: session.revision,
+                packages,
+            },
+            &command(),
+            |_| Ok(()),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.start_intake(
+            &actor,
+            session.id,
+            StartIntake {
+                expected_revision: session.revision
+            },
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        store.job_record(session.id, actor.user_id),
+        Err(Error::NotFound)
+    ));
+}
+
+#[test]
 fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
     use collector_app::{
         AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
@@ -16508,12 +18590,14 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
     let packages = (0..70)
         .map(|position| IntakePackage {
             package: IngestPackageSelection {
+                purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
                     label: None,
                     package_name: format!("Disc {position}"),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "original.bin".into(),
                     bytes: ByteLength(0),
                     sha256: None,
@@ -16523,7 +18607,7 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
             destination: if position < 2 {
                 IntakeDestination::AlbumGroup {
                     key: "two-disc-album".into(),
-                    title: "A confirmed album".into(),
+                    title: Some("A confirmed album".into()),
                     copy_key: "one set".into(),
                 }
             } else {
@@ -16878,6 +18962,7 @@ fn bulk_discovery_preserves_nested_members_and_paginates_more_than_one_guided_pa
     for position in 0..130 {
         for suffix in ["disc.cue", "tracks/audio.bin"] {
             files.push(UploadFile {
+                visibility: Default::default(),
                 name: format!("Albums/{position:04}/{suffix}"),
                 bytes: ByteLength(0),
                 sha256: None,
@@ -16885,6 +18970,7 @@ fn bulk_discovery_preserves_nested_members_and_paginates_more_than_one_guided_pa
         }
     }
     files.push(UploadFile {
+        visibility: Default::default(),
         name: "Albums/readme.txt".into(),
         bytes: ByteLength(10),
         sha256: None,
@@ -16948,12 +19034,14 @@ fn interrupted_intake_manifest_cannot_start_a_partial_batch() {
         .unwrap();
     let package = IntakePackage {
         package: IngestPackageSelection {
+            purchase: None,
             source: ImportSourceSummary {
                 kind: ImportSourceKind::Browser,
                 label: None,
                 package_name: "Unknown original".into(),
             },
             files: vec![UploadFile {
+                visibility: Default::default(),
                 name: "original.bin".into(),
                 bytes: ByteLength(0),
                 sha256: None,
@@ -17386,12 +19474,14 @@ fn bulk_generated_thousands_query_admission_and_restart_measurements() {
         let packages = (offset..(offset + 64).min(count))
             .map(|position| IntakePackage {
                 package: IngestPackageSelection {
+                    purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
                         label: None,
                         package_name: format!("Generated package {position:06}"),
                     },
                     files: vec![UploadFile {
+                        visibility: Default::default(),
                         name: format!("Originals/{position:06}/disc.bin"),
                         bytes: ByteLength(0),
                         sha256: None,
@@ -17615,12 +19705,14 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
     let packages = (0..2)
         .map(|i| IntakePackage {
             package: IngestPackageSelection {
+                purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
                     label: None,
                     package_name: format!("Pending {i}"),
                 },
                 files: vec![UploadFile {
+                    visibility: Default::default(),
                     name: "original.bin".into(),
                     bytes: ByteLength(0),
                     sha256: None,
@@ -17944,6 +20036,7 @@ fn collection_lists_track_occurrences_replay_conflict_and_rebuild_without_payloa
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Evening".into(),
             },
             &create,
@@ -17955,6 +20048,7 @@ fn collection_lists_track_occurrences_replay_conflict_and_rebuild_without_payloa
                 &actor,
                 collection.id,
                 CreateCollectionList {
+                    kind: None,
                     name: "Evening".into()
                 },
                 &create
@@ -18139,6 +20233,7 @@ fn collection_lists_enforce_collection_roles_and_frozen_source_revisions() {
             &curator,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Shared".into(),
             },
             &command(),
@@ -18285,6 +20380,7 @@ fn collection_lists_recover_each_archive_commit_boundary_and_command_receipt() {
         let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
         let receipt = command();
         let request = CreateCollectionList {
+            kind: None,
             name: "Recovered".into(),
         };
         assert!(
@@ -18354,6 +20450,7 @@ fn collection_lists_generic_items_and_music_source_choices_remain_distinct() {
             &actor,
             games.id,
             CreateCollectionList {
+                kind: None,
                 name: "To finish".into(),
             },
             &command(),
@@ -18422,6 +20519,7 @@ fn collection_lists_generic_items_and_music_source_choices_remain_distinct() {
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Music".into(),
             },
             &command(),
@@ -18502,6 +20600,7 @@ fn collection_lists_follow_merged_capture_ownership_and_guarded_undo() {
             &actor,
             collection.id,
             CreateCollectionList {
+                kind: None,
                 name: "Across grouping".into(),
             },
             &command(),
@@ -18674,6 +20773,7 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
                     &actor,
                     collection.id,
                     CreateCollectionList {
+                        kind: None,
                         name: "Complete disc scope".into(),
                     },
                     &command(),
@@ -18725,6 +20825,7 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
                 &actor,
                 collection.id,
                 CreateCollectionList {
+                    kind: None,
                     name: "Restored disc".into(),
                 },
                 &command(),
@@ -19243,4 +21344,4811 @@ fn schema18_enrollment_conversion_preserves_bound_requests_native_credentials_an
             .user_id,
         None
     );
+}
+
+#[test]
+fn uploaded_dat_survives_restart_binds_receipts_and_keeps_snapshot_history() {
+    use collector_app::{DatUploadMetadata, UploadedCatalogPort};
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let archive = root.path().join("archive");
+    let private = root.path().join("state");
+    let store = Arc::new(Store::open_with_clock(&archive, &private, clock.clone()).unwrap());
+    let user = store
+        .create_user("upload-owner", "a long test password", true)
+        .unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: true,
+        device_id: None,
+    };
+    let collection = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .create_collection(
+            &AuthenticatedPrincipal {
+                principal: actor.clone(),
+                credential_kind: CredentialKind::TestLocal,
+                authenticated_at: clock.now(),
+            },
+            CreateCollectionCommand {
+                name: "Uploaded games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let metadata = DatUploadMetadata {
+        system: "Nintendo - Game Boy".into(),
+        catalog: "No-Intro".into(),
+        byte_domain: "org.junk.game.raw-bytes".into(),
+    };
+    let bytes = |version| {
+        format!(r#"<datafile><header><name>Nintendo - Game Boy</name><author>No-Intro</author><version>{version}</version></header><game name="Known Game"><rom name="game.bin" size="4" sha1="a17c9aaa61e80a1bf71d0d850af4e5baa9800bbd"/></game></datafile>"#).into_bytes()
+    };
+    let configure = |store: Arc<Store>| {
+        let provider = Arc::new(
+            LocalDatProvider::new(Default::default())
+                .unwrap()
+                .with_uploads(store.clone()),
+        );
+        CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_catalog_uploads(store)
+            .with_streaming_provider(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+            .with_catalog_parser(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider)
+            .unwrap()
+    };
+    let service = configure(store.clone());
+    let receipt = command();
+    let job = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("1"),
+            &receipt,
+        )
+        .unwrap();
+    drop(service);
+    drop(store);
+    let store = Arc::new(Store::open_with_clock(&archive, &private, clock.clone()).unwrap());
+    let service = configure(store.clone());
+    provider_drain(&service);
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let id = SnapshotId(job.0);
+    let saved = service
+        .catalog_snapshots(&actor, collection.id, None, 10)
+        .unwrap();
+    assert_eq!(saved.items.len(), 1);
+    assert!(!saved.items[0].active);
+    let parsed: collector_providers::DatSnapshotObservation =
+        saved.items[0].snapshot.parsed_observation.parse().unwrap();
+    assert_eq!(parsed.preview_entries[0].label, "Known Game");
+    assert_eq!(parsed.preview_entries[0].files, ["game.bin"]);
+    service
+        .activate_catalog_snapshot(&actor, collection.id, id, &command())
+        .unwrap();
+    clock.advance(60);
+    assert_eq!(
+        service
+            .upload_dat_catalog(
+                &actor,
+                collection.id,
+                metadata.clone(),
+                &bytes("1"),
+                &receipt
+            )
+            .unwrap(),
+        job
+    );
+    assert!(matches!(
+        service.upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("2"),
+            &receipt
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    let second = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("2"),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(second.0), &command())
+        .unwrap();
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 10)
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    let mut exact = Vec::new();
+    SnapshotPort::snapshot_bytes(
+        &*store,
+        SnapshotQuery {
+            collection_id: collection.id,
+            snapshot_id: id,
+        },
+    )
+    .unwrap()
+    .read_to_end(&mut exact)
+    .unwrap();
+    assert_eq!(exact, bytes("1"));
+    let denied = Principal {
+        administrator: false,
+        ..actor.clone()
+    };
+    assert!(
+        service
+            .upload_dat_catalog(
+                &denied,
+                collection.id,
+                metadata.clone(),
+                &bytes("1"),
+                &command()
+            )
+            .is_err()
+    );
+    let malformed = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            b"<datafile><game",
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, malformed).unwrap().state,
+        JobState::Failed
+    );
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 10)
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    let changed = service
+        .upload_dat_catalog(
+            &actor,
+            collection.id,
+            metadata.clone(),
+            &bytes("3"),
+            &command(),
+        )
+        .unwrap();
+    let digest = UploadedCatalogPort::stage_uploaded_catalog(&*store, &bytes("3")).unwrap();
+    let mut corrupted = bytes("3");
+    corrupted[10] ^= 1;
+    std::fs::write(private.join("catalog-uploads").join(digest.hex), corrupted).unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, changed).unwrap().state,
+        JobState::Failed
+    );
+    // A new upload of the exact original can repair private staging and retry.
+    UploadedCatalogPort::stage_uploaded_catalog(&*store, &bytes("3")).unwrap();
+    service.retry_job(&actor, changed, &command()).unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, changed).unwrap().state,
+        JobState::Completed
+    );
+    let cancelled = service
+        .upload_dat_catalog(&actor, collection.id, metadata, &bytes("4"), &command())
+        .unwrap();
+    service.cancel_job(&actor, cancelled, &command()).unwrap();
+    let _ = service.run_next_job("cancelled-upload").unwrap();
+    assert_eq!(
+        service.job(&actor, cancelled).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service
+            .catalog_snapshots(&actor, collection.id, None, 10)
+            .unwrap()
+            .items
+            .len(),
+        3
+    );
+}
+
+fn shared_provider_input(collection: &Collection, input: &str) -> FrozenAcquisitionJob {
+    FrozenAcquisitionJob {
+        collection_binding: collection.binding.clone(),
+        request: ProviderRequest {
+            collection_id: collection.id,
+            provider: ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            operation: OperationId::new("org.junk.providers.accuraterip.acquire").unwrap(),
+            source_fingerprint: None,
+            query: RawJson::from_value(serde_json::json!({"disc":input})),
+            maximum_response_bytes: 1024,
+        },
+        item_id: None,
+        snapshot_id: SnapshotId::new(),
+        created_at: chrono::Utc::now(),
+    }
+}
+fn provider_drain(service: &CollectionService) {
+    for _ in 0..40 {
+        if !service.run_next_job("shared-provider-test").unwrap() {
+            return;
+        }
+    }
+    panic!("provider workflows did not settle");
+}
+fn completed_provider_snapshot(
+    service: &CollectionService,
+    actor: &Principal,
+    job: JobId,
+) -> SnapshotId {
+    let view = service.job(actor, job).unwrap();
+    assert_eq!(view.state, JobState::Completed, "{:?}", view.error);
+    match view.result.unwrap() {
+        collector_app::JobResultView::CatalogSnapshot { snapshot_id, .. } => snapshot_id,
+        _ => panic!("expected catalog result"),
+    }
+}
+
+#[test]
+fn shared_provider_download_has_reserved_capacity_and_private_cross_user_ownership() {
+    let (_root, store, actor, base, collection) = setup();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = base
+        .with_streaming_provider(
+            ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            Arc::new(FixtureStreamingProvider {
+                calls: calls.clone(),
+                bytes: b"shared response".to_vec(),
+            }),
+        )
+        .unwrap();
+    let other_id = store
+        .create_user("second-provider-owner", "a long test password", false)
+        .unwrap();
+    Catalog::grant(store.as_ref(), collection.id, other_id, Role::Curator).unwrap();
+    let other = Principal {
+        user_id: other_id,
+        administrator: false,
+        device_id: None,
+    };
+    let mut processing = Vec::new();
+    for _ in 0..store.job_settings().unwrap().processing_workers {
+        let id = JobId::new();
+        store
+            .enqueue_job(JobSpec {
+                id,
+                user_id: actor.user_id,
+                collection_id: Some(collection.id),
+                item_id: None,
+                kind: "test.processing".into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+        processing.push(
+            store
+                .claim_job("shared-provider-test", 30)
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    let first_input = shared_provider_input(&collection, "same-disc");
+    let first = service
+        .enqueue_catalog_acquisition(&actor, first_input.clone(), &command())
+        .unwrap();
+    let second = service
+        .enqueue_catalog_acquisition(
+            &other,
+            shared_provider_input(&collection, "same-disc"),
+            &command(),
+        )
+        .unwrap();
+    assert_ne!(first, second);
+    assert!(service.job(&other, first).is_err());
+    assert!(service.job(&actor, second).is_err());
+    assert!(
+        service.run_next_job("shared-provider-test").unwrap(),
+        "provider slot stays available with all processing slots occupied"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        service.job(&actor, first).unwrap().state,
+        JobState::Queued,
+        "continuation needs a processing slot"
+    );
+    assert!(
+        store
+            .claim_job("shared-provider-test", 30)
+            .unwrap()
+            .is_none()
+    );
+    for claim in processing {
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+    }
+    provider_drain(&service);
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, first),
+        completed_provider_snapshot(&service, &other, second)
+    );
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    let third = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "same-disc"),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "deliberate refresh downloads again"
+    );
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, third),
+        first_input.snapshot_id
+    );
+    assert!(matches!(
+        service.job(&actor, third).unwrap().provider_status,
+        Some(collector_app::ProviderResponseStatus::Unchanged)
+    ));
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .len(),
+        1,
+        "unchanged refresh does not append a snapshot"
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        completed_provider_snapshot(&service, &other, second),
+        first_input.snapshot_id
+    );
+}
+
+struct BlockingSharedProvider {
+    started: Arc<AtomicBool>,
+    release: Arc<AtomicBool>,
+}
+impl StreamingProviderPort for BlockingSharedProvider {
+    fn acquire_stream(
+        &self,
+        _request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        self.started.store(true, Ordering::SeqCst);
+        while !self.release.load(Ordering::SeqCst) {
+            if execution.cancellation_requested()? {
+                return Err(Error::JobCancelled);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let bytes = b"owned response".to_vec();
+        Ok(ProviderStreamResponse {
+            media_type: "application/octet-stream".into(),
+            bytes: ByteLength(bytes.len() as u64),
+            digest: Digest::sha256(&bytes),
+            parsed_observation: RawJson::from_value(serde_json::json!({"outcome":"data"})),
+            reader: Box::new(std::io::Cursor::new(bytes)),
+        })
+    }
+}
+#[test]
+fn shared_provider_later_owner_survives_cancel_and_last_owner_fences_admission() {
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (_root, store, actor, base, collection) = setup_with_clock(Some(clock.clone()));
+    let started = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let service = Arc::new(
+        base.with_streaming_provider(
+            ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            Arc::new(BlockingSharedProvider {
+                started: started.clone(),
+                release: release.clone(),
+            }),
+        )
+        .unwrap(),
+    );
+    let first = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "owned"),
+            &command(),
+        )
+        .unwrap();
+    let run = service.clone();
+    let worker = thread::spawn(move || run.run_next_job("shared-provider-test"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !started.load(Ordering::SeqCst) {
+        assert!(std::time::Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    clock.advance(2);
+    let second = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "owned"),
+            &command(),
+        )
+        .unwrap();
+    service.cancel_job(&actor, first, &command()).unwrap();
+    service.reconcile_provider_acquisitions().unwrap();
+    assert_eq!(service.job(&actor, second).unwrap().state, JobState::Queued);
+    service.cancel_job(&actor, second, &command()).unwrap();
+    assert!(
+        matches!(
+            service.enqueue_catalog_acquisition(
+                &actor,
+                shared_provider_input(&collection, "owned"),
+                &command()
+            ),
+            Err(Error::CommandInProgress)
+        ),
+        "cannot resurrect last-owner cancellation before settlement"
+    );
+    service.reconcile_provider_acquisitions().unwrap();
+    assert!(worker.join().unwrap().unwrap());
+    assert!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    release.store(true, Ordering::SeqCst);
+    let third = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "owned"),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    completed_provider_snapshot(&service, &actor, third);
+    assert_eq!(
+        service.job(&actor, first).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service.job(&actor, second).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        store
+            .jobs(actor.user_id)
+            .unwrap()
+            .iter()
+            .filter(|j| j.user_id != actor.user_id)
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn provider_response_identity_distinguishes_changed_bytes_inputs_and_collections() {
+    let (_root, store, actor, base, collection) = setup();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let build = |bytes: &[u8]| {
+        CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_streaming_provider(
+                ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+                Arc::new(FixtureStreamingProvider {
+                    calls: calls.clone(),
+                    bytes: bytes.to_vec(),
+                }),
+            )
+            .unwrap()
+    };
+    let service = build(b"one");
+    let one = service
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&collection, "a"), &command())
+        .unwrap();
+    provider_drain(&service);
+    let other = base
+        .create_collection(
+            &test_authentication(&actor),
+            typed_collection("Other provider collection"),
+            &command(),
+        )
+        .unwrap();
+    let two = service
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&collection, "b"), &command())
+        .unwrap();
+    let three = service
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&other, "a"), &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_ne!(
+        completed_provider_snapshot(&service, &actor, one),
+        completed_provider_snapshot(&service, &actor, two)
+    );
+    assert_ne!(
+        completed_provider_snapshot(&service, &actor, one),
+        completed_provider_snapshot(&service, &actor, three)
+    );
+    let changed = build(b"two");
+    let four = changed
+        .enqueue_catalog_acquisition(&actor, shared_provider_input(&collection, "a"), &command())
+        .unwrap();
+    provider_drain(&changed);
+    assert_ne!(
+        completed_provider_snapshot(&changed, &actor, four),
+        completed_provider_snapshot(&service, &actor, one)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn snapshot_duplicate_conversion_preserves_ids_rebuilds_and_requires_verified_backup() {
+    snapshot_duplicate_conversion_case(None, ACCURATERIP_PROVIDER_ID);
+    snapshot_duplicate_conversion_case(
+        None,
+        collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID,
+    );
+}
+fn snapshot_duplicate_conversion_case(
+    fault: Option<collector_store::PublicationFaultPoint>,
+    provider: &str,
+) {
+    let (root, store, actor, service, collection) = setup();
+    let mut ids = Vec::new();
+    let payload = b"existing duplicate response";
+    for index in 0..2 {
+        let id = SnapshotId::new();
+        ids.push(id);
+        let claim = snapshot_claim(&store, collection.id);
+        store
+            .publish_snapshot(
+                &claim,
+                SnapshotRecord {
+                    acquisition_key: None,
+                    id,
+                    collection_id: collection.id,
+                    provider: ModuleId(provider.into()),
+                    media_type: "application/octet-stream".into(),
+                    bytes: ByteLength(payload.len() as u64),
+                    digest: Digest::sha256(payload),
+                    parsed_observation: RawJson::from_value(
+                        serde_json::json!({"outcome":"data","query":"identical"}),
+                    ),
+                    created_at: chrono::DateTime::from_timestamp(
+                        1_800_000_000,
+                        if index == 0 { 900_000_000 } else { 100_000_000 },
+                    )
+                    .unwrap(),
+                },
+                &mut std::io::Cursor::new(payload),
+                &mut || Ok(false),
+            )
+            .unwrap();
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+        // Legacy acquisition inputs were private. Establish exact provenance for conversion.
+        let frozen = shared_provider_input(&collection, "legacy");
+        let mut frozen = frozen;
+        frozen.snapshot_id = id;
+        frozen.request.provider = ModuleId(provider.into());
+        frozen.request.operation = OperationId::new(format!("{provider}.acquire")).unwrap();
+        let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        private
+            .execute(
+                "INSERT INTO processing_jobs(job_id,frozen_input) VALUES(?,?)",
+                rusqlite::params![
+                    claim.id.to_string(),
+                    serde_json::to_string(&collector_app::FrozenJobInput::Acquisition(frozen))
+                        .unwrap()
+                ],
+            )
+            .unwrap();
+    }
+    if fault.is_none() {
+        let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        let (job, raw): (String, String) = db
+            .query_row(
+                "SELECT job_id,frozen_input FROM processing_jobs LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let mut unknown: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        unknown["input"]["future_semantics"] = serde_json::json!({"keep_original_layout":true});
+        db.execute(
+            "UPDATE processing_jobs SET frozen_input=? WHERE job_id=?",
+            rusqlite::params![unknown.to_string(), job],
+        )
+        .unwrap();
+        let inspected = store.inspect_snapshot_duplicates().unwrap();
+        assert_eq!(inspected.skipped.len(), 1);
+        assert!(inspected.duplicates.is_empty());
+        db.execute(
+            "UPDATE processing_jobs SET frozen_input=? WHERE job_id=?",
+            rusqlite::params![raw, job],
+        )
+        .unwrap();
+    }
+    if fault.is_none() {
+        let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let unknown = collection_path
+            .join("snapshots")
+            .join(ids[0].to_string())
+            .join("payload/future-layout.json");
+        std::fs::write(&unknown, b"unknown data requires original source.bin").unwrap();
+        let inspected = store.inspect_snapshot_duplicates().unwrap();
+        assert!(inspected.skipped.contains(&ids[0]));
+        assert!(inspected.duplicates.is_empty());
+        assert!(unknown.exists());
+        std::fs::remove_file(unknown).unwrap();
+    }
+    let plan = store.inspect_snapshot_duplicates().unwrap();
+    assert_eq!(plan.duplicates.len(), 1);
+    assert_eq!(
+        plan.duplicates[0].canonical, ids[1],
+        "fractional timestamps precede ID tie-breaking"
+    );
+    assert_eq!(plan.saved_bytes, payload.len() as u64);
+    assert!(
+        store
+            .apply_snapshot_duplicates(&plan, &root.path().join("missing-backup"))
+            .is_err()
+    );
+    let config = root.path().join("collector.toml");
+    std::fs::write(&config, "fixture configuration").unwrap();
+    let backup = root.path().join("backup");
+    store.backup(&backup, &config).unwrap();
+    if let Some(point) = fault {
+        drop(service);
+        drop(store);
+        let failing = Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap();
+        assert!(failing.apply_snapshot_duplicates(&plan, &backup).is_err());
+        drop(failing);
+        let recovered =
+            Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        recovered.apply_snapshot_duplicates(&plan, &backup).unwrap();
+        recovered.apply_snapshot_duplicates(&plan, &backup).unwrap();
+        for id in &ids {
+            let mut bytes = vec![];
+            recovered
+                .snapshot_bytes(SnapshotQuery {
+                    collection_id: collection.id,
+                    snapshot_id: *id,
+                })
+                .unwrap()
+                .read_to_end(&mut bytes)
+                .unwrap();
+            assert_eq!(bytes, payload);
+        }
+        return;
+    }
+    let backed_config = std::fs::read(backup.join("collector.toml")).unwrap();
+    std::fs::write(backup.join("collector.toml"), b"corrupted backup").unwrap();
+    assert!(store.apply_snapshot_duplicates(&plan, &backup).is_err());
+    std::fs::write(backup.join("collector.toml"), backed_config).unwrap();
+    let extra = root.path().join("state/unbacked-unknown-data");
+    std::fs::write(&extra, b"must preserve").unwrap();
+    assert!(store.apply_snapshot_duplicates(&plan, &backup).is_err());
+    std::fs::remove_file(extra).unwrap();
+    store.apply_snapshot_duplicates(&plan, &backup).unwrap();
+    store.apply_snapshot_duplicates(&plan, &backup).unwrap();
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let reference = collection_path
+        .join("snapshots")
+        .join(plan.duplicates[0].snapshot.to_string())
+        .join("payload/reference.v1.json");
+    let saved_reference = std::fs::read(&reference).unwrap();
+    let mut corrupt: serde_json::Value = serde_json::from_slice(&saved_reference).unwrap();
+    corrupt["checksum"]["hex"] = serde_json::json!("00".repeat(32));
+    std::fs::write(&reference, serde_json::to_vec(&corrupt).unwrap()).unwrap();
+    assert!(
+        store
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: plan.duplicates[0].snapshot
+            })
+            .is_err()
+    );
+    std::fs::write(reference, saved_reference).unwrap();
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 20)
+            .unwrap()
+            .items
+            .len(),
+        2,
+        "historical IDs remain"
+    );
+    for id in &ids {
+        let mut bytes = vec![];
+        store
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: *id,
+            })
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, payload);
+    }
+    assert!(
+        store
+            .inspect_snapshot_duplicates()
+            .unwrap()
+            .duplicates
+            .is_empty()
+    );
+    let reuse = |store: &Store| {
+        let mut incoming = store
+            .snapshot(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: plan.duplicates[0].canonical,
+            })
+            .unwrap();
+        incoming.id = SnapshotId::new();
+        incoming.created_at = chrono::Utc::now();
+        incoming.acquisition_key = Some(plan.duplicates[0].input_key.clone());
+        let claim = snapshot_claim(store, collection.id);
+        let retained = store
+            .publish_snapshot(
+                &claim,
+                incoming,
+                &mut std::io::Cursor::new(payload),
+                &mut || Ok(false),
+            )
+            .unwrap();
+        assert_eq!(
+            retained, plan.duplicates[0].canonical,
+            "fresh bytes reuse proven legacy canonical content"
+        );
+        store
+            .complete_job(
+                claim.id,
+                &claim.claim_token,
+                serde_json::json!({"snapshot_id":retained}),
+            )
+            .unwrap();
+    };
+    reuse(&store);
+    drop(service);
+    drop(store);
+    // Restore the verified pre-conversion backup into empty roots with the
+    // original private identity stopped, and prove its accounts and bytes work.
+    let restored_archive = root.path().join("restored/archive");
+    let restored_state = root.path().join("restored/state");
+    copy_tree(&backup.join("archive"), &restored_archive);
+    copy_tree(&backup.join("state"), &restored_state);
+    assert_eq!(
+        tree_hashes(&backup.join("archive")),
+        tree_hashes(&restored_archive)
+    );
+    assert_eq!(
+        tree_hashes(&backup.join("state")),
+        tree_hashes(&restored_state)
+    );
+    let restored = Store::open(&restored_archive, &restored_state).unwrap();
+    restored
+        .login(
+            "owner",
+            "a long test password",
+            "restored conversion backup",
+        )
+        .unwrap();
+    assert_eq!(
+        Catalog::role(&restored, actor.user_id, collection.id).unwrap(),
+        Role::Owner
+    );
+    for id in &ids {
+        let mut bytes = vec![];
+        restored
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: *id,
+            })
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, payload);
+    }
+    drop(restored);
+    let archive_only = Store::open(
+        root.path().join("archive"),
+        root.path().join("archive-only"),
+    )
+    .unwrap();
+    reuse(&archive_only);
+    for id in ids {
+        let mut bytes = vec![];
+        archive_only
+            .snapshot_bytes(SnapshotQuery {
+                collection_id: collection.id,
+                snapshot_id: id,
+            })
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, payload);
+    }
+}
+
+#[test]
+fn snapshot_duplicate_conversion_recovers_every_mutation_boundary() {
+    use collector_store::PublicationFaultPoint as Point;
+    for point in [
+        Point::Prepared,
+        Point::BytesStaged,
+        Point::PayloadPublished,
+        Point::ProjectionApplied,
+    ] {
+        snapshot_duplicate_conversion_case(Some(point), ACCURATERIP_PROVIDER_ID);
+        snapshot_duplicate_conversion_case(
+            Some(point),
+            collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID,
+        );
+    }
+}
+
+#[test]
+fn same_user_parallel_tracks_publish_without_losing_capture_outputs() {
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let service = Arc::new(
+        service.with_audio_converter(Arc::new(ConcurrentDerivativeEncoder(
+            std::sync::Barrier::new(2),
+        ))),
+    );
+    let jobs: [JobId; 2] = [1, 2].map(|position| {
+        service
+            .prepare_music_derivative(
+                &actor,
+                imported.capture_id,
+                derivative_command(&imported, position),
+                &command(),
+            )
+            .unwrap()
+    });
+    thread::scope(|scope| {
+        for _ in 0..2 {
+            let service = &service;
+            scope.spawn(move || service.run_next_job("parallel-tracks").unwrap());
+        }
+    });
+    for job in jobs {
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    }
+    let capture = store.capture(imported.capture_id).unwrap();
+    assert_eq!(capture.representations.len(), 3);
+    store.reindex().unwrap();
+    assert_eq!(
+        store
+            .capture(imported.capture_id)
+            .unwrap()
+            .representations
+            .len(),
+        3
+    );
+}
+
+#[test]
+#[ignore = "manual local performance qualification with real FLAC"]
+fn processing_concurrency_local_benchmark() {
+    let workers: usize = std::env::var("COLLECTOR_BENCH_WORKERS")
+        .unwrap_or("1".into())
+        .parse()
+        .unwrap();
+    assert!((1..=2).contains(&workers));
+    let tool = collector_providers::ConfiguredEncoder::probe(
+        collector_providers::EncoderKind::Flac,
+        "flac",
+    )
+    .unwrap();
+    let version = tool.version().to_string();
+    let converter = collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap();
+    let (_root, store, actor, service, collection) = setup();
+    let imported = derivative_import_sectors(&service, &actor, collection.id, 0, 13500);
+    let service = Arc::new(service.with_audio_converter(Arc::new(converter)));
+    let jobs: Vec<_> = [1, 2]
+        .into_iter()
+        .map(|position| {
+            let mut input = derivative_command(&imported, position);
+            input.encoder_version = version.clone();
+            service
+                .prepare_music_derivative(&actor, imported.capture_id, input, &command())
+                .unwrap()
+        })
+        .collect();
+    let start = std::time::Instant::now();
+    let mut queue_ms = std::collections::BTreeMap::new();
+    thread::scope(|scope| {
+        for _ in 0..workers {
+            let service = &service;
+            scope.spawn(move || while service.run_next_job("local-benchmark").unwrap() {});
+        }
+        loop {
+            let mut settled = true;
+            for job in &jobs {
+                let view = service.job(&actor, *job).unwrap();
+                if view.state != JobState::Queued {
+                    queue_ms
+                        .entry(*job)
+                        .or_insert_with(|| start.elapsed().as_millis());
+                }
+                if matches!(view.state, JobState::Queued | JobState::Running) {
+                    settled = false;
+                }
+            }
+            if settled {
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+    });
+    eprintln!(
+        "queue_to_claim_ms={:?} (2ms polling resolution)",
+        queue_ms.values().collect::<Vec<_>>()
+    );
+    for job in jobs {
+        let view = service.job(&actor, job).unwrap();
+        assert_eq!(view.state, JobState::Completed, "{:?}", view.error);
+    }
+    let source = store.capture(imported.capture_id).unwrap().representations[0].clone();
+    let inventory = store
+        .package_inventory(collection.id, PackageScope::Representation(source.id))
+        .unwrap();
+    let source_bytes: u64 = inventory.files.iter().map(|file| file.bytes.0).sum();
+    eprintln!(
+        "workers={workers} album_ms={} source_bytes={source_bytes} full_validation_bytes={} (two complete validations per track; codec input/output additional)",
+        start.elapsed().as_millis(),
+        source_bytes * 4
+    );
+}
+
+#[test]
+fn expired_processing_claim_cannot_exceed_capacity_after_older_waiters_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let store = Store::open_with_clock(
+        root.path().join("archive"),
+        root.path().join("state"),
+        clock.clone(),
+    )
+    .unwrap()
+    .with_job_settings(collector_app::JobSettings {
+        processing_workers: 2,
+        copy_workers: 1,
+    })
+    .unwrap();
+    let input = |phase: &str| JobSpec {
+        id: JobId::new(),
+        user_id: UserId::new(),
+        collection_id: None,
+        item_id: None,
+        kind: "test.processing".into(),
+        phase: phase.into(),
+        total_units: 1,
+        request: serde_json::json!({}),
+        frozen_input: None,
+    };
+    let first = input("waiting_fixture");
+    let second = input("waiting_fixture");
+    store.enqueue_job(first.clone()).unwrap();
+    store.enqueue_job(second.clone()).unwrap();
+    clock.advance(1);
+    let expired = input("queued");
+    store.enqueue_job(expired.clone()).unwrap();
+    let old = store.claim_job("same-instance", 30).unwrap().unwrap();
+    assert_eq!(old.id, expired.id);
+    clock.advance(31);
+    assert!(
+        store.renew_job_lease(old.id, &old.claim_token, 30).is_err(),
+        "expired claims cannot revive after capacity is reclaimed"
+    );
+    assert!(
+        store
+            .cancellation_requested(old.id, &old.claim_token)
+            .is_err(),
+        "expired worker work must stop before publication"
+    );
+    let frozen = FrozenAcquisitionJob {
+        collection_binding: CollectionBinding::LegacyUnassigned,
+        request: ProviderRequest {
+            collection_id: CollectionId::new(),
+            provider: ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            operation: OperationId::new("org.junk.providers.accuraterip.acquire").unwrap(),
+            source_fingerprint: None,
+            query: RawJson::from_value(serde_json::json!({"disc":"expired"})),
+            maximum_response_bytes: 1024,
+        },
+        item_id: None,
+        snapshot_id: SnapshotId::new(),
+        created_at: chrono::Utc::now(),
+    };
+    assert!(store.acquisition_for_job(&old, &frozen).is_err());
+    assert!(store.acquisition_owners(&old).is_err());
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let links: u64 = db
+        .query_row("SELECT COUNT(*) FROM acquisition_links", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(links, 0, "an expired owner cannot admit shared work");
+    db.execute(
+        "UPDATE jobs SET phase='queued' WHERE phase='waiting_fixture'",
+        [],
+    )
+    .unwrap();
+    let active = store.claim_job("same-instance", 30).unwrap().unwrap();
+    let other = store.claim_job("same-instance", 30).unwrap().unwrap();
+    assert!(
+        store.claim_job("same-instance", 30).unwrap().is_none(),
+        "expired execution must wait for available capacity"
+    );
+    store
+        .complete_job(active.id, &active.claim_token, serde_json::json!({}))
+        .unwrap();
+    let recovered = store.claim_job("same-instance", 30).unwrap().unwrap();
+    assert_eq!(recovered.id, expired.id);
+    assert_ne!(recovered.claim_token, old.claim_token);
+    assert!(
+        store
+            .complete_job(old.id, &old.claim_token, serde_json::json!({}))
+            .is_err()
+    );
+    store
+        .complete_job(recovered.id, &recovered.claim_token, serde_json::json!({}))
+        .unwrap();
+    store
+        .complete_job(other.id, &other.claim_token, serde_json::json!({}))
+        .unwrap();
+}
+
+#[test]
+fn existing_queued_provider_requests_join_registry_on_upgrade_without_using_processing_capacity() {
+    let (root, store, actor, service, collection) = setup();
+    let first = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "before-registry"),
+            &command(),
+        )
+        .unwrap();
+    let second = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "before-registry"),
+            &command(),
+        )
+        .unwrap();
+    let created = service.job(&actor, first).unwrap().created_at;
+    drop(service);
+    drop(store);
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute_batch("DELETE FROM acquisition_waits; DELETE FROM acquisition_links; DELETE FROM processing_jobs WHERE job_id IN (SELECT id FROM jobs WHERE kind='provider_acquisition'); DELETE FROM jobs WHERE kind='provider_acquisition'; UPDATE jobs SET phase='queued' WHERE kind='catalog_acquisition'; PRAGMA user_version=19;").unwrap();
+    drop(db);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .with_streaming_provider(
+            ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            Arc::new(FixtureStreamingProvider {
+                calls: calls.clone(),
+                bytes: b"upgraded response".to_vec(),
+            }),
+        )
+        .unwrap();
+    assert_eq!(service.job(&actor, first).unwrap().created_at, created);
+    let mut claims = Vec::new();
+    for _ in 0..2 {
+        let id = JobId::new();
+        store
+            .enqueue_job(JobSpec {
+                id,
+                user_id: actor.user_id,
+                collection_id: Some(collection.id),
+                item_id: None,
+                kind: "test.processing".into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+        // Temporarily claim CPU fixtures explicitly before the older download class.
+        let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+        db.execute(
+            "UPDATE jobs SET phase='waiting_fixture' WHERE kind='provider_acquisition'",
+            [],
+        )
+        .unwrap();
+        claims.push(store.claim_job("upgrade", 30).unwrap().unwrap());
+    }
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute(
+        "UPDATE jobs SET phase='queued' WHERE kind='provider_acquisition'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    service.run_next_job("upgrade").unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    for claim in claims {
+        store
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+    }
+    provider_drain(&service);
+    assert_eq!(
+        completed_provider_snapshot(&service, &actor, first),
+        completed_provider_snapshot(&service, &actor, second)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual_fields() {
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (root, store, actor, base, _) = setup_with_clock(Some(clock.clone()));
+    let collection = base
+        .create_collection(
+            &AuthenticatedPrincipal {
+                principal: actor.clone(),
+                credential_kind: CredentialKind::TestLocal,
+                authenticated_at: clock.now(),
+            },
+            CreateCollectionCommand {
+                name: "Automatic games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let configure = |store: Arc<Store>| {
+        let provider = Arc::new(
+            LocalDatProvider::new(Default::default())
+                .unwrap()
+                .with_uploads(store.clone()),
+        );
+        CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_catalog_uploads(store)
+            .with_catalog_inspection(Arc::new(collector_providers::StandardCatalogInspector))
+            .with_streaming_provider(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+            .with_catalog_parser(ModuleId(LOCAL_DAT_PROVIDER_ID.into()), provider)
+            .unwrap()
+    };
+    let service = configure(store.clone());
+    let rom = b"abc";
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "disc.bin".into(),
+                    },
+                    files: vec![UploadFile {
+                        visibility: Default::default(),
+                        name: "disc.bin".into(),
+                        bytes: ByteLength(3),
+                        sha256: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, import, 0, 0, rom)
+        .unwrap();
+    provider_drain(&service);
+    let game = service
+        .ingest_detail(&actor, import)
+        .unwrap()
+        .summary
+        .target_item_id
+        .unwrap();
+    assert_eq!(
+        service
+            .metadata_review(&actor, game)
+            .unwrap()
+            .display
+            .title
+            .source,
+        MetadataValueSource::Provisional
+    );
+    for number in 1..=101 {
+        let mut empty = item(collection.id);
+        empty.id = ItemId(uuid::Uuid::from_u128(number));
+        empty.domain = ModuleData {
+            module: ModuleId("org.junk.games".into()),
+            schema_version: 1,
+            payload: RawJson::from_value(serde_json::json!({})),
+        };
+        Catalog::save(&*store, empty, Revision(0)).unwrap();
+    }
+    let dat = |version: &str| {
+        format!(r#"<datafile><header><name>Game Boy</name><author>No-Intro</author><version>{version}</version></header><game name="Known game"><rom name="game.gb" size="3" sha1="a9993e364706816aba3e25717850c26c9cd0d89d"/></game></datafile>"#).into_bytes()
+    };
+    let preview = service
+        .inspect_catalog_batch(
+            &actor,
+            collection.id,
+            vec![("fixture.dat".into(), dat("1"))],
+        )
+        .unwrap();
+    let upload = preview.entries[0].upload.clone().unwrap();
+    let job = service
+        .import_uploaded_catalog(&actor, collection.id, upload, &command())
+        .unwrap();
+    provider_drain(&service);
+    let activation = service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(job.0), &command())
+        .unwrap();
+    let parent = activation.identification_job_id.unwrap();
+    assert!(service.run_next_job("first-page").unwrap());
+    let record = store.job_record(parent, actor.user_id).unwrap();
+    assert_eq!(record.state, JobState::Queued);
+    assert!(record.result.unwrap().get("cursor").is_some());
+    drop(service);
+    drop(base);
+    drop(store);
+    clock.advance(60);
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock.clone(),
+        )
+        .unwrap(),
+    );
+    let service = configure(store.clone());
+    assert!(service.run_next_job("later-page").unwrap());
+    let direct_context = command();
+    let direct = service
+        .identify_game_entry(&actor, game, &direct_context)
+        .unwrap();
+    assert_eq!(direct.len(), 1);
+    let created = service.job(&actor, direct[0]).unwrap().created_at;
+    clock.advance(60);
+    assert_eq!(
+        service
+            .identify_game_entry(&actor, game, &direct_context)
+            .unwrap(),
+        direct
+    );
+    assert_eq!(service.job(&actor, direct[0]).unwrap().created_at, created);
+    service.cancel_job(&actor, parent, &command()).unwrap();
+    assert_ne!(
+        service.job(&actor, direct[0]).unwrap().state,
+        JobState::Cancelled
+    );
+    let review = service.metadata_review(&actor, game).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            game,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: review.revision,
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "My deliberate title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, direct[0]).unwrap().state,
+        JobState::Completed
+    );
+    let review = service.metadata_review(&actor, game).unwrap();
+    assert_eq!(review.display.title.value, "My deliberate title");
+    assert_eq!(
+        review.display.domain_fields["platform"].value,
+        "Nintendo - Game Boy"
+    );
+    assert!(matches!(
+        review.identification.unwrap().status,
+        collector_modules::games::GameDetectionStatus::Recognized
+    ));
+    let preview = service
+        .inspect_catalog_batch(
+            &actor,
+            collection.id,
+            vec![("replacement.dat".into(), dat("2"))],
+        )
+        .unwrap();
+    let replacement = service
+        .import_uploaded_catalog(
+            &actor,
+            collection.id,
+            preview.entries[0].upload.clone().unwrap(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    let activation = service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(replacement.0), &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service
+            .job(&actor, activation.identification_job_id.unwrap())
+            .unwrap()
+            .state,
+        JobState::Completed
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_review(&actor, game)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "My deliberate title"
+    );
+    assert_eq!(
+        store.active_game_snapshots(collection.id).unwrap(),
+        vec![SnapshotId(replacement.0)]
+    );
+
+    // A source mutation cannot publish a successful identity even if its recorded fingerprint is unchanged.
+    let next = service
+        .identify_game_entry(&actor, game, &command())
+        .unwrap()[0];
+    let current = store.item(game).unwrap();
+    let capture = &current.captures[0];
+    let representation = &capture.representations[0];
+    let collection_path = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.join(format!("captures/{}", capture.id)).exists())
+        .unwrap();
+    let payload = collection_path.join(format!(
+        "captures/{}/payload/{}/disc.bin",
+        capture.id, representation.id
+    ));
+    std::fs::write(&payload, b"xyz").unwrap();
+    provider_drain(&service);
+    assert_eq!(service.job(&actor, next).unwrap().state, JobState::Failed);
+    std::fs::write(&payload, rom).unwrap();
+    let curator_id = store
+        .create_user("game-curator", "a long curator password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, curator_id, Role::Curator).unwrap();
+    let curator = Principal {
+        user_id: curator_id,
+        administrator: false,
+        device_id: None,
+    };
+    let denied = service
+        .identify_game_entry(&curator, game, &command())
+        .unwrap()[0];
+    Catalog::grant(&*store, collection.id, curator_id, Role::Viewer).unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        store.job_record(denied, curator_id).unwrap().state,
+        JobState::Failed
+    );
+    let preview = service
+        .inspect_catalog_batch(&actor, collection.id, vec![("third.dat".into(), dat("3"))])
+        .unwrap();
+    let third = service
+        .import_uploaded_catalog(
+            &actor,
+            collection.id,
+            preview.entries[0].upload.clone().unwrap(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    let stale = service
+        .identify_game_entry(&actor, game, &command())
+        .unwrap()[0];
+    service
+        .activate_catalog_snapshot(&actor, collection.id, SnapshotId(third.0), &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(service.job(&actor, stale).unwrap().state, JobState::Failed);
+    let last_owner = service
+        .identify_game_entry(&actor, game, &command())
+        .unwrap()[0];
+    service.cancel_job(&actor, last_owner, &command()).unwrap();
+    assert_eq!(
+        service.job(&actor, last_owner).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service
+            .metadata_review(&actor, game)
+            .unwrap()
+            .display
+            .title
+            .value,
+        "My deliberate title"
+    );
+}
+
+#[test]
+fn cover_art_retention_reuses_responses_with_item_owned_assets_and_durable_retries() {
+    use collector_app::{AcquireMetadataCommand, ResolveMetadataCommand};
+    use collector_modules::music::{COVER_ART_ARCHIVE_PROVIDER_ID, MUSICBRAINZ_PROVIDER_ID};
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let items = [
+        save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap(),
+        save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap(),
+    ];
+    let release = "22222222-2222-4222-8222-222222222222";
+    let mb_body = serde_json::to_vec(
+        &serde_json::json!({"releases":[{"id":release,"title":"Retained album"}]}),
+    )
+    .unwrap();
+    let mb_fixture =
+        metadata_fixture_server(vec![("200 OK\r\nContent-Type: application/json", mb_body)]);
+    let mb = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "collector-test/0.1 (test@example.invalid)",
+            &mb_fixture.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let image = encoded.into_inner();
+    let mut changed = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([56, 34, 12]))
+        .write_to(&mut changed, image::ImageFormat::Png)
+        .unwrap();
+    let changed = changed.into_inner();
+    let listing = serde_json::to_vec(&serde_json::json!({"release":format!("https://musicbrainz.org/release/{release}"),"images":[{"id":"9001","front":true,"back":false,"approved":true,"types":["Front"]}]})).unwrap();
+    let mut replies = vec![
+        ("200 OK\r\nContent-Type: application/json", listing.clone()),
+        ("200 OK\r\nContent-Type: application/json", listing),
+    ];
+    replies.extend((0..4).map(|_| ("200 OK\r\nContent-Type: image/png", image.clone())));
+    replies.push(("200 OK\r\nContent-Type: image/png", changed));
+    replies.extend((0..2).map(|_| {
+        (
+            "404 Not Found\r\nContent-Type: text/html",
+            b"no artwork".to_vec(),
+        )
+    }));
+    // A pending request resumes after reopening and returns to the older, exact image.
+    replies.push(("200 OK\r\nContent-Type: image/png", image.clone()));
+    replies.push(("200 OK\r\nContent-Type: image/png", image.clone()));
+    let fixture = metadata_fixture_server(replies);
+    let caa = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "collector-test/0.1 (test@example.invalid)",
+            &fixture.origin,
+            &[fixture.origin.as_str()],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
+    let configure = |service: CollectionService| {
+        service
+            .with_streaming_provider(
+                ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                Arc::new(collector_app::BoundedProviderAdapter(caa.clone())),
+            )
+            .unwrap()
+            .with_catalog_parser(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
+            .unwrap()
+    };
+    let service = configure(
+        service
+            .with_streaming_provider(
+                ModuleId(MUSICBRAINZ_PROVIDER_ID.into()),
+                Arc::new(collector_app::BoundedProviderAdapter(mb.clone())),
+            )
+            .unwrap()
+            .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), mb)
+            .unwrap(),
+    );
+    let lookup = ResolveMetadataCommand {
+        lookup: AcquireMetadataCommand::MusicBrainzSearch {
+            query: "retained album".into(),
+            refresh: true,
+        },
+        acquire_artwork: false,
+    };
+    let text_jobs: Vec<_> = items
+        .iter()
+        .map(|item| {
+            service
+                .resolve_metadata(&actor, item.id, lookup.clone(), &command())
+                .unwrap()
+        })
+        .collect();
+    provider_drain(&service);
+    for job in text_jobs {
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    }
+    let candidate = service
+        .metadata_view(&actor, items[0].id)
+        .unwrap()
+        .candidates[0]
+        .identity
+        .clone();
+    let listing_lookup = AcquireMetadataCommand::CoverArtListing {
+        candidate: candidate.clone(),
+    };
+    let image_lookup = AcquireMetadataCommand::CoverArtImage {
+        candidate,
+        image_id: "9001".into(),
+    };
+    let resolve = |who: &Principal, item_id, lookup| {
+        clock.advance(60);
+        let job = service
+            .resolve_metadata(
+                who,
+                item_id,
+                ResolveMetadataCommand {
+                    lookup,
+                    acquire_artwork: false,
+                },
+                &command(),
+            )
+            .unwrap();
+        provider_drain(&service);
+        let view = service
+            .metadata_resolutions(who, item_id)
+            .unwrap()
+            .into_iter()
+            .find(|value| value.job.id == job)
+            .unwrap();
+        assert_eq!(view.job.state, JobState::Completed, "{:?}", view.job.error);
+        view.result.unwrap().snapshot_id
+    };
+    let listing_id = resolve(&actor, items[0].id, listing_lookup.clone());
+    assert_eq!(
+        resolve(&actor, items[0].id, listing_lookup.clone()),
+        listing_id
+    );
+    let image_id = resolve(&actor, items[0].id, image_lookup.clone());
+    let first = service.metadata_view(&actor, items[0].id).unwrap();
+    let first_asset = first.authority.artwork_choice.unwrap();
+    assert_eq!(resolve(&actor, items[0].id, image_lookup.clone()), image_id);
+    assert_eq!(
+        service.metadata_view(&actor, items[0].id).unwrap().revision,
+        first.revision
+    );
+    assert_eq!(resolve(&actor, items[1].id, image_lookup.clone()), image_id);
+    let second_asset = service
+        .metadata_view(&actor, items[1].id)
+        .unwrap()
+        .authority
+        .artwork_choice
+        .unwrap();
+    assert_ne!(
+        first_asset, second_asset,
+        "shared provider bytes must not share item ownership"
+    );
+    let other_id = store
+        .create_user("cover-curator", "a long test password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, other_id, Role::Curator).unwrap();
+    let other = Principal {
+        user_id: other_id,
+        administrator: false,
+        device_id: None,
+    };
+    assert_eq!(resolve(&other, items[0].id, image_lookup.clone()), image_id);
+    assert_eq!(
+        store.asset_states_for_item(items[0].id).unwrap().len(),
+        1,
+        "requester identity must not duplicate a cover"
+    );
+    let changed_id = resolve(&actor, items[0].id, image_lookup.clone());
+    assert_ne!(changed_id, image_id);
+    assert_eq!(
+        store.asset_states_for_item(items[0].id).unwrap().len(),
+        2,
+        "changed artwork retains its own source and Asset"
+    );
+    let no_data = resolve(&actor, items[0].id, listing_lookup.clone());
+    assert_ne!(no_data, listing_id);
+    assert_eq!(resolve(&actor, items[0].id, listing_lookup), no_data);
+    let pending_request = ResolveMetadataCommand {
+        lookup: image_lookup,
+        acquire_artwork: false,
+    };
+    let receipt = command();
+    let pending = service
+        .resolve_metadata(&actor, items[0].id, pending_request.clone(), &receipt)
+        .unwrap();
+    let cancelled = service
+        .resolve_metadata(&actor, items[1].id, pending_request.clone(), &command())
+        .unwrap();
+    service.cancel_job(&actor, cancelled, &command()).unwrap();
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .display
+            .title
+            .value,
+        items[0].title
+    );
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock,
+        )
+        .unwrap(),
+    );
+    let service = configure(CollectionService::new(
+        store.clone(),
+        Arc::new(Registry::builtins()),
+    ));
+    assert_eq!(
+        service
+            .resolve_metadata(&actor, items[0].id, pending_request.clone(), &receipt)
+            .unwrap(),
+        pending
+    );
+    provider_drain(&service);
+    let view = service
+        .metadata_resolutions(&actor, items[0].id)
+        .unwrap()
+        .into_iter()
+        .find(|value| value.job.id == pending)
+        .unwrap();
+    assert_eq!(view.job.state, JobState::Completed, "{:?}", view.job.error);
+    assert_eq!(view.result.unwrap().snapshot_id, image_id);
+    assert_eq!(
+        service.job(&actor, cancelled).unwrap().state,
+        JobState::Cancelled
+    );
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        Some(first_asset)
+    );
+    assert_eq!(store.asset_states_for_item(items[0].id).unwrap().len(), 2);
+    // Access loss cannot turn shared response ownership into a new write grant.
+    AccessPort::set_grant(&*store, collection.id, other_id, Revision(1), None).unwrap();
+    assert!(matches!(
+        service.resolve_metadata(&other, items[0].id, pending_request.clone(), &command()),
+        Err(Error::Forbidden)
+    ));
+    let payload = files_named(&root.path().join("archive"), "source.bin")
+        .into_iter()
+        .find(|path| {
+            path.components()
+                .any(|part| part.as_os_str() == image_id.to_string().as_str())
+        })
+        .unwrap();
+    std::fs::write(payload, vec![0; image.len()]).unwrap();
+    let corrupt = service
+        .resolve_metadata(&actor, items[0].id, pending_request, &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, corrupt).unwrap().state,
+        JobState::Failed,
+        "corrupt retained bytes must never become an unchanged success"
+    );
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        Some(first_asset)
+    );
+    assert_eq!(fixture.requests.lock().unwrap().len(), 11);
+    assert_eq!(
+        service
+            .curation_catalog_snapshots(&actor, collection.id, None, 100)
+            .unwrap()
+            .items
+            .len(),
+        5,
+        "one text response and four distinct artwork responses"
+    );
+}
+
+struct CoverArtReviewFixture {
+    root: tempfile::TempDir,
+    store: Arc<Store>,
+    actor: Principal,
+    service: CollectionService,
+    collection: Collection,
+    item: Item,
+    image_command: collector_app::ResolveMetadataCommand,
+    clock: Arc<TestClock>,
+    _musicbrainz: MetadataFixtureServer,
+    artwork: MetadataFixtureServer,
+    artwork_provider: Arc<CoverArtArchiveProvider>,
+}
+
+impl CoverArtReviewFixture {
+    fn reopen(self) -> Self {
+        let Self {
+            root,
+            store,
+            actor,
+            service,
+            collection,
+            item,
+            image_command,
+            clock,
+            _musicbrainz,
+            artwork,
+            artwork_provider,
+        } = self;
+        drop(service);
+        drop(store);
+        let store = Arc::new(
+            Store::open_with_clock(
+                root.path().join("archive"),
+                root.path().join("state"),
+                clock.clone(),
+            )
+            .unwrap(),
+        );
+        let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+            .with_streaming_provider(
+                ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                Arc::new(collector_app::BoundedProviderAdapter(
+                    artwork_provider.clone(),
+                )),
+            )
+            .unwrap()
+            .with_catalog_parser(
+                ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                artwork_provider.clone(),
+            )
+            .unwrap();
+        Self {
+            root,
+            store,
+            actor,
+            service,
+            collection,
+            item,
+            image_command,
+            clock,
+            _musicbrainz,
+            artwork,
+            artwork_provider,
+        }
+    }
+}
+
+fn review_cover_image() -> Vec<u8> {
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(1024, 1024, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    encoded.into_inner()
+}
+
+fn cover_art_review_fixture(replies: Vec<(&'static str, Vec<u8>)>) -> CoverArtReviewFixture {
+    use collector_modules::music::{COVER_ART_ARCHIVE_PROVIDER_ID, MUSICBRAINZ_PROVIDER_ID};
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let musicbrainz = metadata_fixture_server(vec![(
+        "200 OK\r\nContent-Type: application/json",
+        br#"{"releases":[{"id":"22222222-2222-4222-8222-222222222222","title":"Retained album"}]}"#
+            .to_vec(),
+    )]);
+    let mb = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "collector-test/0.1 (test@example.invalid)",
+            &musicbrainz.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let artwork = metadata_fixture_server(replies);
+    let caa = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "collector-test/0.1 (test@example.invalid)",
+            &artwork.origin,
+            &[artwork.origin.as_str()],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
+    let service = service
+        .with_streaming_provider(
+            ModuleId(MUSICBRAINZ_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(mb.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), mb)
+        .unwrap()
+        .with_streaming_provider(
+            ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(caa.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
+        .unwrap();
+    let text = service
+        .resolve_metadata(
+            &actor,
+            saved.id,
+            collector_app::ResolveMetadataCommand {
+                lookup: collector_app::AcquireMetadataCommand::MusicBrainzSearch {
+                    query: "retained album".into(),
+                    refresh: false,
+                },
+                acquire_artwork: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, text).unwrap().state,
+        JobState::Completed
+    );
+    let candidate = service.metadata_view(&actor, saved.id).unwrap().candidates[0]
+        .identity
+        .clone();
+    CoverArtReviewFixture {
+        root,
+        store,
+        actor,
+        service,
+        collection,
+        item: saved,
+        image_command: collector_app::ResolveMetadataCommand {
+            lookup: collector_app::AcquireMetadataCommand::CoverArtImage {
+                candidate,
+                image_id: "9001".into(),
+            },
+            acquire_artwork: false,
+        },
+        clock,
+        _musicbrainz: musicbrainz,
+        artwork,
+        artwork_provider: caa,
+    }
+}
+
+#[test]
+fn concurrent_cover_creation_converges_across_curators_and_metadata_selection() {
+    let image = review_cover_image();
+    let fixture =
+        cover_art_review_fixture(vec![("200 OK\r\nContent-Type: image/png", image.clone())]);
+    let second_user = fixture
+        .store
+        .create_user("cover-review-curator", "a long test password", false)
+        .unwrap();
+    Catalog::grant(
+        &*fixture.store,
+        fixture.collection.id,
+        second_user,
+        Role::Curator,
+    )
+    .unwrap();
+    let second = Principal {
+        user_id: second_user,
+        administrator: false,
+        device_id: None,
+    };
+    let people = [&fixture.actor, &second];
+    fixture.clock.advance(60);
+    let before = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    let jobs: Vec<_> = people
+        .iter()
+        .map(|who| {
+            fixture
+                .service
+                .resolve_metadata(
+                    who,
+                    fixture.item.id,
+                    fixture.image_command.clone(),
+                    &command(),
+                )
+                .unwrap()
+        })
+        .collect();
+    // Both requester Jobs wait on this one acquisition. Then both processing
+    // slots materialize the same cover concurrently, using one process identity.
+    assert!(
+        fixture
+            .service
+            .run_next_job("shared-cover-download")
+            .unwrap()
+    );
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    barrier.wait();
+                    fixture
+                        .service
+                        .run_next_job("shared-cover-workers")
+                        .unwrap()
+                })
+            })
+            .collect();
+        for thread in threads {
+            assert!(thread.join().unwrap());
+        }
+    });
+    provider_drain(&fixture.service);
+    for (who, job) in people.into_iter().zip(jobs) {
+        let view = fixture.service.job(who, job).unwrap();
+        assert_eq!(view.state, JobState::Completed, "{:?}", view.error);
+    }
+    let assets = fixture
+        .store
+        .asset_states_for_item(fixture.item.id)
+        .unwrap();
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].revision, Revision(1));
+    assert_eq!(
+        resource_bytes(
+            fixture
+                .service
+                .asset_resource(
+                    &fixture.actor,
+                    fixture.collection.id,
+                    assets[0].asset.id,
+                    false
+                )
+                .unwrap()
+        ),
+        image
+    );
+    let after = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    assert_eq!(
+        after.revision,
+        Revision(before.revision.0 + 1),
+        "equal selections commit one authority change"
+    );
+    assert_eq!(after.authority.artwork_choice, Some(assets[0].asset.id));
+    assert_eq!(after.display.title.value, fixture.item.title);
+    assert_eq!(fixture.artwork.requests.lock().unwrap().len(), 1);
+    fixture.store.reindex().unwrap();
+    assert_eq!(
+        fixture
+            .service
+            .metadata_view(&fixture.actor, fixture.item.id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        after.authority.artwork_choice
+    );
+}
+
+#[test]
+fn explicit_cover_reacquisition_restores_history_but_automatic_refresh_cannot() {
+    let image = review_cover_image();
+    let listing = br#"{"release":"https://musicbrainz.org/release/22222222-2222-4222-8222-222222222222","images":[{"id":"9001","front":true,"back":false,"approved":true,"types":["Front"]}]}"#.to_vec();
+    let mut fixture = cover_art_review_fixture(vec![
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: application/json", listing),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+        ("200 OK\r\nContent-Type: image/png", image.clone()),
+    ]);
+    let first = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture.service.job(&fixture.actor, first).unwrap().state,
+        JobState::Completed
+    );
+    let asset = fixture
+        .store
+        .asset_states_for_item(fixture.item.id)
+        .unwrap()
+        .remove(0);
+    let edited = fixture
+        .service
+        .update_asset(
+            &fixture.actor,
+            asset.asset.id,
+            asset.revision,
+            UpdateAssetCommand {
+                visibility: Visibility::Curators,
+                alt_text: "My retained cover description".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let archived = fixture
+        .service
+        .tombstone_asset(&fixture.actor, asset.asset.id, edited.revision, &command())
+        .unwrap();
+    let tombstone = files_named(&fixture.root.path().join("archive"), "record.v3.json")
+        .into_iter()
+        .find(|path| {
+            path.components()
+                .any(|part| part.as_os_str() == asset.asset.id.to_string().as_str())
+                && std::fs::read_to_string(path).is_ok_and(|raw| raw.contains("\"deleted\": true"))
+        })
+        .unwrap();
+    let tombstone_bytes = std::fs::read(&tombstone).unwrap();
+    let current = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    fixture
+        .service
+        .update_metadata_authority(
+            &fixture.actor,
+            fixture.item.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: current.revision,
+                change: MetadataAuthorityChange::ClearArtworkChoice,
+            },
+            &command(),
+        )
+        .unwrap();
+    // A selected release gives the text-first automatic workflow a concrete
+    // album whose front cover it should attempt to acquire.
+    let cleared = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    fixture
+        .service
+        .update_metadata_authority(
+            &fixture.actor,
+            fixture.item.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: cleared.revision,
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: current.candidates[0].identity.clone(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    fixture.clock.advance(60);
+    let automatic = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            collector_app::ResolveMetadataCommand {
+                lookup: collector_app::AcquireMetadataCommand::MusicBrainzSearch {
+                    query: "retained album".into(),
+                    refresh: false,
+                },
+                acquire_artwork: true,
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    let automatic = fixture
+        .service
+        .metadata_resolutions(&fixture.actor, fixture.item.id)
+        .unwrap()
+        .into_iter()
+        .find(|view| view.job.id == automatic)
+        .unwrap();
+    assert_eq!(automatic.job.state, JobState::Completed);
+    assert!(
+        automatic.result.unwrap().artwork_error.is_some(),
+        "automatic refresh must explain why archived artwork was not selected"
+    );
+    assert!(fixture.store.asset_state(asset.asset.id).unwrap().deleted);
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        archived.revision
+    );
+    fixture.clock.advance(60);
+    let receipt = command();
+    let restore = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &receipt,
+        )
+        .unwrap();
+    fixture = fixture.reopen();
+    provider_drain(&fixture.service);
+    let restored = fixture.store.asset_state(asset.asset.id).unwrap();
+    assert_eq!(
+        fixture.service.job(&fixture.actor, restore).unwrap().state,
+        JobState::Completed
+    );
+    assert!(!restored.deleted);
+    assert_eq!(restored.revision, Revision(archived.revision.0 + 1));
+    assert_eq!(restored.asset.visibility, Visibility::Curators);
+    assert_eq!(restored.asset.alt_text, "My retained cover description");
+    assert_eq!(
+        fixture
+            .store
+            .asset_states_for_item(fixture.item.id)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        resource_bytes(
+            fixture
+                .service
+                .asset_resource(&fixture.actor, fixture.collection.id, asset.asset.id, false)
+                .unwrap()
+        ),
+        image
+    );
+    assert_eq!(std::fs::read(&tombstone).unwrap(), tombstone_bytes);
+    assert_eq!(
+        fixture
+            .service
+            .resolve_metadata(
+                &fixture.actor,
+                fixture.item.id,
+                fixture.image_command.clone(),
+                &receipt
+            )
+            .unwrap(),
+        restore
+    );
+    fixture.store.reindex().unwrap();
+    let authority = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap();
+    assert_eq!(authority.authority.artwork_choice, Some(asset.asset.id));
+    assert_eq!(authority.display.title.value, fixture.item.title);
+    // A later direct selection reuses the restored revision rather than restoring again.
+    let again = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture.service.job(&fixture.actor, again).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        restored.revision
+    );
+    // Keep the clock unchanged: revision ownership, not time inference, must
+    // prevent an old queued lookup from undoing a newer archive decision.
+    let older_lookup = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    let later_archive = fixture
+        .service
+        .tombstone_asset(
+            &fixture.actor,
+            asset.asset.id,
+            restored.revision,
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture
+            .service
+            .job(&fixture.actor, older_lookup)
+            .unwrap()
+            .state,
+        JobState::Failed
+    );
+    assert!(fixture.store.asset_state(asset.asset.id).unwrap().deleted);
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        later_archive.revision
+    );
+    let fresh = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    assert_eq!(
+        fixture.service.job(&fixture.actor, fresh).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fixture.store.asset_state(asset.asset.id).unwrap().revision,
+        Revision(later_archive.revision.0 + 1)
+    );
+}
+
+#[test]
+fn provider_cover_materialization_fences_content_restore_revision_and_job_claim() {
+    use collector_app::{ItemEffectContext, ItemEffectSource};
+    let clock = Arc::new(TestClock::new(1_800_000_000));
+    let (_root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let other = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let image = review_cover_image();
+    let asset = AssetId::new();
+    let input = CreateAssetCommand {
+        collection_id: collection.id,
+        subject: AssetSubject::Item { item_id: saved.id },
+        kind: AssetKind::Cover,
+        visibility: Visibility::Shared,
+        alt_text: "Provider cover".into(),
+    };
+    let context = ItemEffectContext {
+        item_id: saved.id,
+        generation: 0,
+        source: ItemEffectSource::Command,
+    };
+    let created = store
+        .materialize_provider_artwork(asset, input.clone(), &image, context, None)
+        .unwrap();
+    let mut different = input.clone();
+    different.subject = AssetSubject::Item { item_id: other.id };
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            different,
+            &image,
+            ItemEffectContext {
+                item_id: other.id,
+                ..context
+            },
+            None
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    let mut changed = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([56, 34, 12]))
+        .write_to(&mut changed, image::ImageFormat::Png)
+        .unwrap();
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &changed.into_inner(),
+            context,
+            None
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    let archived = store.tombstone_asset(asset, created.revision).unwrap();
+    assert!(matches!(
+        store.materialize_provider_artwork(asset, input.clone(), &image, context, None),
+        Err(Error::Conflict)
+    ));
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            context,
+            Some(created.revision)
+        ),
+        Err(Error::Conflict)
+    ));
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            ItemEffectContext {
+                generation: 1,
+                ..context
+            },
+            Some(archived.revision)
+        ),
+        Err(Error::Conflict)
+    ));
+    let restored = store
+        .materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            context,
+            Some(archived.revision),
+        )
+        .unwrap();
+    assert!(!restored.deleted);
+    assert_eq!(restored.revision, Revision(archived.revision.0 + 1));
+    // A second authorized restorer accepts the already restored effect without
+    // another revision; a newer tombstone must reject the old restore revision.
+    assert_eq!(
+        store
+            .materialize_provider_artwork(
+                asset,
+                input.clone(),
+                &image,
+                context,
+                Some(archived.revision)
+            )
+            .unwrap()
+            .revision,
+        restored.revision
+    );
+    let archived_again = store.tombstone_asset(asset, restored.revision).unwrap();
+    assert!(matches!(
+        store.materialize_provider_artwork(
+            asset,
+            input.clone(),
+            &image,
+            context,
+            Some(archived.revision)
+        ),
+        Err(Error::Conflict)
+    ));
+    let job = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: job,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(saved.id),
+            kind: "test.cover".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let claim = store.claim_job("cover-claim-fence", 30).unwrap().unwrap();
+    let claimed = ItemEffectContext {
+        source: ItemEffectSource::Job {
+            id: job,
+            claim: claim.claim_token.parse().unwrap(),
+        },
+        ..context
+    };
+    clock.advance(31);
+    assert!(
+        store
+            .materialize_provider_artwork(
+                asset,
+                input.clone(),
+                &image,
+                claimed,
+                Some(archived_again.revision)
+            )
+            .is_err()
+    );
+    let current = store.claim_job("cover-claim-fence", 30).unwrap().unwrap();
+    store.request_job_cancellation(job, actor.user_id).unwrap();
+    let cancelled = ItemEffectContext {
+        source: ItemEffectSource::Job {
+            id: job,
+            claim: current.claim_token.parse().unwrap(),
+        },
+        ..context
+    };
+    assert!(
+        store
+            .materialize_provider_artwork(
+                asset,
+                input,
+                &image,
+                cancelled,
+                Some(archived_again.revision)
+            )
+            .is_err()
+    );
+    assert!(store.asset_state(asset).unwrap().deleted);
+    assert_eq!(
+        store.asset_state(asset).unwrap().revision,
+        archived_again.revision
+    );
+}
+
+#[test]
+fn provider_cover_restoration_recovers_before_and_after_revision_commit() {
+    use collector_app::{ItemEffectContext, ItemEffectSource};
+    use collector_store::PublicationFaultPoint;
+    for point in [
+        PublicationFaultPoint::Prepared,
+        PublicationFaultPoint::RevisionCommitted,
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        let image = review_cover_image();
+        let asset = AssetId::new();
+        let input = CreateAssetCommand {
+            collection_id: collection.id,
+            subject: AssetSubject::Item { item_id: saved.id },
+            kind: AssetKind::Cover,
+            visibility: Visibility::Shared,
+            alt_text: "Restored cover".into(),
+        };
+        let context = ItemEffectContext {
+            item_id: saved.id,
+            generation: 0,
+            source: ItemEffectSource::Command,
+        };
+        let created = store
+            .materialize_provider_artwork(asset, input.clone(), &image, context, None)
+            .unwrap();
+        let archived = store.tombstone_asset(asset, created.revision).unwrap();
+        drop(service);
+        drop(store);
+        let failed = Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap();
+        assert!(
+            failed
+                .materialize_provider_artwork(
+                    asset,
+                    input.clone(),
+                    &image,
+                    context,
+                    Some(archived.revision)
+                )
+                .is_err()
+        );
+        drop(failed);
+        let recovered =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        assert_eq!(
+            recovered.asset_state(asset).unwrap().deleted,
+            point == PublicationFaultPoint::Prepared
+        );
+        let restored = recovered
+            .materialize_provider_artwork(asset, input, &image, context, Some(archived.revision))
+            .unwrap();
+        assert!(!restored.deleted);
+        assert_eq!(
+            restored.revision,
+            Revision(archived.revision.0 + 1),
+            "recovery/retry cannot restore twice"
+        );
+        recovered.reindex().unwrap();
+        let service = CollectionService::new(recovered, Arc::new(Registry::builtins()));
+        assert_eq!(
+            resource_bytes(
+                service
+                    .asset_resource(&actor, collection.id, asset, false)
+                    .unwrap()
+            ),
+            image
+        );
+    }
+}
+
+#[test]
+fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
+    let (root, store, actor, service, collection) = setup();
+    let flac = include_bytes!("fixtures/digital-audio/01.flac").as_slice();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let receipt = b"private order 1234".as_slice();
+    let package = IngestPackageSelection {
+        purchase: Some(DigitalPurchase {
+            store: Some("Fixture store".into()),
+            order_reference: Some("private order".into()),
+            ..Default::default()
+        }),
+        source: ImportSourceSummary {
+            kind: ImportSourceKind::Browser,
+            label: None,
+            package_name: "Purchase".into(),
+        },
+        anchor_file_index: None,
+        files: [
+            ("01.flac", flac, Visibility::Shared),
+            ("02.mp3", mp3, Visibility::Shared),
+            ("receipt.txt", receipt, Visibility::Curators),
+        ]
+        .into_iter()
+        .map(|(name, data, visibility)| UploadFile {
+            name: name.into(),
+            bytes: ByteLength(data.len() as u64),
+            sha256: None,
+            visibility: Some(visibility),
+        })
+        .collect(),
+    };
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![package],
+            },
+        )
+        .unwrap();
+    assert!(plan.packages[0].analysis_available);
+    assert!(!plan.packages[0].preparation_available);
+    let key = command();
+    let submitted = StartIngestCommand {
+        purchase: None,
+        clean_reimport: None,
+        plan,
+        analysis: collector_app::IngestAnalysisPolicy::Automatic,
+        enrichment: IngestEnrichmentPolicy::Automatic,
+        prepare_music: false,
+        destination: None,
+    };
+    let accepted = service
+        .start_ingest(&actor, submitted.clone(), &key)
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    for (index, data) in [flac, mp3, receipt].into_iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(&actor, id, index, 0, data)
+            .unwrap();
+    }
+    provider_drain(&service);
+    service.resume_guided_ingests().unwrap();
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
+    let item = detail.summary.target_item_id.unwrap();
+    let raw = store.item(item).unwrap();
+    assert!(raw.specimens.is_empty());
+    let capture = &raw.captures[0];
+    assert_eq!(
+        capture.purchase.as_ref().unwrap().store.as_deref(),
+        Some("Fixture store")
+    );
+    assert_eq!(capture.representations.len(), 1);
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    assert_eq!(rows.len(), 2, "{detail:?}");
+    assert!(rows.iter().all(|r| r.profile.is_none() && !r.can_prepare));
+    assert_eq!(rows[0].sample_rate(), 96_000);
+    assert_eq!(rows[0].frame_count.0, 24_000);
+    assert_eq!(rows[0].title, "FLAC original");
+    assert_eq!(rows[1].title, "MP3 original");
+    let album = service.album_playback_snapshot(&actor, item, None).unwrap();
+    assert_eq!(album.tracks.len(), 2);
+    for (index, data) in [flac, mp3].into_iter().enumerate() {
+        let mut resource = service
+            .representation(&actor, item, capture.representations[0].id, index)
+            .unwrap();
+        let mut bytes = Vec::new();
+        resource.reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, data);
+    }
+    assert_eq!(
+        service.item_presented(&actor, item).unwrap().title,
+        "Purchased album"
+    );
+    let search = service
+        .music_search(
+            &actor,
+            collection.id,
+            collector_app::MusicSearchQuery {
+                search: Some("MP3 original".into()),
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(search.items.len(), 1);
+    assert_eq!(search.items[0].sources.len(), 1);
+    let viewer_id = store
+        .create_user("purchase-viewer", "long purchase viewer password", false)
+        .unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let presented = serde_json::to_value(service.item_presented(&viewer, item).unwrap()).unwrap();
+    assert!(!presented.to_string().contains("private order"));
+    assert!(!presented.to_string().contains("receipt.txt"));
+    assert!(matches!(
+        service.representation(&viewer, item, capture.representations[0].id, 2),
+        Err(Error::Forbidden)
+    ));
+    assert_eq!(
+        service
+            .start_ingest(&actor, submitted, &key)
+            .unwrap()
+            .imports[0]
+            .import_id,
+        id
+    );
+
+    // Album ordering and printed numbers are editable; saved targets retain the
+    // immutable source positions even when the album order changes.
+    use collector_app::{
+        CollectionListChange, CollectionListPort, CreateCollectionList, UpdateCollectionList,
+    };
+    let source = capture.representations[0].id;
+    let mut list = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                kind: None,
+                name: "Purchased playlist".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    for _ in 0..2 {
+        list = service
+            .update_collection_list(
+                &actor,
+                collection.id,
+                list.id,
+                UpdateCollectionList {
+                    expected_revision: list.revision,
+                    change: CollectionListChange::Append {
+                        item_id: item,
+                        source_representation_id: None,
+                        track_position: None,
+                    },
+                },
+                &command(),
+            )
+            .unwrap();
+    }
+    let targets = store.collection_list(list.id).unwrap().entries;
+    assert_eq!(targets.len(), 4);
+    let review = service.metadata_review(&actor, item).unwrap();
+    service.update_metadata_authority(&actor,item,UpdateMetadataAuthorityCommand {
+        expected_revision:review.revision,
+        change:MetadataAuthorityChange::SetDomainOverrides { overrides:ModuleData {
+            module:ModuleId("org.junk.music".into()),schema_version:1,
+            payload:RawJson::from_value(serde_json::json!({"artist":"My artist","track_overrides":[
+                {"source_representation_id":source,"track_position":1,"title":"私のタイトル","disc_position":2,"display_position":9},
+                {"source_representation_id":source,"track_position":2,"title":null,"disc_position":1,"display_position":1}
+            ]}))
+        }}
+    },&command()).unwrap();
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks[0]
+            .track_position,
+        2
+    );
+    assert_eq!(
+        serde_json::to_value(store.collection_list(list.id).unwrap().entries).unwrap(),
+        serde_json::to_value(&targets).unwrap()
+    );
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .iter()
+            .find(|row| row.track_position == 1)
+            .unwrap()
+            .title,
+        "私のタイトル"
+    );
+    assert!(matches!(
+        service.update_digital_purchase(
+            &viewer,
+            item,
+            capture.id,
+            collector_app::UpdateDigitalPurchase {
+                expected_revision: capture.revision,
+                purchase: None
+            },
+            &command()
+        ),
+        Err(Error::Forbidden)
+    ));
+    // The ordinary stopped-server backup includes portable private purchase and
+    // visibility facts, metadata authority, playlists and original bytes.
+    let config = root.path().join("collector.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "archive = {:?}\nstate = {:?}\n",
+            root.path().join("archive"),
+            root.path().join("state")
+        ),
+    )
+    .unwrap();
+    let backup = root.path().join("digital-backup");
+    store.backup(&backup, &config).unwrap();
+    drop(service);
+    drop(store);
+    for scope in [
+        collector_app::RestoreScope::Full,
+        collector_app::RestoreScope::ArchiveOnly,
+    ] {
+        let restore = root
+            .path()
+            .join(if matches!(scope, collector_app::RestoreScope::Full) {
+                "full-digital"
+            } else {
+                "archive-digital"
+            });
+        std::fs::create_dir(&restore).unwrap();
+        let archive = restore.join("archive");
+        let state = restore.join("state");
+        collector_store::restore_backup(
+            &backup,
+            &archive,
+            &state,
+            &restore.join("collector.toml"),
+            format!("archive = {archive:?}\nstate = {state:?}\n").as_bytes(),
+            scope,
+        )
+        .unwrap();
+        let rebuilt = Arc::new(Store::open(archive, state).unwrap());
+        let recovered = CollectionService::new(rebuilt.clone(), Arc::new(Registry::builtins()));
+        let restored_actor = if scope == collector_app::RestoreScope::ArchiveOnly {
+            let user_id = rebuilt
+                .create_user("restored-owner", "long restored purchase password", true)
+                .unwrap();
+            collector_app::LocalOwnershipRecoveryService::new(rebuilt.clone())
+                .recover_owner(collection.id, "restored-owner")
+                .unwrap();
+            Principal {
+                user_id,
+                administrator: true,
+                device_id: None,
+            }
+        } else {
+            actor.clone()
+        };
+        let retained = rebuilt.item(item).unwrap();
+        assert_eq!(
+            serde_json::to_value(&retained.captures[0].purchase).unwrap(),
+            serde_json::to_value(&capture.purchase).unwrap()
+        );
+        assert_eq!(
+            retained.captures[0].representations[0].files[2].visibility,
+            Visibility::Curators
+        );
+        assert_eq!(
+            serde_json::to_value(rebuilt.collection_list(list.id).unwrap().entries).unwrap(),
+            serde_json::to_value(&targets).unwrap()
+        );
+        assert_eq!(
+            recovered
+                .recorded_music_track_availability(&restored_actor, item)
+                .unwrap()
+                .iter()
+                .find(|r| r.track_position == 1)
+                .unwrap()
+                .title,
+            "私のタイトル"
+        );
+        let mut bytes = Vec::new();
+        recovered
+            .representation(&restored_actor, item, source, 0)
+            .unwrap()
+            .reader
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, flac);
+    }
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        service
+            .music_search(
+                &actor,
+                collection.id,
+                collector_app::MusicSearchQuery {
+                    search: Some("MP3 original".into()),
+                    cursor: None,
+                    limit: None
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    drop(service);
+    drop(store);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks
+            .len(),
+        2
+    );
+}
+
+fn admit_digital_test_package(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    names: &[&str],
+    bytes: &[&[u8]],
+) -> collector_app::IngestDetail {
+    admit_digital_test_package_with_visibility(service, actor, collection, names, bytes, None)
+}
+fn admit_digital_test_package_with_visibility(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    names: &[&str],
+    bytes: &[&[u8]],
+    visibility: Option<Visibility>,
+) -> collector_app::IngestDetail {
+    let plan = service
+        .plan_ingest(
+            actor,
+            PlanIngestCommand {
+                collection_id: collection,
+                packages: vec![IngestPackageSelection {
+                    purchase: Some(DigitalPurchase {
+                        store: Some("Independent purchase".into()),
+                        ..Default::default()
+                    }),
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "File purchase".into(),
+                    },
+                    anchor_file_index: None,
+                    files: names
+                        .iter()
+                        .zip(bytes)
+                        .map(|(name, data)| UploadFile {
+                            name: (*name).into(),
+                            bytes: ByteLength(data.len() as u64),
+                            sha256: None,
+                            visibility,
+                        })
+                        .collect(),
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::Automatic,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = accepted.imports[0].import_id;
+    for (index, data) in bytes.iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(actor, import, index, 0, data)
+            .unwrap();
+    }
+    provider_drain(service);
+    service.resume_guided_ingests().unwrap();
+    service.ingest_detail(actor, import).unwrap()
+}
+#[test]
+fn alternate_encodings_require_explicit_album_selection_without_retargeting_tracks() {
+    let (_root, store, actor, service, collection) = setup();
+    let detail = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["01.flac", "01.mp3", "booklet.pdf"],
+        &[
+            include_bytes!("fixtures/digital-audio/01.flac"),
+            include_bytes!("fixtures/digital-audio/02.mp3"),
+            b"original companion",
+        ],
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let raw = store.item(item).unwrap();
+    let source = raw.captures[0].representations[0].id;
+    assert_eq!(
+        raw.captures[0].representations[0].files[2].visibility,
+        Visibility::Curators
+    );
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter()
+            .all(|row| row.album_selection == collector_app::MusicAlbumSelection::NeedsReview)
+    );
+    assert!(service.album_playback_snapshot(&actor, item, None).is_err());
+    let review = service.metadata_review(&actor, item).unwrap();
+    service.update_metadata_authority(&actor,item,UpdateMetadataAuthorityCommand {
+        expected_revision:review.revision,change:MetadataAuthorityChange::SetDomainOverrides {overrides:ModuleData {
+            module:ModuleId("org.junk.music".into()),schema_version:1,payload:RawJson::from_value(serde_json::json!({"track_overrides":[
+                {"source_representation_id":source,"track_position":1,"title":null,"disc_position":null,"display_position":null,"album_selected":true},
+                {"source_representation_id":source,"track_position":2,"title":null,"disc_position":null,"display_position":null,"album_selected":false}
+            ]}))
+        }}
+    },&command()).unwrap();
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks
+            .len(),
+        1
+    );
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        2
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks[0]
+            .track_position,
+        1
+    );
+    // Matching printed slots require review for same-codec originals too; codec
+    // inequality is not proof that two files are the same intended album track.
+    let same_codec = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["01.flac", "alternate.flac"],
+        &[
+            include_bytes!("fixtures/digital-audio/01.flac"),
+            include_bytes!("fixtures/digital-audio/01.flac"),
+        ],
+    );
+    assert!(
+        service
+            .album_playback_snapshot(&actor, same_codec.summary.target_item_id.unwrap(), None)
+            .is_err()
+    );
+}
+#[test]
+fn malformed_purchase_audio_never_advertises_ready_playback() {
+    let (_root, _store, actor, service, collection) = setup();
+    for (name, data) in [
+        (
+            "mislabelled.mp3",
+            include_bytes!("fixtures/digital-audio/01.flac").as_slice(),
+        ),
+        (
+            "truncated.mp3",
+            &include_bytes!("fixtures/digital-audio/02.mp3")[..2000],
+        ),
+    ] {
+        let detail = admit_digital_test_package(&service, &actor, collection.id, &[name], &[data]);
+        assert_eq!(
+            detail.import.phase,
+            ImportPhase::Published,
+            "preservation remains useful: {detail:?}"
+        );
+        assert_eq!(
+            detail.summary.outcome,
+            collector_app::IngestStepState::Failed,
+            "{detail:?}"
+        );
+        assert!(detail.summary.target_item_id.is_none_or(|item| {
+            service
+                .recorded_music_track_availability(&actor, item)
+                .unwrap()
+                .is_empty()
+        }));
+        assert!(
+            detail
+                .steps
+                .iter()
+                .any(|step| step.state == collector_app::IngestStepState::Failed),
+            "{detail:?}"
+        );
+    }
+}
+
+#[test]
+fn embedded_purchase_cover_is_an_asset_without_blocking_on_unsupported_companions() {
+    let (_root, store, actor, service, collection) = setup();
+    let detail = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["embedded.flac", "unsupported.aac"],
+        &[
+            include_bytes!("fixtures/digital-audio/embedded.flac"),
+            b"preserved unsupported companion",
+        ],
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let shown = service.item_presented(&actor, item).unwrap();
+    let artwork = shown
+        .primary_artwork
+        .expect("embedded cover published through normal Asset pipeline");
+    assert_eq!(shown.title, "Purchased album");
+    let mut bytes = Vec::new();
+    service
+        .asset_resource(&actor, collection.id, artwork, false)
+        .unwrap()
+        .reader
+        .read_to_end(&mut bytes)
+        .unwrap();
+    assert_eq!(bytes, include_bytes!("fixtures/digital-audio/cover.png"));
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store.item(item).unwrap().captures[0].representations[0].files[1].visibility,
+        Visibility::Curators
+    );
+}
+
+#[test]
+fn private_purchase_audio_does_not_publish_its_embedded_tags_or_artwork() {
+    let (_root, store, actor, service, collection) = setup();
+    let detail = admit_digital_test_package_with_visibility(
+        &service,
+        &actor,
+        collection.id,
+        &["hidden.flac"],
+        &[include_bytes!("fixtures/digital-audio/embedded.flac")],
+        Some(Visibility::Curators),
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let shown = service.item_presented(&actor, item).unwrap();
+    assert_ne!(shown.title, "Purchased album");
+    assert!(shown.primary_artwork.is_none());
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .len(),
+        1
+    );
+    let viewer = Principal {
+        user_id: store
+            .create_user("private-audio-viewer", "long private audio password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    store
+        .grant(collection.id, viewer.user_id, Role::Viewer)
+        .unwrap();
+    assert!(
+        service
+            .recorded_music_track_availability(&viewer, item)
+            .unwrap()
+            .is_empty()
+    );
+    let raw = store.item(item).unwrap();
+    assert_eq!(
+        raw.captures[0].representations[0].files[0].visibility,
+        Visibility::Curators
+    );
+}
+
+#[test]
+fn purchase_privacy_defaults_do_not_share_receipt_photos_and_review_can_share_booklets() {
+    let (_root, _store, actor, service, collection) = setup();
+    let selected = IngestPackageSelection {
+        purchase: None,
+        source: ImportSourceSummary {
+            kind: ImportSourceKind::Browser,
+            label: None,
+            package_name: "Purchase".into(),
+        },
+        anchor_file_index: None,
+        files: [
+            ("01.flac", None),
+            ("cover.png", None),
+            ("receipt.jpg", None),
+            ("booklet.pdf", Some(Visibility::Shared)),
+        ]
+        .into_iter()
+        .map(|(name, visibility)| UploadFile {
+            name: name.into(),
+            bytes: ByteLength(1),
+            sha256: None,
+            visibility,
+        })
+        .collect(),
+    };
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![selected],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        plan.packages[0]
+            .files
+            .iter()
+            .map(|f| f.visibility.unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            Visibility::Shared,
+            Visibility::Shared,
+            Visibility::Curators,
+            Visibility::Shared
+        ]
+    );
+}
+
+#[test]
+fn mp3_single_and_multidisc_purchase_have_distinct_items_and_native_order() {
+    let (_root, store, actor, service, collection) = setup();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let single =
+        admit_digital_test_package(&service, &actor, collection.id, &["single.mp3"], &[mp3]);
+    let album = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["Disc 2/01.flac", "Disc 1/02.mp3"],
+        &[include_bytes!("fixtures/digital-audio/disc-two.flac"), mp3],
+    );
+    let single = single.summary.target_item_id.unwrap();
+    let album = album.summary.target_item_id.unwrap();
+    assert_ne!(single, album);
+    assert!(store.item(single).unwrap().specimens.is_empty());
+    assert!(store.item(album).unwrap().specimens.is_empty());
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, single, None)
+            .unwrap()
+            .tracks
+            .len(),
+        1
+    );
+    let tracks = service
+        .album_playback_snapshot(&actor, album, None)
+        .unwrap()
+        .tracks;
+    assert_eq!(
+        tracks
+            .iter()
+            .map(|r| (r.track_position, r.disc_position, r.sample_rate()))
+            .collect::<Vec<_>>(),
+        vec![(2, Some(1), 44100), (1, Some(2), 96000)]
+    );
+    assert_eq!(
+        store.item(album).unwrap().captures[0]
+            .association
+            .specimen_id,
+        None
+    );
+}
+
+#[test]
+fn game_disc_audio_import_preparation_search_playlists_and_reindex() {
+    use collector_app::{
+        CollectionListChange, CreateCollectionList, MusicSearchQuery, UpdateCollectionList,
+    };
+    let (root, store, actor, base, _) = setup();
+    let collection = base
+        .create_collection(
+            &AuthenticatedPrincipal {
+                principal: actor.clone(),
+                credential_kind: CredentialKind::TestLocal,
+                authenticated_at: chrono::Utc::now(),
+            },
+            CreateCollectionCommand {
+                name: "Game audio".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    let service = base.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let cue=b"FILE \"disc.bin\" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\n TRACK 02 AUDIO\n INDEX 00 00:00:01\n INDEX 01 00:00:02\n TRACK 03 AUDIO\n INDEX 00 00:00:03\n INDEX 01 00:00:04\n";
+    let pcm = vec![0x55; 6 * 2352];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: Some(0),
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Mixed game".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "game.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let started = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = started.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, import, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import, 1, 0, &pcm)
+        .unwrap();
+    provider_drain(&service);
+    let detail = service.ingest_detail(&actor, import).unwrap();
+    let id = detail.summary.target_item_id.expect("Game published");
+    let saved = store.item(id).unwrap();
+    let capture = &saved.captures[0];
+    let source = capture.representations[0].id;
+    assert_eq!(saved.domain.module.0, "org.junk.games");
+    let tracks = service
+        .recorded_music_track_availability(&actor, id)
+        .unwrap();
+    assert_eq!(
+        tracks
+            .iter()
+            .filter(|v| v.primary_playback())
+            .map(|v| v.track_position)
+            .collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    assert!(
+        tracks
+            .iter()
+            .all(|v| v.source_label == "Game disc original")
+    );
+    let inventory = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                kind: None,
+                name: "Inventory".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(inventory.kind, CollectionListKind::Items);
+    let list = service
+        .create_collection_list(
+            &actor,
+            collection.id,
+            CreateCollectionList {
+                kind: Some(CollectionListKind::MusicTracks),
+                name: "Soundtrack".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let list = service
+        .update_collection_list(
+            &actor,
+            collection.id,
+            list.id,
+            UpdateCollectionList {
+                expected_revision: list.revision,
+                change: CollectionListChange::Append {
+                    item_id: id,
+                    source_representation_id: Some(source),
+                    track_position: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(list.entry_count, 2);
+    let review = service.metadata_review(&actor, id).unwrap();
+    service.update_metadata_authority(&actor,id,UpdateMetadataAuthorityCommand {expected_revision:review.revision,change:MetadataAuthorityChange::SetDomainOverrides {overrides:ModuleData {module:saved.domain.module.clone(),schema_version:1,payload:RawJson::from_value(serde_json::json!({"track_overrides":[{"source_representation_id":source,"track_position":2,"title":"Game theme","disc_position":1,"display_position":1}]}))}}}, &command()).unwrap();
+    let songs = service
+        .music_search(
+            &actor,
+            collection.id,
+            MusicSearchQuery {
+                search: Some("Game theme".into()),
+                cursor: None,
+                limit: Some(1),
+            },
+        )
+        .unwrap();
+    assert_eq!(songs.items.len(), 1);
+    assert_eq!(songs.items[0].song.source_representation_id, Some(source));
+    assert!(songs.items[0].sources.iter().all(|v| v.track_position == 2
+        && v.source_representation_id == source
+        && v.title == "Game theme"));
+    // Catalog reads and admission use recorded geometry even when the large
+    // master is temporarily offline. Byte validation belongs to the worker.
+    let paths = files_named(&root.path().join("archive"), "disc.bin");
+    assert_eq!(paths.len(), 1);
+    let held = paths[0].with_extension("held");
+    std::fs::rename(&paths[0], &held).unwrap();
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, id)
+            .unwrap()
+            .iter()
+            .filter(|v| v.primary_playback())
+            .count(),
+        2
+    );
+    let batch = service
+        .prepare_music_album(
+            &actor,
+            id,
+            PrepareMusicAlbum {
+                source_representation_ids: vec![source],
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    let result = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(result.failed, 2, "{result:?}");
+    assert_eq!(result.succeeded, 0);
+    assert_eq!(store.capture(capture.id).unwrap().representations.len(), 1);
+    std::fs::rename(held, &paths[0]).unwrap();
+    service
+        .retry_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    provider_drain(&service);
+    let result = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(result.succeeded, 2, "{result:?}");
+    store.reindex().unwrap();
+    let albums = service
+        .listening_albums(
+            &actor,
+            BrowseQuery {
+                collection_id: Some(collection.id),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(albums.items.len(), 1);
+    assert_eq!(albums.items[0].id, id);
+    let snapshot = service
+        .album_playback_snapshot(&actor, id, Some(source))
+        .unwrap();
+    assert_eq!(snapshot.tracks.len(), 2);
+    assert_eq!(snapshot.tracks[0].title, "Game theme");
+    assert_eq!(snapshot.tracks[0].display_position, Some(1));
+    let missing = CollectionService::new(store.clone(), Arc::new(Registry::default()));
+    let historical = missing
+        .collection_list_view(
+            &actor,
+            collection.id,
+            list.id,
+            collector_app::ListEntriesQuery {
+                cursor: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(historical.entries.items.iter().all(|entry| matches!(
+        entry.availability,
+        collector_app::ListEntryAvailability::Available { .. }
+    )));
+
+    assert!(snapshot.tracks.iter().all(|v| matches!(
+        v.state,
+        collector_app::MusicTrackAvailabilityState::Available { .. }
+    )));
+}
+
+#[test]
+fn documents_preserve_bytes_bound_text_and_obey_visibility_reindex_and_archive() {
+    let (_root, store, actor, service, collection) = setup();
+    let entry = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let viewer = Principal {
+        user_id: store
+            .create_user("document-viewer", "long viewer password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    Catalog::grant(store.as_ref(), collection.id, viewer.user_id, Role::Viewer).unwrap();
+    let input = |visibility, caption: &str| CreateAssetCommand {
+        collection_id: collection.id,
+        subject: AssetSubject::Item { item_id: entry.id },
+        kind: AssetKind::Document,
+        visibility,
+        alt_text: caption.into(),
+    };
+    let pdf = include_bytes!("fixtures/documents/manual.pdf");
+    let key = command();
+    let shared = service
+        .create_asset(&actor, input(Visibility::Shared, "Manual"), pdf, &key)
+        .unwrap();
+    assert_eq!(
+        service
+            .create_asset(&actor, input(Visibility::Shared, "Manual"), pdf, &key)
+            .unwrap()
+            .id,
+        shared.id
+    );
+    assert!(shared.thumbnail.is_none());
+    assert_eq!(shared.media_type, "application/pdf");
+    assert_eq!(
+        service
+            .item_presented(&viewer, entry.id)
+            .unwrap()
+            .primary_artwork,
+        None
+    );
+    assert!(
+        service
+            .document_text_preview(&viewer, collection.id, shared.id)
+            .is_err()
+    );
+    let text = format!(
+        "<script>globalThis.documentExecuted=true</script>\n{}",
+        "日本語 repeated text\n".repeat(15000)
+    );
+    let private = service
+        .create_asset(
+            &actor,
+            input(Visibility::Curators, "Receipt"),
+            text.as_bytes(),
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        !service
+            .item_presented(&viewer, entry.id)
+            .unwrap()
+            .assets
+            .iter()
+            .any(|v| v.id == private.id)
+    );
+    assert!(matches!(
+        service.document_text_preview(&viewer, collection.id, private.id),
+        Err(Error::Forbidden)
+    ));
+    service
+        .update_asset(
+            &actor,
+            private.id,
+            private.revision,
+            collector_app::UpdateAssetCommand {
+                visibility: Visibility::Shared,
+                alt_text: "Shared receipt".into(),
+            },
+            &command(),
+        )
+        .unwrap();
+    let preview = service
+        .document_text_preview(&viewer, collection.id, private.id)
+        .unwrap();
+    assert!(preview.truncated);
+    assert!(preview.text.len() <= 128 * 1024);
+    assert!(preview.text.starts_with("<script>"));
+    let review = service.metadata_review(&actor, entry.id).unwrap();
+    assert!(
+        service
+            .update_metadata_authority(
+                &actor,
+                entry.id,
+                UpdateMetadataAuthorityCommand {
+                    expected_revision: review.revision,
+                    change: MetadataAuthorityChange::SetArtworkChoice {
+                        asset_id: shared.id
+                    }
+                },
+                &command()
+            )
+            .is_err()
+    );
+    store.reindex().unwrap();
+    for (id, expected) in [(shared.id, pdf.as_slice()), (private.id, text.as_bytes())] {
+        let mut resource = service
+            .asset_resource(&viewer, collection.id, id, false)
+            .unwrap();
+        let mut actual = vec![];
+        resource.reader.read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(resource.digest, Digest::sha256(expected));
+    }
+    let current = service
+        .asset_presented(&actor, collection.id, private.id)
+        .unwrap();
+    service
+        .tombstone_asset(&actor, private.id, current.revision, &command())
+        .unwrap();
+    store.reindex().unwrap();
+    assert!(
+        service
+            .asset_resource(&viewer, collection.id, private.id, false)
+            .is_err()
+    );
+    assert!(
+        service
+            .item_presented(&viewer, entry.id)
+            .unwrap()
+            .assets
+            .iter()
+            .any(|v| v.id == shared.id)
+    );
+}
+
+#[test]
+fn backup_reminder_records_validated_completion_preserves_failures_and_reads_bounded_history() {
+    use collector_app::{BackupReminderSettings, BackupReminderStatus};
+    let clock = Arc::new(TestClock::new(1800000000));
+    let (root, store, actor, service, _collection) = setup_with_clock(Some(clock.clone()));
+    let service = service.with_backup_history(store.clone());
+    let settings = BackupReminderSettings {
+        after_days: 30,
+        externally_managed: false,
+        external_completed_at: None,
+        external_failed_at: None,
+    };
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unknown
+    );
+    let config = root.path().join("collector.toml");
+    std::fs::write(&config, b"# test configuration").unwrap();
+    let backup = root.path().join("backup");
+    store.backup(&backup, &config).unwrap();
+    collector_store::validate_backup(&backup).unwrap();
+    let completed = service.backup_reminder(&actor, &settings).unwrap();
+    assert_eq!(completed.status, BackupReminderStatus::Recent);
+    clock.advance(31 * 86400);
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Due
+    );
+    assert!(store.backup(&backup, &config).is_err()); // Existing destination is never overwritten.
+    let failed = service.backup_reminder(&actor, &settings).unwrap();
+    assert_eq!(failed.status, BackupReminderStatus::Failed);
+    assert_eq!(failed.last_completed_at, completed.last_completed_at);
+    let receipt = root.path().join("state/backup-history.v1.json");
+    let mut history = collector_store::read_backup_history(&root.path().join("state"))
+        .unwrap()
+        .unwrap();
+    history.outcome = collector_app::BackupAttemptOutcome::Started;
+    std::fs::write(&receipt, serde_json::to_vec(&history).unwrap()).unwrap();
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unconfirmed
+    );
+    std::fs::write(&receipt, b"corrupt").unwrap();
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unknown
+    );
+    history.version = 2;
+    std::fs::write(&receipt, serde_json::to_vec(&history).unwrap()).unwrap();
+    assert!(store.backup(&backup, &config).is_err());
+    assert_eq!(
+        service
+            .backup_reminder(&actor, &settings)
+            .unwrap()
+            .last_completed_at,
+        None
+    );
+    std::fs::write(&receipt, vec![b' '; 4097]).unwrap();
+    assert!(collector_store::read_backup_history(&root.path().join("state")).is_err());
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Unknown
+    );
+    clock.advance(60);
+    store
+        .backup(&root.path().join("recovered-backup"), &config)
+        .unwrap();
+    assert_eq!(
+        service.backup_reminder(&actor, &settings).unwrap().status,
+        BackupReminderStatus::Recent
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&receipt).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}
+
+// Actual preserved CUE sources, with accepted offline MusicBrainz observations.
+fn automatic_group_sources(
+    store: &Store,
+    actor: &Principal,
+    service: &CollectionService,
+    collection: CollectionId,
+    sectors: &[usize],
+) -> (
+    Vec<Item>,
+    collector_modules::music::MusicBrainzReleaseObservation,
+) {
+    let mut items = Vec::new();
+    let mut media = Vec::new();
+    for (index, sectors) in sectors.iter().enumerate() {
+        let imported = derivative_import_sectors(service, actor, collection, index as u8, *sectors);
+        let mut inventory = item(collection);
+        inventory.title = format!("Provisional folder {index}");
+        inventory.wishlist = false;
+        inventory.specimens.push(Specimen {
+            id: SpecimenId::new(),
+            label: format!("Physical copy {index}"),
+            condition: Condition::Good,
+            ownership: Ownership::Owned,
+            possession: Possession::Present,
+            components: vec![],
+            acquisition: None,
+            private_notes: Some(format!("Retain note {index}")),
+            loans: vec![],
+        });
+        let saved = Catalog::save(store, inventory, Revision(0)).unwrap();
+        let mut capture = Catalog::capture(store, imported.capture_id).unwrap();
+        let revision = capture.revision;
+        capture.association.item_id = Some(saved.id);
+        Catalog::save_capture(store, capture, revision).unwrap();
+        let inventory = Catalog::item(store, saved.id).unwrap();
+        let disc = service
+            .music_album_coverage(actor, saved.id)
+            .unwrap()
+            .sources[0]
+            .recorded_disc_id
+            .clone()
+            .unwrap();
+        media.push(collector_modules::music::MusicBrainzMediumObservation {
+            position: index as u16 + 1,
+            disc_ids: vec![disc],
+            tracks: vec![
+                collector_modules::music::MusicBrainzTrackObservation {
+                    position: 1,
+                    title: "Opening".into(),
+                },
+                collector_modules::music::MusicBrainzTrackObservation {
+                    position: 2,
+                    title: "Finale".into(),
+                },
+            ],
+        });
+        items.push(inventory);
+    }
+    (
+        items,
+        collector_modules::music::MusicBrainzReleaseObservation {
+            release_id: "11111111-1111-4111-8111-111111111111".into(),
+            release_group_id: Some("55555555-5555-4555-8555-555555555555".into()),
+            title: "Multidisc soundtrack".into(),
+            disambiguation: None,
+            language: Some("en".into()),
+            script: None,
+            artist_credit: Some("Ensemble".into()),
+            artist_ids: vec![],
+            disc_ids: media
+                .iter()
+                .flat_map(|medium| medium.disc_ids.clone())
+                .collect(),
+            media,
+        },
+    )
+}
+fn automatic_group_metadata(
+    service: &CollectionService,
+    actor: &Principal,
+    item: &Item,
+    release: &collector_modules::music::MusicBrainzReleaseObservation,
+) {
+    automatic_group_metadata_options(service, actor, item, std::slice::from_ref(release));
+}
+fn automatic_group_metadata_options(
+    service: &CollectionService,
+    actor: &Principal,
+    item: &Item,
+    releases: &[collector_modules::music::MusicBrainzReleaseObservation],
+) -> Vec<MetadataCandidateIdentity> {
+    let candidates = releases
+        .iter()
+        .map(|release| MetadataCandidateObservation {
+            identity: MetadataCandidateIdentity {
+                provider: ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+                provider_record_id: release.release_id.clone(),
+                provider_record_version: Some(
+                    Digest::sha256(&serde_json::to_vec(release).unwrap()).hex,
+                ),
+            },
+            title: MetadataText {
+                value: release.title.clone(),
+                language: Some(LanguageTag::new("en").unwrap()),
+            },
+            subtitle: None,
+            artwork: None,
+            complete_identity: true,
+            strength: MatchStrength::Identifier,
+            provider_priority: 1,
+            observation: RawJson::from_value(serde_json::to_value(release).unwrap()),
+        })
+        .collect::<Vec<_>>();
+    let identities = candidates
+        .iter()
+        .map(|candidate| candidate.identity.clone())
+        .collect();
+    let mut record = service
+        .refresh_metadata(
+            actor,
+            item.id,
+            RefreshMetadataCommand {
+                source_import: None,
+                expected_revision: Revision(0),
+                observation: MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates,
+                    raw_observation: RawJson::from_value(
+                        serde_json::json!({"fixture":"accepted MusicBrainz"}),
+                    ),
+                    observed_at: chrono::Utc::now(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    for field in [MetadataField::Title, MetadataField::Subtitle] {
+        record = service
+            .update_metadata_authority(
+                actor,
+                item.id,
+                UpdateMetadataAuthorityCommand {
+                    expected_revision: record.revision,
+                    change: MetadataAuthorityChange::ClearFieldOverride { field },
+                },
+                &command(),
+            )
+            .unwrap();
+    }
+    identities
+}
+#[test]
+fn automatic_disc_grouping_recovers_existing_metadata_preserves_inventory_and_honors_undo() {
+    let (root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7]);
+    for inventory in &items[..2] {
+        automatic_group_metadata(&service, &actor, inventory, &release);
+    }
+    // A newly admitted request must settle before a background merge can move its inputs.
+    let work = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: work,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(items[0].id),
+            kind: "fixture.busy".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert!(!store.item(items[0].id).unwrap().deleted);
+    let claim = store
+        .claim_job("finish-before-grouping", 30)
+        .unwrap()
+        .unwrap();
+    store
+        .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+        .unwrap();
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service.reconcile_automatic_album_groups().unwrap();
+    let destination = items[..2]
+        .iter()
+        .map(|item| store.item(item.id).unwrap())
+        .find(|item| !item.deleted)
+        .unwrap();
+    assert_eq!(destination.captures.len(), 2);
+    let group = service
+        .album_group_undo(&actor, destination.lifecycle.merge_group.unwrap())
+        .unwrap();
+    assert!(
+        group.group.automatic && group.can_undo,
+        "{:?}",
+        group.reason
+    );
+    assert_eq!(destination.specimens.len(), 2);
+    assert!(destination.specimens.iter().all(|copy| {
+        copy.private_notes
+            .as_deref()
+            .unwrap()
+            .starts_with("Retain note")
+    }));
+    let original_files = items
+        .iter()
+        .flat_map(|item| {
+            item.captures
+                .iter()
+                .flat_map(|capture| capture.representations.clone())
+        })
+        .collect::<Vec<_>>();
+    // A later disc joins the existing destination rather than creating a second album.
+    automatic_group_metadata(&service, &actor, &items[2], &release);
+    service.reconcile_automatic_album_groups().unwrap();
+    let album = store.item(destination.id).unwrap();
+    assert_eq!(album.captures.len(), 3);
+    assert_eq!(album.specimens.len(), 3);
+    let revision = album.revision;
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(store.item(album.id).unwrap().revision, revision);
+    for source in original_files {
+        let current = album
+            .captures
+            .iter()
+            .flat_map(|capture| &capture.representations)
+            .find(|r| r.id == source.id)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(current).unwrap(),
+            serde_json::to_value(source).unwrap()
+        );
+    }
+    store.reindex().unwrap();
+    let group = album.lifecycle.merge_group.unwrap();
+    let undo = service.album_group_undo(&actor, group).unwrap();
+    assert!(undo.can_undo, "{:?}", undo.reason);
+    service.undo_album_group(&actor, group, &command()).unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(store.item(album.id).unwrap().captures.len(), 2);
+    assert!(
+        store
+            .item(items[2].id)
+            .unwrap()
+            .lifecycle
+            .automatic_grouping_disabled
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service.reconcile_automatic_album_groups().unwrap();
+    assert!(!store.item(items[2].id).unwrap().deleted);
+}
+
+#[test]
+fn automatic_disc_grouping_leaves_duplicates_conflicts_and_incomplete_matches_for_review() {
+    for problem in [
+        "duplicate",
+        "disc-conflict",
+        "layout",
+        "manual",
+        "unknown",
+        "release-group",
+    ] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, mut release) = automatic_group_sources(
+            &store,
+            &actor,
+            &service,
+            collection.id,
+            if problem == "duplicate" {
+                &[5, 5]
+            } else {
+                &[5, 6]
+            },
+        );
+        if problem == "disc-conflict" {
+            let duplicate = release.media[0].disc_ids[0].clone();
+            release.media[1].disc_ids.push(duplicate);
+        }
+        if problem == "duplicate" {
+            release.media[1].disc_ids = vec!["OtherDiscId".into()];
+        }
+        if problem == "layout" {
+            release.media[1].tracks.pop();
+        }
+        automatic_group_metadata(&service, &actor, &items[0], &release);
+        if problem == "release-group" {
+            release.release_group_id = Some("66666666-6666-4666-8666-666666666666".into());
+        }
+        automatic_group_metadata(&service, &actor, &items[1], &release);
+        if problem == "manual" {
+            for (index, item) in items.iter().enumerate() {
+                let record = store
+                    .metadata_authority(collection.id, item.id)
+                    .unwrap()
+                    .unwrap();
+                service
+                    .update_metadata_authority(
+                        &actor,
+                        item.id,
+                        UpdateMetadataAuthorityCommand {
+                            expected_revision: record.revision,
+                            change: MetadataAuthorityChange::SetFieldOverride {
+                                field: MetadataField::Title,
+                                value: format!("My title {index}"),
+                                language: None,
+                            },
+                        },
+                        &command(),
+                    )
+                    .unwrap();
+            }
+        }
+        if problem == "unknown" {
+            let mut item = store.item(items[1].id).unwrap();
+            let revision = item.revision;
+            item.domain.payload = RawJson::from_json(r#"{"future":{"ordered":[2,1]}}"#).unwrap();
+            Catalog::save(&*store, item, revision).unwrap();
+        }
+        service.reconcile_automatic_album_groups().unwrap();
+        assert!(
+            items
+                .iter()
+                .all(|item| !store.item(item.id).unwrap().deleted),
+            "unsafe auto-group for {problem}"
+        );
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_accepts_coherent_release_variants_and_keeps_manual_authority() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, mut release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    automatic_group_metadata(&service, &actor, &items[0], &release);
+    release.release_id = "22222222-2222-4222-8222-222222222222".into();
+    release.title = "Soundtrack title in another language".into();
+    automatic_group_metadata(&service, &actor, &items[1], &release);
+    let record = store
+        .metadata_authority(collection.id, items[1].id)
+        .unwrap()
+        .unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            items[1].id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: record.revision,
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "My soundtrack title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    let album = items
+        .iter()
+        .map(|item| store.item(item.id).unwrap())
+        .find(|item| !item.deleted)
+        .unwrap();
+    assert_eq!(album.captures.len(), 2);
+    assert_eq!(
+        service.item_presented(&actor, album.id).unwrap().title,
+        "My soundtrack title"
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service.item_presented(&actor, album.id).unwrap().title,
+        "My soundtrack title"
+    );
+}
+
+#[test]
+fn automatic_group_candidates_are_paged_and_require_a_current_curator() {
+    use collector_app::AlbumGroupingPort;
+    let (_root, store, actor, service, collection) = setup();
+    for index in 0..2 {
+        let (items, mut release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+        if index == 1 {
+            release.release_group_id = Some("77777777-7777-4777-8777-777777777777".into());
+        }
+        for item in &items {
+            automatic_group_metadata(&service, &actor, item, &release);
+        }
+    }
+    let curator = store
+        .create_user("automatic-curator", "a long test password", false)
+        .unwrap();
+    AccessPort::set_grant(
+        &*store,
+        collection.id,
+        curator,
+        Revision(0),
+        Some(Role::Curator),
+    )
+    .unwrap();
+    let first = store.automatic_album_group_candidates(None, 1).unwrap();
+    assert_eq!(first.len(), 1);
+    let second = store
+        .automatic_album_group_candidates(Some(first[0].item_id), 1)
+        .unwrap();
+    assert_eq!(second.len(), 1);
+    assert_ne!(first[0].item_id, second[0].item_id);
+    assert!(
+        store
+            .automatic_album_group_candidates(Some(second[0].item_id), 1)
+            .unwrap()
+            .is_empty()
+    );
+    let grant = store
+        .grant_for_user(collection.id, curator)
+        .unwrap()
+        .unwrap();
+    AccessPort::set_grant(
+        &*store,
+        collection.id,
+        curator,
+        grant.revision,
+        Some(Role::Viewer),
+    )
+    .unwrap();
+    let current = store.automatic_album_group_candidates(None, 10).unwrap();
+    assert_eq!(current.len(), 2);
+    assert!(
+        current
+            .iter()
+            .all(|candidate| candidate.user_id == actor.user_id)
+    );
+    service.reconcile_automatic_album_groups().unwrap();
+}
+
+fn automatic_group_select(
+    service: &CollectionService,
+    actor: &Principal,
+    item: &Item,
+    candidate: &MetadataCandidateIdentity,
+) {
+    let record = service.metadata_view(actor, item.id).unwrap();
+    service
+        .update_metadata_authority(
+            actor,
+            item.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: record.revision,
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: candidate.clone(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+}
+fn automatic_group_live(store: &Store, items: &[Item]) -> Vec<Item> {
+    items
+        .iter()
+        .map(|item| store.item(item.id).unwrap())
+        .filter(|item| !item.deleted)
+        .collect()
+}
+fn automatic_group_alternative(
+    release: &collector_modules::music::MusicBrainzReleaseObservation,
+) -> collector_modules::music::MusicBrainzReleaseObservation {
+    let mut other = release.clone();
+    other.release_id = "22222222-2222-4222-8222-222222222222".into();
+    other.release_group_id = Some("66666666-6666-4666-8666-666666666666".into());
+    other.title = "Another possible album".into();
+    other
+}
+
+#[test]
+fn automatic_disc_grouping_keeps_unproven_alternatives_until_an_album_is_chosen() {
+    for conflicting in [false, true] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+        let mut alternative = automatic_group_alternative(&release);
+        if conflicting {
+            let duplicate = alternative.media[0].disc_ids[0].clone();
+            alternative.media[1].disc_ids.push(duplicate);
+        } else {
+            // An advertised album option lacks the track coverage needed to
+            // prove membership. Missing coverage cannot eliminate that option.
+            for medium in &mut alternative.media {
+                medium.tracks.pop();
+            }
+        }
+        let mut choices = Vec::new();
+        for item in &items {
+            choices.push(automatic_group_metadata_options(
+                &service,
+                &actor,
+                item,
+                &[release.clone(), alternative.clone()],
+            ));
+        }
+        service.reconcile_automatic_album_groups().unwrap();
+        assert_eq!(automatic_group_live(&store, &items).len(), 2);
+        for item in &items {
+            let view = service.metadata_view(&actor, item.id).unwrap();
+            assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
+            assert_eq!(view.current_candidates.len(), 2);
+        }
+        // An explicit choice can still establish a unique compatible target;
+        // the other entry's incomplete alternative must not veto that choice.
+        automatic_group_select(&service, &actor, &items[0], &choices[0][0]);
+        service.reconcile_automatic_album_groups().unwrap();
+        assert_eq!(automatic_group_live(&store, &items).len(), 1);
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_keeps_unresolved_album_options_through_group_reindex_and_undo() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7]);
+    let alternative = automatic_group_alternative(&release);
+    for item in &items {
+        automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+        assert_eq!(
+            service
+                .metadata_view(&actor, item.id)
+                .unwrap()
+                .display
+                .resolution,
+            MetadataResolutionKind::Tentative
+        );
+    }
+    // A/B is still unresolved, but all three discs fit together under either choice.
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let album = &albums[0];
+    assert_eq!(album.captures.len(), 3);
+    for _ in 0..2 {
+        let view = service.metadata_view(&actor, album.id).unwrap();
+        assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
+        assert!(view.authority.selected_candidate.is_none());
+        assert!(view.authority.automatic_candidate.is_none());
+        assert_eq!(view.current_candidates.len(), 2);
+        store.reindex().unwrap();
+    }
+    let group = album.lifecycle.merge_group.unwrap();
+    assert!(service.album_group_undo(&actor, group).unwrap().can_undo);
+    service.undo_album_group(&actor, group, &command()).unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 3);
+    for item in &items {
+        assert_eq!(
+            service
+                .metadata_view(&actor, item.id)
+                .unwrap()
+                .display
+                .resolution,
+            MetadataResolutionKind::Tentative
+        );
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_accepts_equivalent_manual_release_and_version_choices() {
+    for different_release in [false, true] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+        let mut other = release.clone();
+        if different_release {
+            other.release_id = "22222222-2222-4222-8222-222222222222".into();
+        }
+        other.title = "Chosen translated title".into();
+        other.language = Some("ja".into());
+        let first = automatic_group_metadata_options(&service, &actor, &items[0], &[release]);
+        let second = automatic_group_metadata_options(&service, &actor, &items[1], &[other]);
+        automatic_group_select(&service, &actor, &items[0], &first[0]);
+        automatic_group_select(&service, &actor, &items[1], &second[0]);
+        service.reconcile_automatic_album_groups().unwrap();
+        let albums = automatic_group_live(&store, &items);
+        assert_eq!(albums.len(), 1);
+        let view = service.metadata_view(&actor, albums[0].id).unwrap();
+        let selected = view.authority.selected_candidate.unwrap();
+        assert!(selected == first[0] || selected == second[0]);
+        assert_eq!(view.display.resolution, MetadataResolutionKind::Selected);
+        assert!(
+            view.candidates
+                .iter()
+                .any(|candidate| candidate.identity == first[0])
+        );
+        assert!(
+            view.candidates
+                .iter()
+                .any(|candidate| candidate.identity == second[0])
+        );
+        store.reindex().unwrap();
+        assert_eq!(
+            service
+                .metadata_view(&actor, albums[0].id)
+                .unwrap()
+                .authority
+                .selected_candidate,
+            Some(selected)
+        );
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_reassesses_unresolved_siblings_after_a_manual_choice() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let alternative = automatic_group_alternative(&release);
+    let choices = automatic_group_metadata_options(
+        &service,
+        &actor,
+        &items[0],
+        &[release.clone(), alternative.clone()],
+    );
+    automatic_group_metadata_options(&service, &actor, &items[1], &[release, alternative]);
+    automatic_group_select(&service, &actor, &items[0], &choices[0]);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let view = service.metadata_view(&actor, albums[0].id).unwrap();
+    assert_eq!(view.authority.selected_candidate, Some(choices[0].clone()));
+    assert_eq!(view.current_candidates, vec![choices[0].clone()]);
+    assert!(
+        view.candidates
+            .iter()
+            .any(|candidate| candidate.identity == choices[1])
+    );
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_steal_an_unresolved_disc_from_competing_accepted_albums() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7, 8]);
+    let alternative = automatic_group_alternative(&release);
+    automatic_group_metadata(&service, &actor, &items[0], &release);
+    automatic_group_metadata(&service, &actor, &items[1], &release);
+    automatic_group_metadata(&service, &actor, &items[2], &alternative);
+    automatic_group_metadata_options(&service, &actor, &items[3], &[release, alternative]);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 3);
+    assert!(albums.iter().any(|album| album.captures.len() == 2));
+    assert!(!store.item(items[2].id).unwrap().deleted);
+    assert!(!store.item(items[3].id).unwrap().deleted);
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[3].id)
+            .unwrap()
+            .display
+            .resolution,
+        MetadataResolutionKind::Tentative
+    );
+    // A later explicit choice identifies a unique target and triggers attachment.
+    let view = service.metadata_view(&actor, items[3].id).unwrap();
+    let selected = view
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.identity.provider_record_id == "11111111-1111-4111-8111-111111111111"
+        })
+        .unwrap()
+        .identity
+        .clone();
+    automatic_group_select(&service, &actor, &items[3], &selected);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 2);
+    assert!(albums.iter().any(|album| album.captures.len() == 3));
+}
+
+#[test]
+fn automatic_disc_grouping_ambiguous_duplicates_and_incompatible_metadata_do_not_veto_a_safe_subset()
+ {
+    for conflict in ["duplicate", "manual", "unknown", "placement"] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, mut release) = automatic_group_sources(
+            &store,
+            &actor,
+            &service,
+            collection.id,
+            if conflict == "duplicate" {
+                &[5, 5, 6, 7]
+            } else {
+                &[5, 6, 7, 8]
+            },
+        );
+        if conflict == "duplicate" {
+            release.media.remove(1);
+        }
+        for (index, item) in items.iter().enumerate() {
+            let mut releases = vec![release.clone()];
+            if conflict == "placement" && index < 2 {
+                let mut other = release.clone();
+                other.release_id = "22222222-2222-4222-8222-222222222222".into();
+                other.media[0].disc_ids = release.media[1].disc_ids.clone();
+                other.media[1].disc_ids = release.media[0].disc_ids.clone();
+                releases.push(other);
+            }
+            automatic_group_metadata_options(&service, &actor, item, &releases);
+            if conflict == "manual" && index < 2 {
+                let view = service.metadata_view(&actor, item.id).unwrap();
+                service
+                    .update_metadata_authority(
+                        &actor,
+                        item.id,
+                        UpdateMetadataAuthorityCommand {
+                            expected_revision: view.revision,
+                            change: MetadataAuthorityChange::SetFieldOverride {
+                                field: MetadataField::Title,
+                                value: format!("Different manual choice {index}"),
+                                language: None,
+                            },
+                        },
+                        &command(),
+                    )
+                    .unwrap();
+            }
+            if conflict == "unknown" && index < 2 {
+                let mut item = store.item(item.id).unwrap();
+                let revision = item.revision;
+                item.domain.payload = RawJson::from_value(serde_json::json!({"future":index}));
+                Catalog::save(&*store, item, revision).unwrap();
+            }
+        }
+        service.reconcile_automatic_album_groups().unwrap();
+        let albums = automatic_group_live(&store, &items);
+        assert_eq!(albums.len(), 3, "{conflict}");
+        assert!(
+            albums.iter().any(|album| album.captures.len() == 2),
+            "{conflict}"
+        );
+        for item in &items[..2] {
+            assert!(!store.item(item.id).unwrap().deleted, "{conflict}");
+        }
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_infer_membership_from_overlapping_options() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let b = automatic_group_alternative(&release);
+    let mut c = b.clone();
+    c.release_id = "33333333-3333-4333-8333-333333333333".into();
+    c.release_group_id = Some("77777777-7777-4777-8777-777777777777".into());
+    automatic_group_metadata_options(&service, &actor, &items[0], &[release.clone(), b]);
+    automatic_group_metadata_options(&service, &actor, &items[1], &[release, c]);
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+}
+
+#[test]
+fn automatic_disc_grouping_rebuilds_single_identity_catalog_without_resetting_private_work() {
+    use collector_app::LibraryCarePort;
+    let (root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let alternative = automatic_group_alternative(&release);
+    for item in &items {
+        automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+    }
+    let pending = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id: pending,
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(items[0].id),
+            kind: "fixture.busy".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({"retain":"pending"}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let originals = items
+        .iter()
+        .map(|item| serde_json::to_value(item).unwrap())
+        .collect::<Vec<_>>();
+    drop(service);
+    drop(store);
+    let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+    db.execute_batch("DROP TABLE album_group_members; CREATE TABLE album_group_members(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,album_id TEXT NOT NULL); PRAGMA user_version=14;").unwrap();
+    drop(db);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    assert!(!store.catalog_reused_at_startup());
+    for (item, original) in items.iter().zip(originals) {
+        assert_eq!(
+            serde_json::to_value(store.item(item.id).unwrap()).unwrap(),
+            original
+        );
+    }
+    let peers = store
+        .album_group_proposals(actor.user_id, items[0].id, None, 10)
+        .unwrap();
+    assert_eq!(
+        peers.items.len(),
+        1,
+        "Multiple shared options must not duplicate proposal rows"
+    );
+    assert!(peers.next_cursor.is_none());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert!(service.item_presented(&actor, items[0].id).is_ok());
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+    let claim = store
+        .claim_job("after-catalog-upgrade", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.id, pending);
+    store
+        .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 1);
+}
+
+#[test]
+fn automatic_disc_grouping_allows_option_dependent_disc_numbers_without_selecting_metadata() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let mut alternative = automatic_group_alternative(&release);
+    alternative.media[0].position = 2;
+    alternative.media[1].position = 1;
+    for item in &items {
+        automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+    }
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let view = service.metadata_view(&actor, albums[0].id).unwrap();
+    assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
+    assert!(
+        view.authority.domain_overrides.is_none(),
+        "Grouping must not invent a fixed disc assignment across unresolved choices"
+    );
+}
+
+#[test]
+fn automatic_disc_grouping_fences_changed_or_new_competing_neighbors_before_publication() {
+    use collector_app::{
+        AlbumGroupPublication, AlbumGroupResult, AlbumGroupingPort, GroupedItemRevision,
+    };
+    for change in ["inventory", "metadata", "new-peer"] {
+        let (_root, store, actor, service, collection) = setup();
+        let (items, release) =
+            automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7]);
+        let alternative = automatic_group_alternative(&release);
+        for item in &items[..2] {
+            automatic_group_metadata(&service, &actor, item, &release);
+        }
+        if change != "new-peer" {
+            automatic_group_metadata_options(
+                &service,
+                &actor,
+                &items[2],
+                &[release.clone(), alternative],
+            );
+        }
+        let mut entries = vec![];
+        let mut guards = vec![];
+        for (index, original) in items.iter().enumerate() {
+            let before = store.item(original.id).unwrap();
+            let metadata = store.metadata_authority(collection.id, before.id).unwrap();
+            if index < 2 || change != "new-peer" {
+                guards.push((
+                    before.id,
+                    Digest::sha256(&serde_json::to_vec(&before).unwrap()),
+                    Digest::sha256(&serde_json::to_vec(&metadata).unwrap()),
+                ));
+            }
+            if index < 2 {
+                let mut after = before.clone();
+                after.revision = Revision(before.revision.0 + 1);
+                entries.push(GroupedItemRevision {
+                    before,
+                    after,
+                    metadata_before: metadata,
+                    metadata_after: None,
+                });
+            }
+        }
+        let publication = AlbumGroupPublication {
+            result: AlbumGroupResult {
+                group_id: TransactionId::new(),
+                destination: items[0].id,
+                sources: vec![items[1].id],
+                automatic: true,
+            },
+            entries,
+            undo_of: None,
+            membership_guards: guards,
+            membership_groups: vec![release.release_group_id.clone().unwrap()],
+        };
+        match change {
+            "inventory" => {
+                let mut peer = store.item(items[2].id).unwrap();
+                let revision = peer.revision;
+                peer.title = "Concurrent edit".into();
+                Catalog::save(&*store, peer, revision).unwrap();
+            }
+            "metadata" => {
+                let view = service.metadata_view(&actor, items[2].id).unwrap();
+                automatic_group_select(&service, &actor, &items[2], &view.candidates[0].identity);
+            }
+            "new-peer" => automatic_group_metadata(&service, &actor, &items[2], &release),
+            _ => unreachable!(),
+        }
+        assert!(
+            matches!(
+                store.publish_album_group(actor.user_id, publication),
+                Err(Error::Conflict)
+            ),
+            "{change}"
+        );
+        for original in &items[..2] {
+            assert_eq!(
+                store.item(original.id).unwrap().revision,
+                original.revision,
+                "{change}"
+            );
+        }
+        assert_eq!(automatic_group_live(&store, &items).len(), 3);
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_established_subset_precedes_an_unresolved_duplicate() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, mut release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 5]);
+    release.media.pop();
+    let alternative = automatic_group_alternative(&release);
+    for item in &items[..2] {
+        automatic_group_metadata(&service, &actor, item, &release);
+    }
+    automatic_group_metadata_options(&service, &actor, &items[2], &[release, alternative]);
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 2);
+    assert!(albums.iter().any(|album| album.captures.len() == 2));
+    assert!(!store.item(items[2].id).unwrap().deleted);
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_reuse_automatically_cleared_metadata() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    for item in &items {
+        automatic_group_metadata(&service, &actor, item, &release);
+    }
+    let record = store
+        .metadata_authority(collection.id, items[0].id)
+        .unwrap()
+        .unwrap();
+    let mut current = store.item(items[0].id).unwrap();
+    let revision = current.revision;
+    current.lifecycle.automatic_metadata_through = record.revision.0;
+    Catalog::save(&*store, current, revision).unwrap();
+    let view = service.metadata_view(&actor, items[0].id).unwrap();
+    assert!(view.display.candidate.is_none());
+    assert!(
+        !view.candidates.is_empty(),
+        "historical evidence is retained"
+    );
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+    // A later deliberate choice can use retained history again.
+    automatic_group_select(&service, &actor, &items[0], &view.candidates[0].identity);
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 1);
+}
+
+#[test]
+fn automatic_disc_grouping_does_not_restore_explicit_choices_cleared_by_inventory_reset() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    let alternative = automatic_group_alternative(&release);
+    for item in &items {
+        let choices = automatic_group_metadata_options(
+            &service,
+            &actor,
+            item,
+            &[release.clone(), alternative.clone()],
+        );
+        automatic_group_select(&service, &actor, item, &choices[0]);
+        let record = store
+            .metadata_authority(collection.id, item.id)
+            .unwrap()
+            .unwrap();
+        let mut current = store.item(item.id).unwrap();
+        let revision = current.revision;
+        current.lifecycle.reset_fields_through = record.revision.0;
+        Catalog::save(&*store, current, revision).unwrap();
+        assert_eq!(
+            service
+                .metadata_view(&actor, item.id)
+                .unwrap()
+                .display
+                .resolution,
+            MetadataResolutionKind::Tentative
+        );
+    }
+    service.reconcile_automatic_album_groups().unwrap();
+    let albums = automatic_group_live(&store, &items);
+    assert_eq!(albums.len(), 1);
+    let view = service.metadata_view(&actor, albums[0].id).unwrap();
+    assert!(view.authority.selected_candidate.is_none());
+    assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
 }

@@ -7,6 +7,7 @@ use collector_core::Digest;
 fn authorized_resource_becomes_opaque_audio_source_without_a_path() {
     let bytes = b"RIFF fixture".to_vec();
     let resource = MediaResource {
+        visibility: Default::default(),
         reader: Box::new(Cursor::new(bytes.clone())),
         length: bytes.len() as u64,
         media_type: "audio/wav".into(),

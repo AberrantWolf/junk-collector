@@ -1,5 +1,13 @@
 # Account, recovery and server connection usability review
 
+**Current direction (2026-10-09):** [remaining work](remaining-work.md)
+is the only remaining-work queue. Older assignment/order and gap statements below
+are historical. Proposed contracts require reassessment under
+[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
+does not require implementing speculative machinery or permanent lookup history.
+Phono Junk is no longer a target. Implemented contracts describe current behavior,
+not a claim that cleanup or redesign has already happened.
+
 2026-10-07. Source review of Collector and sibling Phono; this is not a completed
 native/browser usability qualification. The user requested this reassessment and
 removal of retired commands. Existing uncommitted PJ1 work is retained.
