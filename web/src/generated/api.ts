@@ -4691,6 +4691,7 @@ export interface components {
         Page_PresentedListEntry: {
             items: {
                 album?: string | null;
+                artist?: string | null;
                 artwork?: null | components["schemas"]["AssetId"];
                 audio?: null | components["schemas"]["MusicTrackAvailability"];
                 availability: components["schemas"]["ListEntryAvailability"];

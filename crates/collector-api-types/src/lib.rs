@@ -185,6 +185,7 @@ pub struct PresentedListEntry {
     pub item_id: Option<ItemId>,
     pub title: String,
     pub album: Option<String>,
+    pub artist: Option<String>,
     pub disc_position: Option<u16>,
     pub track_position: Option<u16>,
     pub artwork: Option<AssetId>,

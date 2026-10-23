@@ -1,5 +1,14 @@
 # Architecture
 
+## Browser now-playing presentation
+
+The web music player publishes title, album artist, album and authorized artwork
+through the standard Media Session API. Album/list presentation supplies metadata
+to the personal queue; the browser adapter owns OS metadata and controls, while
+existing player actions retain playback routing and authorization. It updates on
+track changes and clears metadata/handlers when playback is released or its audio
+element detaches. Unsupported browser actions do not prevent ordinary playback.
+
 ## Direct HTTPS media with Cloudflare control — source delivery, 2026-10-23
 
 The separate `collector-media` executable serves scoped audio HEAD/GET, server

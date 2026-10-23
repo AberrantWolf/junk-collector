@@ -1,5 +1,15 @@
 # Remaining work — home-lab priorities
 
+**Active authorized release — beta.5 (2026-10-23):** merge the direct HTTPS media
+delivery, publish the next preview using exact-source native image validation,
+then update the existing NAS core/media services to that verified release while
+retaining a consistent recovery point and all working media/control settings.
+[Release notes](releases/v0.1.0-beta.5.md) describe the candidate; publication and
+release-image NAS acceptance are not yet complete. The source candidate already
+has operator-accepted iPhone cellular playback, seeking and locked track change.
+Include the subsequently requested browser Media Session metadata and controls;
+qualify actual iPhone lock-screen title/artist/album after the release update.
+
 **Completed source repair — LAN candidates crowded out by container bridges (2026-10-23):**
 `codex/prioritize-lan-playback-addresses` prioritizes the kernel-selected private
 source and ordinary interfaces before container bridges, keeping trust and the

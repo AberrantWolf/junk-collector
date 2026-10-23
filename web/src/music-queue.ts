@@ -1,7 +1,7 @@
 import {useSyncExternalStore} from 'react';
 
 // Personal browser activity: immutable coordinates, never paths or media bytes.
-export type QueuedTrack={id:string;itemId:string;collectionId:string;album:string;title:string;position:number;representationId:string;fileIndex:number;mediaType:string;artwork?:string;original?:boolean};
+export type QueuedTrack={id:string;itemId:string;collectionId:string;album:string;artist?:string;title:string;position:number;representationId:string;fileIndex:number;mediaType:string;artwork?:string;original?:boolean};
 export const MAX_MUSIC_QUEUE=5000;
 type Queue={tracks:QueuedTrack[];current:string|null;playRequest?:string};
 const empty:Queue={tracks:[],current:null};
@@ -10,7 +10,7 @@ let state:Queue=empty;
 const listeners=new Set<()=>void>();
 const storageKey=()=>`collector.music-queue.v1.${owner}`;
 const uuid=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f-]{36}$/i.test(v);
-function valid(v:QueuedTrack){return v&&uuid(v.id)&&uuid(v.itemId)&&uuid(v.collectionId)&&uuid(v.representationId)&&Number.isInteger(v.fileIndex)&&v.fileIndex>=0&&Number.isInteger(v.position)&&v.position>=0&&typeof v.album==='string'&&v.album.length<=4096&&typeof v.title==='string'&&v.title.length<=4096&&typeof v.mediaType==='string'&&v.mediaType.length<100&&(!v.artwork||uuid(v.artwork))&&(v.original===undefined||typeof v.original==='boolean');}
+function valid(v:QueuedTrack){return v&&uuid(v.id)&&uuid(v.itemId)&&uuid(v.collectionId)&&uuid(v.representationId)&&Number.isInteger(v.fileIndex)&&v.fileIndex>=0&&Number.isInteger(v.position)&&v.position>=0&&typeof v.album==='string'&&v.album.length<=4096&&typeof v.title==='string'&&v.title.length<=4096&&(v.artist===undefined||typeof v.artist==='string'&&v.artist.length<=4096)&&typeof v.mediaType==='string'&&v.mediaType.length<100&&(!v.artwork||uuid(v.artwork))&&(v.original===undefined||typeof v.original==='boolean');}
 function publish(next:Queue,persist=true){state=next;if(owner&&persist)try{localStorage.setItem(storageKey(),JSON.stringify(next));}catch{/* Disabled/full local storage must not prevent playback. */}for(const listener of listeners)listener();}
 export function setMusicQueueUser(user?:string){
  if(owner===user)return;owner=user;let next=empty;

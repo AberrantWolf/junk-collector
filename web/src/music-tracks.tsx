@@ -209,7 +209,7 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
  const allReady=!!plan?.discs.length&&plan.discs.every(disc=>{const source=disc.sources.find(source=>source.source_representation_id===discSources[disc.capture_id]);return source&&source.track_count>0&&source.already_available===source.track_count;});
  function queuedTrack(row:Availability){
   if(row.state.status!=='available')throw new Error('This track is not ready for playback. Prepare CD audio explicitly, or ask a curator to review its originals.');
-  return {itemId:item.id,collectionId:item.collection_id,album:item.title,title:row.title,position:row.display_position??row.track_position,representationId:row.state.representation_id,fileIndex:row.state.file_index,mediaType:row.state.media_type,artwork:item.primary_artwork||undefined,original:!row.profile};
+  return {itemId:item.id,collectionId:item.collection_id,album:item.title,artist:item.subtitle||undefined,title:row.title,position:row.display_position??row.track_position,representationId:row.state.representation_id,fileIndex:row.state.file_index,mediaType:row.state.media_type,artwork:item.primary_artwork||undefined,original:!row.profile};
  }
  async function play(source?:string,track?:number){
   playback.current?.abort();const controller=new AbortController();playback.current=controller;

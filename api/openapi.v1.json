@@ -17465,6 +17465,12 @@
                     "null"
                   ]
                 },
+                "artist": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "artwork": {
                   "oneOf": [
                     {

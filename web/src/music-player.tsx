@@ -1,6 +1,7 @@
 import React,{useEffect,useRef,useState,ApiRequestError,isApiRequestError,requestErrorMessage} from './runtime';
 import {useMusicQueue,selectMusicTrack,removeMusicTrack,reorderMusicTrack,clearMusicQueue,musicTrackUrl,type QueuedTrack} from './music-queue';
 import {prepareLocalPlayback,checkPlaybackAccess,playbackUrl,remotePlaybackExpired,remotePlaybackActive} from './local-playback';
+import {useMusicMediaSession,clearMusicMediaSession} from './music-media-session';
 const time=(n:number)=>`${Math.floor(n/60)}:${String(Math.floor(n%60)).padStart(2,'0')}`;
 
 export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMusic:boolean;onSessionExpired:()=>void}){
@@ -11,8 +12,8 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
  const recoveredGrant=useRef(false);
  const pendingSeek=useRef<{element:HTMLAudioElement;position:number}|undefined>(undefined);
  const expired=useRef(onSessionExpired);expired.current=onSessionExpired;
- const bindAudio=React.useCallback((element:HTMLAudioElement|null)=>{if(audio.current!==element){generation.current++;request.current?.abort();diagnosis.current?.abort();const previous=audio.current;if(previous){previous.pause();previous.removeAttribute('src');previous.load();}audio.current=element;loaded.current='';active.current=null;}},[]);
- function release(){pendingSeek.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();active.current=null;loaded.current='';const element=audio.current;if(element){element.pause();element.removeAttribute('src');element.load();}setPosition(0);setDuration(0);setState('Ready');}
+ const bindAudio=React.useCallback((element:HTMLAudioElement|null)=>{if(audio.current!==element){generation.current++;request.current?.abort();diagnosis.current?.abort();const previous=audio.current;if(previous){clearMusicMediaSession();previous.pause();previous.removeAttribute('src');previous.load();}audio.current=element;loaded.current='';active.current=null;}},[]);
+ function release(){clearMusicMediaSession();pendingSeek.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();active.current=null;loaded.current='';const element=audio.current;if(element){element.pause();element.removeAttribute('src');element.load();}setPosition(0);setDuration(0);setState('Ready');}
  useEffect(()=>{if(active.current!==current?.id){release();setError('');}},[current?.id]);
  const visible=browsingMusic||queue.tracks.length>0;
  useEffect(()=>{if(!visible)return;const element=dock.current;if(!element)return;const observer=new ResizeObserver(()=>document.documentElement.style.setProperty('--music-dock-height',`${element.getBoundingClientRect().height}px`));observer.observe(element);document.body.classList.add('has-music-dock');return()=>{observer.disconnect();document.body.classList.remove('has-music-dock');document.documentElement.style.removeProperty('--music-dock-height');};},[visible]);
@@ -54,8 +55,10 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
   }catch(e){if(controller.signal.aborted||token!==generation.current||audio.current!==element)return;element.pause();if(element.error)loaded.current='';setState('Paused');setError(requestErrorMessage(e));if(isApiRequestError(e)&&e.status===401)expired.current();else if(element.error)void diagnosePlaybackFailure(track,element,token);}
  }
  useEffect(()=>{if(queue.playRequest&&queue.playRequest===current?.id)void play(current);},[queue.playRequest]);
- function toggle(){const element=audio.current;if(!element||!current)return;if(!element.paused||state==='Loading'){generation.current++;request.current?.abort();element.pause();setState('Paused');}else void play(current);}
+ function pause(){generation.current++;request.current?.abort();audio.current?.pause();setState('Paused');}
+ function toggle(){const element=audio.current;if(!element||!current)return;if(!element.paused||state==='Loading')pause();else void play(current);}
  function move(delta:number,automatic=false){const track=queue.tracks[index+delta];if(track)void play(track);else if(automatic)setState('Queue finished');}
+ useMusicMediaSession({track:current,audio,enabled:visible&&!!current&&active.current===current.id&&state!=='Ready'&&state!=='Queue finished',play:()=>{if(current)void play(current);},pause,stop:release,previous:index>0?()=>move(-1):undefined,next:index>=0&&index<queue.tracks.length-1?()=>move(1):undefined});
  if(!visible)return null;
  return <section ref={dock} className="music-player music-dock" aria-label="Music player">
   <audio ref={bindAudio} crossOrigin="anonymous" preload="none" data-representation-id={current?.representationId} onLoadedMetadata={e=>{setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0);const pending=pendingSeek.current;if(pending?.element===e.currentTarget){pendingSeek.current=undefined;try{e.currentTarget.currentTime=pending.position;}catch{setError('This browser could not restore the playback position.');}}}} onDurationChange={e=>setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0)} onTimeUpdate={e=>setPosition(e.currentTarget.currentTime)} onPlay={e=>{if(!e.currentTarget.paused)setState('Now playing');}} onPause={e=>{if(e.currentTarget.paused&&!e.currentTarget.ended&&e.currentTarget.currentSrc)setState('Paused');}} onEnded={e=>{if(e.currentTarget.ended)move(1,true);}} onError={e=>{if(e.currentTarget.error&&e.currentTarget.currentSrc&&current){if(remotePlaybackActive(musicTrackUrl(current))&&!recoveredGrant.current){recoveredGrant.current=true;void play(current,true);return;}loaded.current='';setState('Paused');setError('Playback failed. Use Play to retry, or download the track from its album.');void diagnosePlaybackFailure(current,e.currentTarget,generation.current);}}}/>
