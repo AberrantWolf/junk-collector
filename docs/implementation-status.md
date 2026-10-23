@@ -31,9 +31,11 @@ now runs the exact AMD64 source candidate with DNS-only media, IPv4 TCP forwardi
 and a trusted public certificate. Disposable actual-NAS isolation and production
 route/identity/CORS checks pass. DSM uses one-CPU affinity instead of unsupported
 CFS quotas; its process-count limit is not enforced. Caddy remains networked
-without a new DMZ/egress restriction. The first external device target is
-**iPhone Safari**; cellular, screen-lock, long-track lease boundaries and actual
-public certificate renewal remain unqualified. No new release was published.
+without a new DMZ/egress restriction. The operator reports successful basic
+**iPhone Safari cellular playback**, seeking and next/previous, with Direct HTTPS
+displayed; the setup test appeared to pass without a captured per-stage result.
+Screen-lock/background behavior, long-track lease boundaries, network transitions
+and actual public certificate renewal remain unqualified. No new release was published.
 Trash Amp must consume the matching shared
 client revision when rebuilt; sibling compatibility is checked separately from
 changing its existing uncommitted work. HL-12 and HL-05 retain those external checks.

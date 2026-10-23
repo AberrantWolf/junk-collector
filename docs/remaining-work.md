@@ -353,7 +353,9 @@ renewal, public exposure/rollback checks and actual cellular acceptance.
 The separately authorized [NAS deployment](validation/direct-https-media-nas-2026-10-23.md)
 now passes disposable actual-host isolation, retained-state service update,
 DNS-only IPv4/OpenWrt forwarding and initial public certificate/route checks.
-Actual iPhone cellular playback, later renewal and disable/rollback remain open.
+The operator accepts basic iPhone Safari cellular playback, seeking and
+next/previous with Direct HTTPS displayed. Screen-lock/long-session/network-change
+behavior, later renewal and disable/rollback remain open.
 DSM CPU affinity replaces unsupported CFS quotas; the process-count limit is not
 enforced. Caddy's separate frontend DMZ/egress policy remains unimplemented.
 
@@ -1037,11 +1039,13 @@ the networked TLS frontend, and disable/rollback under HL-05. The authorized
 [NAS deployment](validation/direct-https-media-nas-2026-10-23.md) passes actual-host
 fixture isolation, production mount/route inspection, dedicated DNS-only IPv4,
 OpenWrt forwarding, initial public ACME issuance and proxy path/Host checks.
-DSM CPU affinity is enforced; its process-count cap is unsupported. On the user's actual
-**iPhone Safari**, verify cellular (Wi-Fi off) challenge/ranges, audible playback,
-forward/back seek, screen lock/next track, long-track admission expiry/renewal,
-pause/resume and Wi-Fi/cellular changes. Local Chrome/native/container results do
-not pass those device gates. No installed Trash Amp client change was performed.
+DSM CPU affinity is enforced; its process-count cap is unsupported. The operator
+reports basic **iPhone Safari cellular** listening, seeking and next/previous
+working, with Direct HTTPS displayed. The setup test appeared to pass; exact
+challenge/range messages were not captured. Remaining device checks are screen
+lock/background playback, long-track admission expiry/renewal, explicit
+pause/resume, core restart and Wi-Fi/cellular changes. Local Chrome/native/container
+results do not pass those device gates. No installed Trash Amp client change was performed.
 Direct HTTPS supersedes relay/Iroh-first remote ordering;
 those experiments, VPN integration and a mobile port are not dependencies. Retain
 the unrelated queue below.

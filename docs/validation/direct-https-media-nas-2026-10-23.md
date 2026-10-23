@@ -2,7 +2,8 @@
 
 The user authorized deployment after the [source acceptance](direct-https-media-2026-10-23.md).
 The permanent Synology installation now runs the separate media service and a
-dedicated DNS-only HTTPS frontend. **iPhone cellular playback acceptance is pending.**
+dedicated DNS-only HTTPS frontend. **Basic iPhone Safari cellular playback is
+accepted from the operator's report.**
 
 ## Installed candidate and recovery
 
@@ -82,14 +83,24 @@ DSM 7.4.1 / Linux 4.4.302+ / Docker 24.0.2 / Compose 2.20.1 / x86-64:
   mismatched HTTP Host returns 421, and the exact control Origin gets the intended
   CORS response. An explicit Cloudflare edge request still serves control HTTP 200.
 
+## Operator-reported iPhone cellular acceptance
+
+In response to the requested Safari test with Wi-Fi off, signing in through the
+existing Cloudflare control URL and running `/remote-media`, the operator reported:
+
+> The test seemed to work, and I can listen to music, scrub, and go next/previous and it claims Direct HTTPS playback
+
+This accepts the basic external listening workflow: audible music, seeking,
+next/previous track and the displayed Direct HTTPS route on the actual iPhone.
+The setup test was reported as apparently successful; its exact challenge/range
+messages were not supplied, so no independent per-stage result is asserted.
+Device model and iOS version were not reconfirmed for this run. These are operator
+observations, distinct from the independently captured NAS/network checks above.
+
 ## Remaining acceptance
 
-The iPhone operator has been asked to disable Wi-Fi, sign in through the existing
-Cloudflare control URL, queue a prepared track and run `/remote-media`. Fresh
-challenge and authorized early/late range results, audible playback/seeking,
-screen lock/next track, pause/resume, long-track lease boundaries, core restart
-and network transitions remain unqualified until actually exercised. No desktop
-or synthetic result substitutes for that report.
+Screen-lock/background playback, explicit pause/resume, long-track lease
+boundaries, core restart and Wi-Fi/cellular transitions remain untested.
 
 Public certificate renewal, deployment disable/rollback and frontend DMZ/egress
 policy remain separate unexercised operations. Trash Amp still needs its matching

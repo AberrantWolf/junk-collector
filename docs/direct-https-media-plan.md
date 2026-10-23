@@ -1,7 +1,8 @@
 # Direct HTTPS media with Cloudflare control access
 
 Selected design and source contract, **2026-10-23**. **Implemented and deployed
-on the NAS; the user's external iPhone path is awaiting acceptance.** See the
+on the NAS; basic external iPhone Safari playback/seek/track navigation is
+operator-accepted. Background and long-session behavior remain unqualified.** See the
 [NAS deployment](validation/direct-https-media-nas-2026-10-23.md),
 [dated acceptance and limits](validation/direct-https-media-2026-10-23.md) and
 [operator setup](../deploy/container/media.md). The earlier design below is retained
