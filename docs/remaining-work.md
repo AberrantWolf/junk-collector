@@ -354,7 +354,8 @@ The separately authorized [NAS deployment](validation/direct-https-media-nas-202
 now passes disposable actual-host isolation, retained-state service update,
 DNS-only IPv4/OpenWrt forwarding and initial public certificate/route checks.
 The operator accepts basic iPhone Safari cellular playback, seeking and
-next/previous with Direct HTTPS displayed. Screen-lock/long-session/network-change
+next/previous with Direct HTTPS displayed, plus an audible track change while
+locked. Extended-session/network-change
 behavior, later renewal and disable/rollback remain open.
 DSM CPU affinity replaces unsupported CFS quotas; the process-count limit is not
 enforced. Caddy's separate frontend DMZ/egress policy remains unimplemented.
@@ -1042,8 +1043,9 @@ OpenWrt forwarding, initial public ACME issuance and proxy path/Host checks.
 DSM CPU affinity is enforced; its process-count cap is unsupported. The operator
 reports basic **iPhone Safari cellular** listening, seeking and next/previous
 working, with Direct HTTPS displayed. The setup test appeared to pass; exact
-challenge/range messages were not captured. Remaining device checks are screen
-lock/background playback, long-track admission expiry/renewal, explicit
+challenge/range messages were not captured. A subsequent audible track change
+while locked accepts that background transition. Remaining device checks are
+extended background sessions, long-track admission expiry/renewal, explicit
 pause/resume, core restart and Wi-Fi/cellular changes. Local Chrome/native/container
 results do not pass those device gates. No installed Trash Amp client change was performed.
 Direct HTTPS supersedes relay/Iroh-first remote ordering;

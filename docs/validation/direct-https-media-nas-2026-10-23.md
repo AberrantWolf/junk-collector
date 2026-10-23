@@ -97,9 +97,14 @@ messages were not supplied, so no independent per-stage result is asserted.
 Device model and iOS version were not reconfirmed for this run. These are operator
 observations, distinct from the independently captured NAS/network checks above.
 
+The operator subsequently reported hearing a track change while the phone was
+locked. This accepts continued audible playback across that observed locked-screen
+track transition. It does not establish a session duration or exercise grant-expiry
+boundaries.
+
 ## Remaining acceptance
 
-Screen-lock/background playback, explicit pause/resume, long-track lease
+Extended background sessions, explicit pause/resume, long-track lease
 boundaries, core restart and Wi-Fi/cellular transitions remain untested.
 
 Public certificate renewal, deployment disable/rollback and frontend DMZ/egress

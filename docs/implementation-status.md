@@ -34,7 +34,8 @@ CFS quotas; its process-count limit is not enforced. Caddy remains networked
 without a new DMZ/egress restriction. The operator reports successful basic
 **iPhone Safari cellular playback**, seeking and next/previous, with Direct HTTPS
 displayed; the setup test appeared to pass without a captured per-stage result.
-Screen-lock/background behavior, long-track lease boundaries, network transitions
+The operator also heard a track change while the phone was locked, accepting that
+background transition. Extended sessions, long-track lease boundaries, network transitions
 and actual public certificate renewal remain unqualified. No new release was published.
 Trash Amp must consume the matching shared
 client revision when rebuilt; sibling compatibility is checked separately from
