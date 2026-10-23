@@ -75,8 +75,16 @@ connection remains the authenticated control plane. A typed authenticated local
 descriptor advertises bounded generic OS interface candidates and software-managed
 short-lived certificate trust. It does not inspect any overlay provider or infer
 authorization from addresses. The server adapter owns interface enumeration,
-P-256 identity rotation, HTTPS/WebTransport listeners and bounded range framing;
-application services own session-bound, origin/representation-scoped browser
+P-256 identity rotation, HTTPS/WebTransport listeners and bounded range framing.
+The 2026-10-23 address-selection repair stays in that adapter: preserve the
+kernel-selected private source address first, then ordinary private interfaces,
+known container bridge/veth interfaces and finally loopback. The route lookup
+uses an untransmitted UDP connection, not an Internet reachability probe. Names
+only affect priority, never trust or eligibility; no overlay-provider API is
+consulted. Deduplicate addresses before the eight-candidate limit; explicit binds
+remain authoritative. The same selection feeds certificate SANs, descriptors and
+periodic rotation for both web and native clients. Application services continue
+to own session-bound, origin/representation-scoped browser
 grants and live role/revocation checks. The new listeners expose media and server
 identity only, never management. Public HTTP media eligibility is an explicit
 listener capability; a rejected local route cannot retry media on the control

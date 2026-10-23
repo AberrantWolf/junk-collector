@@ -9,8 +9,10 @@ import {chromium} from '@playwright/test';
 async function port(){const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));return port;}
 const ports=await Promise.all([port(),port(),port()]);const origin=`http://localhost:${ports[0]}`;
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-local-playback-'));const config=path.join(scratch,'collector.toml');
+// Override only the isolated fixture listener to exercise OS interface discovery.
+const mediaBind=process.env.COLLECTOR_TEST_LOCAL_PLAYBACK_BIND||'127.0.0.1:0';
 const binary=path.resolve(import.meta.dirname,'../../target/debug/collector-server');const password='Local-player-test-only-password';
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nremote_media_allowed = false\nallowed_origins = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = ${JSON.stringify(mediaBind)}\nremote_media_allowed = false\nallowed_origins = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n`);
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',d=>logs+=d);server.stderr.on('data',d=>logs+=d);
 let browser;
