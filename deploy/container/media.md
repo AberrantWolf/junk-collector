@@ -50,7 +50,19 @@ COLLECTOR_MEDIA_PROXY_IMAGE=caddy:2
 # COLLECTOR_MEDIA_IMAGE=collector-media:local
 ```
 
+Check `docker info` for resource-controller support. On DSM kernels without CPU
+CFS quotas, use `COLLECTOR_MEDIA_CPUS=0` and set `COLLECTOR_MEDIA_CPUSET` to one
+available logical CPU, for example `3` on a four-thread NAS. This uses Docker CPU
+affinity to retain a one-CPU bound. Check the actual container's allowed CPU list.
+Some DSM kernels also discard `pids_limit`; do not report the configured 64-process
+limit as enforced on those hosts. Retain the memory limits and record this host
+limitation rather than changing host cgroup configuration during deployment.
+
 Initialize only the dedicated runtime/certificate directories with the new image:
+
+Create the `media-certificates` and `media-proxy-config` directories beneath
+`COLLECTOR_DATA` first. DSM requires bind-mount source directories to exist before
+starting the initializer; it will then set their ownership and permissions.
 
 ```sh
 docker compose -f compose.yaml -f compose.media.yaml run --rm initialize-media

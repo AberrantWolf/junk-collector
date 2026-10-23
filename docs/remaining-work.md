@@ -350,8 +350,12 @@ login/authentication/control and use a dedicated direct HTTPS media ingress.
 complete source delivery in the [selected plan](direct-https-media-plan.md);
 this entry owns later authorized DNS/TLS/OpenWrt/NAS installation, certificate
 renewal, public exposure/rollback checks and actual cellular acceptance.
-Source implementation changes no live infrastructure and does not qualify the
-actual external path; see the dated source acceptance under HL-12.
+The separately authorized [NAS deployment](validation/direct-https-media-nas-2026-10-23.md)
+now passes disposable actual-host isolation, retained-state service update,
+DNS-only IPv4/OpenWrt forwarding and initial public certificate/route checks.
+Actual iPhone cellular playback, later renewal and disable/rollback remain open.
+DSM CPU affinity replaces unsupported CFS quotas; the process-count limit is not
+enforced. Caddy's separate frontend DMZ/egress policy remains unimplemented.
 
 **State:** Linux ARM64 Docker Desktop runtime/persistence passed locally;
 [Synology x86-64 import/download, recreated-container persistence and full backup/restore](validation/synology-deployment-2026-10-19.md)
@@ -1028,14 +1032,17 @@ and [operator setup/rollback](../deploy/container/media.md).
 
 **Remaining remote acceptance:** consume the matching shared client in Trash Amp's
 next build, publish only under the normal authorized release workflow, and qualify
-NAS mounts/resources, dedicated proxy/default-host policy, DNS/OpenWrt forwarding,
-public ACME issuance/renewal, IPv4/any published IPv6, firewall/DMZ restrictions for
-the networked TLS frontend, and disable/rollback under HL-05. On the user's actual
+later public ACME renewal, any future IPv6, firewall/DMZ restrictions for
+the networked TLS frontend, and disable/rollback under HL-05. The authorized
+[NAS deployment](validation/direct-https-media-nas-2026-10-23.md) passes actual-host
+fixture isolation, production mount/route inspection, dedicated DNS-only IPv4,
+OpenWrt forwarding, initial public ACME issuance and proxy path/Host checks.
+DSM CPU affinity is enforced; its process-count cap is unsupported. On the user's actual
 **iPhone Safari**, verify cellular (Wi-Fi off) challenge/ranges, audible playback,
 forward/back seek, screen lock/next track, long-track admission expiry/renewal,
 pause/resume and Wi-Fi/cellular changes. Local Chrome/native/container results do
-not pass those device/public-path gates. No live deployment or installed-client
-change was performed. Direct HTTPS supersedes relay/Iroh-first remote ordering;
+not pass those device gates. No installed Trash Amp client change was performed.
+Direct HTTPS supersedes relay/Iroh-first remote ordering;
 those experiments, VPN integration and a mobile port are not dependencies. Retain
 the unrelated queue below.
 

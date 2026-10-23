@@ -7,6 +7,10 @@ is `e841ffb`; implementation is the subsequent reviewed source checkpoint.
 No release, DNS/OpenWrt/NAS configuration, public certificate or installed client
 was changed by this work.
 
+The subsequent separately authorized [NAS deployment](direct-https-media-nas-2026-10-23.md)
+records actual-host isolation, DNS/forwarding and public certificate issuance.
+The source-only results and remaining gates below describe this initial checkpoint.
+
 ## Delivered boundaries
 
 - Authenticated control issues bounded, hashed, exact-playable-track browser/native

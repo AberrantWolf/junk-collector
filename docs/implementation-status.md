@@ -1,6 +1,6 @@
 # Implementation status
 
-## Direct HTTPS remote media — source delivered, 2026-10-23
+## Direct HTTPS remote media — source delivered and NAS deployed, 2026-10-23
 
 Cloudflare login/authentication/control can now issue short-lived, exact-track
 browser/native grants for a configured direct HTTPS media origin. The separate
@@ -26,10 +26,15 @@ The `/remote-media` page checks a fresh one-use challenge and real queued-track
 early/late ranges without full-file hashing or changing network settings. A local
 success cannot prove WAN reachability. See [contract](direct-https-media-plan.md),
 [setup/rollback](../deploy/container/media.md) and [acceptance and limits](validation/direct-https-media-2026-10-23.md).
-The first external device target is **iPhone Safari**; cellular, screen-lock,
-long-track lease boundaries and public certificate renewal remain unqualified.
-Source delivery performs no DNS/OpenWrt/NAS change, certificate issuance, release
-publication or installed-client update. Trash Amp must consume the matching shared
+The authorized [NAS deployment](validation/direct-https-media-nas-2026-10-23.md)
+now runs the exact AMD64 source candidate with DNS-only media, IPv4 TCP forwarding
+and a trusted public certificate. Disposable actual-NAS isolation and production
+route/identity/CORS checks pass. DSM uses one-CPU affinity instead of unsupported
+CFS quotas; its process-count limit is not enforced. Caddy remains networked
+without a new DMZ/egress restriction. The first external device target is
+**iPhone Safari**; cellular, screen-lock, long-track lease boundaries and actual
+public certificate renewal remain unqualified. No new release was published.
+Trash Amp must consume the matching shared
 client revision when rebuilt; sibling compatibility is checked separately from
 changing its existing uncommitted work. HL-12 and HL-05 retain those external checks.
 
@@ -42,8 +47,9 @@ deduplicating before the eight-candidate bound. Explicit binds, private address
 eligibility and both clients' pin/identity checks remain. The user confirmed the
 explicit NAS bind restores Trash Amp. Five new regression cases, full workspace
 checks, real Chrome playback/seeking on explicit and wildcard listeners, and the
-web smoke passed. This is not yet a published image or live NAS update; retain
-the working bind until release/deployment acceptance. See
+web smoke passed. The repair is included in the later direct-media NAS source
+candidate; the explicit working bind is retained and wildcard LAN discovery is
+not requalified on that installation. No new release was published. See
 [implementation](automatic-private-playback.md) and [dated evidence](validation/lan-candidate-selection-2026-10-23.md).
 
 ## Build-once container publication — delivered and qualified, 2026-10-22
