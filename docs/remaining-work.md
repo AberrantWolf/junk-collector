@@ -1,14 +1,14 @@
 # Remaining work — home-lab priorities
 
-**Active authorized release — beta.5 (2026-10-23):** merge the direct HTTPS media
-delivery, publish the next preview using exact-source native image validation,
-then update the existing NAS core/media services to that verified release while
-retaining a consistent recovery point and all working media/control settings.
-[Release notes](releases/v0.1.0-beta.5.md) describe the candidate; publication and
-release-image NAS acceptance are not yet complete. The source candidate already
-has operator-accepted iPhone cellular playback, seeking and locked track change.
-Include the subsequently requested browser Media Session metadata and controls;
-qualify actual iPhone lock-screen title/artist/album after the release update.
+**Beta.5 published and NAS updated (2026-10-23):** direct HTTPS media and browser
+Now Playing metadata are merged. Both native architectures passed exact-source
+validation; publication reused those bytes and advanced `preview`. Independent
+registry/assets checks and the permanent NAS core/media update pass, with a
+consistent recovery point, retained settings/identities and 18 other containers
+unchanged. See [publication/deployment evidence](validation/container-beta5-publication-2026-10-23.md)
+and [release notes](releases/v0.1.0-beta.5.md). The earlier source candidate has
+operator-accepted iPhone cellular playback, seeking and locked track change.
+The new physical iPhone lock-screen metadata/OS-button report remains pending.
 
 **Completed source repair — LAN candidates crowded out by container bridges (2026-10-23):**
 `codex/prioritize-lan-playback-addresses` prioritizes the kernel-selected private
@@ -16,8 +16,9 @@ source and ordinary interfaces before container bridges, keeping trust and the
 eight-candidate bound intact. Crowded-interface/certificate regressions, full
 workspace/Clippy/web checks and actual private playback/seek on wildcard and
 explicit listeners passed. The user-confirmed explicit NAS bind still supplies
-working playback on beta.4. Publish/qualify a future preview before removing it;
-no release, NAS or Tailscale change was performed. See
+working playback, and remains in place after the beta.5 release-image update.
+Wildcard discovery on the actual NAS still needs qualification before removing it.
+No Tailscale change was performed. See
 [dated acceptance and limits](validation/lan-candidate-selection-2026-10-23.md).
 
 **Completed authorized follow-up — build once, promote validated images (2026-10-22):**
@@ -1043,9 +1044,10 @@ One-origin path composition retains backend isolation with its documented browse
 origin tradeoff. See [dated acceptance and limits](validation/direct-https-media-2026-10-23.md)
 and [operator setup/rollback](../deploy/container/media.md).
 
-**Remaining remote acceptance:** consume the matching shared client in Trash Amp's
-next build, publish only under the normal authorized release workflow, and qualify
-later public ACME renewal, any future IPv6, firewall/DMZ restrictions for
+**Remaining remote acceptance:** beta.5 is published and installed as recorded
+[above](validation/container-beta5-publication-2026-10-23.md). Consume the matching
+shared client in Trash Amp's next build and check physical iPhone Now Playing
+metadata. Remaining deployment checks cover later public ACME renewal, any future IPv6, firewall/DMZ restrictions for
 the networked TLS frontend, and disable/rollback under HL-05. The authorized
 [NAS deployment](validation/direct-https-media-nas-2026-10-23.md) passes actual-host
 fixture isolation, production mount/route inspection, dedicated DNS-only IPv4,

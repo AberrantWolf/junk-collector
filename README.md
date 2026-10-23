@@ -18,18 +18,19 @@ Each collection contains either games or music.
 | Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
 
-## Beta.3
+## Beta.5
 
-[`v0.1.0-beta.3`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.3)
-adds configurable workers, current ingest activity and automatic multidisc grouping
-with preserved metadata choices and guarded undo. Docker images support
+[`v0.1.0-beta.5`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.5)
+adds isolated direct HTTPS music delivery, browser Now Playing metadata and a LAN
+discovery repair. Login/control can stay on Cloudflare while music uses a separate
+endpoint. Docker images support
 **linux/amd64** and **linux/arm64**; publication and anonymous pulls passed.
-Synology DS1522+ uses AMD64 automatically. Actual beta.3 NAS updating is a separate
-operator check. See [publication evidence](docs/validation/container-beta3-publication-2026-10-22.md).
+Synology DS1522+ uses AMD64 automatically; the permanent NAS update passed.
+See [publication and deployment evidence](docs/validation/container-beta5-publication-2026-10-23.md).
 
 **Back up before updating.** This beta targets personal home-lab use. Storage and
-interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.3.md)
-for catalog rebuild, existing-entry grouping and update requirements.
+interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.5.md)
+for media setup, security boundaries and update requirements.
 
 ## What it supports
 

@@ -29,5 +29,6 @@ exception for request interception. No OS trust or production certificate policy
 is changed. Neither fixture qualifies public-CA trust or physical lock-screen UI.
 
 **Actual iPhone lock-screen title/artist/album/artwork rendering and OS-button
-behavior remain pending the updated NAS deployment.** Earlier operator-reported
+behavior await the operator's report after the
+[beta.5 NAS update](container-beta5-publication-2026-10-23.md).** Earlier operator-reported
 locked track changes establish playback continuity, not this new metadata UI.

@@ -5,6 +5,9 @@ The permanent Synology installation now runs the separate media service and a
 dedicated DNS-only HTTPS frontend. **Basic iPhone Safari cellular playback is
 accepted from the operator's report.**
 
+The subsequent [beta.5 publication and release-image update](container-beta5-publication-2026-10-23.md)
+supersedes this initial source-candidate installation; its dated results remain below.
+
 ## Installed candidate and recovery
 
 - Application source: `93ebf404e51f33fc8386baef6f04930414cbd51f`, built locally
