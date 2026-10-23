@@ -1,17 +1,25 @@
 name: Container release
+run-name: ${{ (github.event_name == 'release' || inputs.retry_release_tag != '') && 'Publish validated container' || (inputs.validation_run_id != '' && 'Rehearse validated container promotion' || 'Validate container candidate') }}
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       retry_release_tag:
-        description: Existing published release tag to retry; empty performs a nonpublishing build
+        description: Existing published release tag to retry using exact-source validated images
+        required: false
+        default: ''
+        type: string
+
+      validation_run_id:
+        description: Successful exact-source validation run; empty discovers it for publication or builds a new validation candidate
         required: false
         default: ''
         type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: collector-container-release
@@ -27,6 +35,7 @@ jobs:
       source: ${{ steps.release.outputs.source }}
       channel: ${{ steps.release.outputs.channel }}
       publish: ${{ github.event_name == 'release' || inputs.retry_release_tag != '' }}
+      reuse: ${{ github.event_name == 'release' || inputs.retry_release_tag != '' || inputs.validation_run_id != '' }}
       tag: ${{ github.event.release.tag_name || inputs.retry_release_tag }}
     steps:
       - uses: actions/checkout@v4
@@ -54,9 +63,10 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: release-plan
+          name: release-plan-${{ github.run_attempt }}
           path: release-plan.json
   checks:
+    if: needs.plan.outputs.reuse != 'true'
     needs: plan
     uses: ./.github/workflows/check.yml
     with:
@@ -75,48 +85,35 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.plan.outputs.revision }}
       - uses: docker/setup-buildx-action@v3
-      - name: Build native smoke image
-        uses: docker/build-push-action@v6
+      - uses: actions/download-artifact@v4
         with:
-          context: .
-          platforms: linux/${{ matrix.architecture }}
-          load: true
-          tags: junk-collector:release-smoke
-          cache-from: type=gha,scope=collector-${{ matrix.architecture }}
-          cache-to: type=gha,scope=collector-${{ matrix.architecture }},mode=max
-      - run: python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
-      - name: Log in to GHCR
-        if: needs.plan.outputs.publish == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Select digest-only image name
-        id: name
-        env:
-          RELEASE_IMAGE: ${{ needs.plan.outputs.reference }}
-        run: echo "image=${RELEASE_IMAGE%:*}" >> "$GITHUB_OUTPUT"
-      - name: Build native platform; publish digest only for a release
+          name: release-plan-${{ github.run_attempt }}
+      - name: Build labelled native OCI export once
         id: image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/${{ matrix.architecture }}
-          outputs: ${{ needs.plan.outputs.publish == 'true' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || format('type=oci,dest=/tmp/collector-{0}.oci.tar', matrix.architecture) }}
-          tags: ${{ steps.name.outputs.image }}
+          outputs: type=oci,dest=/tmp/collector-${{ matrix.architecture }}.oci.tar
           labels: |
             org.opencontainers.image.version=${{ needs.plan.outputs.version }}
             org.opencontainers.image.revision=${{ needs.plan.outputs.revision }}
             org.opencontainers.image.source=${{ needs.plan.outputs.source }}
           cache-from: type=gha,scope=collector-${{ matrix.architecture }}
           cache-to: type=gha,scope=collector-${{ matrix.architecture }},mode=max
+      - name: Smoke the runtime from that exact export
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y skopeo
+          skopeo copy --override-os linux --override-arch "$ARCHITECTURE" "oci-archive:/tmp/collector-$ARCHITECTURE.oci.tar" docker-daemon:junk-collector:release-smoke
+          python3 scripts/container_validation.py smoke-identity "/tmp/collector-$ARCHITECTURE.oci.tar" "$ARCHITECTURE"
+          python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
       - name: Record platform digest
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
@@ -136,14 +133,16 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: platform-${{ matrix.architecture }}
+          name: platform-${{ matrix.architecture }}-${{ github.run_attempt }}
           path: /tmp/platform-${{ matrix.architecture }}/
   container:
+    if: ${{ always() && !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.reuse == 'true' || needs.build.result == 'success') }}
     needs: [plan, build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
+      actions: read
       packages: write
     env:
       RELEASE_TAG: ${{ needs.plan.outputs.tag }}
@@ -154,101 +153,67 @@ jobs:
           ref: ${{ needs.plan.outputs.revision }}
       - uses: actions/download-artifact@v4
         with:
-          name: release-plan
+          name: release-plan-${{ github.run_attempt }}
       - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.reuse != 'true'
         with:
-          pattern: platform-*
+          pattern: platform-*-${{ github.run_attempt }}
           path: /tmp/platforms
           merge-multiple: true
       - run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Check rootless OCI transport before consuming exports
+        run: python3 -B scripts/check_container_validation.py
       - uses: docker/setup-buildx-action@v3
-      - name: Log in to GHCR
+      - name: Assemble exports from accepted native smoke jobs
+        if: needs.plan.outputs.reuse != 'true'
+        id: exported
+        run: python3 scripts/container_validation.py assemble /tmp/platforms /tmp/collector-multiarch.oci.tar
+      - name: Restore authenticated successful exact-source validation
+        if: needs.plan.outputs.reuse == 'true'
+        id: restored
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATION_RUN_ID: ${{ inputs.validation_run_id }}
+        run: python3 scripts/container_validation.py restore /tmp/restored
+      - name: Reverify immutable OCI platforms and source labels before any registry write
+        env:
+          BUILD_DIGEST: ${{ steps.restored.outputs.digest || steps.exported.outputs.digest }}
+          REUSE: ${{ needs.plan.outputs.reuse }}
+        run: |
+          ARCHIVE=/tmp/collector-multiarch.oci.tar
+          if [ "$REUSE" = true ]; then ARCHIVE=/tmp/restored/collector-multiarch.oci.tar; fi
+          python3 scripts/container_release.py verify "oci-archive:$ARCHIVE" "$BUILD_DIGEST"
+          if [ "$REUSE" = true ]; then python3 scripts/container_validation.py compare /tmp/restored/validation.json; fi
+      - name: Seal reusable validation after all checks and both native smoke jobs
+        if: needs.plan.outputs.reuse != 'true'
+        run: python3 scripts/container_validation.py seal
+      - uses: actions/upload-artifact@v4
+        if: needs.plan.outputs.reuse != 'true'
+        with:
+          name: validated-container-${{ github.run_attempt }}
+          path: /tmp/validation/
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
+      - name: Log in to GHCR only after validated export acceptance
         if: needs.plan.outputs.publish == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Assemble published version index
+      - name: Publish validated bytes preserving every digest
         if: needs.plan.outputs.publish == 'true'
-        id: published
-        run: |
-          python3 - <<'PYTHON'
-          import json, os, re, subprocess
-          from pathlib import Path
-          image = os.environ['RELEASE_IMAGE'].rsplit(':', 1)[0]
-          references = []
-          for architecture in ('amd64', 'arm64'):
-              digest = json.loads(Path('/tmp/platforms/' + architecture + '.json').read_text())['digest']
-              if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
-                  raise ValueError('Invalid native build digest')
-              references.append(image + '@' + digest)
-          subprocess.run(['docker', 'buildx', 'imagetools', 'create', '--metadata-file', '/tmp/merged-image.json', '--tag', os.environ['RELEASE_IMAGE'], *references], check=True)
-          result = json.loads(Path('/tmp/merged-image.json').read_text())['containerimage.descriptor']
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('digest=' + result['digest'] + '\n')
-          PYTHON
-      - name: Assemble nonpublishing OCI index
-        if: needs.plan.outputs.publish != 'true'
-        id: exported
-        run: |
-          python3 - <<'PYTHON'
-          import hashlib, json, os, tarfile
-          from pathlib import Path
-          merged = Path('/tmp/collector-oci')
-          (merged / 'blobs/sha256').mkdir(parents=True)
-          manifests = []
-          for architecture in ('amd64', 'arm64'):
-              digest = json.loads(Path('/tmp/platforms/' + architecture + '.json').read_text())['digest']
-              with tarfile.open('/tmp/platforms/collector-' + architecture + '.oci.tar') as archive:
-                  root = json.load(archive.extractfile('index.json'))
-                  if not any(entry['digest'] == digest for entry in root['manifests']):
-                      raise ValueError('Export differs from native build output')
-                  encoded = archive.extractfile('blobs/sha256/' + digest.removeprefix('sha256:')).read()
-                  if 'sha256:' + hashlib.sha256(encoded).hexdigest() != digest:
-                      raise ValueError('Invalid native index digest')
-                  manifests.extend(json.loads(encoded)['manifests'])
-                  for member in archive.getmembers():
-                      if not member.name.startswith('blobs/sha256/'):
-                          continue
-                      name = member.name.removeprefix('blobs/sha256/')
-                      if len(name) != 64 or any(value not in '0123456789abcdef' for value in name) or not member.isfile():
-                          raise ValueError('Invalid OCI blob member')
-                      payload = archive.extractfile(member).read()
-                      if hashlib.sha256(payload).hexdigest() != name:
-                          raise ValueError('Invalid OCI blob digest')
-                      (merged / 'blobs/sha256' / name).write_bytes(payload)
-          (merged / 'oci-layout').write_text('{"imageLayoutVersion":"1.0.0"}')
-          encoded = json.dumps(dict(schemaVersion=2, mediaType='application/vnd.oci.image.index.v1+json', manifests=manifests)).encode()
-          digest = 'sha256:' + hashlib.sha256(encoded).hexdigest()
-          (merged / 'blobs/sha256' / digest.removeprefix('sha256:')).write_bytes(encoded)
-          (merged / 'index.json').write_text(json.dumps(dict(schemaVersion=2, mediaType='application/vnd.oci.image.index.v1+json', manifests=[dict(mediaType='application/vnd.oci.image.index.v1+json', digest=digest, size=len(encoded), annotations={'org.opencontainers.image.ref.name':'release'})])))
-          with tarfile.open('/tmp/collector-multiarch.oci.tar', 'w') as archive:
-              for path in sorted(merged.rglob('*')):
-                  if path.is_file() or path.is_dir():
-                      info = archive.gettarinfo(str(path), arcname=str(path.relative_to(merged)))
-                      info.uid = info.gid = 0
-                      info.uname = info.gname = ''
-                      info.mtime = 0
-                      if path.is_file():
-                          with path.open('rb') as source:
-                              archive.addfile(info, source)
-                      else:
-                          archive.addfile(info)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('digest=sha256:' + hashlib.sha256(encoded).hexdigest() + '\n')
-          PYTHON
-      - name: Verify exported dry-run platforms and labels
-        if: needs.plan.outputs.publish != 'true'
-        env:
-          BUILD_DIGEST: ${{ steps.exported.outputs.digest }}
-        run: python3 scripts/container_release.py verify oci-archive:/tmp/collector-multiarch.oci.tar "$BUILD_DIGEST"
+        run: skopeo copy --all --preserve-digests --authfile "$HOME/.docker/config.json" oci-archive:/tmp/restored/collector-multiarch.oci.tar "docker://$RELEASE_IMAGE"
       - name: Require anonymous version pulls, both platforms and matching source labels
         if: needs.plan.outputs.publish == 'true'
         env:
           RELEASE_IMAGE: ${{ needs.plan.outputs.reference }}
-          BUILD_DIGEST: ${{ steps.published.outputs.digest }}
+          BUILD_DIGEST: ${{ steps.restored.outputs.digest }}
         run: python3 scripts/container_release.py verify "docker://$RELEASE_IMAGE" "$BUILD_DIGEST"
+      - name: Retain consumed validation provenance in the pinned image record
+        if: needs.plan.outputs.reuse == 'true'
+        run: python3 scripts/container_validation.py record-provenance /tmp/restored
       - name: Select channel promotion without downgrading to an older release
         if: needs.plan.outputs.publish == 'true'
         id: channel
@@ -262,7 +227,7 @@ jobs:
         env:
           RELEASE_IMAGE: ${{ needs.plan.outputs.reference }}
           CHANNEL: ${{ needs.plan.outputs.channel }}
-          BUILD_DIGEST: ${{ steps.published.outputs.digest }}
+          BUILD_DIGEST: ${{ steps.restored.outputs.digest }}
         run: |
           IMAGE="${RELEASE_IMAGE%:*}"
           docker buildx imagetools create --tag "$IMAGE:$CHANNEL" "$IMAGE@$BUILD_DIGEST"
@@ -276,15 +241,17 @@ jobs:
         run: |
           python3 scripts/container_release.py bundle /tmp/collector-bundle/junk-collector-container
           tar -czf junk-collector-container.tar.gz -C /tmp/collector-bundle junk-collector-container
+          if [ -f /tmp/restored/provenance.json ]; then cp /tmp/restored/provenance.json validation-provenance.json; fi
           sha256sum junk-collector-container.tar.gz release-image.json > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: junk-collector-container
+          name: junk-collector-container-${{ github.run_attempt }}
           path: |
             junk-collector-container.tar.gz
             release-image.json
             SHA256SUMS
             release-plan.json
+            validation-provenance.json
       - name: Attach installation bundle and image record to release
         if: needs.plan.outputs.publish == 'true'
         env:

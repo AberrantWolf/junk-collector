@@ -1,13 +1,35 @@
 # Implementation status
 
+## Build-once container publication — delivered and qualified, 2026-10-22
+
+The existing release workflow now separates validation from publication. Validation
+builds labelled native AMD64/ARM64 OCI exports once, imports those exact runtime
+configs for the existing recovery/inbox/proxy smokes, verifies their merged index
+and retains a 30-day immutable Actions artifact. Publication restores only a
+successful trusted same-source validation, checks the artifact/archive digests and
+platform/source evidence, and copies those bytes to GHCR without compilation.
+Anonymous pulls, channel downgrade guards and pinned installation assets remain.
+Missing/expired/mismatched artifacts fail closed; manual reuse rehearses acceptance
+without publishing. See [operator contract](container-release-pipeline.md) and
+[qualification record](validation/container-promotion-2026-10-22.md).
+Full exact-source validation (all source checks, native AMD64/ARM64 identity and
+recovery/proxy/inbox smokes, merged OCI inspection) and a same-source reuse
+rehearsal passed. The rehearsal skipped source checks and native builds, consumed
+the current successful attempt's immutable artifact, retained exact image/platform
+digests and generated matching bundle/provenance/checksums. All eleven CI policy/
+rootless transport tests passed. Docker store identity and archive portability
+failures found during qualification are corrected; history remains in the dated
+record. Public registry copy/anonymous/channel steps retain their existing gates
+and were deliberately skipped during rehearsal. No new release or deployment
+was performed; beta.4/preview and the NAS are unchanged.
+
 **Beta.4 published — 2026-10-22:** the automatic private playback image is verified
 ready on `ghcr.io/aberrantwolf/junk-collector:preview`. Both native architectures,
 container smoke, anonymous pulls, source labels and pinned installation bundle
 passed. See [publication evidence](validation/container-beta4-publication-2026-10-22.md)
 and [update/client requirements](releases/v0.1.0-beta.4.md). No NAS deployment was
-performed; Trash Amp needs its matching new client build. The user authorized
-replacing redundant publication rebuilds with promotion of validated images;
-that pipeline improvement follows this completed release.
+performed; Trash Amp needs its matching new client build. The subsequent [build-once pipeline delivery](validation/container-promotion-2026-10-22.md)
+now reuses validated images for future publication.
 
 ## Beta.3 published — 2026-10-22
 
