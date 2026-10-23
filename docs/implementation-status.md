@@ -1,6 +1,6 @@
 # Implementation status
 
-## Browser lock-screen metadata — beta.5 preparation, 2026-10-23
+## Browser lock-screen metadata — beta.5 published and deployed, 2026-10-23
 
 The web player now publishes track title, album artist, album and available cover
 art using the standard Media Session API, for album and playlist playback. OS
@@ -8,8 +8,10 @@ play/pause, previous/next and seeking use the existing player and permission pat
 Track transitions update metadata; release/logout/detachment clear metadata and
 handlers. Older saved queue entries retain their title/album even without the new
 optional artist field. [Real Chrome acceptance](validation/browser-media-session-2026-10-23.md)
-covers metadata, controls, automatic transitions and cleanup. Actual iPhone lock-screen metadata rendering awaits the
-updated deployment; the earlier accepted locked track transition did not test it.
+covers metadata, controls, automatic transitions and cleanup. The
+[published beta.5 image is installed on the NAS](validation/container-beta5-publication-2026-10-23.md),
+and Cloudflare serves its exact web bundle. Actual iPhone lock-screen metadata
+rendering awaits the operator's report; earlier locked playback did not test it.
 
 ## Direct HTTPS remote media — source delivered and NAS deployed, 2026-10-23
 
@@ -38,7 +40,7 @@ early/late ranges without full-file hashing or changing network settings. A loca
 success cannot prove WAN reachability. See [contract](direct-https-media-plan.md),
 [setup/rollback](../deploy/container/media.md) and [acceptance and limits](validation/direct-https-media-2026-10-23.md).
 The authorized [NAS deployment](validation/direct-https-media-nas-2026-10-23.md)
-now runs the exact AMD64 source candidate with DNS-only media, IPv4 TCP forwarding
+first qualified the AMD64 source candidate with DNS-only media, IPv4 TCP forwarding
 and a trusted public certificate. Disposable actual-NAS isolation and production
 route/identity/CORS checks pass. DSM uses one-CPU affinity instead of unsupported
 CFS quotas; its process-count limit is not enforced. Caddy remains networked
@@ -47,7 +49,9 @@ without a new DMZ/egress restriction. The operator reports successful basic
 displayed; the setup test appeared to pass without a captured per-stage result.
 The operator also heard a track change while the phone was locked, accepting that
 background transition. Extended sessions, long-track lease boundaries, network transitions
-and actual public certificate renewal remain unqualified. No new release was published.
+and actual public certificate renewal remain unqualified. The later
+[beta.5 publication/update](validation/container-beta5-publication-2026-10-23.md)
+installs the verified release in core and media, preserving configuration and identities.
 Trash Amp must consume the matching shared
 client revision when rebuilt; sibling compatibility is checked separately from
 changing its existing uncommitted work. HL-12 and HL-05 retain those external checks.
@@ -62,8 +66,8 @@ eligibility and both clients' pin/identity checks remain. The user confirmed the
 explicit NAS bind restores Trash Amp. Five new regression cases, full workspace
 checks, real Chrome playback/seeking on explicit and wildcard listeners, and the
 web smoke passed. The repair is included in the later direct-media NAS source
-candidate; the explicit working bind is retained and wildcard LAN discovery is
-not requalified on that installation. No new release was published. See
+candidate and published beta.5; the explicit working bind is retained and wildcard
+LAN discovery is not requalified on that installation. See
 [implementation](automatic-private-playback.md) and [dated evidence](validation/lan-candidate-selection-2026-10-23.md).
 
 ## Build-once container publication — delivered and qualified, 2026-10-22
@@ -78,6 +82,8 @@ Anonymous pulls, channel downgrade guards and pinned installation assets remain.
 Missing/expired/mismatched artifacts fail closed; manual reuse rehearses acceptance
 without publishing. See [operator contract](container-release-pipeline.md) and
 [qualification record](validation/container-promotion-2026-10-22.md).
+The first actual release using this path, [beta.5](validation/container-beta5-publication-2026-10-23.md),
+successfully reused the accepted native exports without rebuilding.
 Full exact-source validation (all source checks, native AMD64/ARM64 identity and
 recovery/proxy/inbox smokes, merged OCI inspection) and a same-source reuse
 rehearsal passed. The rehearsal skipped source checks and native builds, consumed
