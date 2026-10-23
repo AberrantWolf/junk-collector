@@ -1,20 +1,37 @@
 # Implementation status
 
-## Direct HTTPS remote media — plan selected, 2026-10-23
+## Direct HTTPS remote media — source delivered, 2026-10-23
 
-The user selected Cloudflare login/authentication/control with a separate direct
-HTTPS media-only endpoint. The [plan](direct-https-media-plan.md) covers shared
-scoped grants for web/native, ordinary HTTP/range delivery, dedicated TLS ingress,
-explicit security boundaries and an actual phone-over-cellular reachability/read
-test. The same-day isolation refinement selects a separate media executable/
-container, read-only content and a narrow core authorization socket; one-origin
-proxy composition remains supported without combining processes. Read-only mounts
-protect integrity but permit disclosure of mounted content, and containers share
-the host kernel. These remote capabilities are **not implemented or deployed**. Current
-private playback and its deployment limits remain below; the existing remote
-fallback flag does not supply a separate approved media origin. No DNS, router,
-NAS, certificates, releases or client configuration changed during planning.
-HL-12 retains delivery and HL-05 retains deployment acceptance.
+Cloudflare login/authentication/control can now issue short-lived, exact-track
+browser/native grants for a configured direct HTTPS media origin. The separate
+`collector-media` executable reads only through the configured archive root,
+supports full/single/open/suffix ranges and HEAD/ETag/If-Range, and continuously
+checks live parent/collection authority over a restricted core Unix socket.
+It never accepts login cookies or long-lived account credentials. The shared
+native client retains system HTTPS trust for media independently of control trust;
+the web player uses ordinary anonymous HTTPS audio and preserves position on
+lease renewal. Private routes stay preferred and control-origin music remains
+refused. No VPN, relay, HLS or mobile app was introduced.
+
+The optional Compose overlay gives media no networking, read-only archive/root,
+no capabilities, dedicated socket named volumes and bounded resources. Startup
+rejects effective writable archive/nested mounts. A dedicated Caddy frontend owns
+TLS and certificate state. Its networking remains a distinct firewall/DMZ concern;
+containers share the host kernel and mounted archive confidentiality is not isolated.
+One-origin media-path composition also works with cookie stripping and its stated
+browser-origin tradeoff. The normal release image includes both executables for
+separate services; an optional Docker target supplies a lean media-only image.
+
+The `/remote-media` page checks a fresh one-use challenge and real queued-track
+early/late ranges without full-file hashing or changing network settings. A local
+success cannot prove WAN reachability. See [contract](direct-https-media-plan.md),
+[setup/rollback](../deploy/container/media.md) and [acceptance and limits](validation/direct-https-media-2026-10-23.md).
+The first external device target is **iPhone Safari**; cellular, screen-lock,
+long-track lease boundaries and public certificate renewal remain unqualified.
+Source delivery performs no DNS/OpenWrt/NAS change, certificate issuance, release
+publication or installed-client update. Trash Amp must consume the matching shared
+client revision when rebuilt; sibling compatibility is checked separately from
+changing its existing uncommitted work. HL-12 and HL-05 retain those external checks.
 
 ## LAN candidate selection — source repair accepted, 2026-10-23
 

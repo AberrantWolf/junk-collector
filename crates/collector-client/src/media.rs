@@ -34,6 +34,7 @@ impl MediaCancellation {
 }
 
 pub struct RangeReader {
+    target: collector_api_types::PlaybackTarget,
     client: EnrolledClient,
     route: crate::local_playback::MediaRoute,
     runtime: tokio::runtime::Runtime,
@@ -61,20 +62,21 @@ impl EnrolledClient {
             client: crate::credential_http_client(&self.enrolled)?,
             enrolled: self.enrolled.clone(),
         };
-        let path = format!("api/v1/items/{item}/representations/{representation}/{file_index}");
+        let target = collector_api_types::PlaybackTarget {
+            item_id: item,
+            representation_id: representation,
+            file_index,
+        };
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|_| Error::Unavailable("media runtime unavailable".into()))?;
         cancellation.check().map_err(|_| Error::JobCancelled)?;
-        let route = runtime.block_on(async {
+        let mut route = runtime.block_on(async {
             tokio::select! { result=worker_client.media_route()=>result,
                 _=async {while !cancellation.is_cancelled() {tokio::time::sleep(Duration::from_millis(20)).await;}}=>Err(Error::JobCancelled)}
         })?;
-        let url = route
-            .base
-            .join(&path)
-            .map_err(|_| Error::Invalid("media URL invalid".into()))?;
+        let url = runtime.block_on(async {tokio::select!{result=route.target(&worker_client,target.clone())=>result,_=async{while !cancellation.is_cancelled(){tokio::time::sleep(Duration::from_millis(20)).await;}}=>Err(Error::JobCancelled)}})?;
         let request = route.request(&worker_client, reqwest::Method::HEAD, url.clone())?;
         let response = runtime
             .block_on(cancellable(&cancellation, async {
@@ -113,6 +115,7 @@ impl EnrolledClient {
             .ok_or_else(|| Error::Unavailable("strong media validator missing".into()))?
             .to_owned();
         Ok(RangeReader {
+            target,
             client: worker_client,
             route,
             runtime,
@@ -141,6 +144,12 @@ impl RangeReader {
     fn fetch(&mut self) -> io::Result<()> {
         match self.fetch_once() {
             Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied && self.route.remote => {
+                // A bounded grant eviction/restart is distinct from parent revocation.
+                // Re-authorize the same target through control once; a real denial stops here.
+                self.renew_remote_grant()?;
+                self.fetch_once()
+            }
             Err(error)
                 if matches!(
                     error.kind(),
@@ -152,7 +161,7 @@ impl RangeReader {
             {
                 // Refresh trust after a network change or automatic certificate rotation.
                 // Reuse only the exact immutable representation, never a public retry URL.
-                let route = self
+                let mut route = self
                     .runtime
                     .block_on(cancellable(&self.cancellation, async {
                         self.client
@@ -160,10 +169,14 @@ impl RangeReader {
                             .await
                             .map_err(|error| io::Error::other(error.to_string()))
                     }))?;
-                let url = route
-                    .base
-                    .join(self.url.path().trim_start_matches('/'))
-                    .map_err(io::Error::other)?;
+                let url = self
+                    .runtime
+                    .block_on(cancellable(&self.cancellation, async {
+                        route
+                            .target(&self.client, self.target.clone())
+                            .await
+                            .map_err(|_| io::Error::other("media route unavailable"))
+                    }))?;
                 self.route = route;
                 self.url = url;
                 self.fetch_once()
@@ -171,8 +184,29 @@ impl RangeReader {
             Err(error) => Err(error),
         }
     }
+    fn renew_remote_grant(&mut self) -> io::Result<()> {
+        self.url = self
+            .runtime
+            .block_on(cancellable(&self.cancellation, async {
+                self.route
+                    .target(&self.client, self.target.clone())
+                    .await
+                    .map_err(|_| {
+                        io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "media grant renewal denied",
+                        )
+                    })
+            }))?;
+        Ok(())
+    }
     fn fetch_once(&mut self) -> io::Result<()> {
         self.cancellation.check()?;
+        if self.route.grant.as_ref().is_some_and(|grant| {
+            grant.expires_at < chrono::Utc::now() + chrono::Duration::seconds(15)
+        }) {
+            self.renew_remote_grant()?;
+        }
         let end = self
             .position
             .saturating_add(CHUNK as u64 - 1)

@@ -83,6 +83,10 @@ host-local connector. Cloudflare manages the browser certificate; phones need no
 Collector certificate import. Collector login and collection permissions still apply.
 See [Cloudflare routing](https://developers.cloudflare.com/tunnel/concepts/routing/).
 
+For source builds/releases that include the isolated media executable, see
+[direct HTTPS music](media.md): keep this control tunnel and add a read-only,
+network-disabled media container with its own direct HTTPS hostname.
+
 **Never route Internet access to port 9842.** Forwarded headers do not grant private access.
 
 Proxy requirements:

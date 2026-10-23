@@ -8,6 +8,78 @@ pub struct LocalPlaybackDescriptor {
     pub server_id: ServerId,
     pub endpoints: Vec<LocalPlaybackEndpoint>,
     pub remote_media_allowed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_media: Option<RemoteMediaEndpoint>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteMediaEndpoint {
+    pub base_url: String,
+    pub server_id: ServerId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteGrantRequest {
+    /// None requests a bounded synthetic reachability probe, never library access.
+    pub target: Option<PlaybackTarget>,
+}
+
+#[derive(Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RemoteMediaGrant {
+    pub token: String,
+    pub url: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub server_id: ServerId,
+    pub length: u64,
+    pub etag: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RemoteMediaSample {
+    pub start: u64,
+    pub end: u64,
+    pub digest: Digest,
+}
+#[derive(Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RemoteMediaTest {
+    pub grant: RemoteMediaGrant,
+    pub samples: Vec<RemoteMediaSample>,
+}
+
+/// Socket-only DTOs; a media service credential cannot issue user grants.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaAuthorizeRequest {
+    pub token: String,
+    pub origin: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaFile {
+    /// Relative to the separately configured read-only archive root.
+    pub relative_path: Option<String>,
+    /// Synthetic probe only; bounded by the authority client before decoding.
+    pub inline: Option<String>,
+    pub length: u64,
+    pub digest: Digest,
+    pub media_type: String,
+    pub verify_on_transfer: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaReadTicket {
+    pub handle: String,
+    pub file: MediaFile,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaHandleRequest {
+    pub handle: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]

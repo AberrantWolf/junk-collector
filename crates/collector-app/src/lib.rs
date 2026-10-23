@@ -35,6 +35,7 @@ pub use album_preparation::*;
 mod collection_types;
 pub use collection_types::*;
 mod derivatives;
+mod remote_media;
 pub use derivatives::*;
 mod guided_ingest;
 mod inbox_cleanup;
@@ -350,6 +351,10 @@ pub enum ItemEffectSource {
 }
 
 pub trait ContentPort: Send + Sync {
+    fn remote_media_file(
+        &self,
+        target: &collector_api_types::PlaybackTarget,
+    ) -> Result<collector_api_types::MediaFile>;
     fn activity(&self, user: UserId, item: ItemId) -> Result<serde_json::Value>;
     fn save_activity(&self, user: UserId, item: ItemId, value: serde_json::Value) -> Result<()>;
     fn representation(
@@ -1246,6 +1251,12 @@ pub trait AdministrationPort: Send + Sync {
 }
 
 pub trait AuthenticationPort: Send + Sync {
+    fn authenticate_reference(
+        &self,
+        kind: CredentialKind,
+        user: UserId,
+        device: DeviceId,
+    ) -> Result<(AuthenticatedPrincipal, chrono::DateTime<Utc>)>;
     /// Slow deterministic password binding for the new password-change receipt.
     fn password_change_binding(&self, user: UserId, key: &str, password: &str) -> Result<String>;
     fn change_password(
@@ -1447,7 +1458,8 @@ pub struct StoredPasskey {
 }
 
 pub use collector_api_types::{
-    EnrollmentPhase, EnrollmentStart, EnrollmentView, NativeCredentialIssue,
+    EnrollmentPhase, EnrollmentStart, EnrollmentView, MediaFile, NativeCredentialIssue,
+    PlaybackTarget,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1587,6 +1599,7 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
 
 #[derive(Clone)]
 pub struct CollectionService {
+    remote_media_grants: Arc<remote_media::RemoteMediaGrants>,
     browser_media_grants: Arc<local_playback::BrowserMediaGrants>,
     reader: Arc<dyn CollectionReadPort>,
     writer: Arc<dyn CollectionWritePort>,
@@ -2352,6 +2365,7 @@ impl CollectionService {
         Self {
             reader,
             browser_media_grants: Arc::new(Default::default()),
+            remote_media_grants: Arc::new(Default::default()),
             writer,
             guided_transitions: Arc::new(std::sync::Mutex::new(())),
             access,

@@ -1152,6 +1152,36 @@ impl Store {
 }
 
 impl ContentPort for Store {
+    fn remote_media_file(
+        &self,
+        target: &collector_app::PlaybackTarget,
+    ) -> Result<collector_app::MediaFile> {
+        let (path, file, verify_on_transfer) =
+            self.representation_path(target.item_id, target.representation_id, target.file_index)?;
+        let root = fs::canonicalize(&self.archive).map_err(storage)?;
+        let relative = path.strip_prefix(&root).map_err(|_| Error::Forbidden)?;
+        let relative_path = relative.to_str().ok_or(Error::Forbidden)?.to_owned();
+        Ok(collector_app::MediaFile {
+            relative_path: Some(relative_path),
+            inline: None,
+            length: file.bytes.0,
+            digest: file.digest,
+            media_type: match path
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref()
+            {
+                Some("flac") => "audio/flac",
+                Some("mp3") => "audio/mpeg",
+                Some("wav") => "audio/wav",
+                Some("ogg" | "opus") => "audio/ogg",
+                _ => return Err(Error::Forbidden),
+            }
+            .into(),
+            verify_on_transfer,
+        })
+    }
     fn activity(&self, user: UserId, item: ItemId) -> Result<serde_json::Value> {
         self.activity_record(user, item)
     }
@@ -1742,6 +1772,48 @@ impl AdministrationPort for Store {
 }
 
 impl AuthenticationPort for Store {
+    fn authenticate_reference(
+        &self,
+        kind: collector_app::CredentialKind,
+        user: UserId,
+        device: DeviceId,
+    ) -> Result<(AuthenticatedPrincipal, chrono::DateTime<Utc>)> {
+        let sql = match kind {
+            collector_app::CredentialKind::BrowserSession => {
+                "SELECT u.administrator,s.authenticated_at,s.expires FROM private.sessions s JOIN private.users u ON u.id=s.user_id WHERE s.session_id=? AND u.id=? AND s.expires>? AND u.enabled=1"
+            }
+            collector_app::CredentialKind::NativeCredential => {
+                "SELECT u.administrator,0,n.expires_at FROM private.native_credentials n JOIN private.users u ON u.id=n.user_id WHERE n.id=? AND u.id=? AND n.expires_at>? AND n.revoked_at IS NULL AND u.enabled=1"
+            }
+            collector_app::CredentialKind::TestLocal => return Err(Error::Unauthenticated),
+        };
+        let row: Option<(bool, i64, i64)> = lock(&self.db)?
+            .query_row(
+                sql,
+                params![
+                    device.to_string(),
+                    user.to_string(),
+                    self.clock.now().timestamp()
+                ],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(storage)?;
+        let (administrator, stamp, expiry) = row.ok_or(Error::Unauthenticated)?;
+        Ok((
+            AuthenticatedPrincipal {
+                principal: Principal {
+                    user_id: user,
+                    device_id: Some(device),
+                    administrator,
+                },
+                credential_kind: kind,
+                authenticated_at: chrono::DateTime::from_timestamp(stamp, 0)
+                    .ok_or(Error::Unauthenticated)?,
+            },
+            chrono::DateTime::from_timestamp(expiry, 0).ok_or(Error::Unauthenticated)?,
+        ))
+    }
     fn password_change_binding(&self, user: UserId, key: &str, password: &str) -> Result<String> {
         Store::password_change_binding(self, user, key, password)
     }

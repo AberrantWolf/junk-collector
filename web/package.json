@@ -33,7 +33,8 @@
     "test:intake-review": "node tests/intake-review.mjs",
     "test:game-audio": "node tests/game-audio.mjs",
     "test:documents": "node tests/documents.mjs",
-    "test:backup-reminder": "node tests/backup-reminder.mjs"
+    "test:backup-reminder": "node tests/backup-reminder.mjs",
+    "test:remote-media": "node tests/remote-media.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

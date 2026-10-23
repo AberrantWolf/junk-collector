@@ -35,6 +35,14 @@ A `.local` name must resolve on your network independently of Junk Collector. Me
 
 ### Public exposure
 
+For Cloudflare control plus a separate streaming service, configure
+`[remote_media]` with `base_url` (a fixed HTTPS URL ending in `/`) and `socket`
+(an absolute Unix socket path in a dedicated shared directory). Keep top-level
+`remote_media_allowed = false`; enabling it together with a separate endpoint is
+rejected. Run the separate `collector-media` executable/container using that
+socket and read-only archive access. See the [operator instructions](../deploy/container/media.md).
+No setting opens the router, creates DNS or supplies browser certificate trust.
+
 These settings apply to both the public HTTP upstream and the direct LAN TLS listener. Private listeners include all management surfaces; users still need the appropriate permissions.
 
 | Option | Default | Effect |

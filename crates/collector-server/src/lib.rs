@@ -7,6 +7,7 @@ use collector_app::{
 };
 pub mod local_playback;
 pub mod passkeys;
+pub mod remote_media;
 use axum::{
     Json, Router,
     body::Body,
@@ -70,6 +71,7 @@ pub struct AppState {
     pub multi_user: bool,
     pub local_playback: Option<Arc<local_playback::LocalPlayback>>,
     pub remote_media_allowed: bool,
+    pub remote_media: Option<Arc<remote_media::Configuration>>,
     pub direct_media: bool,
     pub backup_reminder: Option<collector_app::BackupReminderSettings>,
     pub inboxes: Arc<std::collections::BTreeMap<String, std::path::PathBuf>>,
@@ -98,6 +100,7 @@ impl AppState {
             multi_user: false,
             local_playback: None,
             remote_media_allowed: false,
+            remote_media: None,
             direct_media: false,
             backup_reminder: None,
             inboxes: Arc::new(std::collections::BTreeMap::new()),
@@ -539,6 +542,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/", get(index))
         .route("/pair", get(index))
+        .route("/remote-media", get(index))
         .route("/lists", get(index))
         .route("/app.js", get(app_js))
         .route("/playback-sw.js", get(local_playback::worker))
@@ -591,6 +595,8 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(identity))
         .routes(routes!(local_playback::routes))
         .routes(routes!(local_playback::browser_grant))
+        .routes(routes!(remote_media::remote_grant))
+        .routes(routes!(remote_media::remote_test))
         .routes(routes!(features))
         .routes(routes!(login))
         .routes(routes!(recover))
@@ -853,11 +859,20 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         .map(|peer| peer.0.ip().to_string())
         .unwrap_or_else(|| "unknown-direct-peer".into());
     request.extensions_mut().insert(DirectPeer(peer));
-    let local_origins = state
+    let mut local_origins = state
         .local_playback
         .as_ref()
         .map(|local| local.connect_origins())
         .unwrap_or_default();
+    let media_origin = state
+        .remote_media
+        .as_ref()
+        .and_then(|remote| url::Url::parse(&remote.base_url).ok())
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_default();
+    if !media_origin.is_empty() {
+        local_origins.push(media_origin.clone());
+    }
     let mut response = next.run(request).await;
     for (key, value) in [
         ("x-content-type-options", "nosniff"),
@@ -875,7 +890,8 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
     }
     if !local_origins.is_empty() {
         let csp = format!(
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' {}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob: {}; connect-src 'self' {}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            media_origin,
             local_origins.join(" ")
         );
         if let Ok(value) = HeaderValue::from_str(&csp) {

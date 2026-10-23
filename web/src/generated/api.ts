@@ -2196,6 +2196,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/playback/remote-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["remote_grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playback/remote-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["remote_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/playback/routes": {
         parameters: {
             query?: never;
@@ -3788,6 +3820,7 @@ export interface components {
         /** @description Authenticated control-plane advertisement; each endpoint has the same server identity. */
         LocalPlaybackDescriptor: {
             endpoints: components["schemas"]["LocalPlaybackEndpoint"][];
+            remote_media?: null | components["schemas"]["RemoteMediaEndpoint"];
             remote_media_allowed: boolean;
             server_id: components["schemas"]["ServerId"];
         };
@@ -4992,6 +5025,34 @@ export interface components {
             device_name?: string;
             new_password: string;
             username: string;
+        };
+        RemoteGrantRequest: {
+            target?: null | components["schemas"]["PlaybackTarget"];
+        };
+        RemoteMediaEndpoint: {
+            base_url: string;
+            server_id: components["schemas"]["ServerId"];
+        };
+        RemoteMediaGrant: {
+            etag: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: int64 */
+            length: number;
+            server_id: components["schemas"]["ServerId"];
+            token: string;
+            url: string;
+        };
+        RemoteMediaSample: {
+            digest: components["schemas"]["Digest"];
+            /** Format: int64 */
+            end: number;
+            /** Format: int64 */
+            start: number;
+        };
+        RemoteMediaTest: {
+            grant: components["schemas"]["RemoteMediaGrant"];
+            samples: components["schemas"]["RemoteMediaSample"][];
         };
         RepairIntakeDestination: {
             destination: components["schemas"]["IntakeDestination"];
@@ -11304,6 +11365,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrowserPlaybackGrant"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remote_grant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoteGrantRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteMediaGrant"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remote_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoteGrantRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteMediaTest"];
                 };
             };
             401: {

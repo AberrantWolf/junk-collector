@@ -1,6 +1,10 @@
 # Direct HTTPS media with Cloudflare control access
 
-Requested design, **2026-10-23**. **Planned, not implemented or deployed.**
+Selected design and source contract, **2026-10-23**. **Implemented in source;
+not deployed or qualified on the user's external iPhone path.** See the
+[dated acceptance and limits](validation/direct-https-media-2026-10-23.md) and
+[operator setup](../deploy/container/media.md). The earlier design below is retained
+with the implementation refinements incorporated.
 The user selected Cloudflare for login/authentication/control and direct public
 HTTPS for music delivery. This document defines one complete web/Trash Amp
 delivery; it does not authorize DNS, firewall, certificate, NAS or release changes.
@@ -65,15 +69,19 @@ stack is operational convenience, not itself an isolation boundary.
 
 ### Storage and compromise scope
 
-The media container runs as its own non-root identity with read-only rootfs,
+The media container runs as a separate non-root process with read-only rootfs,
 `no-new-privileges`, dropped capabilities, default seccomp and bounded memory,
 CPU, process count, open handles and temporary storage. Do not use privileged mode,
 host networking/PID namespace, Docker socket access, broad host mounts, or core's
 state/config/secrets volume. TLS keys belong only to the frontend. In-memory media
-grants/read handles and a bounded tmpfs need no persistent writable media volume.
+grants/read handles and a bounded tmpfs need no persistent writable application
+state. Dedicated Docker named volumes hold the HTTP and authority sockets; only
+the HTTP socket directory is writable by media. It uses the existing archive UID
+10001 for readability, without sharing core's mount, PID or network namespaces.
 
-Mount only explicitly selected content roots, read-only, using volume identifiers
-that core maps to the corresponding media-container roots. Verify effective
+Mount the selected archive root read-only. Core returns only relative locators
+under that root, not host paths. The production `--require-read-only-archive`
+guard inspects Linux mount flags and refuses writable parent or nested mounts. Verify effective
 read-only behavior on the target NAS, including nested mounts; do not rely on
 the Compose spelling alone. Core can continue publishing to its own writable
 archive mount while media observes committed immutable files through its separate
@@ -114,11 +122,10 @@ Do not mount core's general management socket or reuse its private HTTP router.
 The dedicated internal router supports only the following fixed operations:
 
 1. **Authorize/open:** accept the presented opaque media grant plus its exact
-   target, audience and request context. Core verifies current parent authority,
+   request context. The grant freezes the target/audience; core verifies current parent authority,
    target eligibility, endpoint generation and admission expiry, then returns an
-   ephemeral read handle and a bounded file-locator DTO: configured volume ID,
-   relative immutable locator, length, digest/ETag, media type and relevant
-   validation coordinates. The storage adapter derives the locator after
+   ephemeral read handle and a bounded file-locator DTO: relative immutable locator,
+   length, digest/ETag, media type and the existing transfer-validation requirement. The storage adapter derives the locator after
    authorization; no client supplies an arbitrary path, URL or collection lookup.
    Metadata is sufficient to read the existing file, not a second catalog.
 2. **Recheck:** validate that read handle against current parent/session/device,
@@ -127,7 +134,9 @@ The dedicated internal router supports only the following fixed operations:
    between an admitted stream and admission-lease expiry. No full-file read/hash
    occurs in an authorization/recheck call.
 3. **Release:** discard the bounded ephemeral read handle. A lost release is
-   recovered by timeout and connection/process teardown, without a durable job.
+   recovered by a 30-second renewable idle lease and connection/process teardown,
+   without a durable job. Five-second media heartbeats keep admitted reads alive;
+   a crashed media process cannot hold all user admission slots for four hours.
 
 Public media never proxies requests to this socket verbatim. Parse fixed DTOs
 with small body/field limits and bounded concurrency/deadlines. Reject extra
@@ -158,15 +167,25 @@ shared mechanism; do not duplicate algorithms or import Collector orchestration.
 
 ### Network boundary and deployment modes
 
-Give media an explicitly selected internal frontend-to-media network and the
-authorization socket, with no ordinary network route to core APIs. An internal
-Docker network is not a port allowlist: services sharing a bridge can normally
-reach each other's listening ports, and host/LAN destinations need separate
-attention. Verify effective deny rules for media-to-NAS management, core public/
-private APIs, LAN peers, router and Internet egress. Restrict published ports to
-the TLS frontend; do not publish media or introspection directly. Preserve core's
-existing private LAN listeners rather than changing their networking as a side
-effect. The frontend has certificate-renewal egress but no archive/state mounts.
+The implemented profile uses **no media network interface/routes**
+(`network_mode: none`). Both frontend HTTP and private core authorization use
+filesystem Unix sockets in separate dedicated Docker named volumes. The
+frontend cannot access the core authorization volume. Media's authority volume
+is read-only, and its router cannot proxy arbitrary operations to it. Named
+volumes keep socket inodes on the Linux daemon filesystem, including on Docker
+Desktop; desktop bind-mounted file shares are not a supported socket transport.
+Verify no external routes/active interfaces and denied outbound connection on
+the actual runtime. Kernel-provided down tunnel devices are not usable network
+paths. Core's existing host/private networking stays unchanged.
+
+Only the dedicated TLS frontend publishes a TCP port. It has certificate-renewal
+networking and no archive, core state or authority mounts. Its configured proxy
+routes cannot access general core APIs, but a compromised frontend's ordinary
+bridge networking may reach host/LAN services unless the target host firewall or
+DMZ blocks them. Media's network isolation does not make that separate claim.
+The frontend retains only NET_BIND_SERVICE in its capability bounding set because
+the qualified official Caddy image's file capability otherwise prevents execution;
+no-new-privileges remains enabled. Media drops all capabilities.
 
 Support these hosting arrangements with the **same separate executables**:
 
@@ -199,7 +218,7 @@ non-active, correctly typed and nosniff in either deployment mode.
 | Surface | Network path | Permitted operations |
 | --- | --- | --- |
 | Existing control origin | Phone/client → Cloudflare public tunnel → existing public/client listener | Existing login, passkeys, pairing, metadata/artwork, availability and scoped media-grant issuance; current exposure/role rules remain |
-| Direct media origin | Phone/client → static public IP TCP 443 → dedicated TLS frontend → separate media container on its internal network | Authenticated audio HEAD/GET, a minimal fixed-shape identity response, narrowly bounded CORS OPTIONS and setup probes only |
+| Direct media origin | Phone/client → static public IP TCP 443 → dedicated TLS frontend → separate media container through its HTTP Unix socket | Authenticated audio HEAD/GET, a minimal fixed-shape identity response, narrowly bounded CORS OPTIONS and setup probes only |
 | Internal media authority | Media → dedicated core Unix socket | Presented-capability authorization/open, recheck and release only; never a general core/admin API |
 | Existing private media | Existing HTTPS/WebTransport private listeners | Existing private playback; its generated trust and permissions remain separate |
 | Private management | Existing explicit private listeners | Existing administration/curation with authentication and role checks; never a public-media upstream |
@@ -272,7 +291,11 @@ depend on WebTransport, a live page broker or service-worker execution while the
 phone is locked. Native uses the same scoped authority in an Authorization header.
 Reject conflicting supplied credentials. A URL capability is a bearer secret:
 possession permits its limited reads until expiry/revocation, and CORS/Origin is
-not a substitute for that authorization or proof of who holds the URL.
+not a substitute for that authorization or proof of who holds the URL. Cross-origin
+browser grants require the exact allowed Origin. Same-origin GET/HEAD may omit
+Origin only when the frozen browser origin equals the configured media audience
+origin; other supplied origins still fail. The proxy strips login cookies on
+that media upstream.
 
 - Authorize grant issuance through the existing parent authentication and actual
   collection permissions. Allow only admitted playable music tracks, including
@@ -281,7 +304,7 @@ not a substitute for that authorization or proof of who holds the URL.
   Do not expose another file just because its representation ID exists.
 - Recheck the current parent session/device, account and collection access on
   every HEAD/GET, including cache hits. During a long response, check again at
-  least every five seconds and before each additional MiB; cancel on revocation,
+  least every five seconds and before each additional 256 KiB; cancel on revocation,
   disable or failed authorization. Bound queued output so checking does not merely
   happen after an entire file has already been buffered. Already received bytes
   cannot be recalled, and permitted downloads retain existing offline semantics.
@@ -366,20 +389,21 @@ audit of Collector or DSM.
 | `collector-store` | Core-side immutable file resolution and validation coordinates through a narrow application port; no database/archive parser in media |
 | `collector-api-types` | One shared typed descriptor, grant, internal authorize/recheck/release DTO and diagnostic/result contract; no duplicate private DTOs |
 | `collector-server` | Existing control/private listeners and a separately composed socket-only authorization adapter; never a general management upstream for media |
-| Planned `collector-media` executable | Small media HTTP router, read-only file opens, range delivery, private authority client, cancellation/resource bounds and secret-safe diagnostics; no app/store/providers dependency |
+| `collector-media` executable | Small media HTTP router, read-only file opens, range delivery, private authority client, cancellation/resource bounds and secret-safe diagnostics; no app/store/providers dependency |
 | `collector-client` | Enrolled control identity, remote grant acquisition, normal system HTTPS trust, immutable ranged reads, retries and scoped credential placement |
 | Web player / Trash Amp | Existing player/decoder, queue, state and actionable route/error presentation; no parallel authorization or provider pipeline |
 | Operator/proxy/OpenWrt | DNS, certificate lifecycle, dedicated TLS ingress and firewall mapping; no router/provider credentials held by Collector |
 
 Core/domain modules gain no networking, HTTP, filesystem or database dependencies.
-Register the planned media crate/layer in the architecture checker when it is
-implemented, permitting shared DTO/core value types and narrow external mechanisms
+The media crate/layer is registered in the architecture checker, permitting shared DTO/core value types and narrow external mechanisms
 without importing the Collector application/store/provider orchestration. Keep
 grant policy in core's application service. Reuse maintained HTTP/TLS/file APIs;
 extract shared range/validation mechanisms separately where the two executables
 need them, following `junk-libs` instructions and affected sibling checks. Do not
-create an umbrella networking framework. Package a minimal media image without
-core state, embedded management assets or encoder/provider executables. Read
+create an umbrella networking framework. The default release image includes both binaries to retain build-once promotion;
+separate services receive distinct entrypoints, mounts and networking. An optional
+lean `media` Docker target omits core, management assets and encoders. No core
+operational state is mounted into either media image. Read
 Trash Amp's sibling instructions before modifying it.
 
 Selection is private first, then the explicitly enabled direct HTTPS media route.
@@ -462,8 +486,11 @@ monitor can independently test transport later; operating a new checking service
 is not a dependency. Successful certificate issuance alone does not prove media
 authorization, CORS, playback or that music bypassed Cloudflare.
 
-Save only a bounded recent diagnostic result with its endpoint revision and
-observer evidence, separate from collection history. A client report is diagnostic
+Keep the bounded recent diagnostic result only in the open page's memory, with
+its endpoint and timestamp/observer evidence, separate from collection history.
+No diagnostic history or authority is persisted. The fixed endpoint configuration
+requires a core restart; that process generation invalidates prior grants/handles
+without a durable endpoint-revision migration. A client report is diagnostic
 data, not authority: it cannot enable a route, open a firewall or grant access.
 Configuration changes make previous results stale. A successful run confirms that
 path at that time, not universal network reachability or future availability.
@@ -512,10 +539,12 @@ attack on production, bulk remote playback or repeated full-payload integrity
 scans. Confirm public/private route and grant behavior in code, not solely through
 a proxy's path filters. Check affected sibling projects when shared client code
 changes; run repository architecture, Rust and web gates, rebuild the Rust server
-after embedded assets change and run the real browser smoke. Do not run those
-implementation suites merely to validate this design-only document.
-Build and exercise the new minimal media image on both published architectures
-with the core/media pair from the same release. Bound internal protocol version
+after embedded assets change and run the real browser smoke. The dated acceptance records actual suite runs; reading this contract alone does
+not qualify an implementation.
+The default source release image contains both executables; the optional lean
+media target is separate. Public release acceptance must exercise both published
+architectures with the core/media pair from the same release; local ARM64 evidence
+does not pass that gate. Bound internal protocol version
 handling and report mismatches; do not add checkpoint-only compatibility layers.
 
 Update architecture, implementation status, the implemented playback contract,

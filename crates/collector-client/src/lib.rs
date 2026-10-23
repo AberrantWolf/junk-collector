@@ -80,6 +80,27 @@ struct Identity {
     server_id: ServerId,
 }
 
+pub(crate) async fn bounded_json<T: serde::de::DeserializeOwned>(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<T> {
+    if !response.status().is_success() {
+        return Err(Error::Forbidden);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| Error::Unavailable("response interrupted".into()))?
+    {
+        if bytes.len() + chunk.len() > limit {
+            return Err(Error::Invalid("oversized response".into()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| Error::Invalid("invalid response".into()))
+}
+
 impl PendingEnrollment {
     pub fn server_id(&self) -> ServerId {
         self.expected_server

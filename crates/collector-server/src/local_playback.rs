@@ -175,6 +175,7 @@ fn make_identity(
             server_id: id,
             endpoints,
             remote_media_allowed: false,
+            remote_media: None,
         },
     ))
 }
@@ -313,7 +314,7 @@ pub(crate) async fn routes(
     headers: HeaderMap,
 ) -> ApiResult<Json<LocalPlaybackDescriptor>> {
     principal(&state, &headers)?;
-    let descriptor = state
+    let mut descriptor = state
         .local_playback
         .as_ref()
         .map(|local| local.descriptor(state.remote_media_allowed || state.direct_media))
@@ -321,7 +322,16 @@ pub(crate) async fn routes(
             server_id: state.pairing.server_id,
             endpoints: vec![],
             remote_media_allowed: state.direct_media || state.remote_media_allowed,
+            remote_media: None,
         });
+    descriptor.remote_media =
+        state
+            .remote_media
+            .as_ref()
+            .map(|remote| collector_api_types::RemoteMediaEndpoint {
+                base_url: remote.base_url.clone(),
+                server_id: state.pairing.server_id,
+            });
     Ok(Json(descriptor))
 }
 #[utoipa::path(post,path="/api/v1/playback/grants",request_body=PlaybackTarget,responses((status=200,body=BrowserPlaybackGrant),(status=401),(status=403)))]
@@ -934,6 +944,7 @@ mod tests {
                 server_id: ServerId::new(),
                 endpoints: vec![],
                 remote_media_allowed: false,
+                remote_media: None,
             }),
             readers: Mutex::new(HashMap::new()),
             slots: Arc::new(tokio::sync::Semaphore::new(1)),

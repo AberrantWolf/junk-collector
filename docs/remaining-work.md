@@ -350,7 +350,8 @@ login/authentication/control and use a dedicated direct HTTPS media ingress.
 complete source delivery in the [selected plan](direct-https-media-plan.md);
 this entry owns later authorized DNS/TLS/OpenWrt/NAS installation, certificate
 renewal, public exposure/rollback checks and actual cellular acceptance.
-Planning changes no live infrastructure and does not qualify remote playback.
+Source implementation changes no live infrastructure and does not qualify the
+actual external path; see the dated source acceptance under HL-12.
 
 **State:** Linux ARM64 Docker Desktop runtime/persistence passed locally;
 [Synology x86-64 import/download, recreated-container persistence and full backup/restore](validation/synology-deployment-2026-10-19.md)
@@ -1015,27 +1016,28 @@ Native/offline gaps apply to the actual supported client, Trash Amp.
 
 ### HL-12 — HTTPS relay, LAN switching and deferred certificate rotation
 
-**Selected remote-listening plan, 2026-10-23 — design only:** the user requests
-Cloudflare login/authentication/control plus a separate direct public HTTPS
-media-only endpoint. Follow [the direct-media plan](direct-https-media-plan.md)
-for one complete web/Trash Amp delivery: shared session/device-bound scoped
-grants, ordinary HTTPS/ranges, explicit media/router and process-risk boundaries,
-private-first/direct-remote selection with no Cloudflare music fallback, setup UI
-and an actual phone-over-cellular reachability/read test. A local/hairpin check
-cannot qualify Internet reachability. Public activation requires dedicated proxy
-exposure, certificate renewal and the HL-05 deployment checks. The plan reduces
-exposed operations and now selects the user's same-day separate-executable/
-container refinement: read-only selected content, no core database/credentials,
-socket-only scoped authorize/recheck/release and tested network/mount restrictions.
-Read-only mounted data can still be disclosed by a compromised media process;
-shared-kernel escape is a residual risk. Single-origin path proxying remains
-possible through the same separate process; DNS cannot split Cloudflare/direct
-traffic by URL path. Remote delivery remains unimplemented;
-no release, DNS/firewall/NAS change or new implementation assignment is performed
-by this planning update. This selects direct HTTPS instead of the earlier relay/
-Iroh-first remote ordering; those trials, VPN integration and a mobile Trash Amp
-port are not dependencies. Retain the unrelated active assignment below.
+**Direct HTTPS remote media source delivery, 2026-10-23:** the authorized
+[complete web/shared-native implementation](direct-https-media-plan.md) now keeps
+Cloudflare for control/login and selects private media first, then a configured
+direct HTTPS endpoint. A separate executable/container has a read-only archive,
+no networking or capabilities, bounded Unix-socket authority and live revocation.
+The setup page checks a one-use challenge and real early/late track ranges.
+One-origin path composition retains backend isolation with its documented browser
+origin tradeoff. See [dated acceptance and limits](validation/direct-https-media-2026-10-23.md)
+and [operator setup/rollback](../deploy/container/media.md).
 
+**Remaining remote acceptance:** consume the matching shared client in Trash Amp's
+next build, publish only under the normal authorized release workflow, and qualify
+NAS mounts/resources, dedicated proxy/default-host policy, DNS/OpenWrt forwarding,
+public ACME issuance/renewal, IPv4/any published IPv6, firewall/DMZ restrictions for
+the networked TLS frontend, and disable/rollback under HL-05. On the user's actual
+**iPhone Safari**, verify cellular (Wi-Fi off) challenge/ranges, audible playback,
+forward/back seek, screen lock/next track, long-track admission expiry/renewal,
+pause/resume and Wi-Fi/cellular changes. Local Chrome/native/container results do
+not pass those device/public-path gates. No live deployment or installed-client
+change was performed. Direct HTTPS supersedes relay/Iroh-first remote ordering;
+those experiments, VPN integration and a mobile port are not dependencies. Retain
+the unrelated queue below.
 
 **Source delivery, 2026-10-22:** automatic trusted private media selection now
 covers web and Trash Amp, with software-managed certificate trust, streaming

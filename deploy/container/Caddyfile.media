@@ -1,0 +1,45 @@
+{
+    https_port 8443
+    auto_https disable_redirects
+    servers {
+        protocols h1 h2
+        strict_sni_host on
+        max_header_size 16KB
+        timeouts {
+            read_header 10s
+            idle 30s
+        }
+    }
+    # Capability URLs must not enter access/error request logs.
+    log default {
+        format filter {
+            wrap json
+            fields {
+                request>uri delete
+                request>headers>Authorization delete
+                request>headers>Cookie delete
+            }
+        }
+    }
+}
+
+https://{$COLLECTOR_MEDIA_HOST} {
+    tls {
+        issuer acme {
+            disable_http_challenge
+        }
+    }
+    @allowed {
+        path /read /api/v1/identity
+        method GET HEAD OPTIONS
+    }
+    handle @allowed {
+        reverse_proxy unix//run/collector-media/http.sock {
+            header_up -Cookie
+            header_down -Set-Cookie
+        }
+    }
+    handle {
+        respond 404
+    }
+}

@@ -1,32 +1,45 @@
 # Architecture
 
-## Planned direct HTTPS media with Cloudflare control — 2026-10-23
+## Direct HTTPS media with Cloudflare control — source delivery, 2026-10-23
 
-The user selected a dedicated public HTTPS media origin while retaining the
-existing Cloudflare login/authentication/control origin. The
-[direct-media plan](direct-https-media-plan.md) defines the media-only router,
-application-owned scoped browser/native grants, ordinary HTTPS/range playback,
-explicit endpoint eligibility and a phone-over-cellular reachability/read test.
-This is **design only**, not implemented or deployed. HL-12 owns delivery and
-HL-05 owns installation acceptance; it supersedes relay/Iroh-first ordering for
-this remote outcome without replacing existing private playback.
+The separate `collector-media` executable serves scoped audio HEAD/GET, server
+identity and narrow CORS preflights. Its router never composes the general client
+or management router. Login, enrollment and grant issuance remain on the normal
+control origin. Private playback remains first choice; the configured direct
+HTTPS media endpoint is the remote choice, with Cloudflare music fallback refused.
+See the [implemented contract and plan](direct-https-media-plan.md),
+[operator setup](../deploy/container/media.md) and [dated acceptance](validation/direct-https-media-2026-10-23.md).
+HL-12 retains source/client qualification; HL-05 retains live deployment acceptance.
 
-The media listener must not compose the general client or management router,
-accept login cookies/long-lived native credentials, or enable Cloudflare music
-fallback. Grant issuance remains on the authenticated control connection; live
-account/collection checks remain application policy. The user's isolation follow-up
-selects a planned separate `collector-media` executable/container: read-only selected
-content, no core database/secrets or host network, and a dedicated Unix-socket
-authorize/recheck/release adapter in core. The storage adapter resolves immutable
-file locators; media has no app/store/providers dependency and never parses the
-archive catalog. Read-only mounted content can still be disclosed by a compromised
-media process; existing payload layout is not an audio-only confidentiality boundary.
-Containers share the host kernel. These are planned boundaries, not delivered
-isolation. Single-origin path proxying can use the same separated processes;
-two hostnames are needed for the chosen split Cloudflare/direct ingress, not for
-container isolation itself. DNS cannot split one hostname's traffic by URL path.
-External reachability is confirmed by an outside observer, not a server's
-hairpin request to its own public IP, and never establishes authorization.
+Application services own playable-target eligibility, bounded hashed grants/read
+handles and live session/device/account/collection authorization. The storage
+adapter resolves an authorized immutable relative file locator; media never parses
+archive manifests or opens the account database. `collector-media` depends only
+on shared DTO/core value types and maintained HTTP/file libraries, with no
+app/store/providers dependency. Both HTTP adapters reuse its bounded connection
+mechanism. Audio/format algorithms remain in the existing shared libraries.
+
+The supplied Compose profile gives media a read-only archive/rootfs, no core
+state/config/TLS keys, no capabilities and `network_mode: none`. Named volumes
+share two filesystem Unix sockets: frontend-to-media HTTP and media-to-core's
+restricted authorize/recheck/release/identity adapter. Core still writes through
+its own archive view. Media uses the existing numeric UID to read private archive
+permissions; mount/network/PID/capability boundaries provide isolation. A Linux
+startup guard refuses writable archive or nested mounts. The archive layout is
+not an audio-only confidentiality boundary: compromised media can disclose mounted
+content. Containers share the host kernel. Caddy has separate certificate state
+and ordinary networking; restricting frontend egress/LAN access requires target
+host firewall/DMZ policy and is not implied by media's network isolation.
+
+A single directly hosted origin can proxy a fixed media prefix to the same separate
+process, stripping cookies on that upstream. It retains filesystem isolation but
+shares browser-origin trust. Separate hostnames supply the chosen Cloudflare/direct
+routing and browser-origin separation; DNS cannot split traffic by URL path.
+External reachability requires an outside observer. The authenticated test page
+checks a fresh one-use challenge and bounded early/late reads from a queued track;
+its cellular declaration is user-supplied, not network attestation. Actual iPhone
+Safari, public ACME/renewal, router and NAS acceptance remain separate from local
+source tests. No live infrastructure is changed by source implementation.
 
 ## Existing private playback and dated LAN design
 

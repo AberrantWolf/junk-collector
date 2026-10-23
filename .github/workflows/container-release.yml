@@ -114,6 +114,7 @@ jobs:
           skopeo copy --override-os linux --override-arch "$ARCHITECTURE" "oci-archive:/tmp/collector-$ARCHITECTURE.oci.tar" docker-daemon:junk-collector:release-smoke
           python3 scripts/container_validation.py smoke-identity "/tmp/collector-$ARCHITECTURE.oci.tar" "$ARCHITECTURE"
           python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
+          python3 scripts/check_media_container.py junk-collector:release-smoke --proxy
       - name: Record platform digest
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
