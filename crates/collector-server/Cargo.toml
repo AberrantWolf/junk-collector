@@ -12,6 +12,7 @@ collector-modules.workspace = true
 collector-providers.workspace = true
 collector-store.workspace = true
 collector-client.workspace = true
+collector-media = { path = "../collector-media" }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

@@ -1,11 +1,11 @@
 // Actual browser setup, purchased-file intake and listening against an isolated server.
 import {chromium,expect} from '@playwright/test';
 import {spawn,spawnSync} from 'node:child_process';
-import {mkdtemp,mkdir,writeFile,copyFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,copyFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash,X509Certificate} from 'node:crypto';
 import {clickAction} from './actions.mjs';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-purchases-'));
@@ -24,7 +24,9 @@ let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignor
 let browser,page;
 try{
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19861/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ // Trust only this disposable fixture's SPKI, including its service-worker fetch.
+ const spki=createHash('sha256').update(new X509Certificate(await readFile(path.join(scratch,'state/tls/cert.pem'))).publicKey.export({type:'spki',format:'der'})).digest('base64');
+ browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:[`--ignore-certificate-errors-spki-list=${spki}`]});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -66,9 +68,9 @@ try{
  // Close an album while its real server response is withheld. A later response
  // cannot replace a new track selected after reopening the panel.
  let releaseAlbum;const heldAlbum=new Promise(resolve=>{releaseAlbum=resolve;});
- let albumRequested;const requestedAlbum=new Promise(resolve=>{albumRequested=resolve;});
- await page.route(`**/api/v1/items/${item}/client-playback`,async route=>{const response=await route.fetch();albumRequested();await heldAlbum;await route.fulfill({response}).catch(()=>{});},{times:1});
- await tracks.getByRole('button',{name:'Play album',exact:true}).click();await requestedAlbum;
+ let albumRequestError;let albumRequested;const requestedAlbum=new Promise(resolve=>{albumRequested=resolve;});
+ await page.route(`**/api/v1/items/${item}/client-playback`,async route=>{try{const response=await route.fetch();albumRequested();await heldAlbum;await route.fulfill({response}).catch(()=>{});}catch(error){albumRequestError=error;albumRequested();await route.abort().catch(()=>{});}},{times:1});
+ await tracks.getByRole('button',{name:'Play album',exact:true}).click();await requestedAlbum;assert.ifError(albumRequestError);
  await page.getByRole('button',{name:'Close details',exact:true}).click();
  await page.locator('.collection-row').filter({hasText:'Purchased album'}).click();
  await tracks.locator('.music-track').last().getByRole('button',{name:/^Play track /}).click();
@@ -78,6 +80,7 @@ try{
  await clickAction(tracks,'Add album to list');const chooser=page.getByRole('dialog',{name:'Add to list',exact:true});await chooser.getByLabel('New list name').fill('Purchased playlist');await chooser.getByRole('button',{name:'Append to list',exact:true}).click();await chooser.getByRole('button',{name:'Open list',exact:true}).click();
  const lists=page.getByRole('region',{name:'Collection lists'});await expect(lists.locator('.saved-list-entries li')).toHaveCount(2);await lists.getByRole('button',{name:'Play playlist',exact:true}).click();
  await page.waitForFunction(()=>{const a=document.querySelector('.music-player audio');if(a){a.loop=true;return !a.paused&&a.currentTime>.02;}return false;});
+ await page.waitForFunction(()=>navigator.mediaSession.metadata?.artist==='Digital artist'&&navigator.mediaSession.metadata.album==='Purchased album');
  await page.locator('.music-player audio').evaluate(a=>{a.loop=false;});
  await page.getByRole('button',{name:'Next track',exact:true}).click();
  await page.waitForFunction(()=>{const a=document.querySelector('.music-player audio');if(a&&a.currentSrc.endsWith('/1')){a.loop=true;return !a.paused&&a.currentTime>.02;}return false;});

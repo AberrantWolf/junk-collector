@@ -1,5 +1,57 @@
 # Implementation status
 
+## Browser lock-screen metadata — beta.5 preparation, 2026-10-23
+
+The web player now publishes track title, album artist, album and available cover
+art using the standard Media Session API, for album and playlist playback. OS
+play/pause, previous/next and seeking use the existing player and permission path.
+Track transitions update metadata; release/logout/detachment clear metadata and
+handlers. Older saved queue entries retain their title/album even without the new
+optional artist field. [Real Chrome acceptance](validation/browser-media-session-2026-10-23.md)
+covers metadata, controls, automatic transitions and cleanup. Actual iPhone lock-screen metadata rendering awaits the
+updated deployment; the earlier accepted locked track transition did not test it.
+
+## Direct HTTPS remote media — source delivered and NAS deployed, 2026-10-23
+
+Cloudflare login/authentication/control can now issue short-lived, exact-track
+browser/native grants for a configured direct HTTPS media origin. The separate
+`collector-media` executable reads only through the configured archive root,
+supports full/single/open/suffix ranges and HEAD/ETag/If-Range, and continuously
+checks live parent/collection authority over a restricted core Unix socket.
+It never accepts login cookies or long-lived account credentials. The shared
+native client retains system HTTPS trust for media independently of control trust;
+the web player uses ordinary anonymous HTTPS audio and preserves position on
+lease renewal. Private routes stay preferred and control-origin music remains
+refused. No VPN, relay, HLS or mobile app was introduced.
+
+The optional Compose overlay gives media no networking, read-only archive/root,
+no capabilities, dedicated socket named volumes and bounded resources. Startup
+rejects effective writable archive/nested mounts. A dedicated Caddy frontend owns
+TLS and certificate state. Its networking remains a distinct firewall/DMZ concern;
+containers share the host kernel and mounted archive confidentiality is not isolated.
+One-origin media-path composition also works with cookie stripping and its stated
+browser-origin tradeoff. The normal release image includes both executables for
+separate services; an optional Docker target supplies a lean media-only image.
+
+The `/remote-media` page checks a fresh one-use challenge and real queued-track
+early/late ranges without full-file hashing or changing network settings. A local
+success cannot prove WAN reachability. See [contract](direct-https-media-plan.md),
+[setup/rollback](../deploy/container/media.md) and [acceptance and limits](validation/direct-https-media-2026-10-23.md).
+The authorized [NAS deployment](validation/direct-https-media-nas-2026-10-23.md)
+now runs the exact AMD64 source candidate with DNS-only media, IPv4 TCP forwarding
+and a trusted public certificate. Disposable actual-NAS isolation and production
+route/identity/CORS checks pass. DSM uses one-CPU affinity instead of unsupported
+CFS quotas; its process-count limit is not enforced. Caddy remains networked
+without a new DMZ/egress restriction. The operator reports successful basic
+**iPhone Safari cellular playback**, seeking and next/previous, with Direct HTTPS
+displayed; the setup test appeared to pass without a captured per-stage result.
+The operator also heard a track change while the phone was locked, accepting that
+background transition. Extended sessions, long-track lease boundaries, network transitions
+and actual public certificate renewal remain unqualified. No new release was published.
+Trash Amp must consume the matching shared
+client revision when rebuilt; sibling compatibility is checked separately from
+changing its existing uncommitted work. HL-12 and HL-05 retain those external checks.
+
 ## LAN candidate selection — source repair accepted, 2026-10-23
 
 The deployed beta.4 discovery could omit the host LAN address after sorting and
@@ -9,8 +61,9 @@ deduplicating before the eight-candidate bound. Explicit binds, private address
 eligibility and both clients' pin/identity checks remain. The user confirmed the
 explicit NAS bind restores Trash Amp. Five new regression cases, full workspace
 checks, real Chrome playback/seeking on explicit and wildcard listeners, and the
-web smoke passed. This is not yet a published image or live NAS update; retain
-the working bind until release/deployment acceptance. See
+web smoke passed. The repair is included in the later direct-media NAS source
+candidate; the explicit working bind is retained and wildcard LAN discovery is
+not requalified on that installation. No new release was published. See
 [implementation](automatic-private-playback.md) and [dated evidence](validation/lan-candidate-selection-2026-10-23.md).
 
 ## Build-once container publication — delivered and qualified, 2026-10-22

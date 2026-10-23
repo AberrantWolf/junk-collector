@@ -1,5 +1,14 @@
 # HTTPS relay and automatic LAN connections
 
+**Remote direction selected, 2026-10-23:** use the
+[direct HTTPS media plan](direct-https-media-plan.md): existing Cloudflare control/
+login plus a dedicated direct public media-only origin. This is design only and
+supersedes the relay/Iroh-first remote ordering below for that delivery. Existing
+private playback remains implemented separately; HL-12 is still the only queue.
+The same-day isolation refinement selects a separate read-only media executable/
+container with a narrow core authorization socket. One-hostname proxy composition
+can retain that process boundary; the chosen home setup uses two ingress origins.
+
 **Source update, 2026-10-22:** [automatic private playback](automatic-private-playback.md)
 is now implemented for web and Trash Amp. See [dated acceptance](validation/automatic-private-playback-2026-10-22.md)
 and the [sole queue](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation)

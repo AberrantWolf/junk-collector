@@ -158,7 +158,7 @@ def bundle(root, expected, record, destination):
     if not DIGEST.fullmatch(record.get("digest", "")) or record.get("reference") != expected["image"] + "@" + record["digest"]:
         raise ValueError("Bundle requires the exact checked manifest digest")
     destination.mkdir(parents=True, exist_ok=False)
-    names = ("compose.yaml", "compose.inbox.yaml", ".env.example", "collector.proxy.toml.example",
+    names = ("compose.yaml", "compose.inbox.yaml", "compose.media.yaml", "Caddyfile.media", "media.md", "initialize-media.sh", ".env.example", "collector.proxy.toml.example",
              "README.md", "recovery.md", "snapshot-recovery.md", "freeze-tar-time.py")
     for name in names:
         shutil.copyfile(root / "deploy/container" / name, destination / name)

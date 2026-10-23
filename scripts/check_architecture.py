@@ -11,12 +11,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED = {
     "collector-core": set(),
     "collector-api-types": {"collector-core"},
+    "collector-media": {"collector-core", "collector-api-types"},
     "collector-modules": {"collector-core"},
     "collector-app": {"collector-core", "collector-modules", "collector-api-types"},
     "collector-providers": {"collector-core", "collector-api-types", "collector-app", "collector-modules"},
     "collector-store": {"collector-core", "collector-app"},
     "collector-client": {"collector-core", "collector-api-types"},
-    "collector-server": {"collector-core", "collector-api-types", "collector-modules", "collector-app", "collector-providers", "collector-store", "collector-client"},
+    "collector-server": {"collector-core", "collector-api-types", "collector-modules", "collector-app", "collector-providers", "collector-store", "collector-client", "collector-media"},
 }
 FORBIDDEN_IN_DOMAIN = {"tokio", "reqwest", "axum", "rusqlite", "sqlx", "slint", "egui", "eframe", "cpal"}
 errors = []

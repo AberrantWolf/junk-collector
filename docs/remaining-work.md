@@ -1,5 +1,15 @@
 # Remaining work — home-lab priorities
 
+**Active authorized release — beta.5 (2026-10-23):** merge the direct HTTPS media
+delivery, publish the next preview using exact-source native image validation,
+then update the existing NAS core/media services to that verified release while
+retaining a consistent recovery point and all working media/control settings.
+[Release notes](releases/v0.1.0-beta.5.md) describe the candidate; publication and
+release-image NAS acceptance are not yet complete. The source candidate already
+has operator-accepted iPhone cellular playback, seeking and locked track change.
+Include the subsequently requested browser Media Session metadata and controls;
+qualify actual iPhone lock-screen title/artist/album after the release update.
+
 **Completed source repair — LAN candidates crowded out by container bridges (2026-10-23):**
 `codex/prioritize-lan-playback-addresses` prioritizes the kernel-selected private
 source and ordinary interfaces before container bridges, keeping trust and the
@@ -343,6 +353,22 @@ mechanisms remain useful; do not remove working services just to retire a client
 ## 2. Secure and qualify the actual home-server deployment
 
 ### HL-05 — Linux, NAS and optional public-Internet deployment
+
+**Requested remote-media deployment design, 2026-10-23:** retain Cloudflare for
+login/authentication/control and use a dedicated direct HTTPS media ingress.
+[HL-12](#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation) owns the
+complete source delivery in the [selected plan](direct-https-media-plan.md);
+this entry owns later authorized DNS/TLS/OpenWrt/NAS installation, certificate
+renewal, public exposure/rollback checks and actual cellular acceptance.
+The separately authorized [NAS deployment](validation/direct-https-media-nas-2026-10-23.md)
+now passes disposable actual-host isolation, retained-state service update,
+DNS-only IPv4/OpenWrt forwarding and initial public certificate/route checks.
+The operator accepts basic iPhone Safari cellular playback, seeking and
+next/previous with Direct HTTPS displayed, plus an audible track change while
+locked. Extended-session/network-change
+behavior, later renewal and disable/rollback remain open.
+DSM CPU affinity replaces unsupported CFS quotas; the process-count limit is not
+enforced. Caddy's separate frontend DMZ/egress policy remains unimplemented.
 
 **State:** Linux ARM64 Docker Desktop runtime/persistence passed locally;
 [Synology x86-64 import/download, recreated-container persistence and full backup/restore](validation/synology-deployment-2026-10-19.md)
@@ -1007,6 +1033,34 @@ Native/offline gaps apply to the actual supported client, Trash Amp.
 
 ### HL-12 — HTTPS relay, LAN switching and deferred certificate rotation
 
+**Direct HTTPS remote media source delivery, 2026-10-23:** the authorized
+[complete web/shared-native implementation](direct-https-media-plan.md) now keeps
+Cloudflare for control/login and selects private media first, then a configured
+direct HTTPS endpoint. A separate executable/container has a read-only archive,
+no networking or capabilities, bounded Unix-socket authority and live revocation.
+The setup page checks a one-use challenge and real early/late track ranges.
+One-origin path composition retains backend isolation with its documented browser
+origin tradeoff. See [dated acceptance and limits](validation/direct-https-media-2026-10-23.md)
+and [operator setup/rollback](../deploy/container/media.md).
+
+**Remaining remote acceptance:** consume the matching shared client in Trash Amp's
+next build, publish only under the normal authorized release workflow, and qualify
+later public ACME renewal, any future IPv6, firewall/DMZ restrictions for
+the networked TLS frontend, and disable/rollback under HL-05. The authorized
+[NAS deployment](validation/direct-https-media-nas-2026-10-23.md) passes actual-host
+fixture isolation, production mount/route inspection, dedicated DNS-only IPv4,
+OpenWrt forwarding, initial public ACME issuance and proxy path/Host checks.
+DSM CPU affinity is enforced; its process-count cap is unsupported. The operator
+reports basic **iPhone Safari cellular** listening, seeking and next/previous
+working, with Direct HTTPS displayed. The setup test appeared to pass; exact
+challenge/range messages were not captured. A subsequent audible track change
+while locked accepts that background transition. Remaining device checks are
+extended background sessions, long-track admission expiry/renewal, explicit
+pause/resume, core restart and Wi-Fi/cellular changes. Local Chrome/native/container
+results do not pass those device gates. No installed Trash Amp client change was performed.
+Direct HTTPS supersedes relay/Iroh-first remote ordering;
+those experiments, VPN integration and a mobile port are not dependencies. Retain
+the unrelated queue below.
 
 **Source delivery, 2026-10-22:** automatic trusted private media selection now
 covers web and Trash Amp, with software-managed certificate trust, streaming

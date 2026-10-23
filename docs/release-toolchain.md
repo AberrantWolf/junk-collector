@@ -1,5 +1,10 @@
 # Release Rust toolchain
 
+Beta.5 preparation, 2026-10-23: rechecked the official current-stable manifest;
+its date remains 2026-10-15 and Rust/rustc remains 1.99.1
+(`58cf8f9c3`, 2026-10-13). Installed toolchain, CI and Docker builder agree;
+no toolchain or shared-library dependency update is required.
+
 Beta.3 preparation, 2026-10-22: the official stable manifest was checked again;
 its date remains 2026-10-15 and its Rust/rustc version is 1.99.1
 (`58cf8f9c3`, 2026-10-13), matching the installed toolchain, CI and Docker builder.

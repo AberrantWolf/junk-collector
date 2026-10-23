@@ -11,6 +11,8 @@ pub(crate) struct MediaRoute {
     pub client: Client,
     pub base: Url,
     pub local: bool,
+    pub remote: bool,
+    pub grant: Option<collector_api_types::RemoteMediaGrant>,
 }
 impl MediaRoute {
     pub fn request(
@@ -22,10 +24,73 @@ impl MediaRoute {
         if url.origin() != self.base.origin() || owner.enrolled.expires_at <= chrono::Utc::now() {
             return Err(Error::CredentialRevoked);
         }
-        Ok(self
-            .client
-            .request(method, url)
-            .bearer_auth(&owner.enrolled.credential))
+        let credential = if self.remote {
+            if url.path() != self.base.join("read").map_err(|_| Error::Forbidden)?.path()
+                || url.query().is_some()
+                || url.fragment().is_some()
+                || !url.username().is_empty()
+                || url.password().is_some()
+            {
+                return Err(Error::Forbidden);
+            }
+            self.grant
+                .as_ref()
+                .filter(|g| g.expires_at > chrono::Utc::now())
+                .map(|g| g.token.as_str())
+                .ok_or(Error::CredentialRevoked)?
+        } else {
+            &owner.enrolled.credential
+        };
+        Ok(self.client.request(method, url).bearer_auth(credential))
+    }
+    pub async fn target(
+        &mut self,
+        owner: &EnrolledClient,
+        target: collector_api_types::PlaybackTarget,
+    ) -> Result<Url> {
+        if !self.remote {
+            return self
+                .base
+                .join(&format!(
+                    "api/v1/items/{}/representations/{}/{}",
+                    target.item_id, target.representation_id, target.file_index
+                ))
+                .map_err(|_| Error::Invalid("invalid media URL".into()));
+        }
+        let response = owner
+            .request(
+                Method::POST,
+                owner.api_url("api/v1/playback/remote-grants")?,
+            )?
+            .json(&collector_api_types::RemoteGrantRequest {
+                target: Some(target),
+            })
+            .send()
+            .await
+            .map_err(|_| Error::Unavailable("direct media grant unavailable".into()))?;
+        if !response.status().is_success() {
+            return Err(Error::Forbidden);
+        }
+        let grant: collector_api_types::RemoteMediaGrant =
+            crate::bounded_json(response, 16384).await?;
+        let mut url = Url::parse(&grant.url)
+            .map_err(|_| Error::Invalid("invalid direct media URL".into()))?;
+        if url.origin() != self.base.origin()
+            || url.path() != self.base.join("read").map_err(|_| Error::Forbidden)?.path()
+            || grant.server_id != owner.enrolled.server_id
+            || grant.expires_at <= chrono::Utc::now()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.fragment().is_some()
+            || grant.token.len() != 64
+            || !grant.token.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(Error::Forbidden);
+        }
+        // Native uses only a scoped Authorization header, never a secret-bearing URL.
+        url.set_query(None);
+        self.grant = Some(grant);
+        Ok(url)
     }
 }
 fn private_address(ip: IpAddr) -> bool {
@@ -153,6 +218,8 @@ impl EnrolledClient {
                     client,
                     base,
                     local: true,
+                    remote: false,
+                    grant: None,
                 })
             });
         }
@@ -161,11 +228,45 @@ impl EnrolledClient {
                 return Ok(route);
             }
         }
+        if let Some(endpoint) = descriptor.remote_media {
+            let base = Url::parse(&endpoint.base_url)
+                .map_err(|_| Error::Invalid("invalid direct media endpoint".into()))?;
+            if base.scheme() != "https"
+                || !base.username().is_empty()
+                || base.password().is_some()
+                || base.query().is_some()
+                || base.fragment().is_some()
+                || !base.path().ends_with('/')
+                || endpoint.server_id != self.enrolled.server_id
+            {
+                return Err(Error::Forbidden);
+            }
+            // This client uses system roots, independently of the saved control certificate.
+            let client = crate::system_https_client()?;
+            let identity = client
+                .get(base.join("api/v1/identity").map_err(|_| Error::Forbidden)?)
+                .send()
+                .await
+                .map_err(|_| Error::Unavailable("direct HTTPS media is unreachable".into()))?;
+            let identity: crate::Identity = crate::bounded_json(identity, 4096).await?;
+            if identity.server_id != self.enrolled.server_id {
+                return Err(Error::Forbidden);
+            }
+            return Ok(MediaRoute {
+                client,
+                base,
+                local: false,
+                remote: true,
+                grant: None,
+            });
+        }
         if descriptor.remote_media_allowed {
             return Ok(MediaRoute {
                 client: self.client.clone(),
                 base: self.api_url("")?,
                 local: false,
+                remote: false,
+                grant: None,
             });
         }
         Err(Error::Unavailable("No trusted local playback route is reachable. Public media fallback is disabled. Check local network access and the server firewall.".into()))

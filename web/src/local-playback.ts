@@ -3,13 +3,16 @@ import type {components} from './generated/api';
 type Descriptor=components['schemas']['LocalPlaybackDescriptor'];
 type Target=components['schemas']['PlaybackTarget'];
 type Grant=components['schemas']['BrowserPlaybackGrant'];
+type RemoteGrant=components['schemas']['RemoteMediaGrant'];
+const remoteGrants=new Map<string,RemoteGrant>();
+let remoteBase:URL|undefined;
 interface Transport {ready:Promise<void>;closed:Promise<unknown>;close():void;createBidirectionalStream():Promise<{readable:ReadableStream<Uint8Array>;writable:WritableStream<Uint8Array>}>}
 interface TransportConstructor {new(url:string,options:{serverCertificateHashes:{algorithm:string;value:Uint8Array}[]}):Transport}
 const constructor=()=>(globalThis as unknown as {WebTransport?:TransportConstructor}).WebTransport;
 let route:Transport|undefined;let descriptor:Descriptor|undefined;let refreshed=0;let epoch=0;let selecting:Promise<void>|undefined;let registration:Promise<void>|undefined;
 const grants=new Map<string,Grant>();
 export let playbackRoute='Checking local playback';
-function reset(){epoch++;route?.close();route=undefined;descriptor=undefined;refreshed=0;grants.clear();selecting=undefined;playbackRoute='Checking local playback';}
+function reset(){epoch++;route?.close();route=undefined;descriptor=undefined;refreshed=0;grants.clear();remoteGrants.clear();remoteBase=undefined;selecting=undefined;playbackRoute='Checking local playback';}
 window.addEventListener('collector-api-identity-changed',reset);
 window.addEventListener('online',reset);
 (navigator as unknown as {connection?:EventTarget}).connection?.addEventListener('change',reset);
@@ -20,10 +23,11 @@ async function select(){
  const [advertised,server]=await Promise.all([api<Descriptor>('/playback/routes'),api<{server_id:string}>('/identity')]);
  if(token!==epoch)throw new Error('Playback account changed.');
  if(advertised.server_id!==server.server_id||advertised.endpoints.length>8)throw new Error('Playback server identity mismatch.');
- descriptor=advertised;refreshed=Date.now();
+ if(descriptor?.remote_media?.base_url!==advertised.remote_media?.base_url)remoteGrants.clear();
+ remoteBase=undefined;descriptor=advertised;refreshed=Date.now();
  let permission:PermissionState|undefined;
  for(const name of ['local-network','local-network-access']){try{permission=(await navigator.permissions.query({name:name as PermissionName})).state;break;}catch{}}
- if(permission==='denied'&&!advertised.remote_media_allowed)throw new Error('Local network access is blocked for Collector. Allow it in this site’s permissions, then use Play to retry. Public media fallback is disabled.');
+ if(permission==='denied'&&!advertised.remote_media_allowed&&!advertised.remote_media)throw new Error('Local network access is blocked for Collector. Allow it in this site’s permissions, then use Play to retry. Public media fallback is disabled.');
  const WT=constructor();
  if(WT&&advertised.endpoints.length){
   // The first verified candidate wins. No credential is sent during the handshake.
@@ -31,18 +35,28 @@ async function select(){
    const url=new URL(endpoint.webtransport_url);if(url.protocol!=='https:'||!privateHost(url.hostname)||url.username||url.password||url.pathname!=='/playback'||url.search||url.hash||!/^([0-9a-f]{2}){32}$/.test(endpoint.certificate_sha256)||Date.parse(endpoint.expires_at)<=Date.now()||Date.parse(endpoint.expires_at)>Date.now()+8*86400000)throw new Error('Invalid local playback endpoint.');
    const pin=Uint8Array.from(endpoint.certificate_sha256.match(/../g)!,b=>parseInt(b,16));
    const connection=new WT(url.href,{serverCertificateHashes:[{algorithm:'sha-256',value:pin}]});void connection.closed.catch(()=>{});
-   try{await bounded(connection.ready,permission==='prompt'?60000:2500,'Local connection timed out.');if(token!==epoch)throw new Error('Playback account changed.');return connection;}catch(error){connection.close();throw error;}
+   try{await bounded(connection.ready,permission==='prompt'&&!advertised.remote_media?60000:2500,'Local connection timed out.');if(token!==epoch)throw new Error('Playback account changed.');return connection;}catch(error){connection.close();throw error;}
   });
   try{
    const winner=await Promise.any(candidates);for(const candidate of candidates)void candidate.then(connection=>{if(connection!==winner)connection.close();},()=>{});
    if(token!==epoch){winner.close();throw new Error('Playback account changed.');}
    route?.close();route=winner;playbackRoute='Direct playback';void winner.closed.finally(()=>{if(route===winner){route=undefined;refreshed=0;}}).catch(()=>{});return;
-  }catch{if(!advertised.remote_media_allowed)throw new Error('No trusted local playback route is reachable. Allow Local network access for this site, then use Play to retry. Check that the server allows local UDP playback. Public media fallback is disabled.');}
+  }catch{if(!advertised.remote_media_allowed&&!advertised.remote_media)throw new Error('No trusted local playback route is reachable. Allow Local network access for this site, then use Play to retry. Check that the server allows local UDP playback. Public media fallback is disabled.');}
+ }
+ if(advertised.remote_media){
+  const base=new URL(advertised.remote_media.base_url);
+  if(base.protocol!=='https:'||base.username||base.password||base.search||base.hash||!base.pathname.endsWith('/')||advertised.remote_media.server_id!==server.server_id)throw new Error('Invalid direct HTTPS media endpoint.');
+  const response=await fetch(new URL('api/v1/identity',base),{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(5000),cache:'no-store'});
+  if(!response.ok||Number(response.headers.get('content-length'))>4096)throw new Error('Direct HTTPS media is unreachable.');
+  const reader=response.body?.getReader();if(!reader)throw new Error('Missing direct media identity.');const chunks:Uint8Array[]=[];let length=0;
+  try{while(true){const part=await reader.read();if(part.done)break;length+=part.value.length;if(length>4096)throw new Error('Oversized direct media identity.');chunks.push(part.value);}}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+  const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}if(JSON.parse(new TextDecoder().decode(bytes)).server_id!==server.server_id)throw new Error('Direct media identity mismatch.');
+  if(token!==epoch)throw new Error('Playback account changed.');remoteBase=base;playbackRoute='Direct HTTPS playback';return;
  }
  if(advertised.remote_media_allowed){playbackRoute='HTTPS playback';return;}
  throw new Error(WT?'No local playback endpoint is available. Public media fallback is disabled.':'This browser does not support secure local playback. Use a browser with WebTransport support, or the Trash Amp app. Public media fallback is disabled.');
 }
-async function ensureRoute(){if(route||descriptor&&descriptor.remote_media_allowed&&Date.now()-refreshed<30000)return;if(!selecting){const pending=select();selecting=pending;void pending.finally(()=>{if(selecting===pending)selecting=undefined;}).catch(()=>{});}return selecting;}
+async function ensureRoute(){if(route||descriptor&&(descriptor.remote_media_allowed||remoteBase)&&Date.now()-refreshed<30000)return;if(!selecting){const pending=select();selecting=pending;void pending.finally(()=>{if(selecting===pending)selecting=undefined;}).catch(()=>{});}return selecting;}
 async function install(){if(!('serviceWorker'in navigator))throw new Error('Local playback needs service worker support in a secure browser.');await navigator.serviceWorker.register('/playback-sw.js',{scope:'/',updateViaCache:'none'});await navigator.serviceWorker.ready;if(!navigator.serviceWorker.controller)await bounded(new Promise<void>(resolve=>navigator.serviceWorker.addEventListener('controllerchange',()=>resolve(),{once:true})),5000,'Reload Collector to finish enabling local playback.');}
 export async function prepareLocalPlayback(signal:AbortSignal){signal.throwIfAborted();await ensureRoute();signal.throwIfAborted();if(route){registration??=install().catch(error=>{registration=undefined;throw error;});await registration;}signal.throwIfAborted();return playbackRoute;}
 function targetFromPath(path:string):Target {const parts=/^\/api\/v1\/items\/([0-9a-f-]+)\/representations\/([0-9a-f-]+)\/(\d+)$/.exec(path);if(!parts)throw new Error('Invalid media target');return {item_id:parts[1],representation_id:parts[2],file_index:Number(parts[3])};}
@@ -84,3 +98,20 @@ export async function checkPlaybackAccess(path:string,signal:AbortSignal){
  const grant=await api<Grant>('/playback/grants',{method:'POST',body:JSON.stringify(targetFromPath(path)),signal});
  if(grants.size>=8)grants.delete(grants.keys().next().value!);grants.set(path,grant);
 }
+
+// Public HTTPS media uses an ordinary element URL, independent of the private worker.
+export async function playbackUrl(path:string,signal:AbortSignal,refresh=false){
+ await prepareLocalPlayback(signal);if(!remoteBase||route)return path;
+ const submitted=epoch;const base=remoteBase;let grant=refresh?undefined:remoteGrants.get(path);
+ if(!grant||Date.parse(grant.expires_at)-Date.now()<15000){
+  grant=await api<RemoteGrant>('/playback/remote-grants',{method:'POST',body:JSON.stringify({target:targetFromPath(path)}),signal});
+  const url=new URL(grant.url);
+  if(submitted!==epoch||!descriptor||grant.server_id!==descriptor.server_id||url.origin!==base.origin||url.pathname!==new URL('read',base).pathname||url.username||url.password||url.hash||!/^([0-9a-f]{2}){32}$/.test(grant.token)||url.search!==`?grant=${grant.token}`||!Number.isFinite(Date.parse(grant.expires_at))||Date.parse(grant.expires_at)<=Date.now())throw new Error('Direct media authority changed.');
+  if(remoteGrants.size>=32)remoteGrants.delete(remoteGrants.keys().next().value!);remoteGrants.set(path,grant);
+ }
+ signal.throwIfAborted();return grant.url;
+}
+
+export function remotePlaybackExpired(path:string){const grant=remoteGrants.get(path);return !!grant&&Date.parse(grant.expires_at)<=Date.now();}
+
+export function remotePlaybackActive(path:string){return !!remoteBase&&!route&&remoteGrants.has(path);}

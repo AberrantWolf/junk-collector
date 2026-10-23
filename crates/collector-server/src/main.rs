@@ -148,6 +148,7 @@ struct Config {
     local_playback_bind: Option<SocketAddr>,
     local_playback_enabled: bool,
     remote_media_allowed: bool,
+    remote_media: Option<collector_server::remote_media::Configuration>,
     multi_user: bool,
     exposure: Exposure,
     authentication_origin: Option<String>,
@@ -207,6 +208,7 @@ impl Default for Config {
             local_playback_bind: Some("0.0.0.0:9845".parse().unwrap()),
             local_playback_enabled: true,
             remote_media_allowed: false,
+            remote_media: None,
             multi_user: false,
             exposure: Exposure::default(),
             authentication_origin: None,
@@ -747,6 +749,13 @@ async fn main() -> Result<()> {
         Config::default()
     };
     config.jobs.validate()?;
+    if let Some(remote) = &config.remote_media {
+        remote.validate()?;
+        anyhow::ensure!(
+            !config.remote_media_allowed,
+            "a separate remote media endpoint requires control-origin media fallback disabled"
+        );
+    }
     if let Some(reminder) = &config.backup_reminder {
         reminder.validate()?;
     }
@@ -1079,6 +1088,13 @@ async fn main() -> Result<()> {
                 None => None,
             };
             state.remote_media_allowed = config.remote_media_allowed;
+            state.remote_media = config.remote_media.clone().map(Arc::new);
+            let _media_authority = match &config.remote_media {
+                Some(remote) => {
+                    Some(collector_server::remote_media::start(state.clone(), remote).await?)
+                }
+                None => None,
+            };
             state.direct_media = false;
             let public = router(state.clone());
             state.direct_media = true;

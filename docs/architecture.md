@@ -1,5 +1,57 @@
 # Architecture
 
+## Browser now-playing presentation
+
+The web music player publishes title, album artist, album and authorized artwork
+through the standard Media Session API. Album/list presentation supplies metadata
+to the personal queue; the browser adapter owns OS metadata and controls, while
+existing player actions retain playback routing and authorization. It updates on
+track changes and clears metadata/handlers when playback is released or its audio
+element detaches. Unsupported browser actions do not prevent ordinary playback.
+
+## Direct HTTPS media with Cloudflare control — source delivery, 2026-10-23
+
+The separate `collector-media` executable serves scoped audio HEAD/GET, server
+identity and narrow CORS preflights. Its router never composes the general client
+or management router. Login, enrollment and grant issuance remain on the normal
+control origin. Private playback remains first choice; the configured direct
+HTTPS media endpoint is the remote choice, with Cloudflare music fallback refused.
+See the [implemented contract and plan](direct-https-media-plan.md),
+[operator setup](../deploy/container/media.md) and [dated acceptance](validation/direct-https-media-2026-10-23.md).
+HL-12 retains source/client qualification; HL-05 retains live deployment acceptance.
+
+Application services own playable-target eligibility, bounded hashed grants/read
+handles and live session/device/account/collection authorization. The storage
+adapter resolves an authorized immutable relative file locator; media never parses
+archive manifests or opens the account database. `collector-media` depends only
+on shared DTO/core value types and maintained HTTP/file libraries, with no
+app/store/providers dependency. Both HTTP adapters reuse its bounded connection
+mechanism. Audio/format algorithms remain in the existing shared libraries.
+
+The supplied Compose profile gives media a read-only archive/rootfs, no core
+state/config/TLS keys, no capabilities and `network_mode: none`. Named volumes
+share two filesystem Unix sockets: frontend-to-media HTTP and media-to-core's
+restricted authorize/recheck/release/identity adapter. Core still writes through
+its own archive view. Media uses the existing numeric UID to read private archive
+permissions; mount/network/PID/capability boundaries provide isolation. A Linux
+startup guard refuses writable archive or nested mounts. The archive layout is
+not an audio-only confidentiality boundary: compromised media can disclose mounted
+content. Containers share the host kernel. Caddy has separate certificate state
+and ordinary networking; restricting frontend egress/LAN access requires target
+host firewall/DMZ policy and is not implied by media's network isolation.
+
+A single directly hosted origin can proxy a fixed media prefix to the same separate
+process, stripping cookies on that upstream. It retains filesystem isolation but
+shares browser-origin trust. Separate hostnames supply the chosen Cloudflare/direct
+routing and browser-origin separation; DNS cannot split traffic by URL path.
+External reachability requires an outside observer. The authenticated test page
+checks a fresh one-use challenge and bounded early/late reads from a queued track;
+its cellular declaration is user-supplied, not network attestation. Actual iPhone
+Safari, public ACME/renewal, router and NAS acceptance remain separate from local
+source tests. No live infrastructure is changed by source implementation.
+
+## Existing private playback and dated LAN design
+
 The accepted home-listening **stopgap** uses a dedicated manual LAN HTTPS hostname,
 `collector-lan.awkwardexplorer.com`, resolving to the reserved NAS address even
 through public DNS. It serves the same public/client listener and account store;

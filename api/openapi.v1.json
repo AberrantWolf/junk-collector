@@ -7310,6 +7310,77 @@
         }
       }
     },
+    "/api/v1/playback/remote-grants": {
+      "post": {
+        "operationId": "remote_grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteGrantRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteMediaGrant"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/playback/remote-test": {
+      "post": {
+        "operationId": "remote_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteGrantRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteMediaTest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/v1/playback/routes": {
       "get": {
         "operationId": "routes",
@@ -13653,6 +13724,16 @@
               "$ref": "#/components/schemas/LocalPlaybackEndpoint"
             }
           },
+          "remote_media": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RemoteMediaEndpoint"
+              }
+            ]
+          },
           "remote_media_allowed": {
             "type": "boolean"
           },
@@ -17384,6 +17465,12 @@
                     "null"
                   ]
                 },
+                "artist": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "artwork": {
                   "oneOf": [
                     {
@@ -18836,6 +18923,114 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "RemoteGrantRequest": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlaybackTarget",
+                "description": "None requests a bounded synthetic reachability probe, never library access."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "RemoteMediaEndpoint": {
+        "type": "object",
+        "required": [
+          "base_url",
+          "server_id"
+        ],
+        "properties": {
+          "base_url": {
+            "type": "string"
+          },
+          "server_id": {
+            "$ref": "#/components/schemas/ServerId"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RemoteMediaGrant": {
+        "type": "object",
+        "required": [
+          "token",
+          "url",
+          "expires_at",
+          "server_id",
+          "length",
+          "etag"
+        ],
+        "properties": {
+          "etag": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "length": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "server_id": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "token": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "RemoteMediaSample": {
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "digest"
+        ],
+        "properties": {
+          "digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "end": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "start": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "RemoteMediaTest": {
+        "type": "object",
+        "required": [
+          "grant",
+          "samples"
+        ],
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/RemoteMediaGrant"
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemoteMediaSample"
+            }
           }
         }
       },

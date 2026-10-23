@@ -1,0 +1,82 @@
+# Optional overlay: keep core/control access unchanged and add isolated media.
+# First follow media.md; these services do not configure DNS or OpenWrt.
+services:
+  collector:
+    volumes:
+      - media-authority:/run/collector-authority
+
+  media:
+    image: ${COLLECTOR_MEDIA_IMAGE:-${COLLECTOR_IMAGE}}
+    user: "10001:10001"
+    entrypoint: ["/usr/local/bin/collector-media"]
+    command:
+      - --http-socket
+      - /run/collector-media/http.sock
+      - --authority-socket
+      - /run/collector-authority/socket
+      - --require-read-only-archive
+      - --archive
+      - /media
+      - --allowed-origin
+      - ${COLLECTOR_CONTROL_ORIGIN:?Set the existing exact HTTPS control origin}
+    network_mode: none
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: ${COLLECTOR_MEDIA_CPUS:-1}
+    cpuset: "${COLLECTOR_MEDIA_CPUSET:-}"
+    ulimits:
+      nofile: {soft: 512, hard: 512}
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=16m"]
+    volumes:
+      - ${COLLECTOR_DATA}/archive:/media:ro
+      - media-authority:/run/collector-authority:ro
+      - media-http:/run/collector-media
+    depends_on: [collector]
+    restart: unless-stopped
+
+  media-https:
+    image: ${COLLECTOR_MEDIA_PROXY_IMAGE:-caddy:2}
+    user: "10001:10001"
+    environment:
+      COLLECTOR_MEDIA_HOST: ${COLLECTOR_MEDIA_HOST:?Set the dedicated media DNS hostname}
+    ports:
+      - "${COLLECTOR_MEDIA_BIND_IP:?Set the NAS listener IPv4}:${COLLECTOR_MEDIA_HTTPS_PORT:-9443}:8443/tcp"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    # The official image marks the binary with this file capability; removing it
+    # from the bounding set can prevent exec even though we use port 8443.
+    cap_add: ["NET_BIND_SERVICE"]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: ${COLLECTOR_MEDIA_CPUS:-1}
+    cpuset: "${COLLECTOR_MEDIA_CPUSET:-}"
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=16m"]
+    volumes:
+      - ./Caddyfile.media:/etc/caddy/Caddyfile:ro
+      - media-http:/run/collector-media:ro
+      - ${COLLECTOR_DATA}/media-certificates:/data
+      - ${COLLECTOR_DATA}/media-proxy-config:/config
+    depends_on: [media]
+    restart: unless-stopped
+
+  initialize-media:
+    image: ${COLLECTOR_IMAGE}
+    profiles: ["tools"]
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["/usr/local/bin/collector-initialize-media"]
+    volumes:
+      - media-authority:/data/media-authority
+      - media-http:/data/media-http
+      - ${COLLECTOR_DATA}/media-certificates:/data/media-certificates
+      - ${COLLECTOR_DATA}/media-proxy-config:/data/media-proxy-config
+
+volumes:
+  media-authority:
+  media-http:

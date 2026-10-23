@@ -397,6 +397,7 @@ impl CollectionService {
                 item_id: None,
                 title: "Removed or unavailable entry".into(),
                 album: None,
+                artist: None,
                 disc_position: None,
                 track_position: None,
                 artwork: None,
@@ -416,6 +417,7 @@ impl CollectionService {
                 } = entry.target
                 {
                     view.album = Some(item.title.clone());
+                    view.artist = (!item.subtitle.is_empty()).then(|| item.subtitle.clone());
                     view.track_position = Some(track_position);
                     view.title = format!("Track {track_position:02}");
                     {
