@@ -61,7 +61,39 @@ fn private_address(ip: IpAddr) -> bool {
         IpAddr::V6(ip) => ip.is_unique_local() || ip.is_loopback(),
     }
 }
-fn addresses(bind: SocketAddr) -> std::io::Result<Vec<IpAddr>> {
+// Interface names are hints for ordering, not a security boundary. Keep these
+// narrow: a host LAN bridge named br0 and an ordinary 172.x LAN remain eligible.
+fn container_interface(name: &str) -> bool {
+    name == "docker0"
+        || name == "docker_gwbridge"
+        || name.strip_prefix("br-").is_some_and(|suffix| {
+            suffix.len() == 12 && suffix.bytes().all(|c| c.is_ascii_hexdigit())
+        })
+        || name.strip_prefix("veth").is_some_and(|suffix| {
+            !suffix.is_empty() && suffix.bytes().all(|c| c.is_ascii_hexdigit())
+        })
+}
+
+fn preferred_source(bind: SocketAddr) -> Option<IpAddr> {
+    let destination: SocketAddr = if bind.is_ipv4() {
+        "192.0.2.1:9".parse().expect("IPv4 documentation address")
+    } else {
+        "[2001:db8::1]:9"
+            .parse()
+            .expect("IPv6 documentation address")
+    };
+    // UDP connect selects the kernel's route/source without transmitting a packet.
+    // No default route is fine: interface enumeration still works on offline LANs.
+    let socket = std::net::UdpSocket::bind(SocketAddr::new(bind.ip(), 0)).ok()?;
+    socket.connect(destination).ok()?;
+    Some(socket.local_addr().ok()?.ip())
+}
+
+fn select_addresses(
+    bind: SocketAddr,
+    interfaces: impl IntoIterator<Item = (String, IpAddr)>,
+    preferred: Option<IpAddr>,
+) -> std::io::Result<Vec<IpAddr>> {
     if !bind.ip().is_unspecified() {
         if !private_address(bind.ip()) {
             return Err(std::io::Error::new(
@@ -71,17 +103,45 @@ fn addresses(bind: SocketAddr) -> std::io::Result<Vec<IpAddr>> {
         }
         return Ok(vec![bind.ip()]);
     }
-    let mut result: Vec<_> = if_addrs::get_if_addrs()?
+    let mut candidates: Vec<_> = interfaces
         .into_iter()
-        .map(|i| i.ip())
-        .filter(|ip| private_address(*ip) && ip.is_ipv4() == bind.is_ipv4())
+        .filter(|(_, ip)| private_address(*ip) && ip.is_ipv4() == bind.is_ipv4())
+        .map(|(name, ip)| {
+            let priority = if ip.is_loopback() {
+                3
+            } else if Some(ip) == preferred {
+                0
+            } else if container_interface(&name) {
+                2
+            } else {
+                1
+            };
+            (priority, ip)
+        })
         .collect();
-    result.sort();
-    result.dedup();
-    result.sort_by_key(|ip| ip.is_loopback());
-    result.truncate(8);
-    Ok(result)
+    candidates.sort_unstable();
+    let mut seen = std::collections::HashSet::new();
+    Ok(candidates
+        .into_iter()
+        .map(|(_, ip)| ip)
+        .filter(|ip| seen.insert(*ip))
+        .take(8)
+        .collect())
 }
+
+fn addresses(bind: SocketAddr) -> std::io::Result<Vec<IpAddr>> {
+    if !bind.ip().is_unspecified() {
+        return select_addresses(bind, [], None);
+    }
+    select_addresses(
+        bind,
+        if_addrs::get_if_addrs()?
+            .into_iter()
+            .map(|interface| (interface.name.clone(), interface.ip())),
+        preferred_source(bind),
+    )
+}
+
 fn make_identity(
     ips: &[IpAddr],
     port: u16,
@@ -681,6 +741,160 @@ mod tests {
             assert!(!private_address(ip.parse().unwrap()));
         }
     }
+    fn interface(name: &str, ip: &str) -> (String, IpAddr) {
+        (name.into(), ip.parse().unwrap())
+    }
+
+    #[test]
+    fn docker_bridges_cannot_crowd_out_lan_descriptor_or_certificate() {
+        use rustls::client::danger::ServerCertVerifier;
+        use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let mut interfaces: Vec<_> = (17..=30)
+            .map(|n| interface(&format!("br-{n:012x}"), &format!("172.{n}.0.1")))
+            .collect();
+        interfaces.extend([
+            interface("docker0", "172.16.0.1"),
+            interface("ovs_eth0", "192.168.1.106"),
+            interface("lo", "127.0.0.1"),
+        ]);
+        let ips = select_addresses("0.0.0.0:9845".parse().unwrap(), interfaces, None).unwrap();
+        let lan: IpAddr = "192.168.1.106".parse().unwrap();
+        assert_eq!(ips[0], lan);
+        assert_eq!(ips.len(), 8);
+        let (identity, descriptor) = make_identity(&ips, 9845, ServerId::new()).unwrap();
+        let endpoint = descriptor
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.https_url == "https://192.168.1.106:9845")
+            .expect("the browser/native descriptor must retain the NAS LAN route");
+        assert_eq!(
+            endpoint.webtransport_url,
+            "https://192.168.1.106:9845/playback"
+        );
+        let leaf = CertificateDer::from(identity.certificate_chain().as_slice()[0].der().to_vec());
+        assert_eq!(
+            endpoint.certificate_sha256,
+            Digest::sha256(leaf.as_ref()).hex
+        );
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(leaf.clone()).unwrap();
+        let verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(roots))
+            .build()
+            .unwrap();
+        verifier
+            .verify_server_cert(
+                &leaf,
+                &[],
+                &ServerName::IpAddress(lan.into()),
+                &[],
+                UnixTime::now(),
+            )
+            .expect("the pinned certificate must actually validate for the advertised LAN address");
+        assert!(
+            verifier
+                .verify_server_cert(
+                    &leaf,
+                    &[],
+                    &ServerName::IpAddress("192.168.1.107".parse::<IpAddr>().unwrap().into()),
+                    &[],
+                    UnixTime::now(),
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn kernel_source_survives_the_limit_even_for_unrecognized_interface_names() {
+        let mut interfaces: Vec<_> = (17..=30)
+            .map(|n| interface(&format!("custom{n}"), &format!("172.{n}.0.1")))
+            .collect();
+        let lan = interface("custom-uplink", "192.168.1.106");
+        interfaces.push(lan.clone());
+        let selected = select_addresses(
+            "0.0.0.0:0".parse().unwrap(),
+            interfaces.clone(),
+            Some(lan.1),
+        )
+        .unwrap();
+        assert_eq!(selected[0], lan.1);
+        assert_eq!(selected.len(), 8);
+        interfaces.reverse();
+        assert_eq!(
+            select_addresses("0.0.0.0:0".parse().unwrap(), interfaces, Some(lan.1)).unwrap(),
+            selected
+        );
+    }
+
+    #[test]
+    fn deduplication_precedes_the_bound_and_uses_the_best_interface_priority() {
+        let mut interfaces = vec![interface("docker0", "10.0.0.1"); 16];
+        interfaces.extend([
+            interface("eth0", "10.0.0.1"),
+            interface("eth1", "192.168.1.106"),
+            interface("lo", "127.0.0.1"),
+        ]);
+        let ips = select_addresses("0.0.0.0:0".parse().unwrap(), interfaces, None).unwrap();
+        assert_eq!(
+            ips,
+            ["10.0.0.1", "192.168.1.106", "127.0.0.1"].map(|ip| ip.parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn offline_private_routes_preserve_host_bridges_cgnat_and_address_family() {
+        let interfaces = vec![
+            interface("eth0", "172.20.1.2"),
+            interface("br0", "192.168.2.1"),
+            interface("overlay0", "100.70.1.2"),
+            interface("vethdeadbeef", "10.0.0.2"),
+            interface("docker_gwbridge", "10.0.0.3"),
+            interface("eth1", "fd00::2"),
+            interface("lo", "127.0.0.1"),
+            interface("lo", "::1"),
+            interface("public", "8.8.8.8"),
+            interface("public6", "2001:4860:4860::8888"),
+            interface("local", "169.254.1.2"),
+            interface("local6", "fe80::1"),
+        ];
+        let ips = select_addresses("0.0.0.0:0".parse().unwrap(), interfaces.clone(), None).unwrap();
+        assert_eq!(
+            ips,
+            [
+                "100.70.1.2",
+                "172.20.1.2",
+                "192.168.2.1",
+                "10.0.0.2",
+                "10.0.0.3",
+                "127.0.0.1"
+            ]
+            .map(|ip| ip.parse::<IpAddr>().unwrap())
+        );
+        assert_eq!(
+            select_addresses("[::]:0".parse().unwrap(), interfaces, None).unwrap(),
+            ["fd00::2", "::1"].map(|ip| ip.parse::<IpAddr>().unwrap())
+        );
+        // A route hint cannot manufacture an interface or admit a public address.
+        assert!(
+            select_addresses(
+                "0.0.0.0:0".parse().unwrap(),
+                [],
+                Some("8.8.8.8".parse().unwrap())
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn explicit_bind_still_overrides_discovery_and_rejects_public_addresses() {
+        assert_eq!(
+            select_addresses("192.168.1.106:9845".parse().unwrap(), [], None).unwrap(),
+            ["192.168.1.106".parse::<IpAddr>().unwrap()]
+        );
+        assert!(select_addresses("8.8.8.8:9845".parse().unwrap(), [], None).is_err());
+    }
+
     #[tokio::test]
     async fn ranges_reuse_one_verified_open_handle_and_metadata_never_hashes() {
         use std::io::Cursor;

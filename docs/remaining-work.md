@@ -1,5 +1,15 @@
 # Remaining work — home-lab priorities
 
+**Completed source repair — LAN candidates crowded out by container bridges (2026-10-23):**
+`codex/prioritize-lan-playback-addresses` prioritizes the kernel-selected private
+source and ordinary interfaces before container bridges, keeping trust and the
+eight-candidate bound intact. Crowded-interface/certificate regressions, full
+workspace/Clippy/web checks and actual private playback/seek on wildcard and
+explicit listeners passed. The user-confirmed explicit NAS bind still supplies
+working playback on beta.4. Publish/qualify a future preview before removing it;
+no release, NAS or Tailscale change was performed. See
+[dated acceptance and limits](validation/lan-candidate-selection-2026-10-23.md).
+
 **Completed authorized follow-up — build once, promote validated images (2026-10-22):**
 `codex/publish-validated-images` now passes full native/source/container acceptance
 and the same-source nonpublishing reuse rehearsal. Publication restores exact

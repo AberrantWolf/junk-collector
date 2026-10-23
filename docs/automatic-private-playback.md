@@ -47,6 +47,15 @@ remote_media_allowed = false
 `local_playback_enabled = false` disables the additional listeners. An explicit
 private IPv4/IPv6 bind is supported; wildcard discovery follows that bind's address
 family. At most eight generic private/CGNAT/loopback candidates are advertised.
+The 2026-10-23 source repair selects the kernel's preferred private source first,
+then ordinary private interfaces, known container bridge/veth interfaces and
+finally loopback. Duplicate addresses use their best interface priority before
+the limit is applied. This prevents numerous Docker networks from displacing
+the host LAN address. A local UDP route lookup sends no payload; an unavailable
+default route falls back to interface enumeration, so offline LANs still work.
+Container interface names only affect priority; private `172.x` LANs, host LAN
+bridges and generic overlay addresses remain eligible. No overlay software or
+configuration is accessed. An explicit private bind still overrides discovery.
 The authenticated descriptor supplies each candidate's short-lived P-256 leaf
 certificate and DER SHA-256 hash. The identity is generated in memory, renewed
 every three days with seven-day validity, and refreshed when OS interface addresses

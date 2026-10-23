@@ -1,5 +1,18 @@
 # Implementation status
 
+## LAN candidate selection — source repair accepted, 2026-10-23
+
+The deployed beta.4 discovery could omit the host LAN address after sorting and
+truncating many Docker interfaces. A source repair now prioritizes the kernel's
+selected private source and ordinary interfaces before known container bridges,
+deduplicating before the eight-candidate bound. Explicit binds, private address
+eligibility and both clients' pin/identity checks remain. The user confirmed the
+explicit NAS bind restores Trash Amp. Five new regression cases, full workspace
+checks, real Chrome playback/seeking on explicit and wildcard listeners, and the
+web smoke passed. This is not yet a published image or live NAS update; retain
+the working bind until release/deployment acceptance. See
+[implementation](automatic-private-playback.md) and [dated evidence](validation/lan-candidate-selection-2026-10-23.md).
+
 ## Build-once container publication — delivered and qualified, 2026-10-22
 
 The existing release workflow now separates validation from publication. Validation
