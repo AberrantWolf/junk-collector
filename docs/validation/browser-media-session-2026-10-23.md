@@ -28,7 +28,18 @@ certificate SPKI allowlist in addition to the isolated Playwright context's TLS
 exception for request interception. No OS trust or production certificate policy
 is changed. Neither fixture qualifies public-CA trust or physical lock-screen UI.
 
-**Actual iPhone lock-screen title/artist/album/artwork rendering and OS-button
-behavior await the operator's report after the
-[beta.5 NAS update](container-beta5-publication-2026-10-23.md).** Earlier operator-reported
-locked track changes establish playback continuity, not this new metadata UI.
+At the source checkpoint, physical iPhone lock-screen metadata and OS-button
+behavior still required an operator report after the
+[beta.5 NAS update](container-beta5-publication-2026-10-23.md). Earlier operator-reported
+locked track changes established playback continuity, not this new metadata UI.
+
+## Physical iPhone follow-up — 2026-10-24
+
+After the beta.5 NAS update, the operator was asked to reload Safari, start album
+or playlist playback, lock the iPhone and check track title, album/artist and
+available artwork, optionally trying lock-screen playback buttons. The response
+was: “It works!” This accepts the requested physical iPhone lock-screen metadata
+workflow. The response did not itemize individual fields or buttons, so it does
+not separately qualify each OS control. No phone model or iOS version was supplied
+for this follow-up. Extended sessions and network transitions remain outside this
+report.
