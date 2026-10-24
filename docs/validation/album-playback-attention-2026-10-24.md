@@ -77,3 +77,12 @@ the earlier browser-start limitation; physical iPhone acceptance remains open.
 Full workspace tests and the broader browser smoke are running during candidate
 preparation; exact-source CI and both native container smoke jobs must pass before
 publication. See [beta.6 release notes](../releases/v0.1.0-beta.6.md).
+
+The broader real Chrome smoke also passes, including actual audio start, seek,
+next/previous, natural advance and revocation, bulk import/preparation, collection
+lists, authentication/WebAuthn and mobile layout. Initial exact-source container
+validation [40098766682](https://github.com/AberrantWolf/junk-collector/actions/runs/40098766682)
+stopped at the existing generated fake encoder: Linux returned ETXTBSY while
+probing its just-written script. The repair uses checked-in executable fixtures
+for process failure and I/O-worker termination; the meaningful assertions remain.
+Fresh exact-source validation is required after this repair.

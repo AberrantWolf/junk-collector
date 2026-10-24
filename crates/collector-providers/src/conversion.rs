@@ -884,19 +884,10 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn process_failure_and_cancellation_never_report_output_success() {
-        use std::os::unix::fs::PermissionsExt;
-
         let recipe = recipe("flac 1.5.0", ConversionSettings::Flac { level: 5 }, 588);
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("fake-flac");
-        std::fs::write(
-            &path,
-            b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'flac 1.5.0'; exit 0; fi\nprintf partial\nexit 2\n",
-        )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(&path, permissions).unwrap();
+        // Execute a checked-in fixture rather than a just-written executable:
+        // Linux can transiently reject the latter with ETXTBSY on CI filesystems.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/failing-flac.sh");
         let failing = ConfiguredEncoder::probe(EncoderKind::Flac, path).unwrap();
         let converter = ProcessAudioConverter::new(Some(failing), None).unwrap();
         let mut source = Frames {
@@ -948,11 +939,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn worker_failure_terminates_a_child_that_keeps_running() {
-        use std::os::unix::fs::PermissionsExt;
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("fake-flac");
-        std::fs::write(&path, b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'flac 1.5.0'; exit 0; fi\nprintf partial\nwhile :; do :; done\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/running-flac.sh");
         let tool = ConfiguredEncoder::probe(EncoderKind::Flac, path).unwrap();
         let converter = ProcessAudioConverter::new(Some(tool), None).unwrap();
         struct BrokenScratch(Cursor<Vec<u8>>);
