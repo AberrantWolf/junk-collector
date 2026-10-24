@@ -1447,6 +1447,7 @@ pub enum BrowseFilter {
     FilesAttached,
     Playable,
     NeedsAttention,
+    AlbumPlaybackNeedsAttention,
     Removed,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]

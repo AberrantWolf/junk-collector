@@ -1,5 +1,19 @@
 # Remaining work — home-lab priorities
 
+## Requested live-use delivery — album playback attention, 2026-10-24
+
+The user reported discovering incomplete/unassigned albums only by trying Play
+album on mobile. The source now shows a warning beside library album text,
+explains the blocker in detail and provides a dedicated album playback attention
+filter. It reuses album/list eligibility with recorded observations and published
+track availability, independently of verification and private task failures. The pre-release review
+repair recognizes Opus-only prepared tracks and their retained recipe coordinates
+without requiring FLAC; incomplete preparation still stays in the filter.
+See [acceptance and limits](validation/album-playback-attention-2026-10-24.md).
+The beta.6 release candidate includes this change; publication validation is in
+progress. NAS deployment and physical iPhone acceptance remain outstanding.
+See [release notes](releases/v0.1.0-beta.6.md). No unrelated queue work is absorbed.
+
 **Beta.5 published and NAS updated (2026-10-23):** direct HTTPS media and browser
 Now Playing metadata are merged. Both native architectures passed exact-source
 validation; publication reused those bytes and advanced `preview`. Independent

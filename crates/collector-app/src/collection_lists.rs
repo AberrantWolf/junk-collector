@@ -152,10 +152,25 @@ impl CollectionService {
         source: Option<RepresentationId>,
         track: Option<u16>,
     ) -> Result<Vec<ListTarget>> {
+        self.resolve_music_targets(actor, item, source, track, false)
+    }
+
+    pub(super) fn resolve_music_targets(
+        &self,
+        actor: &Principal,
+        item: &Item,
+        source: Option<RepresentationId>,
+        track: Option<u16>,
+        recorded_only: bool,
+    ) -> Result<Vec<ListTarget>> {
         if track.is_some() && source.is_none() {
             return Err(Error::Invalid("Choose a source disc and track.".into()));
         }
-        let rows = self.music_track_availability_for_item(actor.user_id, item)?;
+        let rows = if recorded_only {
+            self.music_track_availability_recorded(actor.user_id, item)?
+        } else {
+            self.music_track_availability_for_item(actor.user_id, item)?
+        };
         let coverage = self.music_album_coverage(actor, item.id)?;
         // Availability can retain only prepared tracks when original bytes are
         // absent. A disc/album addition must not turn that partial view into a

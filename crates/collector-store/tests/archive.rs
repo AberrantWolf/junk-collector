@@ -13625,13 +13625,23 @@ impl collector_app::AudioConversionPort for DerivativeFixtureEncoder {
         if let Some(hook) = self.after_encode.lock().unwrap().take() {
             hook();
         }
+        let opus = matches!(recipe.settings, ConversionSettings::Opus { .. });
         Ok(collector_app::ConversionValidation {
-            media_type: "audio/flac".into(),
+            media_type: if opus {
+                "audio/ogg; codecs=opus"
+            } else {
+                "audio/flac"
+            }
+            .into(),
             bytes: ByteLength(14),
             digest: Digest::sha256(b"fixture output"),
             decoded_format: recipe.output_format.clone(),
-            decoded_frames: recipe.tracks[0].length.0,
-            lossless_pcm_equal: !self.broken.load(Ordering::SeqCst),
+            decoded_frames: if opus {
+                (recipe.tracks[0].length.0 * 160).div_ceil(147)
+            } else {
+                recipe.tracks[0].length.0
+            },
+            lossless_pcm_equal: !opus && !self.broken.load(Ordering::SeqCst),
             encoder_delay_frames: 0,
             end_padding_frames: 0,
         })
@@ -20525,6 +20535,13 @@ fn collection_lists_generic_items_and_music_source_choices_remain_distinct() {
             &command(),
         )
         .unwrap();
+    let readiness = service
+        .item_presented(&actor, album.id)
+        .unwrap()
+        .album_playback;
+    assert!(
+        matches!(readiness, Some(collector_app::AlbumPlaybackReadiness::NeedsAttention { reason }) if reason.contains("Assign each original"))
+    );
     // Unlinked originals do not acquire album positions from UUID/discovery order.
     assert!(matches!(
         service.update_collection_list(
@@ -20762,6 +20779,29 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
                 .unwrap();
         }
         while service.run_next_job("list-partial-source").unwrap() {}
+        let readiness = service
+            .item_presented(&actor, album.id)
+            .unwrap()
+            .album_playback
+            .unwrap();
+        assert_eq!(
+            matches!(readiness, collector_app::AlbumPlaybackReadiness::Ready),
+            prepared_tracks == 2
+        );
+        let page = service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    collection_id: Some(collection.id),
+                    filter: BrowseFilter::AlbumPlaybackNeedsAttention,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            page.items.iter().any(|entry| entry.id == album.id),
+            prepared_tracks != 2
+        );
         let pcm: Vec<u8> = (0..5 * 588)
             .flat_map(|i| [i as u8, 0x80, 0xff, 0x7f])
             .collect();
@@ -24377,6 +24417,10 @@ fn alternate_encodings_require_explicit_album_selection_without_retargeting_trac
         rows.iter()
             .all(|row| row.album_selection == collector_app::MusicAlbumSelection::NeedsReview)
     );
+    assert!(
+        matches!(service.item_presented(&actor, item).unwrap().album_playback,
+        Some(collector_app::AlbumPlaybackReadiness::NeedsAttention { reason }) if reason.contains("alternate encodings"))
+    );
     assert!(service.album_playback_snapshot(&actor, item, None).is_err());
     let review = service.metadata_review(&actor, item).unwrap();
     service.update_metadata_authority(&actor,item,UpdateMetadataAuthorityCommand {
@@ -24387,6 +24431,21 @@ fn alternate_encodings_require_explicit_album_selection_without_retargeting_trac
             ]}))
         }}
     },&command()).unwrap();
+    assert_eq!(
+        service.item_presented(&actor, item).unwrap().album_playback,
+        Some(collector_app::AlbumPlaybackReadiness::Ready)
+    );
+    let attention = service
+        .browse_presented(
+            &actor,
+            BrowseQuery {
+                collection_id: Some(collection.id),
+                filter: BrowseFilter::AlbumPlaybackNeedsAttention,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(!attention.items.iter().any(|entry| entry.id == item));
     assert_eq!(
         service
             .album_playback_snapshot(&actor, item, None)
@@ -26151,4 +26210,202 @@ fn automatic_disc_grouping_does_not_restore_explicit_choices_cleared_by_inventor
     let view = service.metadata_view(&actor, albums[0].id).unwrap();
     assert!(view.authority.selected_candidate.is_none());
     assert_eq!(view.display.resolution, MetadataResolutionKind::Tentative);
+}
+
+#[test]
+fn album_attention_is_paginated_authorized_and_recomputed_after_reindex() {
+    let (_root, store, actor, service, collection) = setup();
+    let mut expected = Vec::new();
+    for title in ["Attention A", "Attention B", "Attention C"] {
+        let mut input = item(collection.id);
+        input.title = title.into();
+        expected.push(
+            save_inventory(&service, &actor, input, Revision(0))
+                .unwrap()
+                .id,
+        );
+    }
+    let query = BrowseQuery {
+        collection_id: Some(collection.id),
+        filter: BrowseFilter::AlbumPlaybackNeedsAttention,
+        limit: Some(1),
+        ..Default::default()
+    };
+    let mut cursor = None;
+    let mut found = Vec::new();
+    loop {
+        let page = service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    cursor,
+                    ..query.clone()
+                },
+            )
+            .unwrap();
+        found.extend(page.items.into_iter().map(|view| {
+            assert!(matches!(
+                view.album_playback,
+                Some(collector_app::AlbumPlaybackReadiness::NeedsAttention { .. })
+            ));
+            view.id
+        }));
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(found, expected);
+    let outsider = Principal {
+        user_id: UserId::new(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.browse_presented(&outsider, query.clone()),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.item_presented(&outsider, expected[0]),
+        Err(Error::Forbidden)
+    ));
+    store.reindex().unwrap();
+    assert_eq!(
+        service.browse_presented(&actor, query).unwrap().items[0].id,
+        expected[0]
+    );
+}
+
+#[test]
+fn album_playback_attention_reports_release_missing_discs_before_play() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    automatic_group_metadata(&service, &actor, &items[0], &release);
+    let viewer_id = store
+        .create_user("album-status-viewer", "another long test password", false)
+        .unwrap();
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    let viewer_view = service.item_presented(&viewer, items[0].id).unwrap();
+    assert!(viewer_view.domain.payload.is_none());
+    assert_eq!(
+        viewer_view.album_playback,
+        service
+            .item_presented(&actor, items[0].id)
+            .unwrap()
+            .album_playback
+    );
+    let view = service.item_presented(&actor, items[0].id).unwrap();
+    assert!(matches!(view.album_playback,
+        Some(collector_app::AlbumPlaybackReadiness::NeedsAttention { reason })
+            if reason.contains("missing a recorded audio disc")));
+    assert!(
+        matches!(service.album_playback_snapshot(&actor, items[0].id, None),
+        Err(Error::Invalid(reason)) if reason.contains("missing a recorded audio disc"))
+    );
+}
+
+#[test]
+fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparation() {
+    let (_root, store, actor, service, collection) = setup();
+    let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(album.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let attention_query = BrowseQuery {
+        collection_id: Some(collection.id),
+        filter: BrowseFilter::AlbumPlaybackNeedsAttention,
+        ..Default::default()
+    };
+    for position in 1..=2 {
+        let mut request = derivative_command(&imported, position);
+        request.profile = ConversionProfile::Opus {
+            bitrate_kbps: if position == 1 { 128 } else { 192 },
+        };
+        let job = service
+            .prepare_music_derivative(&actor, imported.capture_id, request, &command())
+            .unwrap();
+        while service.run_next_job("album-opus-readiness").unwrap() {}
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+        let ready = position == 2;
+        assert_eq!(
+            matches!(
+                service
+                    .item_presented(&actor, album.id)
+                    .unwrap()
+                    .album_playback,
+                Some(collector_app::AlbumPlaybackReadiness::Ready)
+            ),
+            ready
+        );
+        assert_eq!(
+            service
+                .browse_presented(&actor, attention_query.clone())
+                .unwrap()
+                .items
+                .iter()
+                .any(|entry| entry.id == album.id),
+            !ready
+        );
+    }
+    let snapshot = service
+        .album_playback_snapshot(&actor, album.id, None)
+        .unwrap();
+    let live_rows = service.music_track_availability(&actor, album.id).unwrap();
+    let recorded_rows = service
+        .recorded_music_track_availability(&actor, album.id)
+        .unwrap();
+    assert_eq!(snapshot.tracks.len(), 2);
+    for target in &snapshot.tracks {
+        let live = live_rows
+            .iter()
+            .find(|row| {
+                row.source_representation_id == target.source_representation_id
+                    && row.track_position == target.track_position
+                    && matches!(
+                        row.state,
+                        collector_app::MusicTrackAvailabilityState::Available { .. }
+                    )
+            })
+            .unwrap();
+        assert!(matches!(live.profile, Some(ConversionProfile::Opus { .. })));
+        let recorded = recorded_rows
+            .iter()
+            .find(|row| {
+                row.source_representation_id == live.source_representation_id
+                    && row.track_position == live.track_position
+                    && row.profile == live.profile
+            })
+            .unwrap();
+        assert_eq!(recorded.start_frame, live.start_frame);
+        assert_eq!(recorded.frame_count, live.frame_count);
+        assert_eq!(
+            serde_json::to_value(&recorded.state).unwrap(),
+            serde_json::to_value(&live.state).unwrap()
+        );
+    }
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .item_presented(&actor, album.id)
+            .unwrap()
+            .album_playback,
+        Some(collector_app::AlbumPlaybackReadiness::Ready)
+    );
+    assert!(
+        !service
+            .browse_presented(&actor, attention_query)
+            .unwrap()
+            .items
+            .iter()
+            .any(|entry| entry.id == album.id)
+    );
 }

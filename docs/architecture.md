@@ -1,5 +1,27 @@
 # Architecture
 
+## Album playback readiness — 2026-10-24
+
+Presented music entries carry typed recorded album playback readiness. Application
+policy reuses the album/list target resolver, with committed track observations
+instead of opening PCM, then checks that each selected track has published audio in any supported format,
+including Opus without FLAC. Recorded availability prefers retained FLAC recipe
+coordinates and falls back to retained Opus recipes for tracks without FLAC.
+Missing release discs, ambiguous/unassigned originals, incomplete structure and
+unprepared tracks produce an actionable reason. This is independent of catalog
+verification, device codecs and transport availability. Resolve against authorized
+unredacted records before producing the role-redacted response.
+
+The album-attention browse filter uses the existing authorized, sorted keyset
+query over music candidates, then evaluates this policy in the application. It
+examines at most 200 candidates per request, filling the requested result limit
+where possible and preserving the underlying scoped continuation cursor. Sparse
+API pages may be empty with a continuation; the web follows those cursors
+automatically, with cancellation on a scope change, until results or the end. There is no persistent readiness
+projection to become stale after metadata/assignment/preparation updates or reindex.
+Ordinary browse and detail show the warning without attempting playback. The
+existing requester-private failed-work filter retains its separate meaning.
+
 ## Browser now-playing presentation
 
 The web music player publishes title, album artist, album and authorized artwork

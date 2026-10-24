@@ -184,6 +184,45 @@ impl CollectionService {
 }
 
 impl CollectionService {
+    /// Uses the album/list resolver with committed observations only. Never opens audio.
+    pub(super) fn album_playback_readiness(
+        &self,
+        actor: &Principal,
+        item: &Item,
+    ) -> Result<collector_api_types::AlbumPlaybackReadiness> {
+        use collector_api_types::{AlbumPlaybackReadiness, MusicTrackAvailabilityState};
+        let targets = match self.resolve_music_targets(actor, item, None, None, true) {
+            Ok(targets) => targets,
+            Err(Error::Invalid(reason) | Error::Unavailable(reason)) => {
+                return Ok(AlbumPlaybackReadiness::NeedsAttention { reason });
+            }
+            Err(error) => return Err(error),
+        };
+        let rows = self.music_track_availability_recorded(actor.user_id, item)?;
+        let ready = targets.iter().all(|target| {
+            let ListTarget::MusicTrack {
+                source_representation_id,
+                track_position,
+                ..
+            } = target
+            else {
+                return false;
+            };
+            rows.iter().any(|row| {
+                row.source_representation_id == *source_representation_id
+                    && row.track_position == *track_position
+                    && matches!(row.state, MusicTrackAvailabilityState::Available { .. })
+            })
+        });
+        Ok(if ready {
+            AlbumPlaybackReadiness::Ready
+        } else {
+            AlbumPlaybackReadiness::NeedsAttention {
+                reason: "Some album tracks are not prepared for playback. Open audio preparation to prepare the missing tracks or review failed work.".into(),
+            }
+        })
+    }
+
     pub fn album_playback_snapshot(
         &self,
         actor: &Principal,

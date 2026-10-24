@@ -318,6 +318,14 @@ pub struct AlbumPlaybackSnapshot {
     pub tracks: Vec<MusicTrackAvailability>,
 }
 
+/// Recorded album eligibility, independent of device codecs and network routes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum AlbumPlaybackReadiness {
+    Ready,
+    NeedsAttention { reason: String },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EnrollmentPhase {

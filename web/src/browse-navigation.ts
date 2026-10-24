@@ -4,7 +4,7 @@ import type {operations} from './generated/api';
 type BrowseQuery=NonNullable<operations['browse']['parameters']['query']>;
 export type BrowseLocation={page:'lists'|'library'|'metadata'|'imports'|'preparation'|'activity';list:string;group:string;batch:string;reason:string;attention:boolean;collection:string;search:string;sort:NonNullable<BrowseQuery['sort']>;filter:NonNullable<BrowseQuery['filter']>;item:string};
 const sorts=['title','recently_added','artist','platform'];
-const filters=['all','wishlist','files_attached','playable','needs_attention','removed'];
+const filters=['all','wishlist','files_attached','playable','needs_attention','album_playback_needs_attention','removed'];
 export function readLocation():BrowseLocation{
  const q=new URLSearchParams(location.search);
  return {list:q.get('list')||'',page:({'/lists':'lists','/library-care/metadata':'metadata','/imports':'imports','/library-care/music-preparation':'preparation','/activity':'activity'}[location.pathname]||'library') as BrowseLocation['page'],group:q.get('group')||'',batch:q.get('batch')||'',reason:q.get('reason')||'',attention:q.get('attention')!=='all',collection:q.get('collection')||'',search:q.get('search')||'',sort:(sorts.includes(q.get('sort')||'')?q.get('sort'):'title') as BrowseLocation['sort'],filter:(filters.includes(q.get('filter')||'')?q.get('filter'):'all') as BrowseLocation['filter'],item:q.get('item')||''};

@@ -1,6 +1,6 @@
 import {clickAction} from './actions.mjs';
 // FX-01 real-server navigation regression. All archive/state roots are temporary.
-import {chromium} from '@playwright/test';
+import {chromium,expect} from '@playwright/test';
 import {spawn,spawnSync} from 'node:child_process';
 import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -72,6 +72,19 @@ try{
  await clickAction(page,'Restore entry');await page.getByRole('button',{name:'Remove item',exact:true,includeHidden:true}).waitFor({state:'attached'});assert.equal(await page.getByLabel('Show',{exact:true}).inputValue(),'all');
  await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item'));await page.getByRole('button',{name:'Load more',exact:true}).click();await page.locator(`[data-item-id="${seed.ids[55]}"]`).waitFor();assert.match(await page.locator(`[data-item-id="${seed.ids[55]}"]`).innerText(),/Edited album 055/);
  await page.getByLabel('Show',{exact:true}).selectOption('wishlist');await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===31);await page.reload();await page.locator('.collection-row').first().waitFor();assert.equal(await page.getByLabel('Show',{exact:true}).inputValue(),'wishlist');
+ // Simulate a sparse server page with a real scoped continuation: later matches
+ // must appear without asking the user to scrub through healthy albums.
+ await page.route('**/api/v1/items?*',async route=>{
+  const response=await route.fetch();const page=await response.json();assert.ok(page.next_cursor);
+  await route.fulfill({response,json:{...page,items:[]}});
+ },{times:1});
+ await page.getByLabel('Show',{exact:true}).selectOption('album_playback_needs_attention');
+ await page.waitForFunction(()=>new URL(location.href).searchParams.get('filter')==='album_playback_needs_attention'&&document.querySelectorAll('.collection-row').length===12);
+ await expect(page.locator('.collection-row').first().getByText('Album playback needs attention',{exact:true})).toBeVisible();
+ await page.reload();await expect(page.getByLabel('Show',{exact:true})).toHaveValue('album_playback_needs_attention');
+ await page.locator('.collection-row').first().click();
+ await expect(page.locator('.album-playback-notice')).toContainText('No recorded audio tracks are available');
+ await page.getByRole('button',{name:'Back to results',exact:true}).click();
  await page.getByRole('button',{name:'Clear filters',exact:true}).click();await page.getByLabel('Sort by').selectOption('recently_added');await page.waitForFunction(()=>document.querySelector('.collection-row')?.textContent.includes('Album 061'));
  await page.getByLabel('Sort by').selectOption('artist');await page.waitForFunction(()=>document.querySelector('.collection-row')?.textContent.includes('Alpha'));await page.getByLabel('Sort by').selectOption('title');
  await page.getByRole('searchbox',{name:'Search collection'}).fill('Album 001');await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===1);await page.locator('.collection-row').click();await page.getByLabel('Album 001 details',{exact:true}).waitFor();

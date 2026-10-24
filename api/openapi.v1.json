@@ -4570,6 +4570,7 @@
                 "files_attached",
                 "playable",
                 "needs_attention",
+                "album_playback_needs_attention",
                 "removed"
               ]
             }
@@ -8543,6 +8544,43 @@
             ]
           }
         }
+      },
+      "AlbumPlaybackReadiness": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ready"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "status"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "needs_attention"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Recorded album eligibility, independent of device codecs and network routes."
       },
       "AlbumPlaybackSnapshot": {
         "type": "object",
@@ -17292,6 +17330,16 @@
                     "$ref": "#/components/schemas/PresentedAudioCheck"
                   }
                 },
+                "album_playback": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AlbumPlaybackReadiness"
+                    }
+                  ]
+                },
                 "assets": {
                   "type": "array",
                   "items": {
@@ -18421,6 +18469,16 @@
             "items": {
               "$ref": "#/components/schemas/PresentedAudioCheck"
             }
+          },
+          "album_playback": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlbumPlaybackReadiness"
+              }
+            ]
           },
           "assets": {
             "type": "array",

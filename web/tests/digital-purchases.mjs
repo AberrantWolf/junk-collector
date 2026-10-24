@@ -123,6 +123,10 @@ try{
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,alternateIntake);alternate=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:60000}).toBe('succeeded');
  await page.goto(`${origin}/?collection=${collection}&item=${alternate}`);
  await tracks.getByText(/Alternate encodings need a choice/).waitFor();
+ await expect(page.locator('.album-playback-notice')).toContainText('Choose which alternate encodings');
+ const attentionBefore=await page.evaluate(async collection=>(await(await fetch(`/api/v1/items?collection_id=${collection}&filter=album_playback_needs_attention`)).json()).items.map(item=>item.id),collection);
+ assert.ok(attentionBefore.includes(alternate),'ambiguous purchase missing from playback attention results');
+
  const beforeAmbiguous=await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.')));
  await tracks.getByRole('button',{name:'Play album',exact:true}).click();
  await tracks.getByRole('alert').getByText(/Choose which alternate encodings/).waitFor();
@@ -138,7 +142,11 @@ try{
   await editor.getByRole('button',{name:'Save track details',exact:true}).click();
   await expect(editor.getByRole('form',{name:'Edit purchased track'})).toHaveCount(0);
  }
- await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();
+ await editor.getByRole('button',{name:'Close curator'}).click();
+ await expect(page.locator('.album-playback-notice')).toHaveCount(0);
+ const attentionAfter=await page.evaluate(async collection=>(await(await fetch(`/api/v1/items?collection_id=${collection}&filter=album_playback_needs_attention`)).json()).items.map(item=>item.id),collection);
+ assert.ok(!attentionAfter.includes(alternate),'repaired purchase remains in playback attention results');
+ await page.reload();
  await tracks.getByRole('button',{name:'Play album',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02&&audio.currentSrc.endsWith('/0');}return false;});
  await expect(player.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();

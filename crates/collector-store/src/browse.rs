@@ -137,6 +137,10 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
         BrowseFilter::NeedsAttention => {
             "(EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.state='failed') OR EXISTS(SELECT 1 FROM private.imports p WHERE p.item_id=i.id AND p.user_id=?1 AND p.phase='awaiting_review'))"
         }
+        // The application evaluates the shared album resolver over these candidates.
+        BrowseFilter::AlbumPlaybackNeedsAttention => {
+            "json_extract(i.record,'$.domain.module')='org.junk.music'"
+        }
         BrowseFilter::Removed => "1",
     };
     let terms = search

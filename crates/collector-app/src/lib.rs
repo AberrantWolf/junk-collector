@@ -1458,8 +1458,8 @@ pub struct StoredPasskey {
 }
 
 pub use collector_api_types::{
-    EnrollmentPhase, EnrollmentStart, EnrollmentView, MediaFile, NativeCredentialIssue,
-    PlaybackTarget,
+    AlbumPlaybackReadiness, EnrollmentPhase, EnrollmentStart, EnrollmentView, MediaFile,
+    NativeCredentialIssue, PlaybackTarget,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -2056,6 +2056,7 @@ pub struct PresentedAudioCheck {
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
+    pub album_playback: Option<collector_api_types::AlbumPlaybackReadiness>,
     pub supports_listening: bool,
     pub digital_audio: bool,
     pub workflow_generation: u64,
@@ -2633,21 +2634,37 @@ impl CollectionService {
                 },
             )?;
         }
-        let page = self.reader.browse(actor.user_id, query)?;
-        let mut items = Vec::with_capacity(page.items.len());
-        for mut item in page.items {
-            let role = self.authorize(actor, item.collection_id, Action::Browse)?;
-            let effective_metadata = self.effective_metadata_for_user(&item, actor.user_id)?;
-            item.redact_for(role);
-            items.push(self.presented(item, role, actor.user_id, effective_metadata)?);
-        }
-        Ok(Page {
-            items,
-            next_cursor: page.next_cursor,
-        })
+        let attention = query.filter == BrowseFilter::AlbumPlaybackNeedsAttention;
+        let limit = usize::from(query.limit.unwrap_or(50).clamp(1, 200));
+        let mut query = query;
+        let mut items = Vec::new();
+        let mut examined = 0;
+        let next_cursor = loop {
+            query.limit = Some((limit - items.len()).min(200 - examined) as u16);
+            let page = self.reader.browse(actor.user_id, query.clone())?;
+            examined += page.items.len();
+            for item in page.items {
+                let role = self.authorize(actor, item.collection_id, Action::Browse)?;
+                let effective_metadata = self.effective_metadata_for_user(&item, actor.user_id)?;
+                let view = self.presented(item, role, actor, effective_metadata)?;
+                if !attention
+                    || matches!(
+                        view.album_playback,
+                        Some(collector_api_types::AlbumPlaybackReadiness::NeedsAttention { .. })
+                    )
+                {
+                    items.push(view);
+                }
+            }
+            if !attention || items.len() == limit || examined >= 200 || page.next_cursor.is_none() {
+                break page.next_cursor;
+            }
+            query.cursor = page.next_cursor;
+        };
+        Ok(Page { items, next_cursor })
     }
     pub fn item_presented(&self, actor: &Principal, id: ItemId) -> Result<PresentedItem> {
-        let mut item = self.reader.item(id)?;
+        let item = self.reader.item(id)?;
         let role = self.authorize(
             actor,
             item.collection_id,
@@ -2658,16 +2675,22 @@ impl CollectionService {
             },
         )?;
         let effective_metadata = self.effective_metadata_for_user(&item, actor.user_id)?;
-        item.redact_for(role);
-        self.presented(item, role, actor.user_id, effective_metadata)
+        self.presented(item, role, actor, effective_metadata)
     }
     fn presented(
         &self,
-        item: Item,
+        mut item: Item,
         role: Role,
-        user: UserId,
+        actor: &Principal,
         mut effective_metadata: ResolvedMetadataDisplay,
     ) -> Result<PresentedItem> {
+        let user = actor.user_id;
+        let album_playback = if !item.deleted && item.domain.module.0 == "org.junk.music" {
+            Some(self.album_playback_readiness(actor, &item)?)
+        } else {
+            None
+        };
+        item.redact_for(role);
         let collection = self.reader.collection(item.collection_id)?;
         let (effective_permissions, content_permissions) =
             self.presented_content_permissions(role, &collection, Some(&item.domain));
@@ -2798,6 +2821,7 @@ impl CollectionService {
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
+            album_playback,
             supports_listening,
             digital_audio,
             workflow_generation: item.lifecycle.generation,

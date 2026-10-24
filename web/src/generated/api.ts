@@ -2577,6 +2577,15 @@ export interface components {
             group: components["schemas"]["AlbumGroupResult"];
             reason?: string | null;
         };
+        /** @description Recorded album eligibility, independent of device codecs and network routes. */
+        AlbumPlaybackReadiness: {
+            /** @enum {string} */
+            status: "ready";
+        } | {
+            reason: string;
+            /** @enum {string} */
+            status: "needs_attention";
+        };
         AlbumPlaybackSnapshot: {
             artist: string;
             collection_id: components["schemas"]["CollectionId"];
@@ -4654,6 +4663,7 @@ export interface components {
         Page_PresentedItem: {
             items: {
                 accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
+                album_playback?: null | components["schemas"]["AlbumPlaybackReadiness"];
                 assets: components["schemas"]["PresentedAsset"][];
                 captures: components["schemas"]["PresentedCapture"][];
                 collection_id: components["schemas"]["CollectionId"];
@@ -4912,6 +4922,7 @@ export interface components {
          */
         PresentedItem: {
             accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
+            album_playback?: null | components["schemas"]["AlbumPlaybackReadiness"];
             assets: components["schemas"]["PresentedAsset"][];
             captures: components["schemas"]["PresentedCapture"][];
             collection_id: components["schemas"]["CollectionId"];
@@ -9107,7 +9118,7 @@ export interface operations {
         parameters: {
             query?: {
                 sort?: "title" | "recently_added" | "artist" | "platform";
-                filter?: "all" | "wishlist" | "files_attached" | "playable" | "needs_attention" | "removed";
+                filter?: "all" | "wishlist" | "files_attached" | "playable" | "needs_attention" | "album_playback_needs_attention" | "removed";
                 collection_id?: components["schemas"]["CollectionId"];
                 search?: string;
                 cursor?: string;

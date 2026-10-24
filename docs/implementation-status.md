@@ -1,5 +1,19 @@
 # Implementation status
 
+## Album playback attention — source delivery, 2026-10-24
+
+Music library rows now show a warning when recorded whole-album playback is
+blocked. Detail displays the resolver's reason, and Show → Album playback needs
+attention finds those albums across paginated results. Missing release discs,
+unassigned/alternate originals, incomplete track scope and unprepared audio are
+covered without opening/hashing source audio. Opus-only prepared albums are
+ready; FLAC is a preference rather than a prerequisite. Browser codec and connection
+failures remain runtime concerns. The original Needs my attention filter still
+finds requester-private failed work/import review. See [dated acceptance](validation/album-playback-attention-2026-10-24.md).
+The beta.6 candidate includes this delivery; exact-source publication validation
+is in progress. Real Chrome browse and purchase acceptance pass. NAS deployment
+and physical iPhone acceptance remain outstanding.
+
 ## Browser lock-screen metadata — iPhone accepted, 2026-10-24
 
 The web player now publishes track title, album artist, album and available cover

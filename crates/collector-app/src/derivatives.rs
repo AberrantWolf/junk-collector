@@ -1204,13 +1204,19 @@ impl CollectionService {
                 }
                 if recorded_only {
                     let mut positions = std::collections::BTreeSet::new();
-                    for (representation, recipe) in &retained {
-                        if representation.profile.as_ref() == Some(&ConversionProfile::Flac)
-                            && recipe.tracks.len() == 1
-                            && positions.insert(recipe.tracks[0].position)
-                        {
-                            tracks.retain(|v| v.position != recipe.tracks[0].position);
-                            tracks.push(recipe.tracks[0].clone());
+                    // Retained recipes bind exact input coordinates. Prefer FLAC,
+                    // but an Opus-only track must not fall back to layout coordinates
+                    // that differ from the recipe actually used to prepare its audio.
+                    for profile in &profiles {
+                        for (_, recipe) in retained.iter().filter(|(representation, _)| {
+                            representation.profile.as_ref() == Some(profile)
+                        }) {
+                            if recipe.tracks.len() == 1
+                                && positions.insert(recipe.tracks[0].position)
+                            {
+                                tracks.retain(|v| v.position != recipe.tracks[0].position);
+                                tracks.push(recipe.tracks[0].clone());
+                            }
                         }
                     }
                 }
