@@ -1,8 +1,9 @@
 # Beta.5 publication and NAS update — 2026-10-23
 
 **Published, verified on `preview`, and installed on the permanent NAS.** The
-operator authorized merge/publication and the release-image update. Physical
-iPhone rendering of the newly added Now Playing metadata is awaiting a report.
+operator authorized merge/publication and the release-image update. A dated
+[2026-10-24 follow-up](browser-media-session-2026-10-23.md#physical-iphone-follow-up--2026-10-24)
+records operator acceptance of physical iPhone lock-screen metadata.
 
 ## Frozen source and publication
 
@@ -79,9 +80,10 @@ artist, album, artwork, controls, natural transitions and immediate cleanup in
 real Chrome, including playlist presentation. Full local workspace/Clippy/web
 checks, generated API, embedded-server rebuild and browser smoke also passed.
 
-The operator has been asked to reload Safari and check the new lock-screen
-metadata and OS buttons on the released build. That specific physical UI result,
-extended/lease-boundary sessions, network transitions, later certificate renewal
-and deployment rollback remain unqualified. Caddy's separate DMZ/egress policy
+On 2026-10-24 the operator answered “It works!” after being asked to reload Safari
+and check lock-screen metadata, optionally trying OS buttons, on the released
+build. This accepts the physical metadata workflow without separately itemizing
+fields or controls. Extended/lease-boundary sessions, network transitions, later
+certificate renewal and deployment rollback remain unqualified. Caddy's separate DMZ/egress policy
 and the NAS kernel's process-count limitation are unchanged. Trash Amp still
 needs its matching shared-client build; it was not changed by this release.

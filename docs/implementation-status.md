@@ -1,6 +1,6 @@
 # Implementation status
 
-## Browser lock-screen metadata — beta.5 published and deployed, 2026-10-23
+## Browser lock-screen metadata — iPhone accepted, 2026-10-24
 
 The web player now publishes track title, album artist, album and available cover
 art using the standard Media Session API, for album and playlist playback. OS
@@ -10,8 +10,10 @@ handlers. Older saved queue entries retain their title/album even without the ne
 optional artist field. [Real Chrome acceptance](validation/browser-media-session-2026-10-23.md)
 covers metadata, controls, automatic transitions and cleanup. The
 [published beta.5 image is installed on the NAS](validation/container-beta5-publication-2026-10-23.md),
-and Cloudflare serves its exact web bundle. Actual iPhone lock-screen metadata
-rendering awaits the operator's report; earlier locked playback did not test it.
+and Cloudflare serves its exact web bundle. On 2026-10-24 the operator confirmed
+the requested iPhone Safari lock-screen metadata check works on beta.5; see the
+[physical-device follow-up](validation/browser-media-session-2026-10-23.md#physical-iphone-follow-up--2026-10-24).
+The report did not separately itemize metadata fields or OS-button behavior.
 
 ## Direct HTTPS remote media — source delivered and NAS deployed, 2026-10-23
 

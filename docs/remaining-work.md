@@ -8,7 +8,8 @@ consistent recovery point, retained settings/identities and 18 other containers
 unchanged. See [publication/deployment evidence](validation/container-beta5-publication-2026-10-23.md)
 and [release notes](releases/v0.1.0-beta.5.md). The earlier source candidate has
 operator-accepted iPhone cellular playback, seeking and locked track change.
-The new physical iPhone lock-screen metadata/OS-button report remains pending.
+On 2026-10-24 the operator also accepted the beta.5 iPhone Safari lock-screen
+metadata check; individual fields and OS buttons were not separately itemized.
 
 **Completed source repair — LAN candidates crowded out by container bridges (2026-10-23):**
 `codex/prioritize-lan-playback-addresses` prioritizes the kernel-selected private
@@ -1045,9 +1046,10 @@ origin tradeoff. See [dated acceptance and limits](validation/direct-https-media
 and [operator setup/rollback](../deploy/container/media.md).
 
 **Remaining remote acceptance:** beta.5 is published and installed as recorded
-[above](validation/container-beta5-publication-2026-10-23.md). Consume the matching
-shared client in Trash Amp's next build and check physical iPhone Now Playing
-metadata. Remaining deployment checks cover later public ACME renewal, any future IPv6, firewall/DMZ restrictions for
+[above](validation/container-beta5-publication-2026-10-23.md). The operator accepted
+physical iPhone Now Playing metadata on 2026-10-24. Consume the matching shared
+client in Trash Amp's next build. Remaining deployment checks cover later public
+ACME renewal, any future IPv6, firewall/DMZ restrictions for
 the networked TLS frontend, and disable/rollback under HL-05. The authorized
 [NAS deployment](validation/direct-https-media-nas-2026-10-23.md) passes actual-host
 fixture isolation, production mount/route inspection, dedicated DNS-only IPv4,
