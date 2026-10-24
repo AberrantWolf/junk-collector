@@ -10,9 +10,13 @@ track availability, independently of verification and private task failures. The
 repair recognizes Opus-only prepared tracks and their retained recipe coordinates
 without requiring FLAC; incomplete preparation still stays in the filter.
 See [acceptance and limits](validation/album-playback-attention-2026-10-24.md).
-The beta.6 release candidate includes this change; publication validation is in
-progress. NAS deployment and physical iPhone acceptance remain outstanding.
-See [release notes](releases/v0.1.0-beta.6.md). No unrelated queue work is absorbed.
+**Beta.6 published (2026-10-24):** exact-source checks and both native container
+build/smoke jobs passed. Publication reused the validated images and advanced
+`preview`; public digests, source labels and release assets are independently
+verified. See [publication evidence](validation/container-beta6-publication-2026-10-24.md)
+and [release notes](releases/v0.1.0-beta.6.md). NAS deployment and physical iPhone
+acceptance of the new warning/filter remain outstanding. No unrelated queue work
+is absorbed.
 
 **Beta.5 published and NAS updated (2026-10-23):** direct HTTPS media and browser
 Now Playing metadata are merged. Both native architectures passed exact-source

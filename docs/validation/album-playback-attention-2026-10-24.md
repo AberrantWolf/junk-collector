@@ -14,8 +14,10 @@ most 200 music candidates are examined per request; the web automatically follow
 scope change, so healthy albums cannot hide later matches. Device codec, network-route and undetected on-disk corruption
 are outside recorded readiness. This status makes no verification claim.
 
-Source-only: no release image, NAS configuration/restart or physical iPhone
-acceptance is claimed.
+The initial validation below preceded publication. The later
+[beta.6 publication record](container-beta6-publication-2026-10-24.md) supersedes
+its release limitation; NAS configuration/restart and physical iPhone acceptance
+of the new UI remain outstanding.
 
 ## Validation
 
@@ -86,3 +88,11 @@ stopped at the existing generated fake encoder: Linux returned ETXTBSY while
 probing its just-written script. The repair uses checked-in executable fixtures
 for process failure and I/O-worker termination; the meaningful assertions remain.
 Fresh exact-source validation is required after this repair.
+
+## Final release outcome — 2026-10-24
+
+Full local workspace tests pass: 506 passed, 0 failed, 5 ignored. Both exact-source
+CI checks and native AMD64/ARM64 build/smoke acceptance pass after the fixture
+repair. Beta.6 is published with verified public digests, source labels, assets
+and `preview` promotion; see the [publication record](container-beta6-publication-2026-10-24.md).
+NAS deployment and physical iPhone acceptance of the attention UI remain open.
