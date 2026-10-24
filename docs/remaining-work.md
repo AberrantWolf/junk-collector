@@ -10,6 +10,9 @@ and [release notes](releases/v0.1.0-beta.5.md). The earlier source candidate has
 operator-accepted iPhone cellular playback, seeking and locked track change.
 On 2026-10-24 the operator also accepted the beta.5 iPhone Safari lock-screen
 metadata check; individual fields and OS buttons were not separately itemized.
+The operator also reported approximately three hours of background cellular
+listening while driving without playback issues, accepting extended background
+playback; see the [dated device follow-up](validation/direct-https-media-nas-2026-10-23.md#extended-cellular-background-follow-up--2026-10-24).
 
 **Completed source repair — LAN candidates crowded out by container bridges (2026-10-23):**
 `codex/prioritize-lan-playback-addresses` prioritizes the kernel-selected private
@@ -367,8 +370,9 @@ now passes disposable actual-host isolation, retained-state service update,
 DNS-only IPv4/OpenWrt forwarding and initial public certificate/route checks.
 The operator accepts basic iPhone Safari cellular playback, seeking and
 next/previous with Direct HTTPS displayed, plus an audible track change while
-locked. Extended-session/network-change
-behavior, later renewal and disable/rollback remain open.
+locked. On 2026-10-24 the operator also accepted approximately three hours of
+background cellular listening without playback issues. Network-change behavior,
+later renewal and disable/rollback remain open.
 DSM CPU affinity replaces unsupported CFS quotas; the process-count limit is not
 enforced. Caddy's separate frontend DMZ/egress policy remains unimplemented.
 
@@ -1058,8 +1062,10 @@ DSM CPU affinity is enforced; its process-count cap is unsupported. The operator
 reports basic **iPhone Safari cellular** listening, seeking and next/previous
 working, with Direct HTTPS displayed. The setup test appeared to pass; exact
 challenge/range messages were not captured. A subsequent audible track change
-while locked accepts that background transition. Remaining device checks are
-extended background sessions, long-track admission expiry/renewal, explicit
+while locked accepts that background transition. The 2026-10-24 report of
+approximately three hours of background cellular listening without playback
+issues accepts extended background sessions. Remaining device checks are
+admission expiry/renewal during a single long track, explicit
 pause/resume, core restart and Wi-Fi/cellular changes. Local Chrome/native/container
 results do not pass those device gates. No installed Trash Amp client change was performed.
 Direct HTTPS supersedes relay/Iroh-first remote ordering;
