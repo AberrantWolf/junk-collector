@@ -50,8 +50,10 @@ without a new DMZ/egress restriction. The operator reports successful basic
 **iPhone Safari cellular playback**, seeking and next/previous, with Direct HTTPS
 displayed; the setup test appeared to pass without a captured per-stage result.
 The operator also heard a track change while the phone was locked, accepting that
-background transition. Extended sessions, long-track lease boundaries, network transitions
-and actual public certificate renewal remain unqualified. The later
+background transition. On 2026-10-24 the operator also reported approximately
+[three hours of background cellular listening without playback issues](validation/direct-https-media-nas-2026-10-23.md#extended-cellular-background-follow-up--2026-10-24),
+accepting extended background playback. Lease expiry during a single long track,
+network transitions and actual public certificate renewal remain unqualified. The later
 [beta.5 publication/update](validation/container-beta5-publication-2026-10-23.md)
 installs the verified release in core and media, preserving configuration and identities.
 Trash Amp must consume the matching shared

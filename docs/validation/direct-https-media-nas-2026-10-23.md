@@ -105,9 +105,23 @@ locked. This accepts continued audible playback across that observed locked-scre
 track transition. It does not establish a session duration or exercise grant-expiry
 boundaries.
 
+## Extended cellular background follow-up — 2026-10-24
+
+After the [beta.5 NAS update](container-beta5-publication-2026-10-23.md), the
+operator reported:
+
+> I used my phone on cellular over about 3 hours of driving while running in the background without any playback issues
+
+This accepts approximately three hours of background cellular listening on the
+iPhone in the established Safari playback workflow. This is an operator-observed
+session, without captured playback or network telemetry. It does not separately
+exercise expiry during a single long track, core restart or Wi-Fi/cellular
+switching.
+
 ## Remaining acceptance
 
-Extended background sessions, explicit pause/resume, long-track lease
+Extended background cellular listening is accepted by the dated follow-up above.
+Explicit pause/resume, long-track lease
 boundaries, core restart and Wi-Fi/cellular transitions remain untested.
 
 Public certificate renewal, deployment disable/rollback and frontend DMZ/egress

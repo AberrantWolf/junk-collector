@@ -2,8 +2,10 @@
 
 Selected design and source contract, **2026-10-23**. **Implemented and deployed
 on the NAS; basic external iPhone Safari playback/seek/track navigation is
-operator-accepted, including an audible track change while locked. Extended
-sessions remain unqualified.** See the
+operator-accepted, including an audible track change while locked. A 2026-10-24
+[operator follow-up](validation/direct-https-media-nas-2026-10-23.md#extended-cellular-background-follow-up--2026-10-24)
+also accepts approximately three hours of background cellular listening without
+playback issues.** See the
 [beta.5 publication and NAS update](validation/container-beta5-publication-2026-10-23.md),
 [dated acceptance and limits](validation/direct-https-media-2026-10-23.md) and
 [operator setup](../deploy/container/media.md). The earlier design below is retained

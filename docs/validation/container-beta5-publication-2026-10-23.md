@@ -83,7 +83,9 @@ checks, generated API, embedded-server rebuild and browser smoke also passed.
 On 2026-10-24 the operator answered “It works!” after being asked to reload Safari
 and check lock-screen metadata, optionally trying OS buttons, on the released
 build. This accepts the physical metadata workflow without separately itemizing
-fields or controls. Extended/lease-boundary sessions, network transitions, later
-certificate renewal and deployment rollback remain unqualified. Caddy's separate DMZ/egress policy
+fields or controls. A subsequent report accepts approximately
+[three hours of background cellular listening without playback issues](direct-https-media-nas-2026-10-23.md#extended-cellular-background-follow-up--2026-10-24).
+Lease expiry during a single long track, network transitions, later certificate
+renewal and deployment rollback remain unqualified. Caddy's separate DMZ/egress policy
 and the NAS kernel's process-count limitation are unchanged. Trash Amp still
 needs its matching shared-client build; it was not changed by this release.

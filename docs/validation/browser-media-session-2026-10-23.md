@@ -41,5 +41,6 @@ available artwork, optionally trying lock-screen playback buttons. The response
 was: “It works!” This accepts the requested physical iPhone lock-screen metadata
 workflow. The response did not itemize individual fields or buttons, so it does
 not separately qualify each OS control. No phone model or iOS version was supplied
-for this follow-up. Extended sessions and network transitions remain outside this
-report.
+for this follow-up. A [subsequent cellular listening report](direct-https-media-nas-2026-10-23.md#extended-cellular-background-follow-up--2026-10-24)
+accepts approximately three hours of background playback. Network transitions
+remain outside these reports.
