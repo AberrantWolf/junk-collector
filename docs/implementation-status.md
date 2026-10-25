@@ -1,6 +1,6 @@
 # Implementation status
 
-## Evidence-aware editions and equivalent matches — 2026-10-25 source repair
+## Evidence-aware editions and equivalent matches — beta.7 deployed, 2026-10-25
 
 Automatic music edition preference uses current recorded CD IDs and disc positions
 across attached originals before language/identity tie breakers. It reassesses on
@@ -17,6 +17,13 @@ records and referenced selections remain preserved, including across reindex.
 Historical displays retain their recorded resolution policy; new publications
 freeze the chosen automatic edition. This is logical cleanup, not archive
 compaction or exact-pressing/audio verification. See [acceptance and limits](validation/edition-fit-2026-10-25.md).
+
+Published and installed as beta.7 with the security dependency repairs. Actual
+NAS cleanup consolidated all 17 redundant active versions (44 choices → 27),
+with zero remaining duplicates and all 131 older metadata revision files unchanged.
+Runtime settings, identities and 18 unrelated containers are retained; see
+[publication/deployment acceptance](validation/container-beta7-publication-2026-10-25.md).
+
 
 ## Utoipa 6 maintenance cleanup — 2026-10-25
 

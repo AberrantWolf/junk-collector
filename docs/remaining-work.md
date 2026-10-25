@@ -1,6 +1,6 @@
 # Remaining work — home-lab priorities
 
-## Completed source repair — edition fit and equivalent matches, 2026-10-25
+## Completed live-use repair — edition fit and equivalent matches, 2026-10-25
 
 The user reported a normal 2-disc album automatically assigned to a 3-disc limited
 edition, followed by playback refusal, and duplicate matches differing only in
@@ -9,9 +9,14 @@ reassessment during incremental import/processing, manual-choice preservation,
 playback of available discs, and non-destructive consolidation of equivalent
 matches for existing entries and future responses. Full source checks, focused
 incremental/retention/recovery regressions and actual Chrome workspace/smoke
-acceptance passed; see [the delivery record](validation/edition-fit-2026-10-25.md). Existing
-NAS state/publication is outside this source repair; cleanup runs after deploying
-and starting the updated server. No archive-history pruning is authorized.
+acceptance passed; see [the delivery record](validation/edition-fit-2026-10-25.md).
+Beta.7 is published and deployed with both security commits. Actual NAS cleanup
+removed all 17 equivalent active versions (44 choices → 27), preserving all 131
+older metadata revision files. A complete recovery snapshot, unchanged runtime
+settings/identities, healthy core/media and 18 unchanged unrelated containers are
+verified; see [publication/deployment evidence](validation/container-beta7-publication-2026-10-25.md).
+No archive-history pruning was performed.
+
 
 ## Requested dependency security repair — 2026-10-25
 

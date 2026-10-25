@@ -83,3 +83,13 @@ server starts and periodically thereafter. Provider versions/raw archive history
 still occupy their existing storage; safe physical compaction remains HL-01.
 Identical layouts can describe different pressings; preferences remain descriptive
 and do not claim catalog/audio verification. Missing provider data remains missing.
+
+## Subsequent authorized publication/deployment — 2026-10-25 JST
+
+The user then authorized committing, pushing and deploying this repair together
+with the two security commits. Beta.7 is published and installed. Actual cleanup
+consolidated all 17 redundant active versions across the 11 live music entries,
+with zero duplicates remaining and all 131 pre-existing metadata revision files
+unchanged. The [publication/deployment record](container-beta7-publication-2026-10-25.md)
+supersedes the earlier source-only deployment limitation; retained raw history
+still has not been physically compacted.

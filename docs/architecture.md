@@ -29,8 +29,9 @@ policy reuses the album/list target resolver, with committed track observations
 instead of opening PCM, then checks that each selected track has published audio in any supported format,
 including Opus without FLAC. Recorded availability prefers retained FLAC recipe
 coordinates and falls back to retained Opus recipes for tracks without FLAC.
-Missing release discs, ambiguous/unassigned originals, incomplete structure and
-unprepared tracks produce an actionable reason. This is independent of catalog
+Ambiguous/unassigned originals, incomplete structure and unprepared tracks
+produce an actionable reason. Provider-listed absent media remains in album
+coverage but does not block playback of available unambiguous discs. This is independent of catalog
 verification, device codecs and transport availability. Resolve against authorized
 unredacted records before producing the role-redacted response.
 
