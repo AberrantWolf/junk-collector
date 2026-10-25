@@ -2536,8 +2536,8 @@ export interface components {
             source: "cover_art_image";
         };
         Acquisition: {
-            coordinates?: null | components["schemas"]["GeoCoordinate"];
-            cost?: null | components["schemas"]["Money"];
+            coordinates?: components["schemas"]["GeoCoordinate"] | null;
+            cost?: components["schemas"]["Money"] | null;
             /** Format: date */
             date?: string | null;
             source?: string | null;
@@ -2548,13 +2548,13 @@ export interface components {
         /** @enum {string} */
         ActiveOwnership: "owned" | "borrowed" | "unknown";
         AlbumGroupChoices: {
-            artwork_from?: null | components["schemas"]["ItemId"];
+            artwork_from?: components["schemas"]["ItemId"] | null;
             assemblies?: components["schemas"]["PhysicalSetAssembly"][];
             disc_positions?: components["schemas"]["GroupDiscPosition"][];
-            domain_from?: null | components["schemas"]["ItemId"];
-            identity_from?: null | components["schemas"]["ItemId"];
-            subtitle_from?: null | components["schemas"]["ItemId"];
-            title_from?: null | components["schemas"]["ItemId"];
+            domain_from?: components["schemas"]["ItemId"] | null;
+            identity_from?: components["schemas"]["ItemId"] | null;
+            subtitle_from?: components["schemas"]["ItemId"] | null;
+            title_from?: components["schemas"]["ItemId"] | null;
         };
         AlbumGroupPreview: {
             can_confirm: boolean;
@@ -2604,7 +2604,7 @@ export interface components {
             artwork?: components["schemas"]["ProviderArtworkLink"][];
             expected_revision: components["schemas"]["Revision"];
             snapshot_id: components["schemas"]["SnapshotId"];
-            source_observation_id?: null | components["schemas"]["ObservationId"];
+            source_observation_id?: components["schemas"]["ObservationId"] | null;
         };
         ApproveEnrollment: {
             user_code: string;
@@ -2620,7 +2620,7 @@ export interface components {
             kind: components["schemas"]["AssetKind"];
             media_type: string;
             subject: components["schemas"]["AssetSubject"];
-            thumbnail?: null | components["schemas"]["StoredFile"];
+            thumbnail?: components["schemas"]["StoredFile"] | null;
             visibility: components["schemas"]["Visibility"];
         };
         /** Format: uuid */
@@ -2689,10 +2689,10 @@ export interface components {
         BulkLibraryMemberView: {
             /** Format: int32 */
             already_ready: number;
-            artwork_asset_id?: null | components["schemas"]["AssetId"];
+            artwork_asset_id?: components["schemas"]["AssetId"] | null;
             collection_id: components["schemas"]["CollectionId"];
             item_id: components["schemas"]["ItemId"];
-            job_id?: null | components["schemas"]["JobId"];
+            job_id?: components["schemas"]["JobId"] | null;
             /** Format: int32 */
             position: number;
             reason?: string | null;
@@ -2753,15 +2753,15 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["CaptureId"];
-            purchase?: null | components["schemas"]["DigitalPurchase"];
+            purchase?: components["schemas"]["DigitalPurchase"] | null;
             representations: components["schemas"]["Representation"][];
             revision: components["schemas"]["Revision"];
         };
         CaptureAssociation: {
-            carrier_id?: null | components["schemas"]["CarrierId"];
-            component_id?: null | components["schemas"]["ComponentId"];
-            item_id?: null | components["schemas"]["ItemId"];
-            specimen_id?: null | components["schemas"]["SpecimenId"];
+            carrier_id?: components["schemas"]["CarrierId"] | null;
+            component_id?: components["schemas"]["ComponentId"] | null;
+            item_id?: components["schemas"]["ItemId"] | null;
+            specimen_id?: components["schemas"]["SpecimenId"] | null;
         };
         /** Format: uuid */
         CaptureId: string;
@@ -2790,7 +2790,7 @@ export interface components {
             dialect: string;
             reasons: string[];
             status: components["schemas"]["GameDetectionStatus"];
-            system?: null | components["schemas"]["StandardGameSystem"];
+            system?: components["schemas"]["StandardGameSystem"] | null;
             system_choices: components["schemas"]["StandardGameSystem"][];
             version: string;
         };
@@ -2835,7 +2835,7 @@ export interface components {
         };
         CatalogSnapshotStatus: {
             active: boolean;
-            identification_job_id?: null | components["schemas"]["JobId"];
+            identification_job_id?: components["schemas"]["JobId"] | null;
             inactive_reason?: string | null;
             snapshot: components["schemas"]["SnapshotRecord"];
         };
@@ -2851,7 +2851,7 @@ export interface components {
             corrections: components["schemas"]["UploadedDatCatalog"][];
             detection: components["schemas"]["CatalogDetection"];
             name: string;
-            upload?: null | components["schemas"]["UploadedDatCatalog"];
+            upload?: components["schemas"]["UploadedDatCatalog"] | null;
         };
         /** @description Browser batch of binary DAT/ZIP uploads; parsing uses bounded multipart chunks. */
         CatalogUploadForm: {
@@ -2874,14 +2874,14 @@ export interface components {
             replace_captures: components["schemas"]["CaptureId"][];
             reset_artwork: boolean;
             reset_metadata: boolean;
-            retained_representation?: null | components["schemas"]["RepresentationId"];
+            retained_representation?: components["schemas"]["RepresentationId"] | null;
         };
         CleanupInboxCommand: {
             source_is_idle: boolean;
         };
         ClientAlbum: {
             artist: string;
-            artwork?: null | components["schemas"]["AssetId"];
+            artwork?: components["schemas"]["AssetId"] | null;
             collection_id: components["schemas"]["CollectionId"];
             id: components["schemas"]["ItemId"];
             title: string;
@@ -2934,13 +2934,13 @@ export interface components {
         } | {
             /** @enum {string} */
             action: "move";
-            before?: null | components["schemas"]["ListEntryId"];
+            before?: components["schemas"]["ListEntryId"] | null;
             entry_id: components["schemas"]["ListEntryId"];
         } | {
             /** @enum {string} */
             action: "append";
             item_id: components["schemas"]["ItemId"];
-            source_representation_id?: null | components["schemas"]["RepresentationId"];
+            source_representation_id?: components["schemas"]["RepresentationId"] | null;
             /** Format: int32 */
             track_position?: number | null;
         };
@@ -2984,11 +2984,11 @@ export interface components {
             kind: "artwork_published";
         };
         Component: {
-            carrier?: null | components["schemas"]["Carrier"];
+            carrier?: components["schemas"]["Carrier"] | null;
             id: components["schemas"]["ComponentId"];
             kind: components["schemas"]["ComponentKind"];
             label: string;
-            migration_provenance?: null | components["schemas"]["LegacyComponentProvenance"];
+            migration_provenance?: components["schemas"]["LegacyComponentProvenance"] | null;
             /** Format: int32 */
             position: number;
         };
@@ -2997,7 +2997,7 @@ export interface components {
             expected_revision: components["schemas"]["Revision"];
         };
         ComponentDetails: {
-            carrier?: null | components["schemas"]["CarrierDetails"];
+            carrier?: components["schemas"]["CarrierDetails"] | null;
             kind: components["schemas"]["ComponentKind"];
             label: string;
             /** Format: int32 */
@@ -3033,7 +3033,7 @@ export interface components {
         CorrectIngestAssociationCommand: {
             association: components["schemas"]["CaptureAssociation"];
             expected_capture_revision: components["schemas"]["Revision"];
-            expected_item_revision?: null | components["schemas"]["Revision"];
+            expected_item_revision?: components["schemas"]["Revision"] | null;
         };
         /**
          * @description Typed creation input reserved for CT.2 runtime integration. Keeping the
@@ -3045,7 +3045,7 @@ export interface components {
             name: string;
         };
         CreateCollectionList: {
-            kind?: null | components["schemas"]["CollectionListKind"];
+            kind?: components["schemas"]["CollectionListKind"] | null;
             name: string;
         };
         CreateIntake: {
@@ -3081,7 +3081,7 @@ export interface components {
         };
         /** @description Acquisition facts belong to the purchased package, independently of physical copies. */
         DigitalPurchase: {
-            cost?: null | components["schemas"]["Money"];
+            cost?: components["schemas"]["Money"] | null;
             /** Format: date */
             date?: string | null;
             order_reference?: string | null;
@@ -3116,7 +3116,7 @@ export interface components {
             files: components["schemas"]["UploadFile"][];
         };
         DiscoveredIngestPlan: {
-            plan?: null | components["schemas"]["IngestPlan"];
+            plan?: components["schemas"]["IngestPlan"] | null;
             unassigned_files: string[];
         };
         DisposeSpecimen: {
@@ -3210,7 +3210,7 @@ export interface components {
             id: components["schemas"]["EnrollmentId"];
             phase: components["schemas"]["EnrollmentPhase"];
             requested_label: string;
-            user_id?: null | components["schemas"]["UserId"];
+            user_id?: components["schemas"]["UserId"] | null;
         };
         /** Format: uuid */
         EvidenceId: string;
@@ -3228,7 +3228,7 @@ export interface components {
             default_username?: string | null;
             multi_user: boolean;
             passkeys: boolean;
-            passkeys_unavailable_reason?: null | components["schemas"]["UnavailableReason"];
+            passkeys_unavailable_reason?: components["schemas"]["UnavailableReason"] | null;
         };
         GameCatalogIdentification: {
             byte_domain: string;
@@ -3373,7 +3373,7 @@ export interface components {
         };
         ImportDeclaredFile: {
             bytes: components["schemas"]["ByteLength"];
-            digest?: null | components["schemas"]["Digest"];
+            digest?: components["schemas"]["Digest"] | null;
             name: string;
             received_bytes: components["schemas"]["ByteLength"];
             visibility?: components["schemas"]["Visibility"];
@@ -3402,20 +3402,20 @@ export interface components {
             package_name: string;
         };
         ImportView: {
-            analysis_job_id?: null | components["schemas"]["JobId"];
+            analysis_job_id?: components["schemas"]["JobId"] | null;
             association: components["schemas"]["CaptureAssociation"];
             candidates: components["schemas"]["ImportCandidate"][];
             capture_id: components["schemas"]["CaptureId"];
             collection_id: components["schemas"]["CollectionId"];
             /** Format: date-time */
             created_at: string;
-            expected_item_revision?: null | components["schemas"]["Revision"];
+            expected_item_revision?: components["schemas"]["Revision"] | null;
             files: components["schemas"]["ImportDeclaredFile"][];
             id: components["schemas"]["ImportId"];
             limitations: string[];
             phase: components["schemas"]["ImportPhase"];
             representation_id: components["schemas"]["RepresentationId"];
-            review?: null | components["schemas"]["ImportReviewDecision"];
+            review?: components["schemas"]["ImportReviewDecision"] | null;
             /** Format: int64 */
             revision: number;
             source: components["schemas"]["ImportSourceSummary"];
@@ -3478,9 +3478,9 @@ export interface components {
         };
         IngestDetail: {
             attempts: components["schemas"]["IngestAttemptView"][];
-            cleanup?: null | components["schemas"]["IngestDiscardResult"];
+            cleanup?: components["schemas"]["IngestDiscardResult"] | null;
             import: components["schemas"]["ImportView"];
-            inbox_cleanup?: null | components["schemas"]["InboxCleanupView"];
+            inbox_cleanup?: components["schemas"]["InboxCleanupView"] | null;
             steps: components["schemas"]["IngestStepView"][];
             summary: components["schemas"]["IngestSummary"];
         };
@@ -3495,7 +3495,7 @@ export interface components {
         IngestPackageSelection: {
             anchor_file_index?: number | null;
             files: components["schemas"]["UploadFile"][];
-            purchase?: null | components["schemas"]["DigitalPurchase"];
+            purchase?: components["schemas"]["DigitalPurchase"] | null;
             source: components["schemas"]["ImportSourceSummary"];
         };
         IngestPermissions: {
@@ -3523,7 +3523,7 @@ export interface components {
             position: number;
             preparation_available: boolean;
             preparation_reason?: string | null;
-            purchase?: null | components["schemas"]["DigitalPurchase"];
+            purchase?: components["schemas"]["DigitalPurchase"] | null;
             source: components["schemas"]["ImportSourceSummary"];
         };
         IngestRejectedPackage: {
@@ -3536,7 +3536,7 @@ export interface components {
         IngestStepView: {
             /** Format: int32 */
             attempt?: number | null;
-            job_id?: null | components["schemas"]["JobId"];
+            job_id?: components["schemas"]["JobId"] | null;
             message?: string | null;
             retryable: boolean;
             state: components["schemas"]["IngestStepState"];
@@ -3544,7 +3544,7 @@ export interface components {
         };
         IngestSummary: {
             capture_id: components["schemas"]["CaptureId"];
-            capture_revision?: null | components["schemas"]["Revision"];
+            capture_revision?: components["schemas"]["Revision"] | null;
             collection_id: components["schemas"]["CollectionId"];
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
             /** Format: int32 */
@@ -3555,7 +3555,7 @@ export interface components {
             permissions: components["schemas"]["IngestPermissions"];
             phase: components["schemas"]["ImportPhase"];
             prepare_music: boolean;
-            target_item_id?: null | components["schemas"]["ItemId"];
+            target_item_id?: components["schemas"]["ItemId"] | null;
             total_bytes: components["schemas"]["ByteLength"];
             /** Format: date-time */
             updated_at: string;
@@ -3606,8 +3606,8 @@ export interface components {
         IntakeMemberView: {
             destination: components["schemas"]["IntakeDestination"];
             error?: string | null;
-            import?: null | components["schemas"]["IngestSummary"];
-            import_id?: null | components["schemas"]["ImportId"];
+            import?: components["schemas"]["IngestSummary"] | null;
+            import_id?: components["schemas"]["ImportId"] | null;
             plan: components["schemas"]["IngestPlanPackage"];
             /** Format: int32 */
             position: number;
@@ -3690,9 +3690,9 @@ export interface components {
             /** Format: int64 */
             generation: number;
             historical_captures: components["schemas"]["CaptureId"][];
-            merge_group?: null | components["schemas"]["TransactionId"];
-            merged_into?: null | components["schemas"]["ItemId"];
-            reimport?: null | components["schemas"]["ItemReimport"];
+            merge_group?: components["schemas"]["TransactionId"] | null;
+            merged_into?: components["schemas"]["ItemId"] | null;
+            reimport?: components["schemas"]["ItemReimport"] | null;
             /** Format: int64 */
             reset_artwork_through: number;
             /** Format: int64 */
@@ -3727,7 +3727,7 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "catalog_snapshot";
-            response_status?: null | components["schemas"]["ProviderResponseStatus"];
+            response_status?: components["schemas"]["ProviderResponseStatus"] | null;
             snapshot_id: components["schemas"]["SnapshotId"];
         };
         /** @enum {string} */
@@ -3736,20 +3736,20 @@ export interface components {
             /** Format: int32 */
             attempt: number;
             cancellable: boolean;
-            collection_id?: null | components["schemas"]["CollectionId"];
+            collection_id?: components["schemas"]["CollectionId"] | null;
             /** Format: int64 */
             completed_units: number;
             /** Format: date-time */
             created_at: string;
             error?: string | null;
             id: components["schemas"]["JobId"];
-            item_id?: null | components["schemas"]["ItemId"];
+            item_id?: components["schemas"]["ItemId"] | null;
             kind: string;
             limitation?: string | null;
             phase: string;
             progress_kind: components["schemas"]["JobProgressKind"];
-            provider_status?: null | components["schemas"]["ProviderResponseStatus"];
-            result?: null | components["schemas"]["JobResultView"];
+            provider_status?: components["schemas"]["ProviderResponseStatus"] | null;
+            result?: components["schemas"]["JobResultView"] | null;
             retryable: boolean;
             state: components["schemas"]["JobState"];
             /** Format: int64 */
@@ -3829,7 +3829,7 @@ export interface components {
         /** @description Authenticated control-plane advertisement; each endpoint has the same server identity. */
         LocalPlaybackDescriptor: {
             endpoints: components["schemas"]["LocalPlaybackEndpoint"][];
-            remote_media?: null | components["schemas"]["RemoteMediaEndpoint"];
+            remote_media?: components["schemas"]["RemoteMediaEndpoint"] | null;
             remote_media_allowed: boolean;
             server_id: components["schemas"]["ServerId"];
         };
@@ -3863,10 +3863,10 @@ export interface components {
             types: string[];
         };
         MetadataAuthority: {
-            artwork_choice?: null | components["schemas"]["AssetId"];
-            automatic_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
-            automatic_language?: null | components["schemas"]["LanguageTag"];
-            domain_overrides?: null | components["schemas"]["ModuleData"];
+            artwork_choice?: components["schemas"]["AssetId"] | null;
+            automatic_candidate?: components["schemas"]["MetadataCandidateIdentity"] | null;
+            automatic_language?: components["schemas"]["LanguageTag"] | null;
+            domain_overrides?: components["schemas"]["ModuleData"] | null;
             field_overrides: components["schemas"]["MetadataFieldOverride"][];
             /**
              * @description Unrecognized historical field authority, retained verbatim and never applied
@@ -3875,7 +3875,7 @@ export interface components {
             preserved_field_overrides?: unknown[];
             /** @description Legacy/provider-specific authority keys remain exact and portable. */
             retained_unknown_fields: Record<string, never>;
-            selected_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+            selected_candidate?: components["schemas"]["MetadataCandidateIdentity"] | null;
         };
         MetadataAuthorityChange: {
             candidate: components["schemas"]["MetadataCandidateIdentity"];
@@ -3888,7 +3888,7 @@ export interface components {
             /** @enum {string} */
             change: "set_field_override";
             field: components["schemas"]["MetadataField"];
-            language?: null | components["schemas"]["LanguageTag"];
+            language?: components["schemas"]["LanguageTag"] | null;
             value: string;
         } | {
             /** @enum {string} */
@@ -3924,7 +3924,7 @@ export interface components {
             provider_record_version?: string | null;
         };
         MetadataCandidateObservation: {
-            artwork?: null | components["schemas"]["AssetId"];
+            artwork?: components["schemas"]["AssetId"] | null;
             /**
              * @description A provider's complete identity assertion is ranked before all partial
              *     identifier or layout evidence. It is descriptive identity evidence, not
@@ -3940,32 +3940,32 @@ export interface components {
              */
             provider_priority: number;
             strength: components["schemas"]["MatchStrength"];
-            subtitle?: null | components["schemas"]["MetadataText"];
+            subtitle?: components["schemas"]["MetadataText"] | null;
             title: components["schemas"]["MetadataText"];
         };
         MetadataCandidateView: {
             accepted_automatically: boolean;
-            artwork?: null | components["schemas"]["AssetId"];
+            artwork?: components["schemas"]["AssetId"] | null;
             complete_identity: boolean;
             current: boolean;
             details: Record<string, never>;
             identity: components["schemas"]["MetadataCandidateIdentity"];
-            music_layout?: null | components["schemas"]["MetadataMusicLayout"];
+            music_layout?: components["schemas"]["MetadataMusicLayout"] | null;
             /** Format: int32 */
             provider_priority: number;
             selected: boolean;
             strength: components["schemas"]["MatchStrength"];
-            subtitle?: null | components["schemas"]["MetadataText"];
+            subtitle?: components["schemas"]["MetadataText"] | null;
             title: components["schemas"]["MetadataText"];
             unmatched: boolean;
         };
         MetadataCareQuery: {
-            collection_id?: null | components["schemas"]["CollectionId"];
+            collection_id?: components["schemas"]["CollectionId"] | null;
             cursor?: string | null;
             /** Format: int32 */
             limit?: number | null;
             needs_attention?: boolean;
-            reason?: null | components["schemas"]["MetadataReviewReason"];
+            reason?: components["schemas"]["MetadataReviewReason"] | null;
             search?: string;
         };
         MetadataCatalogSourceView: {
@@ -3982,7 +3982,7 @@ export interface components {
          */
         MetadataFieldOverride: {
             field: components["schemas"]["MetadataField"];
-            language?: null | components["schemas"]["LanguageTag"];
+            language?: components["schemas"]["LanguageTag"] | null;
             value: string;
         };
         MetadataLookupChoice: {
@@ -4031,13 +4031,13 @@ export interface components {
             artwork_error?: string | null;
             artwork_options: components["schemas"]["MetadataArtworkOption"][];
             item_id: components["schemas"]["ItemId"];
-            outcome?: null | components["schemas"]["MetadataRefreshOutcome"];
-            response_status?: null | components["schemas"]["ProviderResponseStatus"];
+            outcome?: components["schemas"]["MetadataRefreshOutcome"] | null;
+            response_status?: components["schemas"]["ProviderResponseStatus"] | null;
             snapshot_id: components["schemas"]["SnapshotId"];
         };
         MetadataResolutionView: {
             job: components["schemas"]["JobView"];
-            result?: null | components["schemas"]["MetadataResolutionResult"];
+            result?: components["schemas"]["MetadataResolutionResult"] | null;
         };
         /** @enum {string} */
         MetadataReviewReason: "missing_name" | "missing_artwork" | "album_ambiguity" | "incomplete_provider_information" | "no_match" | "lookup_failed" | "manual_conflict" | "grouping_proposal";
@@ -4046,12 +4046,12 @@ export interface components {
             candidates: components["schemas"]["MetadataCandidateView"][];
             catalog_sources: components["schemas"]["MetadataCatalogSourceView"][];
             display: components["schemas"]["ResolvedMetadataDisplay"];
-            identification?: null | components["schemas"]["GameIdentification"];
+            identification?: components["schemas"]["GameIdentification"] | null;
             item_id: components["schemas"]["ItemId"];
             lookup_choices: components["schemas"]["MetadataLookupChoice"][];
             permissions: components["schemas"]["MetadataPermissions"];
             preferred_language: components["schemas"]["LanguageTag"];
-            proposed_candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+            proposed_candidate?: components["schemas"]["MetadataCandidateIdentity"] | null;
             providers: components["schemas"]["MetadataProviderView"][];
             recognized_systems: components["schemas"]["StandardGameSystem"][];
             review_reasons: components["schemas"]["MetadataReviewReason"][];
@@ -4072,7 +4072,7 @@ export interface components {
             subtitle: string;
         };
         MetadataText: {
-            language?: null | components["schemas"]["LanguageTag"];
+            language?: components["schemas"]["LanguageTag"] | null;
             value: string;
         };
         MetadataTrackTitle: {
@@ -4187,7 +4187,7 @@ export interface components {
         MusicDiscSourceCoverage: {
             /** Format: int32 */
             assigned_medium_position?: number | null;
-            audio_verification?: null | components["schemas"]["AudioVerificationStatus"];
+            audio_verification?: components["schemas"]["AudioVerificationStatus"] | null;
             capture_id: components["schemas"]["CaptureId"];
             /** Format: date-time */
             captured_at: string;
@@ -4240,7 +4240,7 @@ export interface components {
             attempt?: number | null;
             capture_id: components["schemas"]["CaptureId"];
             error?: string | null;
-            job_id?: null | components["schemas"]["JobId"];
+            job_id?: components["schemas"]["JobId"] | null;
             member_id: components["schemas"]["JobId"];
             source_representation_id: components["schemas"]["RepresentationId"];
             state: components["schemas"]["MusicPreparationMemberState"];
@@ -4249,7 +4249,7 @@ export interface components {
             track_position: number;
         };
         MusicSearchHit: {
-            artwork?: null | components["schemas"]["AssetId"];
+            artwork?: components["schemas"]["AssetId"] | null;
             song: components["schemas"]["MusicSearchRecord"];
             /** @description Source-specific coordinates; empty when no original has been observed. */
             sources: components["schemas"]["MusicTrackAvailability"][];
@@ -4262,14 +4262,14 @@ export interface components {
             /** Format: int64 */
             duration_ms?: number | null;
             item_id: components["schemas"]["ItemId"];
-            source_representation_id?: null | components["schemas"]["RepresentationId"];
+            source_representation_id?: components["schemas"]["RepresentationId"] | null;
             title: string;
             /** Format: int32 */
             track_position: number;
         };
         MusicTrackAvailability: {
             album_selection?: components["schemas"]["MusicAlbumSelection"];
-            audio_format?: null | components["schemas"]["MusicAudioFormat"];
+            audio_format?: components["schemas"]["MusicAudioFormat"] | null;
             /** @description Current actor, module, source and encoder permit explicit preparation. */
             can_prepare: boolean;
             capture_id: components["schemas"]["CaptureId"];
@@ -4279,7 +4279,7 @@ export interface components {
             display_position?: number | null;
             /** @description Decoded track-local frames; MP3 gapless knowledge is separate in audio_format. */
             frame_count: components["schemas"]["PcmFrame"];
-            profile?: null | components["schemas"]["ConversionProfile"];
+            profile?: components["schemas"]["ConversionProfile"] | null;
             source_label: string;
             source_representation_id: components["schemas"]["RepresentationId"];
             /** @description Coordinate in the source PCM timeline at sample_rate(), with native channels. */
@@ -4409,10 +4409,10 @@ export interface components {
             items: {
                 /** Format: int32 */
                 already_ready: number;
-                artwork_asset_id?: null | components["schemas"]["AssetId"];
+                artwork_asset_id?: components["schemas"]["AssetId"] | null;
                 collection_id: components["schemas"]["CollectionId"];
                 item_id: components["schemas"]["ItemId"];
-                job_id?: null | components["schemas"]["JobId"];
+                job_id?: components["schemas"]["JobId"] | null;
                 /** Format: int32 */
                 position: number;
                 reason?: string | null;
@@ -4457,7 +4457,7 @@ export interface components {
         Page_CatalogSnapshotStatus: {
             items: {
                 active: boolean;
-                identification_job_id?: null | components["schemas"]["JobId"];
+                identification_job_id?: components["schemas"]["JobId"] | null;
                 inactive_reason?: string | null;
                 snapshot: components["schemas"]["SnapshotRecord"];
             }[];
@@ -4466,7 +4466,7 @@ export interface components {
         Page_ClientAlbum: {
             items: {
                 artist: string;
-                artwork?: null | components["schemas"]["AssetId"];
+                artwork?: components["schemas"]["AssetId"] | null;
                 collection_id: components["schemas"]["CollectionId"];
                 id: components["schemas"]["ItemId"];
                 title: string;
@@ -4510,7 +4510,7 @@ export interface components {
                 position: number;
                 preparation_available: boolean;
                 preparation_reason?: string | null;
-                purchase?: null | components["schemas"]["DigitalPurchase"];
+                purchase?: components["schemas"]["DigitalPurchase"] | null;
                 source: components["schemas"]["ImportSourceSummary"];
             }[];
             next_cursor?: string | null;
@@ -4518,7 +4518,7 @@ export interface components {
         Page_IngestSummary: {
             items: {
                 capture_id: components["schemas"]["CaptureId"];
-                capture_revision?: null | components["schemas"]["Revision"];
+                capture_revision?: components["schemas"]["Revision"] | null;
                 collection_id: components["schemas"]["CollectionId"];
                 enrichment: components["schemas"]["IngestEnrichmentPolicy"];
                 /** Format: int32 */
@@ -4529,7 +4529,7 @@ export interface components {
                 permissions: components["schemas"]["IngestPermissions"];
                 phase: components["schemas"]["ImportPhase"];
                 prepare_music: boolean;
-                target_item_id?: null | components["schemas"]["ItemId"];
+                target_item_id?: components["schemas"]["ItemId"] | null;
                 total_bytes: components["schemas"]["ByteLength"];
                 /** Format: date-time */
                 updated_at: string;
@@ -4541,8 +4541,8 @@ export interface components {
             items: {
                 destination: components["schemas"]["IntakeDestination"];
                 error?: string | null;
-                import?: null | components["schemas"]["IngestSummary"];
-                import_id?: null | components["schemas"]["ImportId"];
+                import?: components["schemas"]["IngestSummary"] | null;
+                import_id?: components["schemas"]["ImportId"] | null;
                 plan: components["schemas"]["IngestPlanPackage"];
                 /** Format: int32 */
                 position: number;
@@ -4585,20 +4585,20 @@ export interface components {
                 /** Format: int32 */
                 attempt: number;
                 cancellable: boolean;
-                collection_id?: null | components["schemas"]["CollectionId"];
+                collection_id?: components["schemas"]["CollectionId"] | null;
                 /** Format: int64 */
                 completed_units: number;
                 /** Format: date-time */
                 created_at: string;
                 error?: string | null;
                 id: components["schemas"]["JobId"];
-                item_id?: null | components["schemas"]["ItemId"];
+                item_id?: components["schemas"]["ItemId"] | null;
                 kind: string;
                 limitation?: string | null;
                 phase: string;
                 progress_kind: components["schemas"]["JobProgressKind"];
-                provider_status?: null | components["schemas"]["ProviderResponseStatus"];
-                result?: null | components["schemas"]["JobResultView"];
+                provider_status?: components["schemas"]["ProviderResponseStatus"] | null;
+                result?: components["schemas"]["JobResultView"] | null;
                 retryable: boolean;
                 state: components["schemas"]["JobState"];
                 /** Format: int64 */
@@ -4610,7 +4610,7 @@ export interface components {
         };
         Page_MusicSearchHit: {
             items: {
-                artwork?: null | components["schemas"]["AssetId"];
+                artwork?: components["schemas"]["AssetId"] | null;
                 song: components["schemas"]["MusicSearchRecord"];
                 /** @description Source-specific coordinates; empty when no original has been observed. */
                 sources: components["schemas"]["MusicTrackAvailability"][];
@@ -4663,7 +4663,7 @@ export interface components {
         Page_PresentedItem: {
             items: {
                 accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
-                album_playback?: null | components["schemas"]["AlbumPlaybackReadiness"];
+                album_playback?: components["schemas"]["AlbumPlaybackReadiness"] | null;
                 assets: components["schemas"]["PresentedAsset"][];
                 captures: components["schemas"]["PresentedCapture"][];
                 collection_id: components["schemas"]["CollectionId"];
@@ -4679,11 +4679,11 @@ export interface components {
                 identity_link: components["schemas"]["ItemIdentityLink"];
                 inventory_subtitle?: string | null;
                 inventory_title?: string | null;
-                merge_group?: null | components["schemas"]["TransactionId"];
-                merged_into?: null | components["schemas"]["ItemId"];
+                merge_group?: components["schemas"]["TransactionId"] | null;
+                merged_into?: components["schemas"]["ItemId"] | null;
                 presentation: components["schemas"]["ModulePresentation"];
-                primary_artwork?: null | components["schemas"]["AssetId"];
-                reimport_import_id?: null | components["schemas"]["ImportId"];
+                primary_artwork?: components["schemas"]["AssetId"] | null;
+                reimport_import_id?: components["schemas"]["ImportId"] | null;
                 revision: components["schemas"]["Revision"];
                 specimens: components["schemas"]["PresentedSpecimen"][];
                 subtitle: string;
@@ -4702,16 +4702,16 @@ export interface components {
             items: {
                 album?: string | null;
                 artist?: string | null;
-                artwork?: null | components["schemas"]["AssetId"];
-                audio?: null | components["schemas"]["MusicTrackAvailability"];
+                artwork?: components["schemas"]["AssetId"] | null;
+                audio?: components["schemas"]["MusicTrackAvailability"] | null;
                 availability: components["schemas"]["ListEntryAvailability"];
                 /** Format: int32 */
                 disc_position?: number | null;
                 id: components["schemas"]["ListEntryId"];
-                item_id?: null | components["schemas"]["ItemId"];
+                item_id?: components["schemas"]["ItemId"] | null;
                 /** Format: int32 */
                 position: number;
-                source?: null | components["schemas"]["ListTarget"];
+                source?: components["schemas"]["ListTarget"] | null;
                 title: string;
                 /** Format: int32 */
                 track_position?: number | null;
@@ -4732,7 +4732,7 @@ export interface components {
                 occurrences: number;
                 operation: components["schemas"]["CapabilityId"];
                 result: Record<string, never>;
-                snapshot_id?: null | components["schemas"]["SnapshotId"];
+                snapshot_id?: components["schemas"]["SnapshotId"] | null;
                 snapshot_observation?: Record<string, never> | null;
                 source: components["schemas"]["PackageScope"];
                 support: components["schemas"]["OperationSupport"];
@@ -4763,12 +4763,12 @@ export interface components {
                 cleanup_error?: string | null;
                 clear_error?: string | null;
                 clear_pending: boolean;
-                collection_id?: null | components["schemas"]["CollectionId"];
+                collection_id?: components["schemas"]["CollectionId"] | null;
                 collection_name: string;
                 /** Format: int64 */
                 created_at: number;
                 guided: boolean;
-                item_id?: null | components["schemas"]["ItemId"];
+                item_id?: components["schemas"]["ItemId"] | null;
                 item_title?: string | null;
                 kind: string;
                 name: string;
@@ -4857,13 +4857,13 @@ export interface components {
             id: components["schemas"]["AssetId"];
             kind: components["schemas"]["AssetKind"];
             media_type: string;
-            original?: null | components["schemas"]["StoredFile"];
+            original?: components["schemas"]["StoredFile"] | null;
             revision: components["schemas"]["Revision"];
             subject: components["schemas"]["AssetSubject"];
-            thumbnail?: null | components["schemas"]["StoredFile"];
+            thumbnail?: components["schemas"]["StoredFile"] | null;
             /** Format: date-time */
             updated_at: string;
-            visibility?: null | components["schemas"]["Visibility"];
+            visibility?: components["schemas"]["Visibility"] | null;
         };
         /**
          * @description Recorded checks for visible, currently associated originals. This is not an
@@ -4871,7 +4871,7 @@ export interface components {
          */
         PresentedAudioCheck: {
             source_id: components["schemas"]["RepresentationId"];
-            status?: null | components["schemas"]["AudioVerificationStatus"];
+            status?: components["schemas"]["AudioVerificationStatus"] | null;
         };
         PresentedCapture: {
             association: components["schemas"]["CaptureAssociation"];
@@ -4879,7 +4879,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["CaptureId"];
-            purchase?: null | components["schemas"]["DigitalPurchase"];
+            purchase?: components["schemas"]["DigitalPurchase"] | null;
             representations: components["schemas"]["PresentedRepresentation"][];
             revision: components["schemas"]["Revision"];
         };
@@ -4895,7 +4895,7 @@ export interface components {
             supports_listening: boolean;
         };
         PresentedEvidence: {
-            catalog?: null | components["schemas"]["CatalogSnapshot"];
+            catalog?: components["schemas"]["CatalogSnapshot"] | null;
             /** Format: date-time */
             created_at: string;
             details?: unknown;
@@ -4922,7 +4922,7 @@ export interface components {
          */
         PresentedItem: {
             accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
-            album_playback?: null | components["schemas"]["AlbumPlaybackReadiness"];
+            album_playback?: components["schemas"]["AlbumPlaybackReadiness"] | null;
             assets: components["schemas"]["PresentedAsset"][];
             captures: components["schemas"]["PresentedCapture"][];
             collection_id: components["schemas"]["CollectionId"];
@@ -4938,11 +4938,11 @@ export interface components {
             identity_link: components["schemas"]["ItemIdentityLink"];
             inventory_subtitle?: string | null;
             inventory_title?: string | null;
-            merge_group?: null | components["schemas"]["TransactionId"];
-            merged_into?: null | components["schemas"]["ItemId"];
+            merge_group?: components["schemas"]["TransactionId"] | null;
+            merged_into?: components["schemas"]["ItemId"] | null;
             presentation: components["schemas"]["ModulePresentation"];
-            primary_artwork?: null | components["schemas"]["AssetId"];
-            reimport_import_id?: null | components["schemas"]["ImportId"];
+            primary_artwork?: components["schemas"]["AssetId"] | null;
+            reimport_import_id?: components["schemas"]["ImportId"] | null;
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["PresentedSpecimen"][];
             subtitle: string;
@@ -4965,12 +4965,12 @@ export interface components {
             files: components["schemas"]["PresentedFile"][];
             format: string;
             id: components["schemas"]["RepresentationId"];
-            profile?: null | components["schemas"]["ConversionProfile"];
+            profile?: components["schemas"]["ConversionProfile"] | null;
             role: components["schemas"]["RepresentationRole"];
-            source?: null | components["schemas"]["RepresentationId"];
+            source?: components["schemas"]["RepresentationId"] | null;
         };
         PresentedSpecimen: {
-            acquisition?: null | components["schemas"]["Acquisition"];
+            acquisition?: components["schemas"]["Acquisition"] | null;
             components: components["schemas"]["Component"][];
             condition: components["schemas"]["Condition"];
             id: components["schemas"]["SpecimenId"];
@@ -4994,7 +4994,7 @@ export interface components {
         };
         Principal: {
             administrator: boolean;
-            device_id?: null | components["schemas"]["DeviceId"];
+            device_id?: components["schemas"]["DeviceId"] | null;
             user_id: components["schemas"]["UserId"];
         };
         ProcessingSummary: {
@@ -5010,7 +5010,7 @@ export interface components {
             occurrences: number;
             operation: components["schemas"]["CapabilityId"];
             result: Record<string, never>;
-            snapshot_id?: null | components["schemas"]["SnapshotId"];
+            snapshot_id?: components["schemas"]["SnapshotId"] | null;
             snapshot_observation?: Record<string, never> | null;
             source: components["schemas"]["PackageScope"];
             support: components["schemas"]["OperationSupport"];
@@ -5039,7 +5039,7 @@ export interface components {
             username: string;
         };
         RemoteGrantRequest: {
-            target?: null | components["schemas"]["PlaybackTarget"];
+            target?: components["schemas"]["PlaybackTarget"] | null;
         };
         RemoteMediaEndpoint: {
             base_url: string;
@@ -5074,9 +5074,9 @@ export interface components {
             files: components["schemas"]["StoredFile"][];
             format: string;
             id: components["schemas"]["RepresentationId"];
-            profile?: null | components["schemas"]["ConversionProfile"];
+            profile?: components["schemas"]["ConversionProfile"] | null;
             role: components["schemas"]["RepresentationRole"];
-            source?: null | components["schemas"]["RepresentationId"];
+            source?: components["schemas"]["RepresentationId"] | null;
         };
         /** Format: uuid */
         RepresentationId: string;
@@ -5087,22 +5087,22 @@ export interface components {
             lookup: components["schemas"]["AcquireMetadataCommand"];
         };
         ResolvedMetadataDisplay: {
-            artwork?: null | components["schemas"]["AssetId"];
-            candidate?: null | components["schemas"]["MetadataCandidateIdentity"];
+            artwork?: components["schemas"]["AssetId"] | null;
+            candidate?: components["schemas"]["MetadataCandidateIdentity"] | null;
             domain_fields?: {
                 [key: string]: components["schemas"]["ResolvedMetadataText"];
             };
             resolution: components["schemas"]["MetadataResolutionKind"];
-            subtitle?: null | components["schemas"]["ResolvedMetadataText"];
+            subtitle?: components["schemas"]["ResolvedMetadataText"] | null;
             title: components["schemas"]["ResolvedMetadataText"];
         };
         ResolvedMetadataText: {
-            language?: null | components["schemas"]["LanguageTag"];
+            language?: components["schemas"]["LanguageTag"] | null;
             source: components["schemas"]["MetadataValueSource"];
             value: string;
         };
         RetryIngestCommand: {
-            job_id?: null | components["schemas"]["JobId"];
+            job_id?: components["schemas"]["JobId"] | null;
         };
         ReturnLoan: {
             command: components["schemas"]["ReturnLoanCommand"];
@@ -5117,7 +5117,7 @@ export interface components {
         ReturnedPossession: "present" | "elsewhere" | "unknown";
         ReviewImportCommand: {
             association: components["schemas"]["CaptureAssociation"];
-            expected_item_revision?: null | components["schemas"]["Revision"];
+            expected_item_revision?: components["schemas"]["Revision"] | null;
             /** Format: int64 */
             expected_revision: number;
             identity: components["schemas"]["ImportIdentityDecision"];
@@ -5168,13 +5168,13 @@ export interface components {
         };
         SaveItemEnvelope: components["schemas"]["SaveItemCommandEnvelope"] | components["schemas"]["SaveItemEditCommandEnvelope"] | components["schemas"]["Wave1SaveItemEnvelope"];
         ScanPlan: {
-            accuraterip_query?: null | components["schemas"]["DbarQuery"];
-            accuraterip_structure_observation_id?: null | components["schemas"]["ObservationId"];
+            accuraterip_query?: components["schemas"]["DbarQuery"] | null;
+            accuraterip_structure_observation_id?: components["schemas"]["ObservationId"] | null;
             blockers: string[];
             command: components["schemas"]["StartProcessingCommand"];
             files: components["schemas"]["IngestAnchorChoice"][];
-            job?: null | components["schemas"]["JobView"];
-            result?: null | components["schemas"]["ProcessingSummary"];
+            job?: components["schemas"]["JobView"] | null;
+            result?: components["schemas"]["ProcessingSummary"] | null;
             state: components["schemas"]["ScanState"];
         };
         /** @enum {string} */
@@ -5182,7 +5182,7 @@ export interface components {
         /** Format: uuid */
         ServerId: string;
         ServerSettingsView: {
-            backup_reminder?: null | components["schemas"]["BackupReminder"];
+            backup_reminder?: components["schemas"]["BackupReminder"] | null;
             current_user_id: components["schemas"]["UserId"];
             default_user_id: components["schemas"]["UserId"];
             exposure: components["schemas"]["Exposure"];
@@ -5216,7 +5216,7 @@ export interface components {
             provider: components["schemas"]["ModuleId"];
         };
         Specimen: {
-            acquisition?: null | components["schemas"]["Acquisition"];
+            acquisition?: components["schemas"]["Acquisition"] | null;
             components: components["schemas"]["Component"][];
             condition: components["schemas"]["Condition"];
             id: components["schemas"]["SpecimenId"];
@@ -5231,7 +5231,7 @@ export interface components {
             expected_revision: components["schemas"]["Revision"];
         };
         SpecimenDetails: {
-            acquisition?: null | components["schemas"]["Acquisition"];
+            acquisition?: components["schemas"]["Acquisition"] | null;
             condition: components["schemas"]["Condition"];
             label: string;
             ownership: components["schemas"]["ActiveOwnership"];
@@ -5258,12 +5258,12 @@ export interface components {
         };
         StartIngestCommand: {
             analysis?: components["schemas"]["IngestAnalysisPolicy"];
-            clean_reimport?: null | components["schemas"]["CleanReimportOptions"];
-            destination?: null | components["schemas"]["IngestDestination"];
+            clean_reimport?: components["schemas"]["CleanReimportOptions"] | null;
+            destination?: components["schemas"]["IngestDestination"] | null;
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
             plan: components["schemas"]["IngestPlan"];
             prepare_music?: boolean;
-            purchase?: null | components["schemas"]["DigitalPurchase"];
+            purchase?: components["schemas"]["DigitalPurchase"] | null;
         };
         StartIntake: {
             expected_revision: components["schemas"]["Revision"];
@@ -5285,7 +5285,7 @@ export interface components {
             operation_version: number;
             representation_id: components["schemas"]["RepresentationId"];
             selection: Record<string, never>;
-            snapshot_id?: null | components["schemas"]["SnapshotId"];
+            snapshot_id?: components["schemas"]["SnapshotId"] | null;
         };
         StoredFile: {
             bytes: components["schemas"]["ByteLength"];
@@ -5311,7 +5311,7 @@ export interface components {
         };
         UpdateDigitalPurchase: {
             expected_revision: components["schemas"]["Revision"];
-            purchase?: null | components["schemas"]["DigitalPurchase"];
+            purchase?: components["schemas"]["DigitalPurchase"] | null;
         };
         UpdateMetadataAuthorityCommand: {
             change: components["schemas"]["MetadataAuthorityChange"];
@@ -5336,7 +5336,7 @@ export interface components {
             bytes: components["schemas"]["ByteLength"];
             name: string;
             sha256?: string | null;
-            visibility?: null | components["schemas"]["Visibility"];
+            visibility?: components["schemas"]["Visibility"] | null;
         };
         UploadedDatCatalog: {
             bytes: components["schemas"]["ByteLength"];
@@ -5358,12 +5358,12 @@ export interface components {
             cleanup_error?: string | null;
             clear_error?: string | null;
             clear_pending: boolean;
-            collection_id?: null | components["schemas"]["CollectionId"];
+            collection_id?: components["schemas"]["CollectionId"] | null;
             collection_name: string;
             /** Format: int64 */
             created_at: number;
             guided: boolean;
-            item_id?: null | components["schemas"]["ItemId"];
+            item_id?: components["schemas"]["ItemId"] | null;
             item_title?: string | null;
             kind: string;
             name: string;
@@ -5395,7 +5395,7 @@ export interface components {
             prior_failures: components["schemas"]["IngestAttemptView"][];
         };
         WorkJobsQuery: {
-            cursor?: null | components["schemas"]["JobId"];
+            cursor?: components["schemas"]["JobId"] | null;
             /** Format: int32 */
             limit?: number | null;
             target: components["schemas"]["WorkTarget"];
@@ -5427,6 +5427,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5435,6 +5436,7 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogSourceView"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5458,6 +5460,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5466,12 +5469,14 @@ export interface operations {
                     "application/json": components["schemas"]["Collection"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5494,6 +5499,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5502,12 +5508,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_CatalogSnapshotStatus"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5533,6 +5541,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -5541,18 +5550,21 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5579,6 +5591,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5587,24 +5600,28 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogSnapshotStatus"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5634,6 +5651,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -5642,24 +5660,28 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Payload Too Large */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -5685,6 +5707,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -5693,12 +5716,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5722,6 +5747,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5730,18 +5756,21 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogUploadPreview"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Payload Too Large */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -5763,24 +5792,28 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5804,18 +5837,21 @@ export interface operations {
             };
         };
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5833,6 +5869,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5841,6 +5878,7 @@ export interface operations {
                     "application/json": string[];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5866,6 +5904,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -5874,12 +5913,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5899,18 +5940,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5928,6 +5972,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5936,6 +5981,7 @@ export interface operations {
                     "application/json": components["schemas"]["ServerSettingsView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5957,6 +6003,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5965,12 +6012,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_AccountView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5994,6 +6043,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6002,12 +6052,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6033,6 +6085,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6041,18 +6094,21 @@ export interface operations {
                     "application/json": components["schemas"]["AccountView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6076,6 +6132,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6084,12 +6141,14 @@ export interface operations {
                     "application/json": components["schemas"]["AlbumGroupResult"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6111,6 +6170,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6119,12 +6179,14 @@ export interface operations {
                     "application/json": components["schemas"]["AlbumGroupPreview"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6144,6 +6206,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6152,6 +6215,7 @@ export interface operations {
                     "application/json": components["schemas"]["AlbumGroupUndo"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6173,6 +6237,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6181,12 +6246,14 @@ export interface operations {
                     "application/json": components["schemas"]["AlbumGroupResult"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6208,6 +6275,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6216,6 +6284,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6233,12 +6302,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6260,6 +6331,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6268,6 +6340,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6289,6 +6362,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6297,12 +6371,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -6324,12 +6400,14 @@ export interface operations {
             };
         };
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6347,6 +6425,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6355,12 +6434,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -6382,6 +6463,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6390,12 +6472,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Too Many Requests */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6417,6 +6501,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6425,6 +6510,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_BulkLibrarySummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6448,6 +6534,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6456,12 +6543,14 @@ export interface operations {
                     "application/json": components["schemas"]["BulkLibrarySummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6481,6 +6570,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6489,6 +6579,7 @@ export interface operations {
                     "application/json": components["schemas"]["BulkLibrarySummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6510,6 +6601,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6518,6 +6610,7 @@ export interface operations {
                     "application/json": components["schemas"]["BulkLibrarySummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6540,6 +6633,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6548,6 +6642,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_BulkLibraryMemberView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6569,6 +6664,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6577,12 +6673,14 @@ export interface operations {
                     "application/json": components["schemas"]["BulkLibrarySummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6604,6 +6702,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6612,12 +6711,14 @@ export interface operations {
                     "application/json": components["schemas"]["BulkLibrarySummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6643,6 +6744,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -6651,24 +6753,28 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6692,6 +6798,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6700,18 +6807,21 @@ export interface operations {
                     "application/json": components["schemas"]["Page_ProcessingSummary"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -6737,6 +6847,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -6745,24 +6856,28 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6786,6 +6901,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6794,18 +6910,21 @@ export interface operations {
                     "application/json": components["schemas"]["ScanPlan"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -6828,6 +6947,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6847,6 +6967,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6872,6 +6993,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6880,12 +7002,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_PresentedCollection"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6903,6 +7027,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6911,6 +7036,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModuleDescriptor"][];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6942,6 +7068,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6950,36 +7077,42 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedAsset"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Payload Too Large */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -7000,6 +7133,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7008,12 +7142,14 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedAsset"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7037,6 +7173,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7045,18 +7182,21 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedAsset"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7083,6 +7223,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7091,24 +7232,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedAsset"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7129,6 +7274,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7137,6 +7283,7 @@ export interface operations {
                     "application/octet-stream": unknown;
                 };
             };
+            /** @description Partial Content */
             206: {
                 headers: {
                     [name: string]: unknown;
@@ -7145,18 +7292,21 @@ export interface operations {
                     "application/octet-stream": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Range Not Satisfiable */
             416: {
                 headers: {
                     [name: string]: unknown;
@@ -7177,6 +7327,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7185,18 +7336,21 @@ export interface operations {
                     "application/json": components["schemas"]["DocumentTextPreview"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7217,6 +7371,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7225,6 +7380,7 @@ export interface operations {
                     "image/png": unknown;
                 };
             };
+            /** @description Partial Content */
             206: {
                 headers: {
                     [name: string]: unknown;
@@ -7233,18 +7389,21 @@ export interface operations {
                     "image/png": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Range Not Satisfiable */
             416: {
                 headers: {
                     [name: string]: unknown;
@@ -7271,6 +7430,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -7279,12 +7439,14 @@ export interface operations {
                     "application/json": components["schemas"]["StagedInboxImport"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7308,6 +7470,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7316,6 +7479,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_CollectionListSummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7341,6 +7505,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7349,18 +7514,21 @@ export interface operations {
                     "application/json": components["schemas"]["CollectionListSummary"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7384,6 +7552,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7392,18 +7561,21 @@ export interface operations {
                     "application/json": components["schemas"]["CollectionListView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7430,6 +7602,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7438,24 +7611,28 @@ export interface operations {
                     "application/json": components["schemas"]["CollectionListSummary"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7479,6 +7656,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7487,6 +7665,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_MusicSearchHit"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7506,6 +7685,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7514,18 +7694,21 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedCollection"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7548,6 +7731,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7556,12 +7740,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_CatalogSnapshotStatus"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7584,6 +7770,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7592,12 +7779,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_GrantView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7618,26 +7807,30 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": null | components["schemas"]["GrantView"];
+                    "application/json": components["schemas"]["GrantView"] | null;
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7664,6 +7857,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7672,18 +7866,21 @@ export interface operations {
                     "application/json": components["schemas"]["GrantView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7707,24 +7904,28 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7746,6 +7947,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7754,6 +7956,7 @@ export interface operations {
                     "application/json": components["schemas"]["InboxSourceView"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7778,6 +7981,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7786,12 +7990,14 @@ export interface operations {
                     "application/json": components["schemas"]["InboxPackagePage"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7813,18 +8019,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7846,6 +8055,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7854,18 +8064,21 @@ export interface operations {
                     "application/json": components["schemas"]["EnrollmentView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Gone */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -7887,6 +8100,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7895,12 +8109,14 @@ export interface operations {
                     "application/json": components["schemas"]["EnrollmentView"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7922,6 +8138,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7930,12 +8147,14 @@ export interface operations {
                     "application/json": components["schemas"]["EnrollmentStart"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Too Many Requests */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7955,18 +8174,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Gone */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -7990,6 +8212,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7998,12 +8221,14 @@ export interface operations {
                     "application/json": components["schemas"]["EnrollmentView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Too Many Requests */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8027,6 +8252,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8035,18 +8261,21 @@ export interface operations {
                     "application/json": components["schemas"]["EnrollmentCompletion_Pairing"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Gone */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Too Many Requests */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8070,6 +8299,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8078,12 +8308,14 @@ export interface operations {
                     "application/json": components["schemas"]["EnrollmentView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Too Many Requests */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8101,6 +8333,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8120,6 +8353,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8145,6 +8379,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8153,12 +8388,14 @@ export interface operations {
                     "application/json": components["schemas"]["ImportView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8178,6 +8415,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8186,6 +8424,7 @@ export interface operations {
                     "application/json": components["schemas"]["ImportView"];
                 };
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8211,6 +8450,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -8219,12 +8459,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8251,6 +8493,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8259,18 +8502,21 @@ export interface operations {
                     "application/json": components["schemas"]["ImportView"];
                 };
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Payload Too Large */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -8292,6 +8538,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -8300,12 +8547,14 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8331,6 +8580,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8339,12 +8589,14 @@ export interface operations {
                     "application/json": components["schemas"]["ImportView"];
                 };
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8366,6 +8618,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8374,12 +8627,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_IngestSummary"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8403,6 +8658,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -8411,18 +8667,21 @@ export interface operations {
                     "application/json": components["schemas"]["AcceptedIngest"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8444,6 +8703,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8452,12 +8712,14 @@ export interface operations {
                     "application/json": components["schemas"]["DiscoveredIngestPlan"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8479,6 +8741,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8487,18 +8750,21 @@ export interface operations {
                     "application/json": components["schemas"]["IngestPlan"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8518,6 +8784,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8526,12 +8793,14 @@ export interface operations {
                     "application/json": components["schemas"]["IngestDetail"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8557,6 +8826,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8565,24 +8835,28 @@ export interface operations {
                     "application/json": components["schemas"]["IngestDetail"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8608,6 +8882,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8616,18 +8891,21 @@ export interface operations {
                     "application/json": components["schemas"]["IngestDetail"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8653,6 +8931,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8661,18 +8940,21 @@ export interface operations {
                     "application/json": components["schemas"]["IngestDiscardResult"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8698,6 +8980,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -8706,24 +8989,28 @@ export interface operations {
                     "application/json": components["schemas"]["JobId"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8749,6 +9036,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8757,18 +9045,21 @@ export interface operations {
                     "application/json": components["schemas"]["IngestDetail"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8792,6 +9083,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8800,12 +9092,14 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeDiscovery"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8828,6 +9122,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8836,6 +9131,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeDiscoveryPage"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8857,6 +9153,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8865,6 +9162,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_IntakeSession"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8888,6 +9186,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8896,6 +9195,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeSession"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8915,6 +9215,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8923,6 +9224,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeSession"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8944,6 +9246,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8952,6 +9255,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeSession"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8974,6 +9278,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8982,6 +9287,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_IntakeMemberView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9007,6 +9313,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9015,18 +9322,21 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeSession"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9053,6 +9363,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9061,12 +9372,14 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeSession"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9092,6 +9405,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9100,12 +9414,14 @@ export interface operations {
                     "application/json": components["schemas"]["IntakeSession"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9130,6 +9446,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9138,6 +9455,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_PresentedItem"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -9157,6 +9475,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9165,12 +9484,14 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9196,6 +9517,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9204,12 +9526,14 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9229,6 +9553,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9237,6 +9562,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9262,18 +9588,21 @@ export interface operations {
             };
         };
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9296,6 +9625,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9304,6 +9634,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9326,6 +9657,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9334,12 +9666,14 @@ export interface operations {
                     "application/octet-stream": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9368,6 +9702,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9376,12 +9711,14 @@ export interface operations {
                     "application/json": components["schemas"]["Item"];
                 };
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Payload Too Large */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -9401,6 +9738,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9409,12 +9747,14 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedEvidence"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9436,6 +9776,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -9444,12 +9785,14 @@ export interface operations {
                     "application/json": components["schemas"]["JobId"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9469,6 +9812,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9477,12 +9821,14 @@ export interface operations {
                     "application/json": components["schemas"]["MetadataReviewView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9508,6 +9854,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9516,24 +9863,28 @@ export interface operations {
                     "application/json": components["schemas"]["MetadataReviewView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9559,6 +9910,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -9567,30 +9919,35 @@ export interface operations {
                     "application/json": components["schemas"]["JobAccepted"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -9616,6 +9973,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9624,24 +9982,28 @@ export interface operations {
                     "application/json": components["schemas"]["CompletedMetadataAcquisition"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9663,6 +10025,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9671,18 +10034,21 @@ export interface operations {
                     "application/json": components["schemas"]["MetadataArtworkOption"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9708,6 +10074,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9716,24 +10083,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedAsset"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9755,6 +10126,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9763,18 +10135,21 @@ export interface operations {
                     "image/jpeg": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -9800,6 +10175,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9808,24 +10184,28 @@ export interface operations {
                     "application/json": components["schemas"]["MetadataReviewView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9845,6 +10225,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9853,12 +10234,14 @@ export interface operations {
                     "application/json": components["schemas"]["MetadataResolutionView"][];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9884,6 +10267,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -9892,18 +10276,21 @@ export interface operations {
                     "application/json": components["schemas"]["JobAccepted"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9923,6 +10310,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9931,12 +10319,14 @@ export interface operations {
                     "application/json": components["schemas"]["MusicAlbumCoverage"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9956,6 +10346,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9964,12 +10355,14 @@ export interface operations {
                     "application/json": components["schemas"]["MusicTrackAvailability"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9995,6 +10388,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10003,18 +10397,21 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10036,6 +10433,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10044,6 +10442,7 @@ export interface operations {
                     "application/octet-stream": unknown;
                 };
             };
+            /** @description Partial Content */
             206: {
                 headers: {
                     [name: string]: unknown;
@@ -10052,18 +10451,21 @@ export interface operations {
                     "application/octet-stream": unknown;
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Range Not Satisfiable */
             416: {
                 headers: {
                     [name: string]: unknown;
@@ -10089,6 +10491,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10097,18 +10500,21 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10134,6 +10540,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10142,24 +10549,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10186,6 +10597,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10194,24 +10606,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10238,6 +10654,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10246,24 +10663,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10291,6 +10712,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10299,24 +10721,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10341,6 +10767,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10349,18 +10776,21 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10387,6 +10817,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10395,24 +10826,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10439,6 +10874,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10447,24 +10883,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10492,6 +10932,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10500,24 +10941,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedItem"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10539,6 +10984,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -10547,6 +10993,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10574,6 +11021,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -10582,30 +11030,35 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -10632,6 +11085,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10640,24 +11094,28 @@ export interface operations {
                     "application/json": components["schemas"]["PresentedCapture"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10679,6 +11137,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10687,6 +11146,7 @@ export interface operations {
                     "application/json": components["schemas"]["AlbumPlaybackSnapshot"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10706,6 +11166,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10714,6 +11175,7 @@ export interface operations {
                     "application/json": components["schemas"]["MusicTrackAvailability"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10733,6 +11195,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10741,12 +11204,14 @@ export interface operations {
                     "application/json": components["schemas"]["MusicPreparationBatchView"][];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -10772,6 +11237,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -10780,30 +11246,35 @@ export interface operations {
                     "application/json": components["schemas"]["MusicPreparationBatchView"];
                 };
             };
+            /** @description Bad Request */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -10823,6 +11294,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10831,12 +11303,14 @@ export interface operations {
                     "application/json": components["schemas"]["MusicAlbumPreparationPlan"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -10850,13 +11324,14 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                cursor: null | components["schemas"]["JobId"];
+                cursor: components["schemas"]["JobId"] | null;
                 limit: number | null;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10865,6 +11340,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_JobView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -10884,6 +11360,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10892,12 +11369,14 @@ export interface operations {
                     "application/json": components["schemas"]["JobView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -10919,6 +11398,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10927,18 +11407,21 @@ export interface operations {
                     "application/json": components["schemas"]["JobView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10960,6 +11443,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -10968,18 +11452,21 @@ export interface operations {
                     "application/json": components["schemas"]["JobView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11004,6 +11491,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11012,12 +11500,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_PresentedItem"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11041,6 +11531,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11049,6 +11540,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_PreparationCareEntry"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11066,6 +11558,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11074,6 +11567,7 @@ export interface operations {
                     "application/json": components["schemas"]["Principal"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11091,6 +11585,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11099,6 +11594,7 @@ export interface operations {
                     "application/json": components["schemas"]["MetadataPreferences"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11122,6 +11618,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11130,12 +11627,14 @@ export interface operations {
                     "application/json": components["schemas"]["MetadataPreferences"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11153,6 +11652,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11161,6 +11661,7 @@ export interface operations {
                     "application/json": components["schemas"]["AccountView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11184,6 +11685,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11192,18 +11694,21 @@ export interface operations {
                     "application/json": components["schemas"]["AccountView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11223,6 +11728,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11231,12 +11737,14 @@ export interface operations {
                     "application/json": components["schemas"]["MusicPreparationBatchView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -11258,6 +11766,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11266,18 +11775,21 @@ export interface operations {
                     "application/json": components["schemas"]["MusicPreparationBatchView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11299,6 +11811,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11307,24 +11820,28 @@ export interface operations {
                     "application/json": components["schemas"]["MusicPreparationBatchView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -11342,6 +11859,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11350,6 +11868,7 @@ export interface operations {
                     "application/json": components["schemas"]["Pairing"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11371,6 +11890,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11379,12 +11899,14 @@ export interface operations {
                     "application/json": components["schemas"]["BrowserPlaybackGrant"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11406,6 +11928,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11414,18 +11937,21 @@ export interface operations {
                     "application/json": components["schemas"]["RemoteMediaGrant"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -11447,6 +11973,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11455,12 +11982,14 @@ export interface operations {
                     "application/json": components["schemas"]["RemoteMediaTest"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11478,6 +12007,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11486,6 +12016,7 @@ export interface operations {
                     "application/json": components["schemas"]["LocalPlaybackDescriptor"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11506,6 +12037,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11514,6 +12046,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_NativeDeviceView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11536,24 +12069,28 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11574,6 +12111,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11582,6 +12120,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_PasskeyView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11604,24 +12143,28 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11643,6 +12186,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11651,18 +12195,21 @@ export interface operations {
                     "application/json": components["schemas"]["Revision"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11680,6 +12227,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11688,12 +12236,14 @@ export interface operations {
                     "application/json": string[];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11711,18 +12261,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11743,6 +12296,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11751,6 +12305,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_SessionView"];
                 };
             };
+            /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11774,6 +12329,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11782,6 +12338,7 @@ export interface operations {
                     "application/json": components["schemas"]["Upload"];
                 };
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11801,6 +12358,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11809,12 +12367,14 @@ export interface operations {
                     "application/json": components["schemas"]["Upload"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -11836,12 +12396,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11863,6 +12425,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Accepted */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -11871,6 +12434,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11897,6 +12461,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11905,12 +12470,14 @@ export interface operations {
                     "application/json": components["schemas"]["Upload"];
                 };
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Payload Too Large */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -11939,6 +12506,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11947,12 +12515,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_WorkEntry"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -11976,24 +12546,28 @@ export interface operations {
             };
         };
         responses: {
+            /** @description No Content */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12015,6 +12589,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -12023,12 +12598,14 @@ export interface operations {
                     "application/json": components["schemas"]["WorkEntry"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -12050,6 +12627,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -12058,12 +12636,14 @@ export interface operations {
                     "application/json": components["schemas"]["Page_WorkJobView"];
                 };
             };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            /** @description Not Found */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -2761,6 +2761,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
 #[tokio::test]
 async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
     let document = serde_json::to_value(openapi()).unwrap();
+    assert_eq!(document["openapi"], "3.1.0");
     let paths = document["paths"].as_object().unwrap();
     for path in [
         "/api/v1/items/{id}/identify-game",
@@ -2851,6 +2852,14 @@ async fn annotated_contract_covers_api_and_is_not_served_as_public_ui() {
         for operation in path.as_object().unwrap().values() {
             if let Some(body) = operation.get("requestBody") {
                 assert!(body["x-body-limit-bytes"].as_u64().is_some());
+            }
+            for response in operation["responses"].as_object().unwrap().values() {
+                if response.get("$ref").is_none() {
+                    assert!(
+                        response["description"].is_string(),
+                        "OpenAPI 3.1 response is missing its required description"
+                    );
+                }
             }
         }
     }

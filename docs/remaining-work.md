@@ -32,12 +32,13 @@ then the client PEM parser replacement:
 - Security review: corrected a reproduced XML event read-bound bypass in
   published `junk-libs` commit `317517c430744e4f1196e30850b37b3f13c10560`, now
   pinned by Collector. See [review and evidence](validation/security-review-2026-10-25.md).
-- The only remaining maintenance warning is `paste` via `utoipa-axum`; the
-  current lockfile audit has no vulnerability advisory. The user now authorizes
-  the coordinated Utoipa 6 / `utoipa-axum` 0.3 upgrade (using `pastey`) after the
-  review commit. It needs regenerated-contract comparison, route/exposure and
-  affected client checks. It is not yet implemented at this review checkpoint.
-  No advisory ignores were added.
+- `paste`: removed by the coordinated Utoipa 6 / `utoipa-axum` 0.3 upgrade,
+  using `pastey`. Generated-contract comparison preserves OpenAPI 3.1.0 and
+  the API semantics; required response descriptions are supplied explicitly.
+  See [upgrade acceptance](validation/utoipa6-2026-10-25.md). The refreshed audit
+  reports zero vulnerabilities and zero maintenance warnings. No advisory
+  ignores were added. This closes the requested source security/maintenance
+  repair; release/deployment remains separate.
 
 ## Requested live-use delivery — album playback attention, 2026-10-24
 

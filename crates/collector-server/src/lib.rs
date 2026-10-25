@@ -805,7 +805,20 @@ pub fn openapi() -> OpenApi {
         .into_iter()
         .flatten()
         {
-            if let Some(body) = &mut operation.request_body {
+            // OpenAPI 3.1 requires response descriptions. Utoipa 6 omits empty
+            // strings, so supply the HTTP reason when an annotation omitted one.
+            for (status, response) in &mut operation.responses.responses {
+                if let utoipa::openapi::RefOr::T(response) = response
+                    && response.description.is_empty()
+                {
+                    response.description = axum::http::StatusCode::from_bytes(status.as_bytes())
+                        .ok()
+                        .and_then(|status| status.canonical_reason())
+                        .unwrap_or("Response")
+                        .to_owned();
+                }
+            }
+            if let Some(utoipa::openapi::RefOr::T(body)) = &mut operation.request_body {
                 body.extensions = Some(utoipa::openapi::extensions::Extensions::from_iter([(
                     "x-body-limit-bytes",
                     limit,
