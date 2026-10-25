@@ -172,7 +172,7 @@ fn ambiguous_releases_json() -> Vec<u8> {
 }
 
 #[test]
-fn musicbrainz_normalizes_reordered_responses_and_versions_changed_raw_content() {
+fn musicbrainz_versions_candidate_changes_but_reuses_equivalent_responses() {
     let first = releases_json("Original title");
     let reordered = br#"{"count":1,"releases":[{"unknown":null,"release-group":{"id":"00000000-0000-4000-8000-000000000003"},"media":[{"discs":[{"id":"known-disc-id"}]}],"text-representation":{"script":"Latn","language":"eng"},"artist-credit":[{"artist":{"name":"Example Artist","id":"00000000-0000-4000-8000-000000000002"},"name":"Example Artist"}],"title":"Original title","id":"00000000-0000-4000-8000-000000000001"}]}"#.to_vec();
     let changed = releases_json("Changed title");
@@ -209,10 +209,10 @@ fn musicbrainz_normalizes_reordered_responses_and_versions_changed_raw_content()
 
     assert_eq!(first_candidates[0].title.value, "Original title");
     assert_eq!(first_candidates[0].title, reordered_candidates[0].title);
-    assert_ne!(
+    assert_eq!(
         first_candidates[0].identity.provider_record_version,
         reordered_candidates[0].identity.provider_record_version,
-        "a changed raw response receives a new immutable version even when normalization is equal"
+        "equivalent normalized candidate content must reuse its version despite response formatting"
     );
     assert_ne!(
         first_candidates[0].identity.provider_record_version,

@@ -1437,14 +1437,14 @@ impl ProcessingPort for Store {
         record: MetadataAuthorityRecord,
         context: Option<collector_app::ItemEffectContext>,
     ) -> Result<()> {
-        self.publish_metadata_record(transaction, record, None, context)
+        self.publish_metadata_record(transaction, record, None, context, None)
     }
     fn publish_metadata_for_job(
         &self,
         claim: &JobClaim,
         record: MetadataAuthorityRecord,
     ) -> Result<()> {
-        self.publish_metadata_record(TransactionId::new(), record, Some(claim), None)
+        self.publish_metadata_record(TransactionId::new(), record, Some(claim), None, None)
     }
 
     fn metadata_authority(
@@ -1472,6 +1472,53 @@ impl ProcessingPort for Store {
         observation: collector_core::ObservationId,
     ) -> Result<bool> {
         lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM metadata_refreshes WHERE id=? AND collection_id=? AND item_id=?)", params![observation.to_string(), collection.to_string(), item.to_string()], |row| row.get(0)).map_err(storage)
+    }
+
+    fn publish_metadata_maintenance(
+        &self,
+        user: UserId,
+        record: MetadataAuthorityRecord,
+    ) -> Result<()> {
+        self.publish_metadata_record(TransactionId::new(), record, None, None, Some(user))
+    }
+
+    fn metadata_maintenance_candidates(
+        &self,
+        after: Option<ItemId>,
+        limit: u16,
+    ) -> Result<Vec<collector_app::MetadataMaintenanceCandidate>> {
+        if !(1..=200).contains(&limit) {
+            return Err(Error::Invalid(
+                "Use a 1–200 metadata maintenance page.".into(),
+            ));
+        }
+        let db = lock(&self.db)?;
+        let mut statement = db
+            .prepare(
+                "SELECT m.id,
+            (SELECT MIN(g.user_id) FROM private.grants g JOIN private.users u ON u.id=g.user_id
+             WHERE g.collection_id=m.collection_id AND g.role>=1 AND u.enabled=1)
+            FROM metadata_authorities m JOIN items i ON i.id=m.id
+            WHERE i.deleted=0 AND json_extract(i.record,'$.domain.module')='org.junk.music'
+            AND (?1 IS NULL OR m.id>?1) AND EXISTS(
+              SELECT 1 FROM private.grants g JOIN private.users u ON u.id=g.user_id
+              WHERE g.collection_id=m.collection_id AND g.role>=1 AND u.enabled=1)
+            ORDER BY m.id LIMIT ?2",
+            )
+            .map_err(storage)?;
+        statement
+            .query_map(params![after.map(|id| id.to_string()), limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(storage)?
+            .map(|row| {
+                let (item, user) = row.map_err(storage)?;
+                Ok(collector_app::MetadataMaintenanceCandidate {
+                    item_id: item.parse().map_err(storage)?,
+                    user_id: user.parse().map_err(storage)?,
+                })
+            })
+            .collect()
     }
 
     fn metadata_candidates(
@@ -1631,18 +1678,39 @@ impl Store {
 }
 
 impl Store {
+    fn validate_metadata_maintenance(
+        &self,
+        user: UserId,
+        record: &MetadataAuthorityRecord,
+    ) -> Result<()> {
+        let db = lock(&self.db)?;
+        let allowed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=? AND u.enabled=1 AND g.collection_id=? AND g.role>=1)",
+            params![user.to_string(), record.collection_id.to_string()], |row| row.get(0)).map_err(storage)?;
+        if !allowed {
+            return Err(Error::Forbidden);
+        }
+        if !crate::album_grouping::item_work_idle(&db, &[record.item_id])? {
+            return Err(Error::Conflict);
+        }
+        Ok(())
+    }
+
     fn publish_metadata_record(
         &self,
         transaction: TransactionId,
         record: MetadataAuthorityRecord,
         claim: Option<&JobClaim>,
         context: Option<collector_app::ItemEffectContext>,
+        maintenance_user: Option<UserId>,
     ) -> Result<()> {
         record.validate()?;
         if self.item(record.item_id)?.collection_id != record.collection_id {
             return Err(Error::NotFound);
         }
         let _writer = lock(&self.writer)?;
+        if let Some(user) = maintenance_user {
+            self.validate_metadata_maintenance(user, &record)?;
+        }
         if let Some(claim) = claim {
             self.validate_publication_claim(claim, record.collection_id)?;
             self.ensure_job_continues(claim.id, Some(&claim.claim_token))?;
@@ -1735,6 +1803,9 @@ impl Store {
             }
         }
         let mut guarded = || {
+            if let Some(user) = maintenance_user {
+                self.validate_metadata_maintenance(user, &record)?;
+            }
             if let Some(context) = context {
                 self.validate_item_effect(context, record.collection_id)?;
             }

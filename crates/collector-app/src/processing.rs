@@ -603,7 +603,7 @@ impl From<&collector_core::Item> for MetadataInventoryState {
 #[serde(deny_unknown_fields)]
 pub struct MetadataAuthorityRecord {
     /// Historical materializations retain their original decision algorithm.
-    /// New publications use v2; current presentation always applies v2 policy.
+    /// New publications freeze the evidence-aware automatic edition (v4).
     #[serde(default = "legacy_metadata_policy")]
     pub resolution_policy: u32,
     /// Current versions used for automatic resolution; history remains selectable.
@@ -652,7 +652,7 @@ impl MetadataAuthorityRecord {
                     .automatic_language
                     .as_ref()
                     .map_or("en", collector_core::LanguageTag::as_str),
-                self.resolution_policy == 1,
+                self.resolution_policy,
             )?;
             if self.resolution_policy <= 2 {
                 if expected.title.source == collector_core::MetadataValueSource::Provisional {
@@ -681,7 +681,7 @@ impl MetadataAuthorityRecord {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if !matches!(self.resolution_policy, 1..=3) {
+        if !matches!(self.resolution_policy, 1..=4) {
             return Err(collector_core::Error::Unavailable(
                 "unknown metadata resolution policy".into(),
             ));
@@ -711,6 +711,12 @@ impl MetadataAuthorityRecord {
         }
         Ok(())
     }
+}
+
+/// Live music metadata entry and a currently authorized curator for maintenance.
+pub struct MetadataMaintenanceCandidate {
+    pub item_id: collector_core::ItemId,
+    pub user_id: collector_core::UserId,
 }
 
 /// Mechanism-only persistence and package access. Authorization and currency
@@ -797,6 +803,18 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         item: collector_core::ItemId,
         observation: collector_core::ObservationId,
     ) -> Result<bool>;
+    /// Publish maintenance only while authorized and idle, fenced with job admission.
+    fn publish_metadata_maintenance(
+        &self,
+        user: collector_core::UserId,
+        record: MetadataAuthorityRecord,
+    ) -> Result<()>;
+    /// Bounded keyset scan of live music entries with metadata and a current curator.
+    fn metadata_maintenance_candidates(
+        &self,
+        after: Option<collector_core::ItemId>,
+        limit: u16,
+    ) -> Result<Vec<MetadataMaintenanceCandidate>>;
     fn metadata_candidates(
         &self,
         collection: CollectionId,

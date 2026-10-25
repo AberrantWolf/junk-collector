@@ -15304,8 +15304,8 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
     let matched = service.metadata_view(&actor, saved.id).unwrap();
     assert_eq!(
         matched.candidates.len(),
-        3,
-        "Selectable immutable versions are retained separately from current suggestions."
+        2,
+        "Equivalent internal versions share one choice; genuinely changed metadata stays separate."
     );
     assert_eq!(
         matched.authority.selected_candidate,
@@ -15319,7 +15319,15 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
             .unwrap()
             .candidates
             .len(),
-        3
+        2
+    );
+    assert_eq!(
+        store
+            .metadata_candidates(collection.id, saved.id)
+            .unwrap()
+            .len(),
+        3,
+        "Consolidating choices must preserve immutable source versions."
     );
     let mut reused_identity = equivalent;
     reused_identity.identity = original;
@@ -26277,7 +26285,7 @@ fn album_attention_is_paginated_authorized_and_recomputed_after_reindex() {
 }
 
 #[test]
-fn album_playback_attention_reports_release_missing_discs_before_play() {
+fn album_playback_uses_available_discs_while_release_media_remain_missing() {
     let (_root, store, actor, service, collection) = setup();
     let (items, release) =
         automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
@@ -26300,14 +26308,24 @@ fn album_playback_attention_reports_release_missing_discs_before_play() {
             .unwrap()
             .album_playback
     );
+    // A provider-listed absent disc remains visible in coverage, but does not
+    // block selecting the available tracks. They still require preparation.
+    assert_eq!(
+        service
+            .music_album_coverage(&actor, items[0].id)
+            .unwrap()
+            .media
+            .len(),
+        2
+    );
     let view = service.item_presented(&actor, items[0].id).unwrap();
     assert!(matches!(view.album_playback,
         Some(collector_app::AlbumPlaybackReadiness::NeedsAttention { reason })
-            if reason.contains("missing a recorded audio disc")));
-    assert!(
-        matches!(service.album_playback_snapshot(&actor, items[0].id, None),
-        Err(Error::Invalid(reason)) if reason.contains("missing a recorded audio disc"))
-    );
+            if reason.contains("not prepared")));
+    let snapshot = service
+        .album_playback_snapshot(&actor, items[0].id, None)
+        .unwrap();
+    assert_eq!(snapshot.tracks.len(), 2);
 }
 
 #[test]
@@ -26408,4 +26426,351 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
             .iter()
             .any(|entry| entry.id == album.id)
     );
+}
+
+#[test]
+fn album_edition_fit_reassesses_incremental_discs_and_preserves_manual_choice() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, mut limited) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7]);
+    limited.release_id = "00000000-0000-4000-8000-000000000000".into();
+    limited.disambiguation = Some("Limited edition".into());
+    let mut normal = limited.clone();
+    normal.release_id = "11111111-1111-4111-8111-111111111111".into();
+    normal.media.truncate(2);
+    normal.disc_ids = normal
+        .media
+        .iter()
+        .flat_map(|m| m.disc_ids.clone())
+        .collect();
+    normal.disambiguation = None;
+    let mut single = normal.clone();
+    single.release_id = "22222222-2222-4222-8222-222222222222".into();
+    single.media.truncate(1);
+    single.disc_ids = single.media[0].disc_ids.clone();
+    let choices = automatic_group_metadata_options(
+        &service,
+        &actor,
+        &items[0],
+        &[limited.clone(), normal.clone(), single],
+    );
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .display
+            .candidate,
+        Some(choices[2].clone())
+    );
+    let attach = |index: usize| {
+        let mut capture = Catalog::capture(&*store, items[index].captures[0].id).unwrap();
+        let revision = capture.revision;
+        capture.association.item_id = Some(items[0].id);
+        Catalog::save_capture(&*store, capture, revision).unwrap();
+    };
+    attach(1);
+    // Immediate reads use the new source set before the maintenance sweep runs.
+    let view = service.metadata_view(&actor, items[0].id).unwrap();
+    assert_eq!(view.display.candidate, Some(choices[1].clone()));
+    // Maintenance must not invalidate the frozen inputs of admitted work.
+    let before = store
+        .metadata_authority(collection.id, items[0].id)
+        .unwrap()
+        .unwrap();
+    let job = store
+        .enqueue_job(JobSpec {
+            id: JobId::new(),
+            user_id: actor.user_id,
+            collection_id: Some(collection.id),
+            item_id: Some(items[0].id),
+            kind: "maintenance-fence-fixture".into(),
+            phase: "queued".into(),
+            total_units: 0,
+            request: serde_json::json!({}),
+            frozen_input: None,
+        })
+        .unwrap();
+    service.reconcile_music_metadata().unwrap();
+    assert_eq!(
+        store
+            .metadata_authority(collection.id, items[0].id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        before.revision
+    );
+    let mut denied = before.clone();
+    denied.revision = Revision(before.revision.0 + 1);
+    assert!(matches!(
+        store.publish_metadata_maintenance(UserId::new(), denied),
+        Err(Error::Forbidden)
+    ));
+    service.cancel_job(&actor, job, &command()).unwrap();
+    // A later per-disc response may omit the normal edition. It must not erase
+    // that still-compatible strong match learned during the first lookup.
+    let limited_candidate = store
+        .metadata_candidates(collection.id, items[0].id)
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.identity == choices[0])
+        .unwrap();
+    service
+        .refresh_metadata(
+            &actor,
+            items[0].id,
+            RefreshMetadataCommand {
+                source_import: None,
+                expected_revision: view.revision,
+                observation: MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates: vec![limited_candidate],
+                    raw_observation: RawJson::from_value(
+                        serde_json::json!({"fixture":"later disc response"}),
+                    ),
+                    observed_at: chrono::Utc::now(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let view = service.metadata_view(&actor, items[0].id).unwrap();
+    assert!(view.current_candidates.contains(&choices[1]));
+    assert_eq!(view.display.candidate, Some(choices[1].clone()));
+    assert_eq!(
+        service
+            .music_album_coverage(&actor, items[0].id)
+            .unwrap()
+            .media
+            .len(),
+        2
+    );
+    service.reconcile_music_metadata().unwrap();
+    let revision = store
+        .metadata_authority(collection.id, items[0].id)
+        .unwrap()
+        .unwrap()
+        .revision;
+    service.reconcile_music_metadata().unwrap();
+    assert_eq!(
+        store
+            .metadata_authority(collection.id, items[0].id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        revision
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .display
+            .candidate,
+        Some(choices[1].clone())
+    );
+    automatic_group_select(&service, &actor, &items[0], &choices[0]);
+    service.reconcile_music_metadata().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .authority
+            .selected_candidate,
+        Some(choices[0].clone())
+    );
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, items[0].id, None)
+            .unwrap()
+            .tracks
+            .len(),
+        4
+    );
+    // After returning to automatic matching, the normal edition wins again.
+    let view = service.metadata_view(&actor, items[0].id).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            items[0].id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: view.revision,
+                change: MetadataAuthorityChange::ClearSelectedCandidate,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .display
+            .candidate,
+        Some(choices[1].clone())
+    );
+    attach(2);
+    service.reconcile_music_metadata().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .display
+            .candidate,
+        Some(choices[0].clone())
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .display
+            .candidate,
+        Some(choices[0].clone())
+    );
+}
+
+#[test]
+fn equivalent_metadata_versions_consolidate_without_losing_selected_sources_or_artwork() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) = automatic_group_sources(&store, &actor, &service, collection.id, &[5]);
+    let choices = automatic_group_metadata_options(&service, &actor, &items[0], &[release]);
+    let original = store
+        .metadata_candidates(collection.id, items[0].id)
+        .unwrap()[0]
+        .clone();
+    let mut duplicate = original.clone();
+    duplicate.identity.provider_record_version = Some("different-response-hash".into());
+    let mut reordered = duplicate.clone();
+    reordered.identity.provider_record_version = Some("third-response-hash".into());
+    reordered.observation = RawJson::from_json(
+        serde_json::to_string_pretty(&original.observation.value().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let view = service.metadata_view(&actor, items[0].id).unwrap();
+    service
+        .refresh_metadata(
+            &actor,
+            items[0].id,
+            RefreshMetadataCommand {
+                source_import: None,
+                expected_revision: view.revision,
+                observation: MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates: vec![original.clone(), duplicate, reordered],
+                    raw_observation: RawJson::from_value(
+                        serde_json::json!({"fixture":"equivalent versions"}),
+                    ),
+                    observed_at: chrono::Utc::now(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    automatic_group_select(&service, &actor, &items[0], &choices[0]);
+    service.reconcile_music_metadata().unwrap();
+    let view = service.metadata_review(&actor, items[0].id).unwrap();
+    assert_eq!(view.candidates.len(), 1);
+    assert_eq!(view.candidates[0].identity, choices[0]);
+    assert!(view.candidates[0].selected);
+    assert!(view.candidates[0].current);
+    assert_eq!(
+        store
+            .metadata_candidates(collection.id, items[0].id)
+            .unwrap()
+            .len(),
+        3,
+        "immutable source versions remain recoverable"
+    );
+    let revision = view.revision;
+    service.reconcile_music_metadata().unwrap();
+    assert_eq!(
+        service.metadata_view(&actor, items[0].id).unwrap().revision,
+        revision
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .metadata_review(&actor, items[0].id)
+            .unwrap()
+            .candidates
+            .len(),
+        1
+    );
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .authority
+            .selected_candidate,
+        Some(choices[0].clone())
+    );
+}
+
+#[test]
+fn music_metadata_maintenance_recovers_all_pages_of_legacy_duplicate_choices() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) = automatic_group_sources(&store, &actor, &service, collection.id, &[5]);
+    automatic_group_metadata(&service, &actor, &items[0], &release);
+    let original = store
+        .metadata_candidates(collection.id, items[0].id)
+        .unwrap()[0]
+        .clone();
+    let mut duplicate = original.clone();
+    duplicate.identity.provider_record_version = Some("zz-duplicate".into());
+    let identities = vec![original.identity.clone(), duplicate.identity.clone()];
+    let mut entries = vec![];
+    for _ in 0..101 {
+        let entry = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+        let authority = MetadataAuthority {
+            automatic_candidate: Some(original.identity.clone()),
+            ..Default::default()
+        };
+        let candidates = vec![original.clone(), duplicate.clone()];
+        let display =
+            collector_app::resolve_metadata_display(&entry, &authority, &candidates, "en").unwrap();
+        // A real old-policy record: v3 chose the same lowest identity in this tie.
+        store
+            .publish_metadata_authority(
+                TransactionId::new(),
+                MetadataAuthorityRecord {
+                    resolution_policy: 3,
+                    inventory: Some((&entry).into()),
+                    collection_id: collection.id,
+                    item_id: entry.id,
+                    revision: Revision(1),
+                    authority,
+                    current_candidates: Some(identities.clone()),
+                    display: Some(display),
+                    updated_at: chrono::Utc::now(),
+                    observations: vec![MetadataRefreshObservation {
+                        id: ObservationId::new(),
+                        outcome: MetadataRefreshOutcome::Candidates,
+                        candidates,
+                        raw_observation: RawJson::from_value(
+                            serde_json::json!({"fixture":"legacy duplicates"}),
+                        ),
+                        observed_at: chrono::Utc::now(),
+                    }],
+                },
+                None,
+            )
+            .unwrap();
+        entries.push(entry.id);
+    }
+    store.reindex().unwrap(); // Historical validation must still read the old policy.
+    service.reconcile_music_metadata().unwrap();
+    for id in entries {
+        let record = store
+            .metadata_authority(collection.id, id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.resolution_policy, 4);
+        assert_eq!(record.current_candidates.unwrap().len(), 1);
+        assert_eq!(
+            store.metadata_candidates(collection.id, id).unwrap().len(),
+            2
+        );
+    }
+    store.reindex().unwrap();
 }

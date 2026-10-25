@@ -143,7 +143,8 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
                 // An unrelated recovery error must not suppress grouping, nor
                 // may a grouping failure prevent ordinary workflow recovery.
                 let grouping = state.service.reconcile_automatic_album_groups();
-                recovery.and(grouping)
+                let metadata = state.service.reconcile_music_metadata();
+                recovery.and(grouping).and(metadata)
             })
             .await
             {

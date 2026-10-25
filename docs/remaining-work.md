@@ -1,5 +1,18 @@
 # Remaining work — home-lab priorities
 
+## Completed source repair — edition fit and equivalent matches, 2026-10-25
+
+The user reported a normal 2-disc album automatically assigned to a 3-disc limited
+edition, followed by playback refusal, and duplicate matches differing only in
+Collector's internal version. This assignment covers evidence-aware edition
+reassessment during incremental import/processing, manual-choice preservation,
+playback of available discs, and non-destructive consolidation of equivalent
+matches for existing entries and future responses. Full source checks, focused
+incremental/retention/recovery regressions and actual Chrome workspace/smoke
+acceptance passed; see [the delivery record](validation/edition-fit-2026-10-25.md). Existing
+NAS state/publication is outside this source repair; cleanup runs after deploying
+and starting the updated server. No archive-history pruning is authorized.
+
 ## Requested dependency security repair — 2026-10-25
 
 The user's first pass covers easy dependency upgrades. Quinn, rustls,

@@ -300,16 +300,6 @@ impl CollectionService {
             {
                 return Err(Error::Invalid("Assign each original to an album disc before adding the whole multi-disc album. You can add discs individually now.".into()));
             }
-            if coverage.media.iter().any(|medium| {
-                !coverage.sources.iter().any(|candidate| {
-                    candidate.medium_position == Some(medium.position)
-                        && discs
-                            .values()
-                            .any(|ids| ids.contains(&candidate.source_representation_id))
-                })
-            }) {
-                return Err(Error::Invalid("This album is missing a recorded audio disc. Attach and inspect missing discs before adding the whole album, or add the available discs individually.".into()));
-            }
             discs.values().flat_map(|v| v.iter().copied()).collect()
         };
         let mut rows = rows

@@ -1,6 +1,8 @@
 //! Metadata authority and deterministic display resolution. Provider transport
 //! belongs in adapters; this module consumes already-bounded observations.
 
+mod maintenance;
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -362,7 +364,7 @@ impl CollectionService {
         user: UserId,
     ) -> Result<ResolvedMetadataDisplay> {
         let LoadedMetadataAuthority {
-            authority,
+            mut authority,
             legacy,
             current,
             ..
@@ -374,6 +376,9 @@ impl CollectionService {
             &mut candidates,
             legacy.iter().flat_map(|value| &value.candidates),
         )?;
+        let language = self.metadata_language(user)?;
+        let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
+        self.reassess_music_edition(item, &mut authority, &active, &language)?;
         resolve_metadata_display(
             item,
             &authority,
@@ -885,7 +890,7 @@ impl CollectionService {
         self.authorize(actor, item.collection_id, Action::Curate)?;
         let LoadedMetadataAuthority {
             revision,
-            authority,
+            mut authority,
             legacy,
             current,
         } = self.authority_or_inventory(&item)?;
@@ -896,6 +901,9 @@ impl CollectionService {
             &mut candidates,
             legacy.iter().flat_map(|value| &value.candidates),
         )?;
+        let language = self.metadata_language(actor.user_id)?;
+        let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
+        self.reassess_music_edition(&item, &mut authority, &active, &language)?;
         let display = resolve_metadata_display(
             &item,
             &authority,
@@ -908,6 +916,14 @@ impl CollectionService {
                 .map(|candidate| candidate.identity.clone())
                 .collect()
         });
+        let preferred = authority
+            .selected_candidate
+            .iter()
+            .chain(display.candidate.iter())
+            .chain(authority.automatic_candidate.iter())
+            .collect::<Vec<_>>();
+        let (candidates, current_candidates) =
+            maintenance::consolidate_matches(&candidates, &current_candidates, &preferred)?;
         Ok(MetadataView {
             item_id,
             revision,
@@ -967,7 +983,7 @@ impl CollectionService {
         item: &Item,
     ) -> Result<Option<collector_modules::music::MusicBrainzReleaseObservation>> {
         let LoadedMetadataAuthority {
-            authority,
+            mut authority,
             legacy,
             current,
             ..
@@ -980,6 +996,12 @@ impl CollectionService {
             legacy.iter().flat_map(|value| &value.candidates),
         )?;
         let current = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
+        let language = authority
+            .automatic_language
+            .as_ref()
+            .map_or("en", LanguageTag::as_str)
+            .to_owned();
+        self.reassess_music_edition(item, &mut authority, &current, &language)?;
         let display = resolve_metadata_display(
             item,
             &authority,
@@ -1253,8 +1275,18 @@ impl CollectionService {
             .filter(|candidate| current.contains(&candidate.identity))
             .cloned()
             .collect::<Vec<_>>();
-        let (proposed, uncertain) =
+        let (ranked, uncertain) =
             automatic_metadata_candidate(&current_candidates, preferred_language.as_str());
+        let proposed = view
+            .display
+            .candidate
+            .as_ref()
+            .and_then(|id| {
+                current_candidates
+                    .iter()
+                    .find(|candidate| &candidate.identity == id)
+            })
+            .or(ranked);
         let mut review_reasons = Vec::new();
         if view.display.candidate.is_none() && view.authority.field_overrides.is_empty() {
             review_reasons.push(MetadataReviewReason::MissingName);
@@ -1788,8 +1820,16 @@ impl CollectionService {
                 }
                 authority.automatic_language =
                     Some(LanguageTag::new(self.metadata_language(actor.user_id)?)?);
+                let active =
+                    current_metadata_candidates(&authority, &candidates, current.as_deref())?;
+                self.reassess_music_edition(
+                    &item,
+                    &mut authority,
+                    &active,
+                    &self.metadata_language(actor.user_id)?,
+                )?;
                 let record = MetadataAuthorityRecord {
-                    resolution_policy: 3,
+                    resolution_policy: 4,
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
                     item_id,
@@ -1901,8 +1941,35 @@ impl CollectionService {
                 .map(|candidate| candidate.identity.clone())
                 .collect::<Vec<_>>()
         } else {
-            previous_current
+            previous_current.clone()
         };
+        // Disc-by-disc lookups contribute to one evolving edition decision.
+        // Replace returned release versions, but keep other current strong matches;
+        // a response for disc 2 must not erase viable editions learned from disc 1.
+        if available && item.domain.module.0 == "org.junk.music" {
+            let incoming = command
+                .observation
+                .candidates
+                .iter()
+                .map(|candidate| {
+                    (
+                        &candidate.identity.provider,
+                        &candidate.identity.provider_record_id,
+                    )
+                })
+                .collect::<BTreeSet<_>>();
+            for id in &previous_current {
+                if !incoming.contains(&(&id.provider, &id.provider_record_id))
+                    && candidates.iter().any(|candidate| {
+                        &candidate.identity == id
+                            && candidate.complete_identity
+                            && candidate.strength != MatchStrength::Name
+                    })
+                {
+                    current.push(id.clone());
+                }
+            }
+        }
         current.sort();
         current.dedup();
         merge_metadata_candidates(&mut candidates, &command.observation.candidates)?;
@@ -1925,12 +1992,22 @@ impl CollectionService {
                 authority.automatic_candidate = Some(automatic.identity.clone());
             }
         }
+        let active = current_metadata_candidates(&authority, &candidates, Some(&current))?;
+        self.reassess_music_edition(item, &mut authority, &active, preferred_language)?;
+        let preferred = authority
+            .selected_candidate
+            .iter()
+            .chain(authority.automatic_candidate.iter())
+            .collect::<Vec<_>>();
+        let (_, consolidated) =
+            maintenance::consolidate_matches(&candidates, &current, &preferred)?;
+        current = consolidated;
         observations.push(command.observation.clone());
         self.modules
             .validate_metadata_authority(owner, &authority)
             .map_err(Error::from)?;
         let record = MetadataAuthorityRecord {
-            resolution_policy: 3,
+            resolution_policy: 4,
             inventory: Some(item.into()),
             collection_id: item.collection_id,
             item_id: item.id,
@@ -2263,7 +2340,7 @@ impl CollectionService {
         let published = self.processing.publish_metadata_for_job(
             claim,
             MetadataAuthorityRecord {
-                resolution_policy: 3,
+                resolution_policy: 4,
                 inventory: Some((&item).into()),
                 collection_id: item.collection_id,
                 item_id: item.id,
@@ -2408,6 +2485,7 @@ fn metadata_candidates_equivalent(
         && left.identity.provider_record_id == right.identity.provider_record_id
         && left.title == right.title
         && left.subtitle == right.subtitle
+        && left.artwork == right.artwork
         && left.complete_identity == right.complete_identity
         && left.strength == right.strength
         && left.provider_priority == right.provider_priority
@@ -2746,7 +2824,7 @@ pub(crate) fn resolve_metadata_fields(
         authority,
         candidates,
         preferred_language,
-        false,
+        4,
     )
 }
 
@@ -2756,7 +2834,7 @@ pub(crate) fn resolve_metadata_fields_with_policy(
     authority: &MetadataAuthority,
     candidates: &[MetadataCandidateObservation],
     preferred_language: &str,
-    historical: bool,
+    resolution_policy: u32,
 ) -> Result<ResolvedMetadataDisplay> {
     authority.validate()?;
     let mut checked = Vec::new();
@@ -2771,7 +2849,7 @@ pub(crate) fn resolve_metadata_fields_with_policy(
                 .ok_or_else(|| Error::Invalid("selected metadata candidate is absent".into()))
         })
         .transpose()?;
-    let (proposed, uncertain) = if historical {
+    let (proposed, uncertain) = if resolution_policy == 1 {
         let best = candidates
             .iter()
             .max_by(|left, right| compare_candidate(left, right, preferred_language));
@@ -2797,6 +2875,11 @@ pub(crate) fn resolve_metadata_fields_with_policy(
     // different album never replaces a recorded automatic decision during reads.
     let automatic = accepted
         .map(|accepted| {
+            if resolution_policy >= 4
+                && accepted.identity.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+            {
+                return accepted;
+            }
             candidates
                 .iter()
                 .filter(|value| {

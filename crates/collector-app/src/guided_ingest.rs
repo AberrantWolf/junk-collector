@@ -820,7 +820,7 @@ impl CollectionService {
                     &intent.import_id.to_string(),
                 )),
                 MetadataAuthorityRecord {
-                    resolution_policy: 3,
+                    resolution_policy: 4,
                     current_candidates: Some(vec![]),
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,

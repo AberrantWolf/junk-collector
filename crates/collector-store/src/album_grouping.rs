@@ -86,7 +86,7 @@ impl AlbumGroupingPort for Store {
     }
 
     fn automatic_album_group_idle(&self, items: &[ItemId]) -> Result<bool> {
-        automatic_group_idle(&*lock(&self.db)?, items)
+        item_work_idle(&*lock(&self.db)?, items)
     }
 
     fn album_group_publication(&self, group: TransactionId) -> Result<AlbumGroupPublication> {
@@ -296,7 +296,7 @@ impl AlbumGroupingPort for Store {
         let guard = || -> Result<()> {
             let db = lock(&self.db)?;
             if publication.result.automatic
-                && !automatic_group_idle(
+                && !item_work_idle(
                     &db,
                     &publication
                         .entries
@@ -474,7 +474,7 @@ impl AlbumGroupingPort for Store {
     }
 }
 
-fn automatic_group_idle(db: &Connection, items: &[ItemId]) -> Result<bool> {
+pub(crate) fn item_work_idle(db: &Connection, items: &[ItemId]) -> Result<bool> {
     let ids = serde_json::to_string(items).map_err(storage)?;
     let busy: bool = db.query_row("SELECT
       EXISTS(SELECT 1 FROM private.jobs WHERE item_id IN (SELECT value FROM json_each(?1))

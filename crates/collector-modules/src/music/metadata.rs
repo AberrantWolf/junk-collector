@@ -335,9 +335,9 @@ pub fn musicbrainz_metadata_candidates(
                 "MusicBrainz release response is misdirected".into(),
             ));
         }
-        let mut version_input = response_digest.hex.as_bytes().to_vec();
-        version_input.push(0);
-        version_input.extend_from_slice(raw.get().as_bytes());
+        // A candidate version describes this release, not unrelated response entries.
+        let mut version_input =
+            serde_json::to_vec(&raw.value()?).map_err(|error| Error::Invalid(error.to_string()))?;
         // Rank and artwork are part of the immutable candidate, even when the
         // upstream response bytes did not change (for example, adding CAA art).
         version_input.extend_from_slice(

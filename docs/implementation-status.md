@@ -1,5 +1,23 @@
 # Implementation status
 
+## Evidence-aware editions and equivalent matches — 2026-10-25 source repair
+
+Automatic music edition preference uses current recorded CD IDs and disc positions
+across attached originals before language/identity tie breakers. It reassesses on
+reads and through paginated periodic maintenance; later discs may change the
+preference. Manual release choices survive. The open Metadata panel refreshes
+background changes while retaining unsaved text edits. Missing provider-listed
+media remains in coverage but does not block playback/list expansion of available,
+unambiguous discs; ordinary preparation and authorization still apply.
+
+Matches differing only by internal version consolidate to one current/review
+choice. Candidate content, artwork, ranking and provider identities must agree;
+new MusicBrainz versions exclude unrelated response content. Immutable source
+records and referenced selections remain preserved, including across reindex.
+Historical displays retain their recorded resolution policy; new publications
+freeze the chosen automatic edition. This is logical cleanup, not archive
+compaction or exact-pressing/audio verification. See [acceptance and limits](validation/edition-fit-2026-10-25.md).
+
 ## Utoipa 6 maintenance cleanup — 2026-10-25
 
 Utoipa 6.0.0 / utoipa-gen 6.0.1 and utoipa-axum 0.3.0 replace the final

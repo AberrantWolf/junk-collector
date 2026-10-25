@@ -1,5 +1,27 @@
 # Architecture
 
+## Evidence-aware music editions and equivalent matches — 2026-10-25
+
+Application metadata policy ranks editions against current, committed CD-layout
+observations for attached originals, without opening audio payloads. Compatible
+disc IDs/positions precede language and arbitrary identity tie breakers; fewer
+unrepresented media is a preference, not proof of an owned edition. Manual release
+choices remain authoritative. Reads reassess immediately and periodic, paginated
+maintenance publishes revised automatic choices for search/reindex. Publication
+uses existing inventory/revision fences. Historical materialized displays retain
+their recorded policy; new displays freeze the chosen automatic edition.
+
+Equivalent matches have identical provider/record ID, metadata, artwork, ranking
+and parsed observation, differing only in internal version. Consolidate their
+active identities and review presentation, preferring referenced identities. Retain
+immutable candidate/source revisions and references; this is non-destructive
+logical cleanup, not archive compaction. New MusicBrainz versions hash candidate
+content rather than unrelated bytes in the surrounding response.
+
+Album playback/list expansion includes available unambiguous discs even when a
+provider edition lists additional media. Missing media remains visible through
+album coverage; source ambiguity, authorization and unavailable audio still apply.
+
 ## Album playback readiness — 2026-10-24
 
 Presented music entries carry typed recorded album playback readiness. Application
