@@ -1,5 +1,44 @@
 # Remaining work — home-lab priorities
 
+## Requested dependency security repair — 2026-10-25
+
+The user's first pass covers easy dependency upgrades. Quinn, rustls,
+rustls-webpki, webpki-roots, Tokio and ZIP now resolve to patched releases; see
+[dated versions and validation](validation/dependency-security-2026-10-25.md).
+No release or deployment is included. The user subsequently authorized both
+shared XML and CHD repairs, affected sibling checks and shared-source publication,
+then the client PEM parser replacement:
+
+- `quick-xml`: shared parser upgraded to 0.41.0 in published `junk-libs` commit
+  `b343ea540dcc5a389718e55e2be590040071118c`, included in the current CHD pin
+  below. Local acceptance is complete with the named sibling lint
+  limitation in the [dated acceptance record](validation/quick-xml-security-2026-10-25.md).
+  After explicit user authorization, `codex/fix-quick-xml` was pushed to
+  `git@github.com:AberrantWolf/junk-libs.git` and its remote head verified against
+  the exact validated pin. This closes shared-source publication; a Collector
+  release/deployment remains separate.
+- `ruzstd`: shared minimum raised to `chd` 0.3.5 and Collector resolves `ruzstd`
+  0.9.1 through published `junk-libs` commit `e4d536b7c23d2075c8a98f6a1525e1bcaa32eef0`
+  on `codex/fix-chd-security`. The refreshed audit clears RUSTSEC-2026-0344 and
+  reports zero vulnerabilities. Shared codec round trips and affected sibling
+  tests/Clippy pass, as do Collector's full workspace/Clippy/web/build/browser
+  checks. See [dated acceptance](validation/chd-security-2026-10-25.md) for evidence
+  and limits. This closes the known vulnerability repair; release/deployment
+  remains separate.
+- `rustls-pemfile`: removed from the client and lockfile in favor of
+  `rustls-pki-types::PemObject`, preserving single-certificate DER pinning and
+  using those same DER bytes for TLS trust. See [dated acceptance](validation/pem-parser-maintenance-2026-10-25.md)
+  for certificate regressions and affected native/browser checks.
+- Security review: corrected a reproduced XML event read-bound bypass in
+  published `junk-libs` commit `317517c430744e4f1196e30850b37b3f13c10560`, now
+  pinned by Collector. See [review and evidence](validation/security-review-2026-10-25.md).
+- The only remaining maintenance warning is `paste` via `utoipa-axum`; the
+  current lockfile audit has no vulnerability advisory. The user now authorizes
+  the coordinated Utoipa 6 / `utoipa-axum` 0.3 upgrade (using `pastey`) after the
+  review commit. It needs regenerated-contract comparison, route/exposure and
+  affected client checks. It is not yet implemented at this review checkpoint.
+  No advisory ignores were added.
+
 ## Requested live-use delivery — album playback attention, 2026-10-24
 
 The user reported discovering incomplete/unassigned albums only by trying Play

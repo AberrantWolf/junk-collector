@@ -18,7 +18,8 @@ utoipa.workspace = true
 chrono.workspace = true
 tokio = { version = "1", features = ["rt", "time", "macros"] }
 
-rustls-pemfile = "2"
+rustls-pki-types = "1.9"
 
 [dev-dependencies]
 tempfile.workspace = true
+rcgen = "0.13"

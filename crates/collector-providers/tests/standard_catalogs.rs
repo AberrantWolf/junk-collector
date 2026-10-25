@@ -118,6 +118,25 @@ fn archive_and_expansion_limits_are_enforced_before_catalog_acceptance() {
     );
 }
 #[test]
+fn nul_zip_member_names_are_rejected_without_staging() {
+    let mut archive = zip(&[("bad.dat", dat("GB", "No-Intro"))]);
+    let central = archive
+        .windows(4)
+        .position(|bytes| bytes == b"PK\x01\x02")
+        .unwrap();
+    // Both ZIP headers must describe the same invalid filename.
+    for (header, name) in [(0, 30), (central, 46)] {
+        archive[header + name] = 0;
+    }
+    let staging = Staging::default();
+    assert!(
+        StandardCatalogInspector
+            .inspect_upload(&archive, &staging, 512 * 1024 * 1024, 128)
+            .is_err()
+    );
+    assert!(staging.0.lock().unwrap().is_empty());
+}
+#[test]
 fn conflicting_document_systems_require_a_constrained_explicit_choice() {
     let bytes = String::from_utf8(dat("PS1", "Redump"))
         .unwrap()

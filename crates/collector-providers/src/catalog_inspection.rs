@@ -31,8 +31,12 @@ impl CatalogUploadInspectionPort for StandardCatalogInspector {
                 let mut file = archive
                     .by_index(index)
                     .map_err(|e| Error::Invalid(format!("Unsupported ZIP member: {e}")))?;
-                let name = file.name().to_owned();
+                let name = file
+                    .name()
+                    .map_err(|e| Error::Invalid(format!("Invalid ZIP member name: {e}")))?
+                    .into_owned();
                 if file.enclosed_name().is_none()
+                    || name.starts_with('/')
                     || name.contains('\\')
                     || name.contains(':')
                     || file

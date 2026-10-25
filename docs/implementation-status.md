@@ -1,5 +1,71 @@
 # Implementation status
 
+## Security review checkpoint — 2026-10-25
+
+The review found and corrected a shared DAT read-bound bypass: literal delimiter
+bytes inside XML attributes/comments/CDATA reset the old token counter. Published
+`junk-libs` commit `317517c430744e4f1196e30850b37b3f13c10560` bounds each parser
+event before buffering and retains the independent decoded-value/total-input
+caps. Collector pins that correction. The prior ZIP, TLS, certificate authority,
+CHD and PEM fixes remain intact; no further actionable regression was found in
+those changed paths. See [review scope and validation](validation/security-review-2026-10-25.md).
+The Utoipa 6 upgrade is authorized as the next phase after this review commit.
+
+## Client PEM parser maintenance cleanup — 2026-10-25
+
+`collector-client` uses `rustls-pki-types::PemObject` instead of the unmaintained
+`rustls-pemfile` wrapper. Local playback still requires one certificate whose DER
+SHA-256 matches the authenticated descriptor; the same parsed DER supplies TLS
+trust. Missing, multiple, malformed and incorrectly pinned certificates are
+rejected. The bounded descriptor, private-address, expiry, server-identity and
+credential-release fences remain in place. The lockfile removes `rustls-pemfile`
+without upgrading other packages; Utoipa stays unchanged. The audit reports zero
+vulnerabilities and only the `paste` maintenance warning. Client/workspace tests,
+Clippy, native LAN media, browser smoke/private playback and refreshed Trash Amp
+integration checks pass. See [dated checks and limits](validation/pem-parser-maintenance-2026-10-25.md).
+No release or deployment is included.
+
+## Shared CHD/Zstandard security repair — 2026-10-25
+
+Collector pins published `junk-libs` commit `e4d536b7c23d2075c8a98f6a1525e1bcaa32eef0`.
+The shared minimum is `chd` 0.3.5 and Collector's lockfile resolves `ruzstd`
+0.9.1. Its refreshed RustSec audit reported zero vulnerability advisories, with
+the existing `paste` and `rustls-pemfile` maintenance warnings. The client cleanup
+above now leaves only `paste`. Shared
+disc/audio/format suites, independent chdman 0.285 codec round trips and affected
+Retro Junk/Trash Amp tests and Clippy pass. Collector's full workspace tests,
+Clippy, web checks/build and real browser smoke also pass; see [dated acceptance and limits](validation/chd-security-2026-10-25.md).
+No application policy, original bytes, archive
+format, release image or live installation was changed.
+
+## Shared XML security repair — locally validated, 2026-10-25
+
+The XML delivery pinned published `junk-libs` commit `b343ea540dcc5a389718e55e2be590040071118c`,
+upgrading the shared DAT parser to quick-xml 0.41. Text/entity/CDATA fragments are
+joined before trimming, accumulated text stays bounded and malformed references
+fail closed. The public DAT records and application authority policy are unchanged.
+Both quick-xml advisories cleared from the lockfile audit; the subsequent CHD
+repair above clears `ruzstd`. Two maintenance warnings remained at that stage;
+the client cleanup above now leaves only `paste`. Sibling checks and source publication evidence are
+recorded in [the dated validation](validation/quick-xml-security-2026-10-25.md).
+The user authorized the previously blocked push; `codex/fix-quick-xml` is now
+published and its remote head matches the validated pin. Fresh machines/CI can
+fetch that source. No Collector release or deployment has occurred.
+
+## Dependency security updates — 2026-10-25
+
+The source lockfile updates Quinn, rustls, certificate validation/root certificates
+and Tokio to patched releases. The provider ZIP dependency moves from 2.4.2 to
+9.1.0, retaining bounded in-memory member inspection rather than filesystem
+extraction. This initial pass reduced RustSec findings from 16 vulnerability
+advisories to three and cleared Tokio's I/O safety warning. The subsequent XML
+and CHD repairs above initially left two maintenance warnings; the client cleanup
+above leaves only `paste`, tracked in [remaining work](remaining-work.md).
+Both shared security fixes are now published.
+See [versions, validation and limits](validation/dependency-security-2026-10-25.md).
+These are source changes; the published images and NAS installation still need a
+future release/update to receive them.
+
 ## Album playback attention — beta.6 published, 2026-10-24
 
 Music library rows now show a warning when recorded whole-album playback is

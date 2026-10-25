@@ -3,6 +3,7 @@ use crate::EnrolledClient;
 use collector_api_types::LocalPlaybackDescriptor;
 use collector_core::{Digest, Error, Result, ServerId};
 use reqwest::{Client, Method, RequestBuilder};
+use rustls_pki_types::{CertificateDer, pem::PemObject};
 use std::{net::IpAddr, time::Duration};
 use url::Url;
 
@@ -103,6 +104,17 @@ fn private_address(ip: IpAddr) -> bool {
         IpAddr::V6(ip) => ip.is_unique_local() || ip.is_loopback(),
     }
 }
+
+fn pinned_certificate(pem: &[u8], expected_sha256: &str) -> Option<reqwest::Certificate> {
+    let mut certificates = CertificateDer::pem_slice_iter(pem);
+    let certificate = certificates.next()?.ok()?;
+    if certificates.next().is_some() || Digest::sha256(certificate.as_ref()).hex != expected_sha256
+    {
+        return None;
+    }
+    reqwest::Certificate::from_der(certificate.as_ref()).ok()
+}
+
 impl EnrolledClient {
     pub(crate) async fn media_route(&self) -> Result<MediaRoute> {
         tokio::time::timeout(Duration::from_secs(5), self.discover_media_route())
@@ -168,21 +180,15 @@ impl EnrolledClient {
                 {
                     return None;
                 }
-                let certificates = rustls_pemfile::certs(&mut endpoint.certificate_pem.as_bytes())
-                    .collect::<std::io::Result<Vec<_>>>()
-                    .ok()?;
-                if certificates.len() != 1
-                    || Digest::sha256(certificates[0].as_ref()).hex != endpoint.certificate_sha256
-                {
-                    return None;
-                }
+                let certificate = pinned_certificate(
+                    endpoint.certificate_pem.as_bytes(),
+                    &endpoint.certificate_sha256,
+                )?;
                 let client = Client::builder()
                     .no_proxy()
                     .https_only(true)
                     .tls_built_in_root_certs(false)
-                    .add_root_certificate(
-                        reqwest::Certificate::from_pem(endpoint.certificate_pem.as_bytes()).ok()?,
-                    )
+                    .add_root_certificate(certificate)
                     .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(Duration::from_secs(2))
                     .timeout(Duration::from_secs(10))
@@ -270,5 +276,55 @@ impl EnrolledClient {
             });
         }
         Err(Error::Unavailable("No trusted local playback route is reachable. Public media fallback is disabled. Check local network access and the server firewall.".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity() -> rcgen::CertifiedKey {
+        rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap()
+    }
+
+    #[test]
+    fn certificate_trust_requires_the_exact_der_pin() {
+        let identity = identity();
+        let pem = identity.cert.pem();
+        let digest = Digest::sha256(identity.cert.der().as_ref()).hex;
+        assert!(pinned_certificate(pem.as_bytes(), &digest).is_some());
+        assert!(pinned_certificate(pem.as_bytes(), &"0".repeat(64)).is_none());
+        assert!(pinned_certificate(pem.as_bytes(), &Digest::sha256(pem.as_bytes()).hex).is_none());
+    }
+
+    #[test]
+    fn missing_multiple_and_malformed_certificates_cannot_supply_trust() {
+        let identity = identity();
+        let pem = identity.cert.pem();
+        let digest = Digest::sha256(identity.cert.der().as_ref()).hex;
+        let malformed = "-----BEGIN CERTIFICATE-----\n@@@\n-----END CERTIFICATE-----\n";
+        for input in [
+            String::new(),
+            "plain text".into(),
+            identity.key_pair.serialize_pem(),
+            format!("{pem}{pem}"),
+            malformed.into(),
+            format!("{pem}{malformed}"),
+            format!("{pem}-----BEGIN CERTIFICATE-----\nunfinished\n"),
+        ] {
+            assert!(pinned_certificate(input.as_bytes(), &digest).is_none());
+        }
+    }
+
+    #[test]
+    fn unrelated_pem_sections_do_not_change_the_single_certificate_pin() {
+        let identity = identity();
+        let input = format!(
+            "{}{}",
+            identity.key_pair.serialize_pem(),
+            identity.cert.pem()
+        );
+        let digest = Digest::sha256(identity.cert.der().as_ref()).hex;
+        assert!(pinned_certificate(input.as_bytes(), &digest).is_some());
     }
 }
