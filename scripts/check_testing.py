@@ -20,7 +20,7 @@ class SelectionTests(unittest.TestCase):
         return {s['name'] for s in checks.select(paths, kind, level, known)[1]}
 
     def test_text_only_never_schedules_units_including_release_level(self):
-        for paths, kind in [(['README.md'], 'auto'), (['docs/getting-started.md'], 'docs'),
+        for paths, kind in [(['README.md'], 'auto'), (['AGENTS.md'], 'docs'), (['docs/testing.md'], 'docs'), (['docs/getting-started.md'], 'docs'),
                             (['web/src/metadata-review.tsx', 'web/dist/curation.js'], 'ui-copy'),
                             (['crates/collector-server/src/main.rs'], 'cli-copy')]:
             for level in ('local', 'beta', 'full'):
@@ -35,6 +35,8 @@ class SelectionTests(unittest.TestCase):
         for paths, known in [(['unknown.file'], True), (['docs/getting-started.md'], False),
                              (['Cargo.lock'], True), (['crates/collector-store/src/lib.rs'], True)]:
             self.assertIn('workspace-tests', self.names(paths, known=known))
+        self.assertIn('workspace-tests', self.names(['AGENTS.md']))
+        self.assertIn('workspace-tests', self.names(['docs/testing.md']))
         self.assertIn('web-models', self.names(['web/src/app.tsx']))
         self.assertNotIn('workspace-tests', self.names(['web/src/app.css']))
 

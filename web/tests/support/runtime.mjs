@@ -12,7 +12,7 @@ export async function deadline(promise,label,millis=10000){
 function signalOwned(child,signal){
  try{if(child.fixtureGroup)process.kill(-child.pid,signal);else child.kill(signal);}catch(error){if(error.code!=='ESRCH')throw error;}
 }
-export async function stopProcess(child,millis=5000){
+export async function stopProcess(child,millis=child?.fixtureGrace||5000){
  if(!child||child.exitCode!==null||child.signalCode!==null)return;
  const ended=new Promise(resolve=>child.once('exit',resolve));
  signalOwned(child,'SIGTERM');
@@ -20,14 +20,13 @@ export async function stopProcess(child,millis=5000){
 }
 export function spawn(command,args=[],options={}){
  const grouped=process.platform!=='win32';
- const child=nodeSpawn(command,args,{...options,detached:grouped});child.fixtureGroup=grouped;children.add(child);
+ const child=nodeSpawn(command,args,{...options,detached:grouped});child.fixtureGroup=grouped;child.fixtureGrace=command===process.execPath?15000:5000;children.add(child);
  child.once('exit',()=>{children.delete(child);if(grouped)signalOwned(child,'SIGKILL');});return child;
 }
 export function onCleanup(callback){cleanups.add(callback);return ()=>cleanups.delete(callback);}
 export async function cleanup(){
- const results=await Promise.allSettled([...cleanups].map(callback=>callback()));
- const stopped=await Promise.allSettled([...children].map(child=>stopProcess(child)));
- const failed=[...results,...stopped].find(result=>result.status==='rejected');
+ const results=await Promise.allSettled([...cleanups].map(callback=>callback()).concat([...children].map(child=>stopProcess(child))));
+ const failed=results.find(result=>result.status==='rejected');
  if(failed)throw failed.reason;
 }
 export async function waitForServer(url,child,{timeout=20000,logs=()=>''}={}){

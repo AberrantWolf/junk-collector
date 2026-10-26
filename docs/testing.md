@@ -31,7 +31,10 @@ the changed executable output. CSS-only changes select web checks and focused
 rendering. UI behavior also runs the queue/context/label model checks. Rust edits
 select affected crate tests and transitive in-repository consumers, with Clippy.
 Storage, authentication, contracts, dependencies, toolchain, build/release tooling,
-policy documents and unknown paths select broader workspace coverage.
+policy behavior changes and unknown paths select broader workspace coverage.
+Automatic selection treats policy documents conservatively; an explicitly reviewed
+`--classification docs` may exempt a prose-only correction in `AGENTS.md` or a
+policy document when its instructions and behavior are unchanged.
 
 `ui-copy` and `cli-copy` are human declarations after reviewing the entire diff.
 The selector rejects contradictory paths; it cannot prove that a source string is

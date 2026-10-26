@@ -61,7 +61,7 @@ def classify(paths, declared):
     if declared == 'auto':
         return inferred
     allowed = {
-        'docs': lambda p: (p == 'README.md' or p.startswith('docs/') and p.endswith('.md')) and not p.startswith('docs/decisions/') and p not in POLICY_DOCS,
+        'docs': lambda p: p.endswith('.md'),
         'ui-copy': lambda p: p.startswith(('web/src/', 'web/dist/', 'web/tests/')) and p.endswith(('.tsx', '.ts', '.js', '.mjs', '.css', '.html')) or p.startswith('docs/') and p.endswith('.md'),
         'cli-copy': lambda p: p.startswith('crates/collector-server/src/') and p.endswith('.rs') or p.startswith('docs/') and p.endswith('.md'),
         'style': lambda p: p.startswith('web/') and p.endswith('.css') or p.startswith('docs/') and p.endswith('.md'),
@@ -71,7 +71,7 @@ def classify(paths, declared):
     }
     if any(not allowed[declared](p) for p in paths):
         raise ValueError(f'{declared} contradicts changed paths; use auto or a broader classification')
-    if declared != 'infra' and any(p in POLICY_DOCS or p.startswith('docs/decisions/') for p in paths):
+    if declared not in ('infra', 'docs') and any(p in POLICY_DOCS or p.startswith('docs/decisions/') or p == 'AGENTS.md' for p in paths):
         raise ValueError('Testing/release/architecture policy changes require infra coverage')
     if declared == 'rust' and inferred == 'infra':
         return 'infra'

@@ -45,6 +45,9 @@ try{
  await editor.getByText('Upload complete.',{exact:false}).waitFor();
  const first=await readItem();assert.equal(first.captures.length,1);
  await editor.getByRole('button',{name:'Close curator'}).click();
+ // Global Add/import does not promise an active detail after attachment. Open
+ // the known entry explicitly before testing playback across replacement.
+ await page.goto(`${origin}/?collection=${seeded.collectionId}&item=${seeded.id}`);
  await page.getByText('Album details, evidence & files',{exact:true}).click();
  await page.getByRole('button',{name:'Add file to queue',exact:true}).click();
  const player=page.getByRole('region',{name:'Music player'});await player.getByRole('button',{name:'Play',exact:true}).click();

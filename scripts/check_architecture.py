@@ -42,7 +42,7 @@ for source in (ROOT / "crates/collector-server/src").rglob("*.rs"):
 
 # Check concrete document links. Prose coverage and security decisions require
 # review; keyword matching cannot establish that a design is complete.
-for document in [ROOT / "README.md", *(ROOT / "docs").rglob("*.md")]:
+for document in [ROOT / "README.md", ROOT / "AGENTS.md", *(ROOT / "docs").rglob("*.md")]:
     text = document.read_text()
     for target in re.findall(r"\[[^]]+\]\(([^)]+)\)", text):
         target = target.split("#", 1)[0]
