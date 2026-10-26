@@ -60,3 +60,14 @@ visually inspected; the button and explanatory text fit the viewport.
 
 No release, deployment or live MusicBrainz edit is included. Registration status
 reflects recorded provider data; refresh the release after submitting an edit.
+
+
+## Subsequent authorized publication and deployment — 2026-10-26 JST
+
+The user then authorized release and deployment. Beta.8 is published and running
+on the NAS after exact-source checks and both native container smokes. Retained
+configuration/identity, a complete stopped-server recovery point, public HTTPS
+and served-asset checks, and 18 unchanged unrelated containers are verified. See
+[the publication/deployment record](container-beta8-publication-2026-10-26.md).
+This supersedes the earlier source-only release/deployment limitation. No live
+MusicBrainz edit or new physical-device listening acceptance is claimed.

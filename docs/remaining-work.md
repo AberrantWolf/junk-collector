@@ -14,8 +14,10 @@ and confirmation. The button is hidden when that ID is already registered; refre
 the release in Metadata after submitting. Reads use current committed observations
 without opening/hashing audio. No MusicBrainz credentials, automatic edits or
 submission-success receipts are introduced. See [acceptance and limits](validation/musicbrainz-disc-submission-2026-10-26.md).
-Source checks and full Chrome smoke acceptance pass. Source delivery only;
-release and NAS deployment are separate.
+Source checks and full Chrome smoke acceptance pass. Published and deployed as
+beta.8 on the NAS, with retained settings/identities, a complete recovery snapshot,
+passing production HTTPS/served-asset checks and 18 unrelated containers unchanged.
+See [publication and deployment evidence](validation/container-beta8-publication-2026-10-26.md).
 
 ## Completed live-use repair — edition fit and equivalent matches, 2026-10-25
 
