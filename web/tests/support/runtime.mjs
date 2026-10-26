@@ -9,14 +9,19 @@ const cleanups=new Set();
 export async function deadline(promise,label,millis=10000){
  let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(`${label} timed out after ${millis}ms`)),millis);})]);}finally{clearTimeout(timer);}
 }
+function signalOwned(child,signal){
+ try{if(child.fixtureGroup)process.kill(-child.pid,signal);else child.kill(signal);}catch(error){if(error.code!=='ESRCH')throw error;}
+}
 export async function stopProcess(child,millis=5000){
  if(!child||child.exitCode!==null||child.signalCode!==null)return;
  const ended=new Promise(resolve=>child.once('exit',resolve));
- child.kill('SIGTERM');
- try{await deadline(ended,'child shutdown',millis);}catch{child.kill('SIGKILL');await deadline(ended,'child reap',5000);}
+ signalOwned(child,'SIGTERM');
+ try{await deadline(ended,'child shutdown',millis);}catch{signalOwned(child,'SIGKILL');await deadline(ended,'child reap',5000);}
 }
-export function spawn(...args){
- const child=nodeSpawn(...args);children.add(child);child.once('exit',()=>children.delete(child));return child;
+export function spawn(command,args=[],options={}){
+ const grouped=process.platform!=='win32';
+ const child=nodeSpawn(command,args,{...options,detached:grouped});child.fixtureGroup=grouped;children.add(child);
+ child.once('exit',()=>{children.delete(child);if(grouped)signalOwned(child,'SIGKILL');});return child;
 }
 export function onCleanup(callback){cleanups.add(callback);return ()=>cleanups.delete(callback);}
 export async function cleanup(){

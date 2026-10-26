@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Select and run checks for a complete diff. Copy classifications require human review."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,7 +17,6 @@ BROWSER = ('smoke', 'integration', 'browse', 'audio-checks', 'accuraterip-snapsh
            'scans', 'work', 'fx04', 'fx05', 'fx06', 'fx04-review', 'local-playback', 'lists',
            'accounts', 'pair', 'navigation', 'certificate', 'numeric-ip', 'game-catalog',
            'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media')
-MODEL = ('queue', 'context', 'labels')
 FIXTURE = {'audio-checks', 'accuraterip-snapshots', 'actions', 'lists'}
 SENSITIVE = ('crates/collector-core/', 'crates/collector-api-types/', 'crates/collector-store/',
              'crates/collector-client/', '.github/', 'scripts/', 'deploy/')
@@ -42,7 +40,7 @@ def automatic(paths):
         return 'docs'
     if any(p in POLICY_DOCS for p in paths):
         return 'infra'
-    if all(p.startswith('docs/') and p.endswith('.md') and not p.startswith(('docs/decisions/',)) for p in paths):
+    if all((p == 'README.md' or p.startswith('docs/') and p.endswith('.md')) and not p.startswith(('docs/decisions/',)) for p in paths):
         return 'docs'
     if all(p.startswith('web/src/') and p.endswith('.css') or p == 'web/dist/app.css' for p in paths):
         return 'style'
@@ -63,7 +61,7 @@ def classify(paths, declared):
     if declared == 'auto':
         return inferred
     allowed = {
-        'docs': lambda p: p.startswith('docs/') and p.endswith('.md') and not p.startswith('docs/decisions/') and p not in POLICY_DOCS,
+        'docs': lambda p: (p == 'README.md' or p.startswith('docs/') and p.endswith('.md')) and not p.startswith('docs/decisions/') and p not in POLICY_DOCS,
         'ui-copy': lambda p: p.startswith(('web/src/', 'web/dist/', 'web/tests/')) and p.endswith(('.tsx', '.ts', '.js', '.mjs', '.css', '.html')) or p.startswith('docs/') and p.endswith('.md'),
         'cli-copy': lambda p: p.startswith('crates/collector-server/src/') and p.endswith('.rs') or p.startswith('docs/') and p.endswith('.md'),
         'style': lambda p: p.startswith('web/') and p.endswith('.css') or p.startswith('docs/') and p.endswith('.md'),

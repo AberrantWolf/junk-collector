@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Run short browser acceptance against the exact release image, without debug builds."""
 import argparse
-import json
 import os
 from pathlib import Path
 import secrets

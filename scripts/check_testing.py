@@ -20,7 +20,7 @@ class SelectionTests(unittest.TestCase):
         return {s['name'] for s in checks.select(paths, kind, level, known)[1]}
 
     def test_text_only_never_schedules_units_including_release_level(self):
-        for paths, kind in [(['docs/getting-started.md'], 'docs'),
+        for paths, kind in [(['README.md'], 'auto'), (['docs/getting-started.md'], 'docs'),
                             (['web/src/metadata-review.tsx', 'web/dist/curation.js'], 'ui-copy'),
                             (['crates/collector-server/src/main.rs'], 'cli-copy')]:
             for level in ('local', 'beta', 'full'):
