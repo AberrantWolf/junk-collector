@@ -89,7 +89,7 @@ def main():
     parser.add_argument('repository');parser.add_argument('revision');parser.add_argument('destination', type=Path)
     parser.add_argument('--wait-seconds', type=int, default=0);parser.add_argument('--plan', type=Path);parser.add_argument('--base');parser.add_argument('--full', action='store_true');parser.add_argument('--run-id')
     args = parser.parse_args()
-    until = time.monotonic() + min(max(args.wait_seconds, 0), 900)
+    until = time.monotonic() + min(max(args.wait_seconds, 0), 1800)
     while True:
         if recover(args.repository, args.revision, args.destination, base=args.base, require_full=args.full,
                    selected=args.run_id, required=json.loads(args.plan.read_text()) if args.plan else None):

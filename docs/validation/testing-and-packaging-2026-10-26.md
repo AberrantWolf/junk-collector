@@ -86,3 +86,8 @@ path in the game-audio fixture. It now resolves the real encoder from PATH (or
 Production encoder selection is unchanged. The corrected prior source run reached
 and passed the superseded-playback, pagination, lifecycle, security, local-route,
 account, purchase and intake cases before this fixture prerequisite stopped it.
+
+The hosted full suite takes longer than the original 15-minute reuse wait. The
+wait is now bounded at 30 minutes so a concurrently requested container candidate
+can consume the successful source receipt instead of starting duplicate tests.
+The enclosing job allows time for a fresh run if no usable receipt appears.

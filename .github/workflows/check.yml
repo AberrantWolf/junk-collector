@@ -35,7 +35,7 @@ permissions:
 jobs:
   rust-and-web:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,7 +81,7 @@ jobs:
           Path('/tmp/check-arguments.json').write_text(json.dumps(arguments))
           reused = False
           if os.environ['REUSE_CHECKS'] == 'true':
-              command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds',('900' if any(step['name'] in ('workspace-tests','affected-tests','browser-server') for step in report['steps']) else '0'),'--plan','/tmp/check-plan.json']
+              command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds',('1800' if any(step['name'] in ('workspace-tests','affected-tests','browser-server') for step in report['steps']) else '0'),'--plan','/tmp/check-plan.json']
               if base: command += ['--base', base]
               if level == 'full': command += ['--full']
               reused = subprocess.run(command).returncode == 0
