@@ -150,7 +150,10 @@ smokes and AMD64 release-image browser acceptance must succeed before validation
 is sealed. CI no longer compiles discarded standalone release binaries. Requested
 standalone deliverables still need their own release build.
 
-Source checks cache Rust dependencies by toolchain/platform/profile/input keys.
+Source checks cache Rust dependencies and workspace outputs by
+toolchain/platform/profile/input keys, including after an unrelated browser test
+fails. A cache entry is never qualification evidence; Cargo still validates its
+inputs and the selected checks must pass.
 Docker uses pinned cargo-chef dependency recipes and ordinary cached image layers,
 exported with BuildKit `mode=max`; unchanged dependencies survive web-only edits
 and hosted-runner replacement. Source/assets/lockfile/toolchain changes still

@@ -950,11 +950,12 @@ try{
   await album.getByRole('button',{name:'Add album to queue',exact:true}).click();
   const codec=await player.locator('audio').evaluate(element=>({support:element.canPlayType('audio/flac'),agent:navigator.userAgent}));assert.notEqual(codec.support,'','target browser did not report FLAC decoding support');
   // A rejected old play promise must not overwrite a newer track's state.
-  await player.locator('audio').evaluate(element=>{const play=element.play.bind(element);element.play=()=>{element.play=play;return new Promise((_,reject)=>setTimeout(()=>reject(new DOMException('Obsolete request','AbortError')),500));};});
+  await player.locator('audio').evaluate(element=>{const play=element.play.bind(element);window.obsoletePlay={started:false};element.play=()=>{element.play=play;window.obsoletePlay.started=true;return new Promise((_,reject)=>{window.obsoletePlay.reject=reject;});};});
   await player.getByRole('button',{name:'Play',exact:true}).click();
+  await playbackPage.waitForFunction(()=>window.obsoletePlay?.started);
   await player.getByRole('button',{name:'Next track'}).click();
   await playbackPage.waitForFunction(id=>{const audio=document.querySelector('.music-player audio');return audio?.dataset.representationId===id&&!audio.paused&&audio.currentTime>0.1;},expected[1].representation);
-  await playbackPage.waitForTimeout(550);
+  await playbackPage.evaluate(async()=>{window.obsoletePlay.reject(new DOMException('Obsolete request','AbortError'));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));delete window.obsoletePlay;});
   assert.equal(await player.getByRole('alert').count(),0,'obsolete play failure overwrote the current track');
   await player.getByRole('button',{name:'Previous track'}).click();
   await player.getByRole('button',{name:'Pause',exact:true}).click();
@@ -1283,4 +1284,4 @@ try{
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
  console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial, WebAuthn registration/login and mobile layout.');
-}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await new Promise(resolve=>metadataProviderServer.close(resolve));await rm(scratch,{recursive:true,force:true});}
+}catch(error){console.error(logs);const failurePage=browser?.contexts().flatMap(context=>context.pages()).at(-1)||page;if(failurePage){console.error((await failurePage.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(0,6000));await failurePage.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await new Promise(resolve=>metadataProviderServer.close(resolve));await rm(scratch,{recursive:true,force:true});}
