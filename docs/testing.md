@@ -127,7 +127,10 @@ Real-server fixtures default to `target/debug/collector-server` and, where neede
 Some offline provider fixtures intentionally need debug-only endpoint hooks;
 deployment builds never enable those hooks. The short smoke also accepts
 `COLLECTOR_TEST_ORIGIN` and `COLLECTOR_TEST_PASSWORD` for a disposable, already
-initialized release-image fixture. Never point its mutation workflow at production.
+initialized release-image fixture. The container helper passes its exact generated
+certificate in `COLLECTOR_TEST_CERTIFICATE_PEM` when enabling
+`COLLECTOR_TEST_SELF_SIGNED=1`; this pins the disposable key across browser requests
+and reloads. Never point its mutation workflow at production.
 
 The shared harness bounds shutdown, reaps owned processes on interruption/failure
 and leaves unrelated Chrome sessions alone. `node web/tests/harness-check.mjs`

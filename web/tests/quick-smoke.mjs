@@ -1,5 +1,5 @@
 // Short real-server acceptance; no provider, encoder or restart fixtures.
-import {chromium,expect} from './support/browser.mjs';
+import {chromium,expect,fixtureCertificateArgs} from './support/browser.mjs';
 import {spawn,spawnSync,serverBinary,stopProcess,waitForServer} from './support/runtime.mjs';
 import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
 import {createServer} from 'node:net';
@@ -10,8 +10,11 @@ import assert from 'node:assert/strict';
 import {clickAction} from './actions.mjs';
 const started=Date.now();
 let scratch,server,browser,page,logs='';
+const failedRequests=[];
 let origin=process.env.COLLECTOR_TEST_ORIGIN;
 const ignoreHTTPSErrors=process.env.COLLECTOR_TEST_SELF_SIGNED==='1';
+const certificate=process.env.COLLECTOR_TEST_CERTIFICATE_PEM;
+if(ignoreHTTPSErrors&&!certificate)throw Error('Self-signed smoke requires the disposable fixture certificate in COLLECTOR_TEST_CERTIFICATE_PEM.');
 const password=process.env.COLLECTOR_TEST_PASSWORD||randomBytes(24).toString('hex');
 async function port(){const listener=createServer();await new Promise(resolve=>listener.listen(0,'127.0.0.1',resolve));const value=listener.address().port;await new Promise(resolve=>listener.close(resolve));return value;}
 try{
@@ -24,8 +27,8 @@ try{
   server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',value=>logs+=value);server.stdout.on('data',value=>logs+=value);
   await waitForServer(origin+'/healthz',server,{logs:()=>logs});
  }
- browser=await chromium.launch();page=await browser.newPage({ignoreHTTPSErrors,viewport:{width:1440,height:1000}});page.setDefaultTimeout(15000);
- const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ browser=await chromium.launch({args:certificate?fixtureCertificateArgs(certificate):[]});page=await browser.newPage({ignoreHTTPSErrors,viewport:{width:1440,height:1000}});page.setDefaultTimeout(15000);
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('requestfailed',request=>{if(failedRequests.length<30)failedRequests.push({url:request.url(),error:request.failure()?.errorText});});
  await page.goto(origin);
  for(const file of ['app.js','app.css','curation.js'])assert.equal(await page.evaluate(async file=>(await fetch('/'+file)).text(),file),await readFile(new URL('../dist/'+file,import.meta.url),'utf8'),`stale served asset: ${file}`);
  await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -48,5 +51,5 @@ try{
  const viewer=await browser.newContext({ignoreHTTPSErrors});const denied=await viewer.newPage();await denied.goto(origin);await denied.getByLabel('Username',{exact:true}).fill('smoke-viewer');await denied.getByLabel('Password',{exact:true}).fill('Disposable-smoke-viewer-password');await denied.getByRole('button',{name:'Sign in',exact:true}).click();await denied.getByLabel('Password',{exact:true}).waitFor({state:'detached'});
  assert.equal(await denied.evaluate(async()=>{const response=await fetch('/api/v1/admin/users',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({username:'forbidden',password:'Not-an-actual-user-password',administrator:false})});return response.status;}),403);
  assert.deepEqual(errors,[]);console.log(`Short smoke passed in ${((Date.now()-started)/1000).toFixed(2)}s: login, artwork/search/detail, management bundle, viewer denial, mobile layout and served assets.`);
-} catch(error){console.error(logs);if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));throw error;}
+} catch(error){console.error(logs);console.error('Failed requests:',failedRequests);if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));throw error;}
 finally{try{await browser?.close();}finally{await stopProcess(server);if(scratch)await rm(scratch,{recursive:true,force:true});}}

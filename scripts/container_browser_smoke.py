@@ -51,7 +51,7 @@ def main():
                     raise RuntimeError('Release-image browser fixture failed readiness')
                 time.sleep(.1)
             subprocess.run(['node', 'web/tests/quick-smoke.mjs'], cwd=ROOT,
-                           env=dict(os.environ, COLLECTOR_TEST_ORIGIN=origin, COLLECTOR_TEST_PASSWORD=password, COLLECTOR_TEST_SELF_SIGNED='1'),
+                           env=dict(os.environ, COLLECTOR_TEST_ORIGIN=origin, COLLECTOR_TEST_PASSWORD=password, COLLECTOR_TEST_SELF_SIGNED='1', COLLECTOR_TEST_CERTIFICATE_PEM=certificate),
                            check=True, timeout=90)
         except BaseException:
             subprocess.run(['docker', 'logs', name], capture_output=False, timeout=10)
