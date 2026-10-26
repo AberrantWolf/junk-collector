@@ -1,5 +1,5 @@
 import {build} from 'esbuild';
-import {chromium,expect} from '@playwright/test';
+import {chromium,expect} from './support/browser.mjs';
 import {createServer} from 'node:http';
 import path from 'node:path';
 const web=path.resolve(import.meta.dirname,'..');
@@ -7,7 +7,7 @@ const fixtures=[['Unchecked',[null]],['Passed',['verified']],['Partial',['verifi
 const bundled=await build({stdin:{contents:`import React,{useState} from './src/runtime';import {createRoot} from 'react-dom/client';import AudioCheckStatus from './src/audio-check-status';function App(){const [opened,setOpened]=useState('');return <><p role="status">{opened}</p>{${JSON.stringify(fixtures)}.map(([title,statuses])=><section aria-label={title} key={title}><AudioCheckStatus item={{title,accuraterip:statuses.map((status,index)=>({source_id:String(index),status}))}} onOpen={title==='Reader'?undefined:()=>setOpened(title)}/></section>)}</>;}createRoot(document.getElementById('root')).render(<App/>);`,resolveDir:web,loader:'tsx'},bundle:true,write:false,format:'iife',jsxFactory:'React.createElement',jsxFragment:'React.Fragment',tsconfig:path.join(web,'tsconfig.json')});
 const server=createServer((_request,response)=>{response.setHeader('Content-Type','text/html');response.end(`<div id="root"></div><script>${bundled.outputFiles[0].text}</script>`);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
 try{
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);
+ browser=await chromium.launch({headless:true});const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);
  for(const [album,label] of [['Unchecked','Not checked'],['Passed','Verified'],['Partial','1/2 verified'],['Mismatch','Mismatch'],['Partial mismatch','1/2 · mismatch'],['No data discs','No data'],['Mixed','Inconclusive'],['No data','No data'],['Limited','Incomplete search'],['Ambiguous','Ambiguous offsets'],['Unavailable','Unavailable'],['Unsupported','Unsupported']])await expect(page.getByRole('region',{name:album,exact:true}).getByRole('button')).toHaveText(label);
  await expect(page.getByRole('region',{name:'Empty',exact:true})).toHaveText('No originals');await expect(page.getByRole('region',{name:'Empty',exact:true}).getByRole('button')).toHaveCount(0);
  await expect(page.getByRole('region',{name:'Reader',exact:true})).toHaveText('Verified');await expect(page.getByRole('region',{name:'Reader',exact:true}).getByRole('button')).toHaveCount(0);

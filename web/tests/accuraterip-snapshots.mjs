@@ -1,6 +1,6 @@
 // Real check-panel interactions with offline API fixtures; no provider requests.
 import {build} from 'esbuild';
-import {chromium,expect} from '@playwright/test';
+import {chromium,expect} from './support/browser.mjs';
 import {createServer} from 'node:http';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -27,7 +27,7 @@ const server=createServer(async(request,response)=>{
  response.statusCode=404;send({error:{message:'Unhandled fixture '+url.pathname}});
 });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
 try{
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ browser=await chromium.launch({headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.addInitScript(()=>sessionStorage.setItem('collector.scan.a',JSON.stringify({snapshotId:'saved-b'})));
  await page.goto(`http://127.0.0.1:${server.address().port}`);
  const docket=source=>page.locator('.import-docket').filter({has:page.locator('.docket-title',{hasText:source+'.toc ·'})});

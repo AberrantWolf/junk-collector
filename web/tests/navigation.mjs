@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 // Real-server acceptance for destination navigation and collection scope.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -9,14 +10,14 @@ import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-navigation-'));
 const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');
-const origin='http://localhost:19962';const binary=path.join(root,'target/debug/collector-server');
+const origin='http://localhost:19962';const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19961"\nprivate_bind = "127.0.0.1:19962"\nlan_bind = "127.0.0.1:19963"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}", "http://localhost:19961"]\n[exposure]\npublic_curation = false\npublic_administration = false\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let server,browser;let logs='';
 try{
  server=spawn(binary,['--config',config,'serve']);server.stdout.on('data',value=>logs+=value);server.stderr.on('data',value=>logs+=value);
  let ready=false;for(let i=0;i<200;i++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1360,height:980}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  const seed=await page.evaluate(async()=>{
@@ -71,4 +72,4 @@ try{
  await page.setViewportSize({width:1360,height:600});await page.getByRole('button',{name:'Sign out',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeInViewport();
  const client=await browser.newPage();await client.goto('http://localhost:19961');await client.getByLabel('Password',{exact:true}).fill(password);await client.getByRole('button',{name:'Sign in',exact:true}).click();await client.getByRole('heading',{name:'Library',exact:true}).waitFor();assert.equal(await client.getByRole('button',{name:'Administration',exact:true}).count(),0);assert.equal(await client.getByRole('button',{name:'Imports',exact:true}).count(),0);await expect(client.getByRole('button',{name:'Lists',exact:true})).toBeVisible();
  assert.deepEqual(errors,[]);console.log('Navigation acceptance passed: destination/scope separation, populated desktop/mobile screenshots, scope preservation, browser back, search/pagination, keyboard disclosures and focus, mobile/short viewport access, listener exposure.');
-}finally{await browser?.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>{server.kill('SIGKILL');resolve();},5000))]);}await rm(scratch,{recursive:true,force:true});}
+}finally{await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

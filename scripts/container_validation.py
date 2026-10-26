@@ -16,6 +16,7 @@ import tempfile
 import zipfile
 
 import container_release as release
+from check_changes import validate_report
 
 WORKFLOW = '.github/workflows/container-release.yml'
 VALIDATION_TITLE = 'Validate container candidate'
@@ -189,7 +190,17 @@ def smoke_identity(archive_path, architecture):
         raise ValueError('Smoke config bytes differ from the exported runtime image (daemon ID: ' + actual + ')')
 
 
-def seal(expected, image, archive, run_id, attempt):
+def check_qualification(expected, checks, platforms):
+    require_full = not re.search(r'-(?:alpha|beta)(?:\.|$)', expected['version'])
+    validate_report(checks, expected['revision'], require_full)
+    if set(platforms) != {'amd64', 'arm64'}:
+        raise ValueError('Missing native runtime qualification')
+    for architecture, result in platforms.items():
+        if result.get('runtime') != 'passed' or result.get('browser') != ('passed' if architecture == 'amd64' else 'covered-on-amd64'):
+            raise ValueError('Missing runtime/browser prerequisite')
+
+
+def seal(expected, image, archive, run_id, attempt, checks, platform_checks):
     if image.get('anonymous_docker_pulls') is not False or image.get('channel') is not None:
         raise ValueError('Validation must be nonpublishing')
     for name in ('version', 'revision', 'source', 'image'):
@@ -200,7 +211,8 @@ def seal(expected, image, archive, run_id, attempt):
                    for platform, digest in image['platforms'].items()]))
     if not release.DIGEST.fullmatch(image['digest']) or archive.stat().st_size > MAX_ARCHIVE:
         raise ValueError('Invalid validated export')
-    return dict(schema=1, repository=expected['source'].removeprefix('https://github.com/'),
+    check_qualification(expected, checks, platform_checks)
+    return dict(schema=2, checks=checks, platform_checks=platform_checks, repository=expected['source'].removeprefix('https://github.com/'),
                 version=expected['version'], revision=expected['revision'], source=expected['source'],
                 image=expected['image'], run_id=int(run_id), attempt=int(attempt),
                 digest=image['digest'], platforms=image['platforms'],
@@ -215,6 +227,7 @@ def validate_platform_map(platforms):
 
 
 def compare(evidence, image):
+    check_qualification(image, evidence.get('checks', {}), evidence.get('platform_checks', {}))
     validate_platform_map(evidence.get('platforms'))
     for name in ('version', 'revision', 'source', 'image', 'digest', 'platforms'):
         if evidence.get(name) != image.get(name):
@@ -268,8 +281,9 @@ def unpack(path, destination, artifact):
 
 def check_evidence(evidence, expected, run, archive):
     validate_platform_map(evidence.get('platforms'))
-    if evidence.get('schema') != 1 or evidence.get('repository') != expected['source'].removeprefix('https://github.com/'):
+    if evidence.get('schema') != 2 or evidence.get('repository') != expected['source'].removeprefix('https://github.com/'):
         raise ValueError('Unsupported validation evidence')
+    check_qualification(expected, evidence.get('checks', {}), evidence.get('platform_checks', {}))
     for name in ('version', 'revision', 'source', 'image'):
         if evidence.get(name) != expected[name]:
             raise ValueError('Validation evidence disagrees with release ' + name)
@@ -357,7 +371,9 @@ def main():
     smoke = sub.add_parser('smoke-identity')
     smoke.add_argument('archive', type=Path)
     smoke.add_argument('architecture', choices=('amd64', 'arm64'))
-    sub.add_parser('seal')
+    sealed = sub.add_parser('seal')
+    sealed.add_argument('--checks', required=True, type=Path)
+    sealed.add_argument('--platform-checks', required=True, type=Path)
     record = sub.add_parser('record-provenance')
     record.add_argument('restored', type=Path)
     compared = sub.add_parser('compare')
@@ -378,12 +394,14 @@ def main():
         evidence = json_file(args.restored / 'validation.json')
         compare(evidence, image)
         image['validation'] = dict(json_file(args.restored / 'provenance.json'),
-                                   archive_sha256=evidence['archive_sha256'])
+                                   archive_sha256=evidence['archive_sha256'],
+                                   checks={key:evidence['checks'][key] for key in ('policy','level','classification','coverage','base')},
+                                   platform_checks=evidence['platform_checks'])
         image_path.write_text(json.dumps(image, indent=2) + '\n')
     elif args.operation == 'compare':
         compare(json_file(args.evidence), json_file(Path('release-image.json')))
     elif args.operation == 'seal':
-        evidence = seal(expected, json_file(Path('release-image.json')), Path('/tmp/collector-multiarch.oci.tar'), os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
+        evidence = seal(expected, json_file(Path('release-image.json')), Path('/tmp/collector-multiarch.oci.tar'), os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'], json_file(args.checks), {arch: json_file(args.platform_checks / (arch + '.json')) for arch in ('amd64', 'arm64')})
         Path('/tmp/validation').mkdir(exist_ok=False)
         Path('/tmp/validation/validation.json').write_text(json.dumps(evidence, indent=2) + '\n')
         shutil.move('/tmp/collector-multiarch.oci.tar', '/tmp/validation/collector-multiarch.oci.tar')

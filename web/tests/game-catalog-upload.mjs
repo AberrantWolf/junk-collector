@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 // Offline real-server journey for the October 9 game import/catalog TODOs.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-game-catalog-'));
 const config=path.join(scratch,'collector.toml'),password=randomBytes(24).toString('hex');
-const origin='http://localhost:19972',binary=path.join(root,'target/debug/collector-server');
+const origin='http://localhost:19972',binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19971"\nprivate_bind = "127.0.0.1:19972"\nlan_bind = "127.0.0.1:19973"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}"]\n[exposure]\npublic_curation = false\npublic_administration = false\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let server,browser,page,logs='';
@@ -22,7 +23,7 @@ const gb=dat('Game Boy','No-Intro','20261010','GB fixture',[['game.gb',Buffer.fr
 try{
  server=spawn(binary,['--config',config,'serve']);server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);
  let ready=false;for(let i=0;i<200;i++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}assert.ok(ready,logs);
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({headless:true});
  page=await browser.newPage({viewport:{width:1360,height:980}});page.setDefaultTimeout(15000);page.on('dialog',dialog=>dialog.accept());const errors=[],external=[];page.on('pageerror',e=>errors.push(e.message));page.on('response',async r=>{if(r.status()===422)console.error('Rejected request:',await r.text());});
  await page.route('**/*',route=>{const url=new URL(route.request().url());if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.toString());return route.abort();}return route.continue();});
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
@@ -67,4 +68,4 @@ try{
  const future=await importGame();await expect.poll(async()=>{const rows=(await read(`/items?collection_id=${collection.id}&limit=50`)).items;return rows.filter(i=>i.captures?.length&&i.title==='Final Fantasy & Tactics (USA)').length;},{timeout:45000}).toBe(2);
  assert.equal(future.length,2);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
  console.log('Automatic game journey passed: provisional disc, mixed DAT/ZIP content detection, two active systems, activation scan, immediate title/system/search refresh, deliberate overrides and use-detected controls, future automatic imports, malformed upload rejection; offline.');
-}catch(error){if(page){console.error((await page.locator('body').innerText()).slice(-14000));await page.screenshot({path:'/tmp/collector-game-failure.png',fullPage:true}).catch(()=>{});}throw error;}finally{await browser?.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(()=>{server.kill('SIGKILL');r();},5000))]);}await rm(scratch,{recursive:true,force:true});}
+}catch(error){if(page){console.error((await page.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(-14000));await page.screenshot({path:'/tmp/collector-game-failure.png',fullPage:true}).catch(()=>{});}throw error;}finally{await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

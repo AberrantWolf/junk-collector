@@ -1,20 +1,21 @@
+import {stopProcess} from './support/runtime.mjs';
 // Real stopped-server backup receipts and administrator UI, in disposable storage.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
-const root=path.resolve(import.meta.dirname,'../..'),scratch=await mkdtemp(path.join(tmpdir(),'collector-backup-reminder-')),config=path.join(scratch,'collector.toml'),binary=path.join(root,'target/debug/collector-server'),password=randomBytes(24).toString('hex'),origin='http://localhost:19912';
+const root=path.resolve(import.meta.dirname,'../..'),scratch=await mkdtemp(path.join(tmpdir(),'collector-backup-reminder-')),config=path.join(scratch,'collector.toml'),binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server')),password=randomBytes(24).toString('hex'),origin='http://localhost:19912';
 const base=`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19911"\nprivate_bind = "127.0.0.1:19912"\nlan_bind = "127.0.0.1:19913"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "https://localhost:19913"\nallowed_origins = ["${origin}"]\n[backup_reminder]\nafter_days = 30\n`;
 await writeFile(config,base);const cli=(args,input)=>spawnSync(binary,['--config',config,...args],{input,encoding:'utf8',timeout:60000});const setup=cli(['setup','--username','owner'],password);assert.equal(setup.status,0,setup.stderr);
 let server,browser,page,logs='';
 async function start(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);for(let i=0;i<300;i++){if(server.exitCode!==null)throw Error(logs);try{if((await fetch('http://127.0.0.1:19911/healthz')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server readiness timeout: '+logs);}
-async function stop(){if(!server||server.exitCode!==null)return;const ended=new Promise(r=>server.once('exit',r));server.kill('SIGINT');await Promise.race([ended,new Promise((_,reject)=>setTimeout(()=>reject(Error('Server stop timeout')),5000).unref())]);}
+async function stop(){await stopProcess(server);}
 async function panel(){await page.goto(origin);await page.getByRole('button',{name:'Create collection',exact:true}).waitFor();const menu=page.getByRole('button',{name:'Menu',exact:true});if(await menu.isVisible())await menu.click();await page.getByRole('button',{name:'Administration',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByRole('button',{name:'Server settings',exact:true}).click();return admin.getByRole('region',{name:'Backup reminder',exact:true});}
 try{
- await start();browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});page=await browser.newPage({viewport:{width:1200,height:1000}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await start();browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1200,height:1000}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Create collection',exact:true}).waitFor();
  let reminder=await panel();await reminder.getByRole('status').getByText('No confirmed completion date is available.',{exact:true}).waitFor();await stop();
  const destination=path.join(scratch,'backup');const backup=cli(['backup','--destination',destination]);assert.equal(backup.status,0,backup.stderr);const validation=cli(['validate-backup','--backup',destination]);assert.equal(validation.status,0,validation.stderr);await start();
@@ -22,4 +23,4 @@ try{
  const failed=cli(['backup','--destination',destination]);assert.notEqual(failed.status,0);const doctor=cli(['doctor']);assert.equal(doctor.status,0,doctor.stderr);assert.ok(doctor.stdout.includes('"status":"failed"'));await start();reminder=await panel();await reminder.getByText('The latest recorded backup attempt failed.',{exact:true}).waitFor();const after=await page.evaluate(async()=> (await(await fetch('/api/v1/admin/settings')).json()).backup_reminder);assert.equal(after.last_completed_at,first.last_completed_at);await stop();
  await writeFile(config,base+'externally_managed = true\nexternal_completed_at = "2020-01-01T00:00:00Z"\n');await start();reminder=await panel();await reminder.getByText('The recorded backup is overdue.',{exact:true}).waitFor();await reminder.getByText('External backup: operator-reported dates; Collector has not observed or validated this backup.',{exact:true}).waitFor();await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(scratch,'backup-reminder-mobile.png'),fullPage:true});assert.deepEqual(errors,[]);
  console.log(`Backup reminder browser acceptance passed: unknown, real full backup and validation, recent receipt, real failed retry without losing completion, doctor, external overdue report and mobile. Artifacts: ${scratch}`);
-}catch(error){console.error(logs);console.error(await page?.locator('body').innerText().catch(()=>''));throw error;}finally{await browser?.close();try{await stop();}catch{server?.kill('SIGKILL');}}
+}catch(error){console.error(logs);console.error(await page?.locator('body').innerText({timeout:2000}).catch(()=>''));throw error;}finally{await browser?.close();try{await stop();}catch{server?.kill('SIGKILL');}}

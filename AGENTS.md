@@ -38,4 +38,45 @@ Read `docs/architecture.md` before adding or changing a subsystem. `docs/impleme
 - Test claims with independent vectors and cases that defeat shortcuts (for example, v2-only matches without a v1 anchor). A green legacy test is not proof its expected behavior is correct; explain changes to expectations. Exercise new user workflows through their real UI, including setup and immediate refresh after mutations.
 - Follow `docs/decisions/pre-release-evolution.md`: do not add compatibility wrappers or migrations merely for checkpoint stability. Preserve actual data and recovery guarantees. When completing work, update current status, relevant delivery records and `docs/remaining-work.md` together; retain clearly dated historical validation records.
 
-Checks: `python3 scripts/check_architecture.py`, `cargo fmt --all -- --check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `npm --prefix web run check`, `npm --prefix web run build`. Rebuild the Rust server after changing embedded web assets. `npm --prefix web run test:smoke` uses a temporary local server/profile and a virtual WebAuthn authenticator; configure `CHROME_PATH` when needed.
+## Change-based validation
+
+Use [the maintained test selection policy and commands](docs/testing.md). Inspect
+staged, unstaged and relevant untracked changes; release selection covers the whole
+candidate since its validated baseline. Preview with `python3 scripts/check_changes.py
+--dry-run` and select the smallest meaningful check set.
+
+- Documentation and human-facing text-only edits do not require unit tests. Do not
+  add tests that merely freeze copy. Check documentation links; for UI copy run web
+  type checking/build and inspect the affected screen, including mobile wrapping,
+  overflow and accessible names. CLI copy requires compiling the affected executable
+  and inspecting output. Review the entire diff before declaring `ui-copy` or
+  `cli-copy`; machine-readable strings, identifiers, URLs and protocol/configuration
+  values require checks for their actual behavior.
+- CSS/layout changes require focused rendering checks. UI behavior changes require
+  related model/browser tests. Rust changes require affected package/consumer tests
+  and Clippy plus architecture/format checks. Authentication, authorization,
+  storage/recovery, shared contracts, dependency/toolchain changes and uncertain
+  scope require broader workspace coverage. Beta releases use the documented
+  change-based set; RC/stable require full qualification of functional changes.
+  Reuse unchanged evidence only with a recorded applicable full baseline. Report
+  selected, failed and omitted checks honestly.
+- Use the shared browser harness and supported launch context. On macOS, browser
+  tests must run outside Codex's seatbelt execution context; the harness refuses
+  that known-broken launch before starting Chrome. Use the permitted execution
+  tool rather than repeatedly trying the failing context. Missing browser binaries
+  and launch failures are infrastructure failures, never passed UI acceptance.
+  Keep temporary state isolated and teardown bounded.
+- Deploy release-mode executables only. Build each deployment target once, test
+  the resulting artifact, and publish those same validated bytes. Debug builds
+  are development/test tools, not deployment prerequisites. Rebuild a serving
+  binary after changing its embedded web assets. Do not run duplicate standalone
+  release builds when the container is the sole deliverable.
+
+The full source set remains architecture checks, `cargo fmt --all -- --check`,
+`cargo test --workspace --locked`, `cargo clippy --workspace --all-targets --locked
+-- -D warnings`, web type checking/build, web model tests and the broad browser
+suite. Run it with `python3 scripts/check_changes.py --level full --classification
+infra`. `npm --prefix web run test:smoke` is short acceptance;
+`npm --prefix web run test:integration` retains the broad provider/media/recovery
+journey, including virtual WebAuthn. See the policy for installing test browsers,
+explicit binary paths, feature journeys and release-image acceptance.

@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 // Actual browser setup, purchased-file intake and listening against an isolated server.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,mkdir,writeFile,copyFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -18,7 +19,7 @@ await writeFile(path.join(fixture,'receipt.txt'),'PRIVATE ORDER REFERENCE 482');
 await writeFile(path.join(fixture,'booklet.txt'),'Shared booklet');
 await writeFile(path.join(fixture,'cover.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'));
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19861"\nprivate_bind = "127.0.0.1:19862"\nlan_bind = "127.0.0.1:19863"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\npurchases = "${scratch}"\n`);
-const binary=path.join(root,'target/debug/collector-server');
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
 let browser,page;
@@ -26,7 +27,7 @@ try{
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19861/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
  // Trust only this disposable fixture's SPKI, including its service-worker fetch.
  const spki=createHash('sha256').update(new X509Certificate(await readFile(path.join(scratch,'state/tls/cert.pem'))).publicKey.export({type:'spki',format:'der'})).digest('base64');
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:[`--ignore-certificate-errors-spki-list=${spki}`]});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true,args:[`--ignore-certificate-errors-spki-list=${spki}`]});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -152,4 +153,4 @@ try{
  await expect(player.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
  assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance and mobile layout. Artifacts: ${scratch}`);
-}catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText().catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();server.kill('SIGINT');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(r,5000))]);if(server.exitCode===null)server.kill('SIGKILL');}
+}catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();await stopProcess(server);}

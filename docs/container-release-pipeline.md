@@ -4,9 +4,11 @@ This changes future releases after beta.4. Installed clients and Portainer keep
 their existing update process and `preview` channel. It does not republish beta.4.
 
 Release tooling stays in the existing **Container release** workflow. Validation
-runs the repository checks, builds each native architecture once, imports the
+selects [change-based repository checks](testing.md), builds each native architecture
+in parallel with source qualification, imports the
 runtime from its labelled OCI export into Docker, checks its config identity and
-runs the actual native proxy/inbox/recovery smokes. It verifies both exports and
+runs the actual native proxy/inbox/recovery smokes plus short browser acceptance
+on the AMD64 release image. There is no extra discarded standalone release build. It verifies both exports and
 stores the merged archive plus `validation.json` as an immutable Actions artifact.
 Publication copies that validated archive, preserving all image digests. It does
 not rerun compilation, source tests or image builds.
@@ -16,6 +18,12 @@ not rerun compilation, source tests or image builds.
    gh workflow run container-release.yml --ref codex/your-release-candidate
    ```
    Empty inputs produce **Validate container candidate**, without registry writes.
+   They require full source coverage because no validated baseline was supplied.
+   For a reviewed UI copy-only beta, add `-f base_ref=vPREVIOUS_VERSION -f
+   classification=ui-copy`; see [selection and evidence](testing.md). Use
+   `-f check_level=full` for RC/stable qualification. The source job can reuse a
+   successful same-SHA Checks receipt only when its workflow, baseline, required
+   commands, current attempt and immutable artifact digest qualify.
    Wait for the entire run to succeed, including both native architectures and
    container verification. Record its run ID. No candidate changes after this
    point: even a documentation commit requires fresh exact-source validation.
@@ -66,3 +74,12 @@ source and platform digests. Reused records additionally identify the validation
 run, attempt, artifact ID/digest and archive SHA-256. `SHA256SUMS` covers the bundle
 and image record. Local OCI/rehearsal evidence does not claim anonymous registry
 publication, a NAS deployment or a new installed Trash Amp version.
+
+Validation schema 2 binds source-check scope/results and native/browser outcomes to
+the existing exact-source archive evidence. Failed, skipped or cancelled required
+checks cannot seal a candidate. Beta coverage cannot qualify RC/stable functional
+changes. Text-only RC/stable changes may cite a verified full baseline. Old schema-1
+exports need a fresh validation run; this changes no published image or user data.
+Rust source checks use a dependency cache; Docker dependency recipes are ordinary
+exported layers that survive web-only edits and fresh hosted runners. Record cold
+and warm measurements in delivery evidence rather than assuming a cache hit.

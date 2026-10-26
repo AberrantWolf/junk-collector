@@ -11,3 +11,5 @@
 /deploy/container/.env.before-update
 /deploy/container/collector.toml
 /deploy/container/collector-cert.pem
+
+__pycache__/

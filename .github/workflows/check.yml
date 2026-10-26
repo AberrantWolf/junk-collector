@@ -6,36 +6,121 @@ on:
   workflow_call:
     inputs:
       source_ref:
-        description: Source ref for release verification
+        description: Exact source ref for release verification
         required: false
         default: ''
         type: string
+      base_ref:
+        description: Validated baseline covering the complete candidate diff
+        required: false
+        default: ''
+        type: string
+      classification:
+        description: Reviewed change classification (auto is conservative)
+        required: false
+        default: auto
+        type: string
+      level:
+        required: false
+        default: beta
+        type: string
+      journeys:
+        description: Comma-separated affected browser journeys
+        required: false
+        default: ''
+        type: string
+permissions:
+  contents: read
+  actions: read
 jobs:
   rust-and-web:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 0
+      - name: Select complete change scope and reuse applicable source checks
+        id: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_REF: ${{ inputs.base_ref || github.event.pull_request.base.sha || github.event.before }}
+          CLASSIFICATION: ${{ inputs.classification || 'auto' }}
+          CHECK_LEVEL: ${{ inputs.level || 'beta' }}
+          JOURNEYS: ${{ inputs.journeys }}
+          REUSE_CHECKS: ${{ inputs.source_ref != '' }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, re, subprocess, tomllib
+          from pathlib import Path
+          revision = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          base = os.environ.get('BASE_REF', '')
+          if base and set(base) == {'0'}: base = ''
+          if base: base = subprocess.check_output(['git','rev-parse',base], text=True).strip()
+          version = tomllib.loads(Path('Cargo.toml').read_text())['workspace']['package']['version']
+          level = os.environ['CHECK_LEVEL'] if re.search(r'-(?:alpha|beta)(?:\.|$)', version) else 'full'
+          arguments = ['--level', level, '--classification', os.environ['CLASSIFICATION']]
+          if base: arguments += ['--base', base]
+          for journey in filter(None, os.environ.get('JOURNEYS', '').split(',')):
+              arguments += ['--journey', journey]
+          if os.environ['REUSE_CHECKS'] == 'true': arguments += ['--source-only']
+          subprocess.run(['python3','scripts/check_changes.py',*arguments,'--dry-run','--report','/tmp/check-plan.json'],check=True)
+          report = json.loads(Path('/tmp/check-plan.json').read_text())
+          if base and level == 'full' and report['classification'] in ('docs','ui-copy','cli-copy'):
+              subprocess.run(['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],base,'/tmp/baseline-check-report.json','--full'],check=True)
+              arguments += ['--baseline-report','/tmp/baseline-check-report.json']
+          Path('/tmp/check-arguments.json').write_text(json.dumps(arguments))
+          reused = False
+          if os.environ['REUSE_CHECKS'] == 'true':
+              command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds','900','--plan','/tmp/check-plan.json']
+              if base: command += ['--base', base]
+              if level == 'full': command += ['--full']
+              reused = subprocess.run(command).returncode == 0
+          if reused: report = json.loads(Path('/tmp/check-report.json').read_text())
+          names = {step['name'] for step in report['steps']}
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write(f'reused={str(reused).lower()}\n')
+              output.write(f'rust={str(bool(names & {"format","workspace-tests","affected-tests","cli-build","browser-server"})).lower()}\n')
+              output.write(f'web={str("web-build" in names).lower()}\n')
+              output.write(f'browser={str("browser" in names).lower()}\n')
+          PYTHON
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
         with:
           toolchain: 1.99.1
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
+        with:
+          shared-key: source-checks
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.web == 'true'
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libssl-dev
-      - run: python3 scripts/check_architecture.py
-      - run: python3 -B scripts/check_container_tools.py
-      - run: python3 -B scripts/check_container_release.py
-      - run: python3 -B scripts/check_container_validation.py
-      - run: npm --prefix web ci
-      - run: npm --prefix web run check
-      - run: npm --prefix web run build
-      - run: git diff --exit-code -- web/dist
-      - run: cargo fmt --all -- --check
-      - run: cargo test --workspace --locked
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo build --release --locked -p collector-server -p collector-media
+      - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
+        run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libssl-dev flac opus-tools
+      - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.web == 'true'
+        run: npm --prefix web ci
+      - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.browser == 'true'
+        run: npm --prefix web exec -- playwright install --with-deps chromium chrome
+      - name: Execute selected checks
+        if: steps.scope.outputs.reused != 'true'
+        run: |
+          python3 - <<'PYTHON'
+          import json, subprocess
+          from pathlib import Path
+          arguments = json.loads(Path('/tmp/check-arguments.json').read_text())
+          subprocess.run(['python3','scripts/check_changes.py',*arguments,'--report','/tmp/check-report.json'],check=True)
+          PYTHON
+      - name: Require committed production web assets
+        if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.web == 'true'
+        run: git diff --exit-code -- web/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-checks-${{ github.run_attempt }}
+          path: /tmp/check-report.json
+          if-no-files-found: error
+          retention-days: 30

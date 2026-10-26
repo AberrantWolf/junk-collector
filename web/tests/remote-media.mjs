@@ -1,27 +1,28 @@
+import {stopProcess} from './support/runtime.mjs';
 // Real core, separate media executable/Unix sockets, HTTPS frontend and HTML audio.
 // HTTPS trust exceptions are scoped to this disposable self-signed test context;
 // this is not evidence of public-CA deployment or actual iPhone behavior.
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
-import {spawn,spawnSync} from 'node:child_process';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {createServer as netServer} from 'node:net';
 import {createServer as tlsServer} from 'node:https';
 import {request as httpRequest} from 'node:http';
 import path from 'node:path';
-import {chromium,expect} from '@playwright/test';
+import {chromium,expect} from './support/browser.mjs';
 async function port(){const server=netServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
 const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp('/tmp/jc-media-');
 const ports=await Promise.all([port(),port(),port(),port()]);const single=process.env.COLLECTOR_TEST_SINGLE_ORIGIN==='1';const upstream=`http://localhost:${ports[0]}`;const origin=single?`https://localhost:${ports[3]}`:upstream;const remote=`https://localhost:${ports[3]}/${single?'media/':''}`;
 const config=path.join(scratch,'collector.toml');const authority=path.join(scratch,'auth/socket');const mediaSocket=path.join(scratch,'http/socket');await mkdir(path.dirname(mediaSocket));
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_enabled = false\nremote_media_allowed = false\nallowed_origins = ["${origin}"]\n[remote_media]\nbase_url = "${remote}"\nsocket = "${authority}"\n[exposure]\npublic_curation = true\npublic_administration = true\n`);
-const binary=path.join(root,'target/debug/collector-server');const password='Disposable remote-media fixture password';
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));const password='Disposable remote-media fixture password';
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 const children=[];let logs='';const start=(binary,args)=>{const child=spawn(binary,args,{stdio:['ignore','pipe','pipe']});children.push(child);child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);return child;};
 let browser,front;const observed=[];let rejectedGrant;const rejectFirst=process.env.COLLECTOR_TEST_MEDIA_REJECT_FIRST_READ==='1';
 try{
  start(binary,['--config',config,'serve']);
  for(let n=0;;n++){try{if((await fetch(upstream+'/healthz')).ok)break;}catch{}if(n>150)throw new Error(logs);await new Promise(r=>setTimeout(r,100));}
- start(path.join(root,'target/debug/collector-media'),['--http-socket',mediaSocket,'--authority-socket',authority,'--archive',path.join(scratch,'archive'),'--allowed-origin',origin]);
+ start((process.env.COLLECTOR_MEDIA_BINARY||path.join(root,'target/debug/collector-media')),['--http-socket',mediaSocket,'--authority-socket',authority,'--archive',path.join(scratch,'archive'),'--allowed-origin',origin]);
  front=tlsServer({key:await readFile(path.join(scratch,'state/tls/key.pem')),cert:await readFile(path.join(scratch,'state/tls/cert.pem'))},(request,response)=>{
   const url=new URL(request.url,remote);const media=single?url.pathname.startsWith('/media/'):true;const pathname=single&&media?url.pathname.slice(6):url.pathname;
   if(media&&(!['/read','/api/v1/identity'].includes(pathname)||!['GET','HEAD','OPTIONS'].includes(request.method))){response.writeHead(404).end();return;}
@@ -30,7 +31,7 @@ try{
   const forwarded=httpRequest({...media?{socketPath:mediaSocket}:{hostname:'127.0.0.1',port:ports[0]},path:pathname+url.search,method:request.method,headers},result=>{if(media)delete result.headers['set-cookie'];response.writeHead(result.statusCode,result.headers);result.pipe(response);});
   forwarded.on('error',()=>{if(!response.headersSent)response.writeHead(503).end();else response.destroy();});request.pipe(forwarded);response.on('close',()=>forwarded.destroy());
  });await new Promise(resolve=>front.listen(ports[3],'127.0.0.1',resolve));
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true});await context.addInitScript(()=>{window.mediaActions={};const session=navigator.mediaSession;const original=session.setActionHandler.bind(session);session.setActionHandler=(action,handler)=>{window.mediaActions[action]=handler;original(action,handler);};});const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('Remote audio');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
@@ -68,6 +69,6 @@ try{
  console.log(`Remote HTTPS playback (${single?'one origin with a media path':'separate origins'}) passed in Chrome ${await browser.version()}: real separate media executable/Unix sockets, actual FLAC/MP3 playback/seeks, OS media metadata/artwork/actions and automatic track transition, control media refusal, live logout/source release, no browser credential forwarding, synthetic challenge and real early/late range test. Fixture TLS only; iPhone Safari/cellular remains unqualified.`);
 }catch(error){console.error(logs);throw error;}finally{
  await browser?.close();if(front){front.closeAllConnections();await new Promise(resolve=>front.close(resolve));}
- for(const child of children.reverse()){if(child.exitCode!==null||child.signalCode!==null)continue;child.kill('SIGTERM');await Promise.race([new Promise(resolve=>child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await Promise.race([new Promise(resolve=>child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,2000))]);}}
+ for(const child of children.reverse())await stopProcess(child);
  await rm(scratch,{recursive:true,force:true});
 }

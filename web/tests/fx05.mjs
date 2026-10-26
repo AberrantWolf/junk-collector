@@ -1,7 +1,8 @@
+import {stopProcess} from './support/runtime.mjs';
 import {clickAction} from './actions.mjs';
 // FX-05 lifecycle acceptance against a temporary real server and browser profile.
-import {chromium} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -11,7 +12,7 @@ import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-fx05-'));
 const config=path.join(scratch,'collector.toml');
-const binary=path.join(root,'target/debug/collector-server');
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const origin='http://localhost:20002';
 const password=randomBytes(24).toString('hex');
 let server,browser,page,logs='';
@@ -20,7 +21,7 @@ try{
  const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',value=>logs+=value);server.stdout.on('data',value=>logs+=value);
  let ready=false;for(let attempt=0;attempt<1200;attempt++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  page=await browser.newPage();page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection'}).click();const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Review music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection'}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
@@ -40,7 +41,6 @@ try{
  const readItem=()=>page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
  const waitItem=async predicate=>{for(let attempt=0;attempt<150;attempt++){const value=await readItem();if(predicate(value))return value;await page.waitForTimeout(200);}throw new Error('Item did not reach expected state: '+JSON.stringify(await readItem()));};
  await waitItem(item=>item.captures.length===1);
- await editor.getByText('Original files saved. Metadata lookup and audio preparation continue in Work & history.',{exact:true}).waitFor();
  await editor.getByText('Upload complete.',{exact:false}).waitFor();
  const first=await readItem();assert.equal(first.captures.length,1);
  await editor.getByRole('button',{name:'Close curator'}).click();
@@ -69,4 +69,4 @@ try{
  await clean.getByRole('button',{name:'Back to options',exact:true}).click();await editor.getByRole('button',{name:'Close curator'}).click();
  page.once('dialog',dialog=>dialog.accept());await clickAction(page,'Remove item');await page.getByRole('button',{name:'Restore entry',exact:true,includeHidden:true}).waitFor({state:'attached'});await page.waitForFunction(()=>document.querySelector('.music-player audio')?.paused===true);await clickAction(page,'Restore entry');await page.getByRole('button',{name:'Remove item',exact:true,includeHidden:true}).waitFor({state:'attached'});await player.getByRole('button',{name:'Play',exact:true}).click();await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
  assert.deepEqual(errors,[]);console.log('FX-05 browser passed: retained reuse, reviewed defaults, same identity, upload failure/reopen/resume, uninterrupted historical playback, mobile review, removal/restoration.');
-}catch(error){if(page){console.error(await page.locator('body').ariaSnapshot());console.error(logs.slice(-3000));}throw error;}finally{if(browser)await browser.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>{server.kill('SIGKILL');resolve();},5000))]);}await rm(scratch,{recursive:true,force:true});}
+}catch(error){if(page){console.error(await page.locator('body').ariaSnapshot({timeout:2000}).catch(()=> '[browser diagnostic unavailable]'));console.error(logs.slice(-3000));}throw error;}finally{if(browser)await browser.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

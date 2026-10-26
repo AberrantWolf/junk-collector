@@ -1,5 +1,21 @@
 # Remaining work — home-lab priorities
 
+## Faster checks and packaging — implementation acceptance, 2026-10-26
+
+The requested [testing workflow](testing.md) now selects checks from the complete
+change, exempts reviewed display/prose edits from unit tests, and separates short
+browser acceptance from broad integration and optional scale qualification.
+The shared harness prevents the known macOS seatbelt Chrome launch and bounds
+owned process cleanup. Container source checks and native image builds run in
+parallel, with dependency caching, exact-source check reuse and profile-aware
+validation evidence. Discarded standalone release compilation is removed.
+
+Local source, lifecycle, short-smoke and broad integration checks pass. Remaining
+feature journeys and hosted native/cache/promotion acceptance are in progress;
+see [dated evidence](validation/testing-and-packaging-2026-10-26.md). No release
+publication or production deployment is included.
+
+
 ## Requested UI copy cleanup — local source, 2026-10-26
 
 Delivered a conservative copy pass across metadata, playback, imports, grouping

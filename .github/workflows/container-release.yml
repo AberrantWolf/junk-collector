@@ -5,6 +5,28 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
+      base_ref:
+        description: Previous validated release ref covering the entire candidate (empty requires full checks)
+        required: false
+        default: ''
+        type: string
+      classification:
+        description: Reviewed classification; use ui-copy only after reviewing the complete diff
+        required: false
+        default: auto
+        type: choice
+        options: [auto, docs, ui-copy, cli-copy, style, ui, rust, infra]
+      check_level:
+        description: Full functional qualification is required for RC and stable
+        required: false
+        default: beta
+        type: choice
+        options: [beta, full]
+      journeys:
+        description: Comma-separated affected browser journeys
+        required: false
+        default: ''
+        type: string
       retry_release_tag:
         description: Existing published release tag to retry using exact-source validated images
         required: false
@@ -71,8 +93,13 @@ jobs:
     uses: ./.github/workflows/check.yml
     with:
       source_ref: ${{ needs.plan.outputs.revision }}
+      base_ref: ${{ inputs.base_ref }}
+      classification: ${{ inputs.classification || 'auto' }}
+      level: ${{ inputs.check_level || 'beta' }}
+      journeys: ${{ inputs.journeys }}
   build:
-    needs: [plan, checks]
+    if: needs.plan.outputs.reuse != 'true'
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
@@ -115,6 +142,18 @@ jobs:
           python3 scripts/container_validation.py smoke-identity "/tmp/collector-$ARCHITECTURE.oci.tar" "$ARCHITECTURE"
           python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
           python3 scripts/check_media_container.py junk-collector:release-smoke --proxy
+      - uses: actions/setup-node@v4
+        if: matrix.architecture == 'amd64'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Browser acceptance against the release image
+        if: matrix.architecture == 'amd64'
+        run: |
+          npm --prefix web ci
+          npm --prefix web exec -- playwright install --with-deps chromium
+          python3 scripts/container_browser_smoke.py junk-collector:release-smoke
       - name: Record platform digest
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
@@ -127,7 +166,7 @@ jobs:
           digest = os.environ['BUILD_DIGEST']
           if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
               raise ValueError('Missing platform build digest')
-          Path('/tmp/platform-' + os.environ['ARCHITECTURE'] + '/' + os.environ['ARCHITECTURE'] + '.json').write_text(json.dumps(dict(digest=digest)))
+          Path('/tmp/platform-' + os.environ['ARCHITECTURE'] + '/' + os.environ['ARCHITECTURE'] + '.json').write_text(json.dumps(dict(digest=digest, runtime='passed', browser='passed' if os.environ['ARCHITECTURE'] == 'amd64' else 'covered-on-amd64')))
           PYTHON
           if [ -f "/tmp/collector-$ARCHITECTURE.oci.tar" ]; then
             mv "/tmp/collector-$ARCHITECTURE.oci.tar" "/tmp/platform-$ARCHITECTURE/"
@@ -137,8 +176,8 @@ jobs:
           name: platform-${{ matrix.architecture }}-${{ github.run_attempt }}
           path: /tmp/platform-${{ matrix.architecture }}/
   container:
-    if: ${{ always() && !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.reuse == 'true' || needs.build.result == 'success') }}
-    needs: [plan, build]
+    if: ${{ always() && !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.reuse == 'true' || (needs.build.result == 'success' && needs.checks.result == 'success')) }}
+    needs: [plan, checks, build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -161,6 +200,11 @@ jobs:
           pattern: platform-*-${{ github.run_attempt }}
           path: /tmp/platforms
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.reuse != 'true'
+        with:
+          name: source-checks-${{ github.run_attempt }}
+          path: /tmp/source-checks
       - run: sudo apt-get update && sudo apt-get install -y skopeo
       - name: Check rootless OCI transport before consuming exports
         run: python3 -B scripts/check_container_validation.py
@@ -187,7 +231,7 @@ jobs:
           if [ "$REUSE" = true ]; then python3 scripts/container_validation.py compare /tmp/restored/validation.json; fi
       - name: Seal reusable validation after all checks and both native smoke jobs
         if: needs.plan.outputs.reuse != 'true'
-        run: python3 scripts/container_validation.py seal
+        run: python3 scripts/container_validation.py seal --checks /tmp/source-checks/check-report.json --platform-checks /tmp/platforms
       - uses: actions/upload-artifact@v4
         if: needs.plan.outputs.reuse != 'true'
         with:

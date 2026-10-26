@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 // Real-server public-certificate download and explicitly trusted HTTPS enrollment.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import https from 'node:https';
 import {createHash,randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-certificate-'));
-const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');const origin='http://localhost:19972';const tlsOrigin='https://localhost:19973';const binary=path.join(root,'target/debug/collector-server');
+const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');const origin='http://localhost:19972';const tlsOrigin='https://localhost:19973';const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19971"\nprivate_bind = "127.0.0.1:19972"\nlan_bind = "127.0.0.1:19973"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}"]\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);assert.ok(setup.stdout.includes('https://localhost:19973'));
 let server,browser;let logs='';
@@ -16,7 +17,7 @@ async function trustedRequest(certificate,route,body){return new Promise((resolv
 try{
  server=spawn(binary,['--config',config,'serve']);server.stdout.on('data',value=>logs+=value);server.stderr.on('data',value=>logs+=value);let ready=false;for(let i=0;i<150;i++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
  assert.equal((await fetch(origin+'/api/v1/pairing')).status,401);
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});const page=await browser.newPage({viewport:{width:1200,height:900},acceptDownloads:true});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1200,height:900},acceptDownloads:true});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Administration',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByRole('button',{name:'Server settings',exact:true}).click();const panel=admin.getByRole('region',{name:'HTTPS certificate'});await panel.getByRole('link',{name:'Download public certificate',exact:true}).waitFor();
  const downloadPromise=page.waitForEvent('download');await panel.getByRole('link',{name:'Download public certificate',exact:true}).click();const download=await downloadPromise;assert.equal(download.suggestedFilename(),'junk-collector-certificate.pem');const bytes=await readFile(await download.path());const certificate=bytes.toString('utf8');assert.equal(certificate,await readFile(path.join(scratch,'state/tls/cert.pem'),'utf8'));assert.ok(!certificate.includes('PRIVATE KEY'));const fingerprint=createHash('sha256').update(bytes).digest('hex');await expect(panel.locator('.certificate-fingerprint')).toHaveText(fingerprint);assert.ok(setup.stdout.includes(fingerprint));
  await panel.locator('summary').filter({hasText:'Trust the certificate on macOS'}).click();await expect(panel.getByText('Secure Sockets Layer (SSL)',{exact:false})).toBeVisible();await panel.locator('summary').filter({hasText:'Trust only this connection in Trash Amp'}).click();await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'/tmp/collector-certificate-help.png',fullPage:true});await admin.getByRole('button',{name:'Close administration',exact:true}).click();
@@ -27,4 +28,4 @@ try{
  // A failed certificate read stays visible and retryable on a new panel.
  await page.goto(origin);await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('button',{name:'Administration',exact:true}).click();await page.route('**/api/v1/pairing',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary certificate read failure'}}}));await admin.getByRole('button',{name:'Server settings',exact:true}).click();await panel.getByRole('button',{name:'Retry certificate',exact:true}).waitFor();await page.unroute('**/api/v1/pairing');await panel.getByRole('button',{name:'Retry certificate',exact:true}).click();await panel.getByRole('link',{name:'Download public certificate',exact:true}).waitFor();
  assert.deepEqual(errors,[]);console.log('Certificate acceptance passed: authenticated browser PEM download, exact startup/file fingerprint, no private key, mobile help and retry, explicitly validated HTTPS, local browser approval and one-time issuance.');
-}finally{await browser?.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>{server.kill('SIGKILL');resolve();},5000))]);}await rm(scratch,{recursive:true,force:true});}
+}finally{await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

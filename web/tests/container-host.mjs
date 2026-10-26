@@ -1,5 +1,5 @@
 // Browser handoff for check_container.py, including actual remote-host TLS/media.
-import {chromium,expect} from '@playwright/test';
+import {chromium,expect} from './support/browser.mjs';
 import {readFile,mkdtemp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -14,7 +14,7 @@ const identity=await new Promise((resolve,reject)=>{const req=https.get(fixture.
 assert.equal(identity.server_id,fixture.server_id);
 let browser,page;
 try{
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:fixture.private_ip?[`--host-resolver-rules=MAP ${new URL(fixture.origin).hostname} ${fixture.private_ip}`]:[]});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true,args:fixture.private_ip?[`--host-resolver-rules=MAP ${new URL(fixture.origin).hostname} ${fixture.private_ip}`]:[]});
  // Test-only self-signed browser acceptance; the PEM/name was independently validated above.
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));

@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 // Actual document attachment and preview workflow against an isolated server.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -14,14 +15,14 @@ const password=randomBytes(24).toString('hex');
 const origin='https://localhost:19903';
 
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19901"\nprivate_bind = "127.0.0.1:19902"\nlan_bind = "127.0.0.1:19903"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\npurchases = "${scratch}"\n`);
-const binary=path.join(root,'target/debug/collector-server');
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
 let browser,page;
 try{
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19901/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
  const publicKey=spawnSync('openssl',['x509','-in',path.join(scratch,'state/tls/cert.pem'),'-pubkey','-noout']);assert.equal(publicKey.status,0);const publicDer=spawnSync('openssl',['pkey','-pubin','-outform','DER'],{input:publicKey.stdout});assert.equal(publicDer.status,0);const certificatePin=createHash('sha256').update(publicDer.stdout).digest('base64');
- browser=await chromium.launch({args:[`--ignore-certificate-errors-spki-list=${certificatePin}`],executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',args:[`--ignore-certificate-errors-spki-list=${certificatePin}`],headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -45,4 +46,4 @@ try{
  await page.setViewportSize({width:1440,height:1000});await documents.getByRole('button',{name:'Attach document',exact:true}).click();const note=editor.getByRole('article',{name:/document attached to Item/}).filter({hasText:'notes.txt'});await note.getByRole('button',{name:'Edit metadata',exact:true}).click();await note.getByLabel('Visibility').selectOption('curators');await note.getByRole('button',{name:'Save document details',exact:true}).click();await note.getByText('document · Curators only',{exact:true}).waitFor();
  page.once('dialog',dialog=>dialog.accept());await note.getByRole('button',{name:'Archive document',exact:true}).click();await note.waitFor({state:'detached'});await editor.getByRole('button',{name:'Close curator'}).click();await expect(documents.getByText('notes.txt',{exact:true})).toHaveCount(0);await documents.getByText('manual.pdf',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);console.log(`Document browser acceptance passed (Chrome ${await browser.version()}): setup, private default, PDF upload, uncertain-response receipt recovery, native PDF preview, escaped bounded text/mobile preview, exact original download, visibility edit and archive. Artifacts: ${scratch}`);
-}catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText().catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();server.kill('SIGINT');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(r,5000))]);if(server.exitCode===null)server.kill('SIGKILL');}
+}catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();await stopProcess(server);}

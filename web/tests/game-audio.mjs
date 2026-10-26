@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 // Actual browser setup, mixed-mode game intake and listening against an isolated server.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,mkdir,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -23,13 +24,13 @@ const pcm=Buffer.alloc(11*75*2352);for(let frame=0;frame<pcm.length/4;frame++){p
 files=['game.cue','disc.bin'].map(file=>path.join(fixture,file));trackCount=2;
 }
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19881"\nprivate_bind = "127.0.0.1:19882"\nlan_bind = "127.0.0.1:19883"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[encoders]\nflac = "/opt/homebrew/bin/flac"\n[inboxes]\npurchases = "${scratch}"\n`);
-const binary=path.join(root,'target/debug/collector-server');
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
 let browser,page;
 try{
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19881/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -55,4 +56,4 @@ try{
  const songs=await page.evaluate(async id=>await(await fetch(`/api/v1/collections/${id}/music-search?search=Game%20theme`)).json(),collection);assert.equal(songs.items.length,1);assert.equal(songs.items[0].sources[0].track_position,2);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(scratch,'game-audio-mobile.png'),fullPage:true});
  assert.deepEqual(errors,[]);console.log(`Game CD audio browser acceptance passed (Chrome ${await browser.version()}): setup, mixed-mode import, title edit/reload, real FLAC preparation, playback/seek, audio-only playlist, source-bound search and mobile layout. Artifacts: ${scratch}`);
-}catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText().catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();server.kill('SIGINT');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(r,5000))]);if(server.exitCode===null)server.kill('SIGKILL');}
+}catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();await stopProcess(server);}

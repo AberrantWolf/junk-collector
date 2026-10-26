@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 // Actual numeric-IP HTTPS startup, password login, capability guidance and recovery.
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -13,7 +14,7 @@ const config=path.join(scratch,'collector.toml'),origin='https://127.0.0.1:19663
 const password=randomBytes(24).toString('hex');
 const artifact=path.join(tmpdir(),'collector-ip-passkeys.png');
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19661"\nprivate_bind = "127.0.0.1:19662"\nlan_bind = "127.0.0.1:19663"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["127.0.0.1"]\n`);
-const binary=path.join(root,'target/debug/collector-server');
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 let browser,page,server,logs='';
 try{
  const setup=spawnSync(binary,['--config',config,'setup'],{input:password,encoding:'utf8',timeout:30000});assert.equal(setup.status,0,setup.stderr);
@@ -27,7 +28,7 @@ try{
  // Independently validate the actual IP SAN and certificate before the isolated
  // browser context accepts this fixture's self-signed certificate.
  await new Promise((resolve,reject)=>{const req=https.get(origin+'/api/v1/identity',{ca},response=>{response.resume();response.on('end',()=>{try{assert.equal(response.statusCode,200);resolve();}catch(error){reject(error);}});});req.setTimeout(5000,()=>req.destroy(Error('TLS timed out')));req.on('error',reject);});
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -49,6 +50,6 @@ try{
 }catch(error){console.error(logs);await page?.screenshot({path:artifact,fullPage:true}).catch(()=>{});throw error;}
 finally{
  await browser?.close();
- if(server){const exit=new Promise(resolve=>server.once('exit',resolve));if(server.exitCode===null){server.kill('SIGINT');await Promise.race([exit,new Promise(resolve=>setTimeout(resolve,5000))]);}if(server.exitCode===null){server.kill('SIGKILL');await exit;}}
+ await stopProcess(server);
  await rm(scratch,{recursive:true,force:true});
 }

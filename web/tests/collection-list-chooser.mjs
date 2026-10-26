@@ -1,7 +1,7 @@
 // Browser regressions for chooser state and uncertain command outcomes. The real
 // component uses controlled HTTP fixtures; archive effects have store/HTTP tests.
 import {build} from 'esbuild';
-import {chromium,expect} from '@playwright/test';
+import {chromium,expect} from './support/browser.mjs';
 import {createServer} from 'node:http';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -24,7 +24,7 @@ let browser;
 const summary=(id,name,revision=1,entry_count=0)=>({id,name,revision,collection_id:'c',kind:'items',entry_count,can_edit:true});
 const open=async page=>{await page.goto(origin);await page.getByRole('button',{name:'Open chooser'}).click();await page.getByRole('button',{name:'Append to list',exact:true}).waitFor();};
 try{
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({headless:true});
  const page=await browser.newPage();page.setDefaultTimeout(10000);
  const writes=[];
  await page.route('**/api/v1/**',async route=>{

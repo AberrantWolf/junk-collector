@@ -1,7 +1,8 @@
 # Faster testing and packaging with reliable browser launches
 
-Proposed 2026-10-26. Planning only; existing test commands, release gates and
-`AGENTS.md` remain unchanged. Implementation requires a later instruction.
+Approved and implementation authorized 2026-10-26. The implemented commands and
+policy are maintained in [testing](testing.md); acceptance and limits are recorded
+in [the delivery evidence](validation/testing-and-packaging-2026-10-26.md).
 [Remaining work](remaining-work.md) remains the only assignment queue; the steps
 below define this delivery rather than creating another backlog.
 
@@ -287,5 +288,5 @@ selection policy, artifact checks and documentation together. Work in this order
 
 The planned implementation touches development tooling, tests, CI, container
 builds and documentation. It adds no Collector subsystem, stored collection schema,
-provider workflow or automatic production deployment. This plan authorizes none
-of those implementation changes and does not commit, publish or deploy anything.
+provider workflow or automatic production deployment. Publication and production deployment are separate actions; this delivery changes
+neither published images nor installed services.

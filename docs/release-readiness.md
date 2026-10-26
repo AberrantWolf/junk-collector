@@ -20,8 +20,12 @@ introduced by this review.
 | Optional backup-age reminder | [Beta.2 feature acceptance](validation/backup-reminder-2026-10-21.md) | Recorded validation/external reports only; no scheduler, background media scan or assertion that a backup still exists |
 | Game-disc CD audio | Beta.2 packages source with owned/browser/native streaming and offline acceptance | Exact shared/Collector/native pins qualified; broader physical/raw-format coverage and native application packaging remain separate |
 
-Per-release source gates, current-stable toolchain selection, embedded-asset rebuild,
-relevant actual UI journeys and digest-pinned packaging remain required. Reuse
+Per-release source coverage follows [the change-based testing policy](testing.md):
+text-only edits do not trigger unit tests; beta selects affected checks and
+RC/stable requires full functional qualification. Current-stable toolchain selection,
+embedded-asset rebuild, relevant actual UI journeys and digest-pinned packaging
+remain required. Deployment executables are release builds; container qualification
+uses the exact images without an extra discarded standalone release compilation. Reuse
 unaffected acceptance instead of repeating the whole deployment/device matrix.
 A supported release must select a finite client/format scope, link its evidence,
 retain visible limitations and describe complete matching-point recovery. The

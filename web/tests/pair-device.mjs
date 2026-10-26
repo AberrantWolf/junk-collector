@@ -1,5 +1,6 @@
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {stopProcess} from './support/runtime.mjs';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -8,14 +9,14 @@ import assert from 'node:assert/strict';
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-pair-'));
 const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');
-const multiUser=process.env.COLLECTOR_MULTI_USER==='1';const base='http://localhost:19942';const binary=path.join(root,'target/debug/collector-server');
+const multiUser=process.env.COLLECTOR_MULTI_USER==='1';const base='http://localhost:19942';const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 await writeFile(config,`multi_user = ${multiUser}\narchive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19941"\nprivate_bind = "127.0.0.1:19942"\nlan_bind = "127.0.0.1:19943"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${base}"]\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let browser;let server;let logs='';
 try{
  server=spawn(binary,['--config',config,'serve']);server.stdout.on('data',value=>logs+=value);server.stderr.on('data',value=>logs+=value);
  let ready=false;for(let i=0;i<100;i++){try{if((await fetch(base+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({headless:true});
  const context=await browser.newContext();const page=await context.newPage();const errors=[];page.on('pageerror',value=>errors.push(value.message));
  const started=await context.request.post(base+'/api/v1/enrollments/start',{data:{device_name:'Trash Amp pairing test'}});assert.equal(started.status(),200);const enrollment=await started.json();
  await page.goto(base+enrollment.verification_url+'?code='+encodeURIComponent(enrollment.user_code));if(multiUser)await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -30,5 +31,5 @@ try{
  const replay=await context.request.post(`${base}/api/v1/enrollments/${enrollment.id}/complete`,{data:{completion_secret:enrollment.completion_secret}});assert.notEqual(replay.status(),200);
  assert.deepEqual(errors,[]);console.log('Pairing browser journey passed: signed-out destination, account display, invalid code retry, sign-out destination, approval, native credential and one-time completion.');
 }finally{
- await browser?.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>{server.kill('SIGKILL');resolve();},5000))]);}await rm(scratch,{recursive:true,force:true});
+ await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});
 }

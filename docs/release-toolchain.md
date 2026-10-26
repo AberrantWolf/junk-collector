@@ -38,10 +38,14 @@ The published alpha.1's dated Rust 1.95 validation remains historical evidence.
 Before each later release, check official current-stable Rust, install that exact
 version for qualification, and record the decision. Advance the repository pin,
 CI, Docker and build documentation together only after actual qualification.
-Run architecture/format, workspace tests and all-target Clippy with warnings denied,
-web checks/build, the release executable, container build/runtime and the relevant
-shared-library/consumer checks. Rebuild the server with current embedded assets and
-run affected real-browser journeys. Do not suppress new lints to pass qualification,
+Select source checks using [the change-based testing policy](testing.md).
+Text-only edits do not trigger unit tests. Beta candidates use checks for the
+complete change since their validated baseline; RC/stable require full functional
+qualification or applicable full baseline evidence for unchanged behavior. Keep
+relevant shared-library/consumer checks. Build deployment executables in release
+mode once per target inside their actual deliverable, with current embedded assets,
+and run the relevant browser/image acceptance. A container-only release does not
+need discarded standalone release executables. Do not suppress new lints to pass qualification,
 change sibling projects silently, or treat local tests as LA3/PJ1 hardware evidence.
 
 [October TODO validation](validation/october-todos.md) records this upgrade,

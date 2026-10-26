@@ -146,3 +146,10 @@ Server settings → HTTPS certificate for download and trust instructions.
 | Music preparation is unavailable | Run `doctor`; check encoder paths, restart after configuration changes, and inspect the package's reported limitations. |
 | Metadata or artwork is unavailable | Check the provider user agent and the job's error. Manual curation and preservation remain available during provider outages. |
 | An import or preparation failed | Read the job/track error and fix its cause before retrying. Keep the complete source package and its original relative filenames. |
+
+## Development checks
+
+Use [change-based validation](testing.md) for local work and candidate packaging.
+Text-only edits do not require unit tests. The short smoke and affected browser
+journeys replace unrelated full-suite runs during UI iteration; full functional
+qualification remains available for RC/stable and broad infrastructure changes.

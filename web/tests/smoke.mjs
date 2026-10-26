@@ -1,6 +1,7 @@
+import {stopProcess} from './support/runtime.mjs';
 import {clickAction,showAction} from './actions.mjs';
-import {chromium,expect} from '@playwright/test';
-import {spawn,spawnSync} from 'node:child_process';
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync} from './support/runtime.mjs';
 import {chmod,mkdir,mkdtemp,readFile,readdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -39,7 +40,7 @@ const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-di
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nlocal_playback_enabled = false\nauthentication_origin = "https://localhost:${port}"\nallowed_origins = ["https://localhost:${port}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["https://localhost:${port}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
 const datPath=path.join(scratch,'fixture.dat');
 await writeFile(datPath,'<datafile><header><name>Game Boy</name><author>No-Intro</author><version>1</version></header><game name="Browser game"><rom name="game.bin" size="5" crc="9271ee57"/></game></datafile>');
-const binary=path.join(root,'target/debug/collector-server');
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nlocal_playback_enabled = false\nallowed_origins = []\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
 if(hasFlac){const slowFlac=path.join(scratch,'slow-flac.sh');await writeFile(slowFlac,`#!/bin/sh\nif [ "$1" != "--version" ]; then delay=3; for arg in "$@"; do if [ "$arg" = "--input-size=531552" ]; then delay=9; fi; done; sleep "$delay"; fi\nexec "${flacPath}" "$@"\n`);await chmod(slowFlac,0o755);const probe=spawnSync(slowFlac,['--version'],{encoding:'utf8',timeout:180000});assert.equal(probe.status,0,`Test encoder wrapper could not start: ${probe.error||probe.stderr}`);await writeFile(config,`\n[encoders]\nflac = "${slowFlac}"\n`,{flag:'a'});}
 await writeFile(config,`\n[dat_sources.browser]\npath = "${datPath}"\nsystem = "gb"\ncatalog = "No-Intro"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`,{flag:'a'});
@@ -57,7 +58,7 @@ if(localSetup){
 let logs='';let server;
 function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${accurateRipPort}/`,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`}});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
 async function waitForServer(){for(let i=0;i<1200;i++){if(server.exitCode!==null)throw new Error('server exited before readiness: '+logs);try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server did not become ready: '+logs);}
-async function stopServer(){if(!server||server.exitCode!==null)return;server.kill('SIGINT');await new Promise(resolve=>server.once('exit',resolve));}
+async function stopServer(){await stopProcess(server);}
 async function archiveUnavailableOwnerFixture(collectionId,itemId){
  const collectionRoot=path.join(scratch,'archive/collections');
  const collectionDirectory=(await readdir(collectionRoot)).find(name=>name.endsWith(`--${collectionId}`));assert.ok(collectionDirectory,'collection archive directory not found');
@@ -80,7 +81,7 @@ let browser; let page;
 try{
  await waitForServer();
  // Test-only self-signed HTTPS acceptance. Product clients never disable certificate validation.
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  const browserVersion=await browser.version();
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});
  context.setDefaultTimeout(30000);context.setDefaultNavigationTimeout(30000);
@@ -1281,4 +1282,4 @@ try{
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
  console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial, WebAuthn registration/login and mobile layout.');
-}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText()).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await new Promise(resolve=>metadataProviderServer.close(resolve));await rm(scratch,{recursive:true,force:true});}
+}catch(error){console.error(logs);if(page){console.error((await page.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(0,6000));await page.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await new Promise(resolve=>metadataProviderServer.close(resolve));await rm(scratch,{recursive:true,force:true});}

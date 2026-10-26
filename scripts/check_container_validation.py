@@ -17,6 +17,7 @@ import zipfile
 
 import container_release as release
 import container_validation as validation
+import check_changes
 
 
 def digest(data):
@@ -69,7 +70,31 @@ class ValidationTests(unittest.TestCase):
                           anonymous_docker_pulls=False)
         self.archive = self.root / 'collector-multiarch.oci.tar'
         self.archive.write_bytes(b'OCI archive bytes')
-        self.evidence = validation.seal(self.expected, self.image, self.archive, '123', '2')
+        self.checks = dict(policy=check_changes.POLICY, revision='a'*40, dirty=False, status='passed',
+                           classification='infra', level='full', coverage='full', paths=['Dockerfile'],
+                           steps=[dict(step, status='passed') for step in check_changes.select(['Dockerfile'], 'infra', 'full')[1]])
+        self.platform_checks = {arch:dict(runtime='passed',browser='passed' if arch == 'amd64' else 'covered-on-amd64') for arch in ('amd64','arm64')}
+        self.evidence = validation.seal(self.expected, self.image, self.archive, '123', '2', self.checks, self.platform_checks)
+
+    def test_release_level_and_native_browser_prerequisites_are_enforced(self):
+        for field, value in [('status','failed'), ('dirty',True), ('revision','b'*40)]:
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validation.seal(self.expected, self.image, self.archive, '123', '2',
+                                dict(self.checks, **{field:value}), self.platform_checks)
+        for architecture in ('amd64','arm64'):
+            for field in ('runtime','browser'):
+                results = copy.deepcopy(self.platform_checks);results[architecture][field]='skipped'
+                with self.assertRaises(ValueError):
+                    validation.seal(self.expected, self.image, self.archive, '123', '2', self.checks, results)
+        paths=['web/src/app.tsx']
+        changed=dict(self.checks, classification='ui-copy', coverage='changed', paths=paths,
+                     steps=[dict(step,status='passed') for step in check_changes.select(paths,'ui-copy','full')[1]])
+        # Beta accepts an explicitly reviewed copy-only scope. RC/stable require
+        # applicable full functional evidence; a successful beta run is insufficient.
+        validation.check_qualification(self.expected, changed, self.platform_checks)
+        for version in ('0.1.0-rc.1','0.1.0'):
+            with self.assertRaises(ValueError):
+                validation.check_qualification(dict(self.expected,version=version), changed, self.platform_checks)
 
     def test_source_version_and_run_attempt_bind_validation(self):
         validation.check_run(self.run, self.expected, 7, 19)
@@ -79,7 +104,7 @@ class ValidationTests(unittest.TestCase):
         # A dry-run reference/channel is deliberately different from publication.
         validation.check_evidence(self.evidence, public, self.run, self.archive)
         for field, value in [('version', '0.1.0-beta.6'), ('revision', 'b' * 40), ('source', 'https://github.com/Other/repo'),
-                             ('image', 'ghcr.io/other/repo'), ('attempt', 1), ('run_id', 124), ('schema', 2),
+                             ('image', 'ghcr.io/other/repo'), ('attempt', 1), ('run_id', 124), ('schema', 1),
                              ('archive_sha256', 'sha256:' + '0' * 64), ('archive_bytes', 0), ('platforms', {})]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 validation.check_evidence(dict(self.evidence, **{field: value}), self.expected, self.run, self.archive)

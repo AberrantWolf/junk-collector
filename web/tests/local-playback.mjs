@@ -1,24 +1,25 @@
+import {stopProcess} from './support/runtime.mjs';
 // Actual production app, server, worker, QUIC listener and HTML media element.
 import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createServer} from 'node:net';
-import {spawn,spawnSync} from 'node:child_process';
-import {chromium} from '@playwright/test';
+import {spawn,spawnSync} from './support/runtime.mjs';
+import {chromium} from './support/browser.mjs';
 async function port(){const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));return port;}
 const ports=await Promise.all([port(),port(),port()]);const origin=`http://localhost:${ports[0]}`;
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-local-playback-'));const config=path.join(scratch,'collector.toml');
 // Override only the isolated fixture listener to exercise OS interface discovery.
 const mediaBind=process.env.COLLECTOR_TEST_LOCAL_PLAYBACK_BIND||'127.0.0.1:0';
-const binary=path.resolve(import.meta.dirname,'../../target/debug/collector-server');const password='Local-player-test-only-password';
+const binary=(process.env.COLLECTOR_SERVER_BINARY||path.resolve(import.meta.dirname,'../../target/debug/collector-server'));const password='Local-player-test-only-password';
 await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = ${JSON.stringify(mediaBind)}\nremote_media_allowed = false\nallowed_origins = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n`);
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',d=>logs+=d);server.stderr.on('data',d=>logs+=d);
 let browser;
 try{
  for(let n=0;;n++){try{if((await fetch(origin+'/healthz')).ok)break;}catch{}if(n>150||server.exitCode!==null)throw new Error(logs);await new Promise(r=>setTimeout(r,100));}
- browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  // localhost is a secure context; no certificate-error bypass or security flags.
  const context=await browser.newContext();const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
@@ -57,5 +58,5 @@ try{
  await page.evaluate(()=>{window.WebTransport=undefined;});await player.getByRole('button',{name:'Play',exact:true}).click();await player.getByRole('alert').filter({hasText:'does not support secure local playback'}).waitFor();assert.equal(await page.locator('audio').getAttribute('src'),null);assert.equal(mediaRequests,0);
  assert.deepEqual(errors,[]);console.log(`Local playback passed in Chrome ${await browser.version()}: automatic pinned QUIC, actual audio, forward/back seeks, public media refusal, wrong pin, live logout/source release and unsupported-transport fail closed.`);
 }finally{
- await browser?.close();server.kill('SIGTERM');await Promise.race([new Promise(r=>server.once('exit',r)),new Promise(r=>setTimeout(r,4000))]);if(server.exitCode===null){server.kill('SIGKILL');await new Promise(r=>server.once('exit',r));}await rm(scratch,{recursive:true,force:true});
+ await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});
 }

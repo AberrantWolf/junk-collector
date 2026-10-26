@@ -8,7 +8,7 @@
     "check": "tsc --noEmit",
     "check:api": "python3 ../scripts/api_contract.py",
     "generate:api": "python3 ../scripts/api_contract.py --write",
-    "test:smoke": "node tests/smoke.mjs",
+    "test:smoke": "node tests/quick-smoke.mjs",
     "test:browse": "node tests/browse.mjs",
     "test:audio-checks": "node tests/audio-check-status.mjs",
     "test:accuraterip-snapshots": "node tests/accuraterip-snapshots.mjs",
@@ -34,7 +34,12 @@
     "test:game-audio": "node tests/game-audio.mjs",
     "test:documents": "node tests/documents.mjs",
     "test:backup-reminder": "node tests/backup-reminder.mjs",
-    "test:remote-media": "node tests/remote-media.mjs"
+    "test:remote-media": "node tests/remote-media.mjs",
+    "test:integration": "node tests/smoke.mjs",
+    "test:full": "node tests/run-suite.mjs",
+    "test:models": "node tests/run-suite.mjs queue context labels",
+    "test:labels": "node tests/presentation-labels.mjs",
+    "test:scale": "node tests/run-suite.mjs scale"
   },
   "dependencies": {
     "react": "^19.0.0",
