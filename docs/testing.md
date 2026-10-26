@@ -73,8 +73,14 @@ Candidate dispatch inputs take precedence over push trailers. Cheap copy-only
 candidate checks do not wait for an unrelated broader push run to finish.
 
 ```sh
-git commit -m "Clarify metadata guidance" -m "Check-Classification: ui-copy"
+git commit -m "Clarify metadata guidance" -m "Check-Classification: ui-copy
+Check-Base: v0.1.0-beta.8"
 ```
+
+Keep classification and baseline trailers together in the final paragraph. A blank
+line between them ends the trailer block, so Git may omit the classification and
+CI will conservatively select broader checks. Omit `Check-Base` when the normal
+push/PR baseline already covers the reviewed diff.
 
 ## Browser tests
 
