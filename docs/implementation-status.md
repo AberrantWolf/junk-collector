@@ -1,5 +1,36 @@
 # Implementation status
 
+## UI copy cleanup — local source, 2026-10-26
+
+Metadata, playback and import views use shorter guidance with fewer repeated
+preservation assurances. Distinct import, grouping, replacement and recovery-code
+rules appear as lists. Consequences, recovery actions and evidence limitations stay
+visible. See [scope and validation](validation/ui-copy-cleanup-2026-10-26.md).
+
+## Metadata active release and Disc ID action — local source, 2026-10-26
+
+The Metadata panel now marks the resolved candidate with a prominent “Currently
+using” banner and outline and places it first among visible matches. The effective
+metadata summary identifies the provider/selection mode and calls out manual field
+overrides separately; a manual display title can coexist with a provider release.
+Proposed or unused matches do not receive the active cue.
+
+The Disc ID submission action has moved beside the active MusicBrainz release.
+It reuses authorized server coverage, hides on release/revision changes until
+fresh coverage arrives, and ignores coverage for a different release. Identical
+recorded TOCs share one link; distinct eligible discs have labelled links.
+Registration/TOC eligibility remains application policy. The old disc-details
+placement is removed. Full source checks and focused/full Chrome acceptance pass;
+evidence is recorded
+[here](validation/metadata-release-controls-2026-10-26.md). This change is local
+and unpushed; beta.8 on the NAS retains the earlier presentation.
+
+## Metadata attention notice — 2026-10-26
+
+Metadata review shows current attention reasons as a bulleted list under
+“Needs Attention:”, followed by “(Manual metadata always takes precedence.)”.
+See [validation](validation/metadata-attention-notice-2026-10-26.md).
+
 ## MusicBrainz track names and Disc ID submission — 2026-10-26
 
 An effective single-disc release now supplies track names when recorded track

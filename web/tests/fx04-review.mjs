@@ -1,5 +1,5 @@
 // FX-04 review regressions against a temporary real server and browser profile.
-import {chromium} from '@playwright/test';
+import {chromium,expect} from '@playwright/test';
 import {spawn,spawnSync} from 'node:child_process';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -48,13 +48,17 @@ try{
  const saved=await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
  assert.equal(saved.inventory_title,'Draft after import');assert.equal(saved.inventory_subtitle,'First edition');assert.equal(saved.wishlist,true);assert.equal(saved.domain.payload.artist,'Existing artist');assert.equal(saved.captures.length,1);
  // Synthetic provider responses exercise presentation without external provider requests.
- let automaticTitle='Accepted release';
+ let automaticTitle='Accepted release';let using='selected';
  await page.route(`**/api/v1/items/${seeded.id}/metadata`,async route=>{
   if(route.request().method()!=='GET'){await route.continue();return;}
   const response=await route.fetch();const review=await response.json();
   const candidate=(title,strength,current,extra={})=>({identity:{provider:'org.junk.providers.musicbrainz',provider_record_id:title,provider_record_version:null},title:{value:title,language:'en'},subtitle:null,artwork:null,complete_identity:true,strength,provider_priority:0,current,selected:false,accepted_automatically:false,unmatched:false,details:null,music_layout:null,...extra});
-  review.candidates=[candidate('Saved name choice','name',false,{selected:true,unmatched:true}),candidate(automaticTitle,'name',true,{accepted_automatically:true}),candidate('Detected disc match','disc_layout',true),candidate('Recorded release match','identifier',true),candidate('Obsolete name search','name',false),candidate('New name suggestion','name',true),candidate('Old disc match','disc_layout',false)];
-  review.authority.selected_candidate=review.candidates[0].identity;
+  review.candidates=[candidate('Saved name choice','name',false,{selected:using==='selected',unmatched:using==='selected'}),candidate(automaticTitle,'name',true,{accepted_automatically:true}),candidate('Detected disc match','disc_layout',true),candidate('Recorded release match','identifier',true),candidate('Obsolete name search','name',false),candidate('New name suggestion','name',true),candidate('Old disc match','disc_layout',false)];
+  review.authority.selected_candidate=using==='selected'?review.candidates[0].identity:null;
+  review.display.candidate=using==='selected'?review.candidates[0].identity:using==='automatic'?review.candidates[1].identity:null;
+  review.display.resolution=using==='selected'?'selected':using==='automatic'?'automatic':'manual';
+  review.display.title.source={source:'manual'};
+  if(using==='automatic')review.candidates.push(review.candidates.splice(1,1)[0]);
   await route.fulfill({response,json:review});
  });
  await editor.getByRole('button',{name:'Music',exact:true}).click();
@@ -62,6 +66,10 @@ try{
  const ledger=page.locator('.candidate-ledger');const titles=ledger.locator('.candidate > div:first-child > strong');await titles.getByText('Saved name choice',{exact:true}).waitFor();
  for(const title of ['Accepted release','Detected disc match','Recorded release match'])assert.equal(await titles.getByText(title,{exact:true}).count(),1);
  for(const title of ['Obsolete name search','New name suggestion','Old disc match'])assert.equal(await titles.getByText(title,{exact:true}).count(),0);
+ await expect(ledger.locator('.candidate.in-use')).toHaveCount(1);
+ await expect(ledger.locator('.candidate.in-use')).toContainText('Saved name choice');
+ await expect(ledger.locator('.candidate.in-use').getByText('Currently using · selected by you',{exact:true})).toBeVisible();
+ await expect(page.getByRole('article',{name:'Effective metadata'}).getByText('Manual title override',{exact:true})).toBeVisible();
  const disclosure=ledger.getByRole('checkbox',{name:'Show text-search suggestions and earlier results'});
  await disclosure.check();await titles.getByText('Obsolete name search',{exact:true}).waitFor();
  assert.equal(await titles.getByText('New name suggestion',{exact:true}).count(),1);
@@ -69,10 +77,24 @@ try{
  // A later disc result changes the automatic fit without closing the workspace.
  await page.getByLabel('Title mode',{exact:true}).selectOption('manual');
  await page.getByLabel('Displayed title',{exact:true}).fill('Keep this unsaved correction');
- automaticTitle='Normal edition (2 discs)';
+ using='automatic';automaticTitle='Normal edition (2 discs)';
  await titles.getByText(automaticTitle,{exact:true}).waitFor();
  assert.equal(await titles.getByText('Accepted release',{exact:true}).count(),0);
  assert.equal(await page.getByLabel('Displayed title',{exact:true}).inputValue(),'Keep this unsaved correction');
- await ledger.getByText('Automatic best fit',{exact:false}).waitFor();
+ await expect(ledger.locator('.candidate.in-use')).toHaveCount(1);
+ await expect(ledger.locator('.candidate.in-use')).toContainText('Normal edition (2 discs)');
+ assert.equal(await titles.first().innerText(),'Normal edition (2 discs)','active automatic release was not pinned first');
+ await expect(page.getByRole('article',{name:'Effective metadata'}).getByText('Normal edition (2 discs)',{exact:true})).toBeVisible();
+ await expect(ledger.locator('.candidate.in-use').getByText('Currently using · automatic match',{exact:true})).toBeVisible();
+ await page.setViewportSize({width:390,height:844});
+ await ledger.locator('.candidate.in-use').scrollIntoViewIfNeeded();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'active release overflows mobile');
+ await page.screenshot({path:path.join(root,'web/test-results/metadata-active-release-mobile.png'),fullPage:true});
+ using='manual';
+ await expect(ledger.locator('.candidate.in-use')).toHaveCount(0,{timeout:10000});
+ await expect(page.getByRole('article',{name:'Effective metadata'}).getByText('Using manual metadata',{exact:true})).toBeVisible();
+ await page.getByRole('article',{name:'Effective metadata'}).scrollIntoViewIfNeeded();
+ await page.screenshot({path:path.join(root,'web/test-results/metadata-manual-source-mobile.png'),fullPage:true});
+
  assert.deepEqual(errors,[]);console.log('FX-04 review browser passed: existing destination drafts, preserved fields, stable section during background updates, and album-match/history disclosure.');
 }catch(error){if(page){console.error(await page.locator('body').ariaSnapshot());console.error(logs.slice(-3000));}throw error;}finally{if(browser)await browser.close();if(server&&server.exitCode===null){server.kill('SIGINT');await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>{server.kill('SIGKILL');resolve();},5000))]);}await rm(scratch,{recursive:true,force:true});}

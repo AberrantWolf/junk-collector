@@ -139,7 +139,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   <h3 id="guided-ingest-heading">{historyOnly?'Import progress':'Import original files'}</h3>{!historyOnly&&<>
   <p className="muted">Choose a folder of dumps. We find packages in its subfolders, create entries, save the originals, and gather available metadata and artwork.</p>
   </>}
-  {failure&&<p role="alert" className="notice error">{failure} Saved entries and received bytes are kept. Open the import below to resume.</p>}
+  {failure&&<p role="alert" className="notice error">{failure} Open the import below to resume.</p>}
   {notice&&<p role="status" className="notice">{notice}</p>}
   {queueLabel&&<p><strong>{queueLabel}</strong></p>}
   {uploadProgress?<UploadMeter value={uploadProgress}/>:activity&&<WorkProgress label={activity}/>}
@@ -153,7 +153,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
    </>:inboxes.length?<div><label>Inbox<select value={inboxLabel} disabled={busy} onChange={event=>{setInboxLabel(event.target.value);setPlan(undefined);}}>{inboxes.map(value=><option key={value.label}>{value.label}</option>)}</select></label><InboxPackageChooser collectionId={collectionId} label={inboxLabel} selected={inboxPackages} onSelect={value=>{setInboxPackages(value);setPlan(undefined);}} disabled={busy} multiple/></div>:<p className="notice">No configured inbox packages are available.</p>}
    {!!unassigned.length&&<details className="notice"><summary>{unassigned.length} {unassigned.length===1?'file is':'files are'} outside the detected packages and will not be uploaded</summary><ul>{unassigned.map(name=><li key={name}>{name}</li>)}</ul></details>}
    {plan&&<>
-    <p><strong>{plan.packages.length} dump packages found.</strong> {destination?'The package will be attached to the selected entry; its copy records stay as they are.':plan.packages.every(pkg=>pkg.files.some(f=>/\.(flac|mp3)$/i.test(f.name))&&!pkg.anchors.length)?'A digital entry will be recorded without a physical copy.':'A new entry and one owned physical copy will be recorded for each package.'}</p>
+    <p><strong>{plan.packages.length} dump packages found.</strong> {destination?'The package will be attached to the selected entry.':plan.packages.every(pkg=>pkg.files.some(f=>/\.(flac|mp3)$/i.test(f.name))&&!pkg.anchors.length)?'A digital entry will be recorded without a physical copy.':'A new entry and one owned physical copy will be recorded for each package.'}</p>
     {plan.packages.every(pkg=>pkg.files.some(f=>/\.(flac|mp3)$/i.test(f.name))&&!pkg.anchors.length)&&<PurchaseFields value={purchase} disabled={busy} onChange={value=>{setPurchase(value);acceptance.current=undefined;}}/>}
     {plan.packages.some(pkg=>pkg.blockers.length>0)&&<div className="notice" role="note"><strong>Review before saving</strong>{plan.packages.flatMap(pkg=>pkg.blockers.map(blocker=><p key={`${pkg.position}:${blocker.kind}:${blocker.message}`}>{pkg.default_title}: {blocker.message} {blocker.blocks_analysis?'Originals can still be saved without analysis.':''}</p>))}</div>}
     {destination&&plan.packages.length!==1&&<p className="notice error" role="alert">Choose one package when attaching to an existing entry. Clear the destination to create separate entries for all packages.</p>}
@@ -168,11 +168,11 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   </>}
   {detail&&<details className="ingest-detail" open={detailOpen} onToggle={event=>setDetailOpen(event.currentTarget.open)}><summary>Details: {detail.summary.package_name}</summary>
    <IngestStatus summary={detail.summary}/>
-   {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {target?.id===detail.import.association.item_id?target.title:'its saved collection entry'}. Other discs attached to that entry are retained.</p>}
+   {detail.import.phase==='published'&&!!detail.import.association.item_id&&<p className="notice">This dump is attached to {target?.id===detail.import.association.item_id?target.title:'its saved collection entry'}.</p>}
    {!uploadProgress&&detail.import.phase==='staging'&&<WorkProgress label={detail.import.source.kind==='browser'?'Upload progress':'Original files copied'} completed={detail.import.files.reduce((sum,file)=>sum+file.received_bytes,0)} total={detail.summary.total_bytes} detail="Uploaded files are saved on the server."/>}
    {detail.import.source.kind==='inbox'&&<section aria-label="Inbox source cleanup" className="notice inbox-cleanup">
     <strong>Inbox source files</strong>
-    <p>Originals stay in the inbox unless you explicitly remove them here. Cleanup is available after preservation succeeds and requested processing finishes. Optional metadata or preparation failures can still be retried from the archive. Finish other inbox imports first; new inbox imports pause while cleanup runs.</p>
+    <ul><li>Inbox files stay until you choose to remove them.</li><li>Cleanup becomes available after originals are saved and requested processing finishes. Failed metadata or preparation can be retried from the archive.</li><li>Finish other inbox imports first; new inbox imports pause during cleanup.</li></ul>
     {detail.inbox_cleanup&&<>
      <p role="status">{detail.inbox_cleanup.completed?'Inbox cleanup complete':`Cleanup ${stateLabel(detail.inbox_cleanup.state)}`} · Confirmed removed {bytes(detail.inbox_cleanup.removed_bytes)} of {bytes(detail.inbox_cleanup.total_bytes)}</p>
      {detail.inbox_cleanup.error&&<p role="alert">{detail.inbox_cleanup.error}</p>}
@@ -181,7 +181,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
      {['queued','running','cancel_requested'].includes(detail.inbox_cleanup.state)&&!detail.inbox_cleanup.completed&&<button disabled={busy||detail.inbox_cleanup.state==='cancel_requested'} onClick={()=>void cancelInboxCleanup()}>Cancel inbox cleanup</button>}
     </>}
     {detail.summary.permissions.can_clean_inbox&&!detail.inbox_cleanup?.completed&&(!detail.inbox_cleanup||['failed','cancelled'].includes(detail.inbox_cleanup.state))&&<>
-     <p>Checksums of the inbox files and their preserved archive copies are checked first. Only matching imported files are removed. The inbox must allow renaming and deletion.</p>
+     <p>Only imported files matching the archive copies are removed. The inbox must allow renaming and deletion.</p>
      <label><input type="checkbox" checked={inboxConfirmed} disabled={busy} onChange={event=>setInboxConfirmed(event.target.checked)}/> Copying and editing this source package have finished. Remove its imported inbox files and keep the archive originals.</label>
      <button disabled={busy||!inboxConfirmed} onClick={()=>void cleanInbox()}>{detail.inbox_cleanup?'Retry inbox cleanup':'Remove imported inbox files'}</button>
     </>}
@@ -193,7 +193,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
    {!uploadProgress&&detail.summary.permissions.can_resume_upload&&<form aria-label="Resume guided package" onSubmit={event=>{event.preventDefault();void resume();}}><p>Select the original folder or files. Received bytes will be checked before the upload continues.</p><label>Original folder<input type="file" multiple {...{webkitdirectory:''}} disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><label>Original files<input aria-label="Resume original package files" type="file" multiple disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><button disabled={busy||!resumeFiles.length}>Resume upload</button></form>}
    {detail.summary.permissions.can_cancel&&<button disabled={busy} onClick={()=>void cancel()}>Cancel remaining work</button>}{detail.summary.permissions.can_discard&&<button disabled={busy} onClick={()=>void discard()}>Discard unfinished import</button>}
    {detail.summary.outcome==='failed'&&!detail.steps.some(step=>step.retryable)&&<button disabled={busy} onClick={()=>void retry(null)}>Retry optional processing</button>}
-   {detail.summary.permissions.can_correct_association&&<details><summary>Correct destination</summary>{target===undefined?<p role="status">Loading saved destination…</p>:<><DestinationChooser collectionId={collectionId} selected={target} disabled={busy} onSelect={value=>{targetEdited.current=true;setTarget(value);}}/>{associationChanged?<><p role="status">Destination changed. Save to apply this change.</p><button disabled={busy} onClick={()=>void correct()}>Save destination</button><p className="muted">This moves only this import. Other discs and original files are kept.</p></>:<p role="status">{detail.import.association.item_id?'Already attached to this entry. No changes to save.':'This dump is already unattached. No changes to save.'}</p>}</>}</details>}
+   {detail.summary.permissions.can_correct_association&&<details><summary>Correct destination</summary>{target===undefined?<p role="status">Loading saved destination…</p>:<><DestinationChooser collectionId={collectionId} selected={target} disabled={busy} onSelect={value=>{targetEdited.current=true;setTarget(value);}}/>{associationChanged?<><p role="status">Destination changed. Save to apply this change.</p><button disabled={busy} onClick={()=>void correct()}>Save destination</button><p className="muted">This moves only this import.</p></>:<p role="status">{detail.import.association.item_id?'Already attached to this entry. No changes to save.':'This dump is already unattached. No changes to save.'}</p>}</>}</details>}
   </details>}
  </section>;
 }

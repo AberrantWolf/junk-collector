@@ -57,11 +57,19 @@ export async function ingestProgressJourney(page,{scratch,holdProvider,collectio
  const proposals=await page.evaluate(async id=>{
   const members=(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items;
   const entries=members.map(member=>member.import.target_item_id);
-  const response=await fetch(`/api/v1/items/${entries[0]}/album-group-proposals?limit=32`);
-  if(!response.ok)throw Error(await response.text());
-  return {entries,peers:(await response.json()).items.map(item=>item.id)};
+  const peers=[];let cursor=null;
+  do{
+   const query=new URLSearchParams({limit:'32'});if(cursor)query.set('cursor',cursor);
+   const response=await fetch(`/api/v1/items/${entries[0]}/album-group-proposals?${query}`);
+   if(!response.ok)throw Error(await response.text());
+   const result=await response.json();peers.push(...result.items.map(item=>item.id));cursor=result.next_cursor;
+  }while(cursor);
+  return {entries,peers};
  },intake);
  assert.equal(new Set(proposals.entries).size,31,'Conflicting release disc placements retain reviewed grouping');
- assert.deepEqual(new Set(proposals.peers),new Set(proposals.entries.slice(1)),'Accepted album identities expose all grouping proposals');
+ // Earlier journeys share this collection and release, so their entries are
+ // legitimate additional proposals. Every peer from this intake must be found.
+ const peers=new Set(proposals.peers);
+ for(const entry of proposals.entries.slice(1))assert.ok(peers.has(entry),'Accepted album identities expose all grouping proposals');
  console.log('31-album real inbox activity: active/queued/shared provider stages, reload, mobile, terminal polling and accepted album grouping proposals passed.');
 }

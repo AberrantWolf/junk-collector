@@ -24,6 +24,12 @@ of the same release, even when a manual choice retains older immutable text.
 Existing browse/collection
 access applies to coverage; the link itself grants no new Collector access.
 
+The local 2026-10-26 presentation follow-up moves this action into Metadata beside
+the effective release, with abortable, revision-scoped coverage polling. The web
+uses the resolved display identity for the active-release cue, independently of
+manual title/subtitle/domain-field sources; provider suggestions are not labelled
+as in use. There is no metadata-policy or storage/API format change.
+
 ## Evidence-aware music editions and equivalent matches — 2026-10-25
 
 Application metadata policy ranks editions against current, committed CD-layout

@@ -126,7 +126,7 @@ try{
  await security.getByRole('button',{name:'Recovery',exact:true}).click();
  await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();
  await security.getByText('Save these codes now.',{exact:false}).waitFor();
- assert.equal(await security.getByRole('listitem').count(),10);
+ assert.equal(await security.getByRole('list',{name:'Recovery codes'}).getByRole('listitem').count(),10);
  page.once('dialog',dialog=>dialog.accept());
  await page.getByRole('button',{name:'Close account and security'}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
@@ -681,10 +681,7 @@ try{
   await restoredCurator.getByRole('button',{name:'Music',exact:true}).click();
   await restoredCurator.getByText('Disc details & checks',{exact:true}).click();
  }
- await openSubmissionTracks();
- await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered opening$/)).toBeVisible();
- await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered finale$/)).toBeVisible();
- const submissionLink=restoredCurator.getByRole('link',{name:'Submit Disc ID to MusicBrainz',exact:true});
+ const submissionLink=submissionCandidate.getByRole('link',{name:'Submit Disc ID to MusicBrainz',exact:true});
  await expect(submissionLink).toHaveCount(1); // Only the complete CD source, never the uninspected original.
  const submissionUrl=new URL(await submissionLink.getAttribute('href'));
  assert.equal(submissionUrl.origin,'https://musicbrainz.org');assert.equal(submissionUrl.pathname,'/cdtoc/attach');
@@ -700,14 +697,26 @@ try{
  const popupPromise=page.waitForEvent('popup');await submissionLink.click();const submissionPopup=await popupPromise;
  await submissionPopup.waitForLoadState();assert.equal(new URL(submissionPopup.url()).searchParams.get('toc'),'1 2 601 150 375');
  await submissionPopup.close();await page.context().unroute('https://musicbrainz.org/cdtoc/attach?**');
+ // Metadata exposes the action without visiting the collapsed disc details.
+ await expect(submissionReview.getByRole('link',{name:'Submit Disc ID to MusicBrainz',exact:true})).toHaveCount(1);
+ // Coverage for another release must not expose its submission links here.
+ const coveragePath=`**/api/v1/items/${musicItemId}/music-disc-coverage`;
+ await page.route(coveragePath,async route=>{const response=await route.fetch();const coverage=await response.json();await route.fulfill({json:{...coverage,release_id:releaseIds.english}});});
+ await expect(submissionLink).toHaveCount(0,{timeout:10000});
+ await page.unroute(coveragePath);
+ await expect(submissionLink).toHaveCount(1,{timeout:10000});
+ await openSubmissionTracks();
+ await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered opening$/)).toBeVisible();
+ await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered finale$/)).toBeVisible();
+ await expect(restoredCurator.getByRole('link',{name:'Submit Disc ID to MusicBrainz',exact:true})).toHaveCount(0);
  const registeredDisc=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-disc-coverage`)).json()).sources.find(source=>source.recorded_disc_id)?.recorded_disc_id,musicItemId);
  assert.ok(registeredDisc);submissionRelease.media[0].discs=[{id:registeredDisc}];
  await restoredCurator.getByRole('button',{name:'Close curator'}).click();
  await page.goto(`https://localhost:${port}/library-care/metadata?collection=${submissionCollection}&item=${musicItemId}`);
  await submissionReview.locator('article.candidate').filter({has:page.getByText('Unregistered CD fixture',{exact:true})}).getByRole('button',{name:'Refresh release and tracks',exact:true}).click();
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-disc-coverage`)).json()).sources.find(source=>source.recorded_disc_id)?.musicbrainz_submission_toc,musicItemId),{timeout:30000}).toBeNull();
+ await expect(submissionReview.getByRole('link',{name:'Submit Disc ID to MusicBrainz',exact:true})).toHaveCount(0);
  await openSubmissionTracks();
- await expect(submissionLink).toHaveCount(0);
  await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered opening$/)).toBeVisible();
  releases.splice(releases.indexOf(submissionRelease),1);
  // Restore this shared smoke fixture before the independent playback journey.

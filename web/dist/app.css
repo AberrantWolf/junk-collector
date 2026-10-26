@@ -602,12 +602,9 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 
 .track-format-details{font-size:10px;line-height:1}
 
-.playback-guidance{font-size:11px;color:var(--muted);margin:8px 0;overflow-wrap:anywhere}
 .playback-source{display:block;font-size:10px;color:var(--muted);overflow-wrap:anywhere;margin:4px 0}
 .album-track-toolbar{flex-wrap:wrap}
 .music-track>div.track-title>.track-play{flex:none;min-height:32px;border:1px solid var(--line);color:var(--ink);background:var(--paper);padding:3px 7px;font-size:11px}
-
-.musicbrainz-submit{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:10px 15px;text-decoration:none;color:inherit}.musicbrainz-submit:hover{background:#e5ebf6}.musicbrainz-submission small{display:block;margin-top:.5rem;color:var(--muted)}
 
 .artwork-stack{display:grid;justify-items:center;flex:none}.artwork-stack .artwork.large{margin-bottom:8px}.metadata-state{max-width:70px;margin-top:5px;color:#875e26;font-size:9px;line-height:1.2;text-align:center}.detail>.artwork-stack{justify-items:start}.detail>.artwork-stack .metadata-state{max-width:none;margin-bottom:18px}
 .metadata-review{clear:both;margin-top:30px;padding-top:26px;border-top:2px solid var(--ink)}.metadata-review h3{font-family:"Iowan Old Style","Palatino Linotype",Palatino,serif;font-size:24px;font-weight:500;letter-spacing:-.025em;margin:0}.metadata-review h4{margin:0 0 14px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#536157}.metadata-review .section-heading p{margin:6px 0 0;color:var(--muted);font-size:12px}.effective-metadata{display:flex;align-items:start;justify-content:space-between;gap:18px;margin:22px 0 0;padding:18px 0;border-block:1px solid var(--line)}.effective-metadata>div{display:grid;gap:3px}.effective-metadata span,.effective-metadata small{color:var(--muted);font-size:11px}.effective-metadata strong{font-family:"Iowan Old Style","Palatino Linotype",Palatino,serif;font-size:24px;font-weight:500;line-height:1.15}.metadata-boundary{margin:0;padding:12px 0;color:#6f572f;font-size:11px;line-height:1.45;border-bottom:1px solid var(--line)}
@@ -621,6 +618,13 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 .archived-artwork-choices{border:0;padding:0;margin:0 0 16px;min-width:0}.archived-artwork-choices legend{font-size:13px;margin-bottom:12px}.archived-artwork-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}.archived-artwork{position:relative;display:grid;align-content:start;gap:8px;padding:10px;border:1px solid var(--line);border-radius:4px;margin:0;min-width:0;cursor:pointer}.archived-artwork.selected{border-color:var(--green);background:#edf0e5}.archived-artwork input{width:auto;justify-self:start}.archived-artwork img,.artwork-preview-missing{width:100%;height:100px;object-fit:contain;background:#e5e8dd}.artwork-preview-missing{display:grid;place-items:center;text-align:center;color:var(--muted);font-size:11px}.archived-artwork>span:last-child{overflow-wrap:anywhere;font-size:12px}
 
 .provider-artwork{min-width:0}.provider-artwork>button:first-child{display:grid;gap:7px;width:100%;text-align:left}.provider-artwork img,.provider-artwork .artwork-preview-missing{width:100%;height:170px;object-fit:contain;background:#e5e8dd}.provider-artwork .retry-preview{margin-top:6px;width:100%;font-size:12px}
+.metadata-attention h4{margin:0;color:inherit;font-size:inherit;letter-spacing:normal;text-transform:none}.metadata-attention ul{margin:8px 0;padding-left:24px}.metadata-attention p{margin:0}
+
+.metadata-disc-submissions{display:grid;gap:8px;max-width:22rem;flex-basis:100%}.metadata-disc-submissions>div{display:grid;gap:4px}.metadata-disc-submissions p{margin:0}.musicbrainz-submit{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:7px 9px;text-decoration:none;color:inherit;font-size:11px;text-align:center}.musicbrainz-submit:hover{background:#e5ebf6}
+
+.candidate.in-use{border:2px solid var(--green);border-left-width:6px;border-radius:6px;background:var(--accent);padding:16px;margin-block:12px;opacity:1}.candidate.in-use>div:first-child>strong{font-size:19px}.candidate .candidate-use-badge{justify-self:start;background:var(--green);color:#fff;border-radius:4px;padding:6px 10px;font-size:13px;font-weight:700;line-height:1.4}.effective-metadata>.metadata-use-status{display:flex;align-items:flex-start;flex-direction:column;gap:7px;max-width:24rem}.effective-metadata .metadata-use-label{font-size:14px;font-weight:700;color:var(--ink)}.effective-metadata .metadata-override-badge{background:#fff4db;color:#6f4a16;border:1px solid #bd914c;border-radius:4px;padding:5px 8px;font-size:12px;font-weight:650}
+
+.effective-metadata .metadata-use-release-name{font-size:14px;font-weight:650;color:var(--ink)}
 
 .modal > .close, .detail > .close {
  position: sticky;
