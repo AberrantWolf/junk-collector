@@ -142,3 +142,9 @@ registry image or running installation changed.
 reviewed text-only edits, supported browser launches and release-only deployment.
 This record and the status/queue closeout are documentation-only changes after
 the qualified code snapshot; they do not alter build inputs or testing policy.
+
+## Publication follow-up — 2026-10-26
+
+Published and installed on the NAS in beta.9 after fresh exact-source source/native
+image/browser qualification. See [publication and deployment evidence](container-beta9-publication-2026-10-26.md).
+The earlier measurements and source-only scope above remain dated historical evidence.

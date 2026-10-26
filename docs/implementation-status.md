@@ -1,5 +1,15 @@
 # Implementation status
 
+## Beta.9 published and installed — 2026-10-26
+
+Beta.9 includes the faster testing/packaging workflow, active-release/Disc ID
+controls and copy cleanup. Full exact-source checks, both native images and
+release-image browser acceptance pass. Publication reused validated bytes and
+advanced `preview`; public digests/assets are independently verified. The NAS now
+runs the pinned beta.9 image after a complete recovery snapshot and a 3.94-second
+switch, retaining configuration/identity/TLS and 18 unrelated containers. See
+[publication and NAS evidence](validation/container-beta9-publication-2026-10-26.md).
+
 ## Faster checks and packaging — delivered, 2026-10-26
 
 The requested [testing workflow](testing.md) now selects checks from the complete
@@ -14,18 +24,19 @@ Full workspace/model/browser qualification, both native release-image smokes,
 hosted cache reuse and exact-source nonpublishing promotion rehearsal pass. The
 full candidate completed in 15m57s and artifact-only rehearsal in 47s; short smoke
 takes about five seconds. See [dated evidence](validation/testing-and-packaging-2026-10-26.md)
-for source/run identities, measurements and limits. No release publication or
-production deployment is included.
+for source/run identities, measurements and limits. Those timings describe the
+original tooling qualification; subsequent beta.9 publication and NAS acceptance
+are recorded above.
 
 
-## UI copy cleanup — local source, 2026-10-26
+## UI copy cleanup — beta.9 deployed, 2026-10-26
 
 Metadata, playback and import views use shorter guidance with fewer repeated
 preservation assurances. Distinct import, grouping, replacement and recovery-code
 rules appear as lists. Consequences, recovery actions and evidence limitations stay
 visible. See [scope and validation](validation/ui-copy-cleanup-2026-10-26.md).
 
-## Metadata active release and Disc ID action — local source, 2026-10-26
+## Metadata active release and Disc ID action — beta.9 deployed, 2026-10-26
 
 The Metadata panel now marks the resolved candidate with a prominent “Currently
 using” banner and outline and places it first among visible matches. The effective
@@ -40,8 +51,8 @@ recorded TOCs share one link; distinct eligible discs have labelled links.
 Registration/TOC eligibility remains application policy. The old disc-details
 placement is removed. Full source checks and focused/full Chrome acceptance pass;
 evidence is recorded
-[here](validation/metadata-release-controls-2026-10-26.md). This change is local
-and unpushed; beta.8 on the NAS retains the earlier presentation.
+[here](validation/metadata-release-controls-2026-10-26.md). Published and installed
+on the NAS in beta.9; see the publication record above.
 
 ## Metadata attention notice — 2026-10-26
 

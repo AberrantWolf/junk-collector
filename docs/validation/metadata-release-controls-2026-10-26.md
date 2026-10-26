@@ -41,3 +41,9 @@ Chrome required execution outside the filesystem sandbox.
 The mobile active-release, manual-only summary and submission screenshots were
 visually inspected. Concurrent attention/copy edits remain intact. There was no
 commit, push, publication, deployment or live MusicBrainz submission for this work.
+
+## Publication follow-up — 2026-10-26
+
+Published and installed on the NAS in beta.9 after fresh exact-source source/native
+image/browser qualification. See [publication and deployment evidence](container-beta9-publication-2026-10-26.md).
+The earlier measurements and source-only scope above remain dated historical evidence.

@@ -34,3 +34,9 @@ collection. The initial smoke/account attempts counted instruction bullets; the
 initial intake attempt rejected two valid earlier peers. Reruns passed after
 these test corrections. The equivalent recovery-code selector in FX-06 was also
 scoped; that older full journey was not run. No production behavior changed.
+
+## Publication follow-up — 2026-10-26
+
+Published and installed on the NAS in beta.9 after fresh exact-source source/native
+image/browser qualification. See [publication and deployment evidence](container-beta9-publication-2026-10-26.md).
+The earlier measurements and source-only scope above remain dated historical evidence.
