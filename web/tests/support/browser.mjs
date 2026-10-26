@@ -1,7 +1,13 @@
 import {chromium as playwrightChromium,expect} from '@playwright/test';
 import {accessSync,constants} from 'node:fs';
+import {createHash,X509Certificate} from 'node:crypto';
 import {deadline,onCleanup,cleanup} from './runtime.mjs';
 export {expect};
+// Exact disposable-fixture trust also covers service-worker script fetches.
+export function fixtureCertificateArgs(pem){
+ const key=new X509Certificate(pem).publicKey.export({type:'spki',format:'der'});
+ return ['--ignore-certificate-errors-spki-list='+createHash('sha256').update(key).digest('base64')];
+}
 export function assertBrowserEnvironment({platform=process.platform,sandbox=process.env.CODEX_SANDBOX}={}){
  if(platform==='darwin'&&sandbox==='seatbelt')throw Error('Browser tests cannot launch inside the macOS Codex seatbelt sandbox (Chrome aborts during application registration). Run this test through the permitted terminal execution context. No browser was launched.');
 }

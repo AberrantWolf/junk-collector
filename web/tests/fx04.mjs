@@ -1,3 +1,4 @@
+import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 // FX-04 pagination and navigation regression (explicit scale mode is optional) against a temporary real server/profile.
 import {chromium} from './support/browser.mjs';
@@ -21,7 +22,7 @@ try{
  await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19981"\nprivate_bind = "127.0.0.1:19982"\nlan_bind = "127.0.0.1:19983"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n`);
  const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',chunk=>logs+=chunk);server.stdout.on('data',chunk=>logs+=chunk);
- let ready=false;for(let n=0;n<100;n++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
+ await waitForServer(origin+'/healthz',server,{logs:()=>logs});
  browser=await chromium.launch({headless:true});
  page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();

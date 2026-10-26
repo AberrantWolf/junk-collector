@@ -1,3 +1,4 @@
+import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 // FX-03 real-server history lifecycle regression. All archive/state roots are temporary.
 import {chromium} from './support/browser.mjs';
@@ -18,7 +19,7 @@ try{
  await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19961"\nprivate_bind = "127.0.0.1:19962"\nlan_bind = "127.0.0.1:19963"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n`);
  const init=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(init.status,0,init.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',v=>logs+=v);server.stdout.on('data',v=>logs+=v);
- let ready=false;for(let n=0;n<100;n++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}assert.ok(ready,logs);
+ await waitForServer(origin+'/healthz',server,{logs:()=>logs});
  browser=await chromium.launch({headless:true});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(15000);
  await page.goto(origin);for(const name of ['app.js','app.css','work-history.js'])assert.equal(await page.evaluate(async name=>await(await fetch('/'+name)).text(),name),await readFile(path.join(root,'web/dist',name),'utf8'),'server contains stale '+name);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();

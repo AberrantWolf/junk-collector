@@ -1,3 +1,4 @@
+import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 import {chromium,expect} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
@@ -15,7 +16,7 @@ const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',en
 let browser;let server;let logs='';
 try{
  server=spawn(binary,['--config',config,'serve']);server.stdout.on('data',value=>logs+=value);server.stderr.on('data',value=>logs+=value);
- let ready=false;for(let i=0;i<100;i++){try{if((await fetch(base+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
+ await waitForServer(base+'/healthz',server,{logs:()=>logs});
  browser=await chromium.launch({headless:true});
  const context=await browser.newContext();const page=await context.newPage();const errors=[];page.on('pageerror',value=>errors.push(value.message));
  const started=await context.request.post(base+'/api/v1/enrollments/start',{data:{device_name:'Trash Amp pairing test'}});assert.equal(started.status(),200);const enrollment=await started.json();

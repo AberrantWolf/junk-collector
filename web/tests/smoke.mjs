@@ -1,3 +1,4 @@
+import {waitForServer as waitUntilReady} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 import {clickAction,showAction} from './actions.mjs';
 import {chromium,expect} from './support/browser.mjs';
@@ -57,7 +58,7 @@ if(localSetup){
 }
 let logs='';let server;
 function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${accurateRipPort}/`,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`}});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
-async function waitForServer(){for(let i=0;i<1200;i++){if(server.exitCode!==null)throw new Error('server exited before readiness: '+logs);try{const response=await fetch('http://127.0.0.1:19841/healthz');if(response.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server did not become ready: '+logs);}
+async function waitForServer(){await waitUntilReady('http://127.0.0.1:19841/healthz',server,{logs:()=>logs,timeout:120000});}
 async function stopServer(){await stopProcess(server);}
 async function archiveUnavailableOwnerFixture(collectionId,itemId){
  const collectionRoot=path.join(scratch,'archive/collections');

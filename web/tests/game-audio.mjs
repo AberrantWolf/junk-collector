@@ -1,6 +1,6 @@
 import {stopProcess} from './support/runtime.mjs';
 // Actual browser setup, mixed-mode game intake and listening against an isolated server.
-import {chromium,expect} from './support/browser.mjs';
+import {chromium,expect,fixtureCertificateArgs} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,mkdir,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -30,7 +30,7 @@ let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignor
 let browser,page;
 try{
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19881/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
- browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',args:fixtureCertificateArgs(await readFile(path.join(scratch,'state/tls/cert.pem'),'utf8')),headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();

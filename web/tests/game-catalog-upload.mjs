@@ -1,3 +1,4 @@
+import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 // Offline real-server journey for the October 9 game import/catalog TODOs.
 import {chromium,expect} from './support/browser.mjs';
@@ -22,7 +23,7 @@ const playstation=version=>dat('PSX','Redump',version+' & fixture','Final Fantas
 const gb=dat('Game Boy','No-Intro','20261010','GB fixture',[['game.gb',Buffer.from('abc')]]);
 try{
  server=spawn(binary,['--config',config,'serve']);server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);
- let ready=false;for(let i=0;i<200;i++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}assert.ok(ready,logs);
+ await waitForServer(origin+'/healthz',server,{logs:()=>logs});
  browser=await chromium.launch({headless:true});
  page=await browser.newPage({viewport:{width:1360,height:980}});page.setDefaultTimeout(15000);page.on('dialog',dialog=>dialog.accept());const errors=[],external=[];page.on('pageerror',e=>errors.push(e.message));page.on('response',async r=>{if(r.status()===422)console.error('Rejected request:',await r.text());});
  await page.route('**/*',route=>{const url=new URL(route.request().url());if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.toString());return route.abort();}return route.continue();});

@@ -1,3 +1,4 @@
+import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 // FX-04 review regressions against a temporary real server and browser profile.
 import {chromium,expect} from './support/browser.mjs';
@@ -19,7 +20,7 @@ try{
  await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19991"\nprivate_bind = "127.0.0.1:19992"\nlan_bind = "127.0.0.1:19993"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n`);
  const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',value=>logs+=value);server.stdout.on('data',value=>logs+=value);
- let ready=false;for(let attempt=0;attempt<100;attempt++){try{if((await fetch(origin+'/healthz')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,100));}assert.ok(ready,logs);
+ await waitForServer(origin+'/healthz',server,{logs:()=>logs});
  browser=await chromium.launch({headless:true});
  page=await browser.newPage();page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
