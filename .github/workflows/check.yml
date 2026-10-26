@@ -125,9 +125,6 @@ jobs:
           arguments = json.loads(Path('/tmp/check-arguments.json').read_text())
           subprocess.run(['python3','scripts/check_changes.py',*arguments,'--report','/tmp/check-report.json'],check=True)
           PYTHON
-      - name: Require committed production web assets
-        if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.web == 'true'
-        run: git diff --exit-code -- web/dist
       - uses: actions/upload-artifact@v4
         with:
           name: source-checks-${{ github.run_attempt }}

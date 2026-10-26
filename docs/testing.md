@@ -141,7 +141,8 @@ gh workflow run container-release.yml --ref codex/your-candidate -f base_ref=v0.
 
 The source-check job reuses an applicable successful same-SHA Checks receipt when
 workflow/repository, baseline, required commands, run attempt and immutable artifact
-digest agree. Otherwise it runs the required checks. Copy/layout-only container validation without explicit feature journeys
+digest agree. A successful broader browser/workspace result can cover a narrower requested
+subset. Otherwise it runs the required checks. Copy/layout-only container validation without explicit feature journeys
 uses the actual release image for its short browser acceptance and does not require
 a separate debug build. Explicit feature journeys still run and may need debug
 fixtures. UI behavior without named affected journeys conservatively runs the
@@ -150,7 +151,8 @@ Full qualification retains the broad debug-fixture suites.
 
 Source checks and native AMD64/ARM64 builds run concurrently. Both native runtime
 smokes and AMD64 release-image browser acceptance must succeed before validation
-is sealed. CI no longer compiles discarded standalone release binaries. Requested
+is sealed. CI no longer compiles discarded standalone release binaries, including for
+CLI-only text edits; their source-format checks and image CLI acceptance remain. Requested
 standalone deliverables still need their own release build.
 
 Source checks cache Rust dependencies and workspace outputs by

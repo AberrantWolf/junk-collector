@@ -136,8 +136,31 @@ def select(paths, kind='auto', level='local', base_known=True, journeys=(), exte
     return kind, steps
 
 
+def container_source_steps(kind, steps, journeys=()):
+    # The image build supplies the release executable, including CLI-only edits.
+    omitted = {'cli-build'}
+    if kind in ('docs', 'ui-copy', 'style', 'cli-copy') and not journeys:
+        omitted |= {'browser-server', 'browser'}
+    return [step for step in steps if step['name'] not in omitted]
+
+
+def covers_steps(actual_steps, required_steps):
+    actual = {step['name']: step['command'] for step in actual_steps}
+    for required in required_steps:
+        name, command = required['name'], required['command']
+        if actual.get(name) == command:
+            continue
+        if name in ('affected-tests', 'affected-clippy') and ('workspace-tests' if name == 'affected-tests' else 'workspace-clippy') in actual:
+            continue
+        browser = actual.get('browser', [])
+        if name == 'browser' and browser[:2] == command[:2] == ['node', 'web/tests/run-suite.mjs'] and set(command[2:]) <= set(browser[2:]):
+            continue
+        return False
+    return True
+
+
 def validate_report(report, revision=None, require_full=False):
-    if report.get('policy') != POLICY or report.get('status') != 'passed' or report.get('dirty') is not False:
+    if report.get('policy') != POLICY or report.get('status') != 'passed' or report.get('dirty') is not False or report.get('source_unchanged') is not True:
         raise ValueError('Check evidence must be successful, current-policy and committed')
     if revision and report.get('revision') != revision:
         raise ValueError('Check evidence source revision mismatch')
@@ -148,14 +171,14 @@ def validate_report(report, revision=None, require_full=False):
         validate_report(baseline, report.get('base'), True)
     steps = report.get('steps', [])
     _, expected = select(report.get('paths', []), report.get('classification', 'auto'), report.get('level', 'local'), journeys=report.get('journeys', []), external_server=report.get('external_server', False))
-    if report.get('source_only') and report.get('classification') in ('ui-copy', 'style', 'cli-copy', 'docs') and not report.get('journeys'):
-        expected = [s for s in expected if s['name'] not in ('browser-server', 'browser')]
+    if report.get('source_only'):
+        expected = container_source_steps(report.get('classification'), expected, report.get('journeys', []))
     actual_names = {s.get('name') for s in steps}
     if report.get('coverage') not in ('changed', 'full'):
         raise ValueError('Unknown qualification coverage')
     if report.get('coverage') == 'full' and not any(s['name'] == 'workspace-tests' for s in expected):
         raise ValueError('Full coverage is inconsistent with selected scope')
-    if not {s['name'] for s in expected}.issubset(actual_names):
+    if actual_names != {s['name'] for s in expected} or len(steps) != len(expected):
         raise ValueError('Check evidence omits required checks for its declared scope')
     for required in expected:
         actual = next(s for s in steps if s.get('name') == required['name'])
@@ -181,8 +204,8 @@ def main():
     try:
         base, paths = changed(args.base)
         kind, steps = select(paths, args.classification, args.level, args.base is not None or args.level == 'local', args.journey, bool(os.environ.get('COLLECTOR_TEST_ORIGIN') or os.environ.get('COLLECTOR_SERVER_BINARY')))
-        if args.source_only and kind in ('ui-copy', 'style', 'cli-copy', 'docs') and not args.journey:
-            steps = [s for s in steps if s['name'] not in ('browser-server', 'browser')]
+        if args.source_only:
+            steps = container_source_steps(kind, steps, args.journey)
         report = dict(policy=POLICY, revision=git('rev-parse', 'HEAD'), base=base,
                       dirty=bool(git('status', '--porcelain')), classification=kind,
                       level=args.level, coverage='full' if any(s['name'] == 'workspace-tests' for s in steps) else 'changed',
@@ -205,6 +228,11 @@ def main():
                     break
             else:
                 report['status'] = 'passed'
+        if report['status'] == 'passed':
+            report['source_unchanged'] = not report['dirty'] and git('rev-parse', 'HEAD') == report['revision'] and not git('status', '--porcelain')
+            if not report['dirty'] and not report['source_unchanged']:
+                report['status'] = 'failed'
+                print('Source changed during validation; do not attribute these results to the original revision.', file=sys.stderr)
         if args.report:
             args.report.write_text(json.dumps(report, indent=2) + '\n')
         return 1 if report['status'] == 'failed' else 0

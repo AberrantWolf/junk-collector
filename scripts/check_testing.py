@@ -49,11 +49,11 @@ class SelectionTests(unittest.TestCase):
         self.assertNotIn('collector-client', command)
 
     def test_text_rc_reuses_full_baseline_but_cannot_inflate_coverage(self):
-        base = dict(policy=checks.POLICY, status='passed', dirty=False, revision='b'*40,
+        base = dict(policy=checks.POLICY, status='passed', dirty=False, source_unchanged=True, revision='b'*40,
                     coverage='full', classification='infra', level='full', paths=['Dockerfile'],
                     steps=[dict(step, status='passed') for step in checks.select(['Dockerfile'], 'infra', 'full')[1]])
         paths = ['web/src/metadata-review.tsx']
-        copy_report = dict(policy=checks.POLICY, status='passed', dirty=False, revision='a'*40,
+        copy_report = dict(policy=checks.POLICY, status='passed', dirty=False, source_unchanged=True, revision='a'*40,
                            base='b'*40, coverage='changed', classification='ui-copy', level='full', paths=paths,
                            steps=[dict(step, status='passed') for step in checks.select(paths, 'ui-copy', 'full')[1]])
         with self.assertRaises(ValueError): checks.validate_report(copy_report, require_full=True)
@@ -65,6 +65,25 @@ class SelectionTests(unittest.TestCase):
         bad = copy.deepcopy(copy_report);bad['steps'][0]['command']=['true']
         with self.assertRaises(ValueError): checks.validate_report(bad)
 
+    def test_container_copy_does_not_compile_a_second_deployment_binary(self):
+        for kind, paths in [('cli-copy',['crates/collector-server/src/main.rs']), ('ui-copy',['web/src/app.tsx'])]:
+            _, local = checks.select(paths, kind, 'beta')
+            selected = checks.container_source_steps(kind, local)
+            self.assertFalse({'cli-build','browser-server','browser'} & {step['name'] for step in selected})
+            self.assertIn('cli-build' if kind == 'cli-copy' else 'browser-server', {step['name'] for step in local})
+
+    def test_full_evidence_covers_subset_without_replaying_checks(self):
+        _, full = checks.select(['Dockerfile'], 'infra', 'full')
+        _, related = checks.select(['crates/collector-modules/src/lib.rs'], 'rust', 'beta')
+        _, browser = checks.select(['web/src/app.tsx'], 'ui', 'beta', journeys=['fx04-review'])
+        self.assertTrue(checks.covers_steps(full, related))
+        self.assertTrue(checks.covers_steps(full, browser))
+        _, narrow = checks.select(['web/src/app.tsx'], 'ui-copy', 'beta')
+        self.assertFalse(checks.covers_steps(narrow, full))
+        self.assertFalse(checks.covers_steps(narrow, browser))
+        _, cli = checks.select(['crates/collector-server/src/main.rs'], 'cli-copy', 'beta')
+        self.assertFalse(checks.covers_steps(full, cli), 'debug tests do not supply a release-mode CLI executable')
+
     def test_harness_reaps_processes_on_interruption(self):
         subprocess.run(['node', str(checks.ROOT/'web/tests/harness-check.mjs')], check=True, timeout=20)
 
@@ -72,8 +91,8 @@ class SelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             def git(*args):
-                return subprocess.check_output(['git', '-C', temporary, *args], text=True).strip()
-            git('init', '-q');git('config', 'user.name', 'Fixture');git('config', 'user.email', 'fixture@example.invalid')
+                return subprocess.check_output(['git', '-C', temporary, *args], text=True, timeout=15).strip()
+            git('init', '-q', '--template=');git('config', 'user.name', 'Fixture');git('config', 'user.email', 'fixture@example.invalid');git('config','commit.gpgsign','false');git('config','core.hooksPath',str(root/'no-hooks'))
             (root/'first').write_text('initial');(root/'deleted').write_text('retained')
             git('add', '.');git('commit', '-qm', 'base');base=git('rev-parse', 'HEAD')
             (root/'committed').write_text('committed');git('add', '.');git('commit', '-qm', 'later')
@@ -93,12 +112,33 @@ class SelectionTests(unittest.TestCase):
                 self.assertEqual(checks.main(), 1)
             self.assertEqual(json.loads(destination.read_text())['status'], 'failed')
 
+    def test_a_check_cannot_qualify_sources_it_changed(self):
+        for changed_head in (False, True):
+            with tempfile.TemporaryDirectory() as temporary:
+                destination=Path(temporary)/'report.json'
+                executed=False
+                def git(*args):
+                    if args[:2] == ('rev-parse','HEAD'):
+                        return 'b'*40 if executed and changed_head else 'a'*40
+                    return ' M README.md' if executed and not changed_head else ''
+                def run(*args, **kwargs):
+                    nonlocal executed
+                    executed=True
+                    return subprocess.CompletedProcess([],0)
+                with patch('sys.argv',['check_changes','--classification','docs','--report',str(destination)]), \
+                     patch.object(checks,'changed',return_value=('a'*40,['README.md'])), \
+                     patch.object(checks,'git',side_effect=git), patch.object(checks.subprocess,'run',side_effect=run):
+                    self.assertEqual(checks.main(),1)
+                report=json.loads(destination.read_text())
+                self.assertEqual(report['status'],'failed')
+                self.assertFalse(report['source_unchanged'])
+
     def test_evidence_rejects_partial_wrong_revision_and_inflated_coverage(self):
-        report = dict(policy=checks.POLICY, status='passed', dirty=False, revision='a'*40,
+        report = dict(policy=checks.POLICY, status='passed', dirty=False, source_unchanged=True, revision='a'*40,
                       coverage='full', classification='infra', level='full', paths=['Dockerfile'],
                       steps=[dict(name=s['name'], status='passed', command=s['command']) for s in checks.select(['Dockerfile'], 'infra', 'full')[1]])
         checks.validate_report(report, 'a'*40, True)
-        for field, value in [('status', 'failed'), ('dirty', True), ('policy', 'old'), ('revision', 'b'*40), ('steps', [])]:
+        for field, value in [('status', 'failed'), ('dirty', True), ('source_unchanged', False), ('policy', 'old'), ('revision', 'b'*40), ('steps', [])]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 checks.validate_report(dict(report, **{field:value}), 'a'*40, True)
         partial = copy.deepcopy(report);partial['steps'][0]['status']='skipped'
@@ -110,7 +150,7 @@ class SelectionTests(unittest.TestCase):
 
 class SourceReceiptTests(unittest.TestCase):
     def test_reuse_binds_source_workflow_attempt_baseline_and_required_checks(self):
-        report=dict(policy=checks.POLICY, revision='a'*40, base='b'*40, dirty=False,
+        report=dict(policy=checks.POLICY, revision='a'*40, base='b'*40, dirty=False, source_unchanged=True,
                     classification='ui-copy', level='beta', coverage='changed', paths=['web/src/app.tsx'],
                     steps=[dict(step,status='passed') for step in checks.select(['web/src/app.tsx'],'ui-copy','beta')[1]], status='passed')
         run=dict(id=123,head_sha='a'*40,repository=dict(id=7),head_repository=dict(id=7),

@@ -9,6 +9,9 @@ import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {clickAction} from './actions.mjs';
 const root=path.resolve(import.meta.dirname,'../..');
+const flacPath=process.env.COLLECTOR_TEST_FLAC||spawnSync('which',['flac'],{encoding:'utf8'}).stdout?.trim();
+assert.ok(flacPath,'Install flac or set COLLECTOR_TEST_FLAC before game-audio acceptance');
+assert.equal(spawnSync(flacPath,['--version'],{timeout:10000}).status,0,'The test FLAC encoder must be executable');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-game-audio-'));
 const config=path.join(scratch,'collector.toml');
 const password=randomBytes(24).toString('hex');
@@ -23,7 +26,7 @@ await writeFile(path.join(fixture,'game.cue'),'FILE "disc.bin" BINARY\n TRACK 01
 const pcm=Buffer.alloc(11*75*2352);for(let frame=0;frame<pcm.length/4;frame++){pcm.writeInt16LE(Math.round(Math.sin(frame*2*Math.PI*440/44100)*4096),frame*4);pcm.writeInt16LE(Math.round(Math.sin(frame*2*Math.PI*660/44100)*4096),frame*4+2);}await writeFile(path.join(fixture,'disc.bin'),pcm);
 files=['game.cue','disc.bin'].map(file=>path.join(fixture,file));trackCount=2;
 }
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19881"\nprivate_bind = "127.0.0.1:19882"\nlan_bind = "127.0.0.1:19883"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[encoders]\nflac = "/opt/homebrew/bin/flac"\n[inboxes]\npurchases = "${scratch}"\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19881"\nprivate_bind = "127.0.0.1:19882"\nlan_bind = "127.0.0.1:19883"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[encoders]\nflac = ${JSON.stringify(flacPath)}\n[inboxes]\npurchases = "${scratch}"\n`);
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);

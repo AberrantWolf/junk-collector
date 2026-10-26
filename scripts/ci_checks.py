@@ -11,7 +11,7 @@ import time
 import subprocess
 import sys
 import zipfile
-from check_changes import validate_report
+from check_changes import validate_report, covers_steps
 
 MAX_BYTES = 4 * 1024 * 1024
 
@@ -70,8 +70,7 @@ def recover(repository, revision, destination, *, base=None, require_full=False,
             if report['coverage'] != 'full' and (not base or report['base'] != base):
                 continue
             if required:
-                actual = {step['name']: step['command'] for step in report['steps']}
-                if any(actual.get(step['name']) != step['command'] for step in required['steps']):
+                if not covers_steps(report['steps'], required['steps']):
                     continue
             current = api(prefix + '/actions/runs/' + str(run['id']))
             check_run(current, revision, repository_id, workflow_id)

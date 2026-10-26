@@ -70,7 +70,7 @@ class ValidationTests(unittest.TestCase):
                           anonymous_docker_pulls=False)
         self.archive = self.root / 'collector-multiarch.oci.tar'
         self.archive.write_bytes(b'OCI archive bytes')
-        self.checks = dict(policy=check_changes.POLICY, revision='a'*40, dirty=False, status='passed',
+        self.checks = dict(policy=check_changes.POLICY, revision='a'*40, dirty=False, source_unchanged=True, status='passed',
                            classification='infra', level='full', coverage='full', paths=['Dockerfile'],
                            steps=[dict(step, status='passed') for step in check_changes.select(['Dockerfile'], 'infra', 'full')[1]])
         self.platform_checks = {arch:dict(runtime='passed',browser='passed' if arch == 'amd64' else 'covered-on-amd64') for arch in ('amd64','arm64')}

@@ -32,7 +32,9 @@ from that checkpoint; no production code or deployment setting is changed.
 - Retained broad integration passed in 134.74 seconds with actual Google Chrome,
   virtual WebAuthn, provider concurrency, FLAC playback/seek/revocation, bulk intake
   and collection lists. Browse, AccurateRip panel/status and overflow-action suites
-  also pass. Remaining named journeys are being qualified.
+  also pass. All named local journeys pass, including security/reauthentication, certificates,
+  local and remote playback, documents, game audio, purchase imports and lifecycle
+  replacement. The revised broad integration passes again in 134.03 seconds.
 
 The existing scan journey needed to expand the current server-configured catalog
 section before importing. Its actual import/activation/scan assertions are retained.
@@ -42,18 +44,25 @@ ambiguous result and no-match checks. The pagination fixture now defaults to 102
 entries/imports, crossing both page boundaries with its original assertions;
 `test:scale` retains the explicit 3,000-entry/import workload. The unmodified scale
 setup exceeded the new ordinary three-minute fixture deadline before reaching
-browser assertions. No copy-only unit test or shallow layout assertion was added.
+browser assertions. Exact-wording label and account-error assertions were removed. Their replacements
+retain known-state labels, distinct audio outcomes, refusal of wrong-account work
+and the guarantee that tentative/unknown results cannot look verified. Git-diff
+fixtures disable inherited signing/hooks and bound Git commands; unit tests never
+need the user's signing agent. No copy-only unit test or shallow layout assertion
+was added.
 
 ## Container and CI evidence
 
 A native ARM64 release-mode image builds successfully with the pinned cargo-chef
 recipe layer. The dependency cook took 99.7 seconds; the final application build
-102.8 seconds on this local Docker host. These are local build-stage timings, not
-hosted cold/warm qualification or an estimate of end-to-end release latency.
+102.8 seconds on this local Docker host. A separate temporary build context changed only a web asset: the dependency cook
+was cached and the complete rebuild took **91.73 seconds**, including an 87.63-second
+application build. These are local timings, not an estimate of hosted release latency.
 
 The existing host-network Compose smoke did not become reachable from macOS Docker
 Desktop. No Docker setting or production configuration was changed to work around
-that host-specific limitation. Native Linux runtime/media smokes, hosted cache reuse,
+that host-specific limitation. Both native Linux architecture runtime/media jobs now pass; the corrected AMD64
+release-image browser acceptance also passes. Full source qualification and
 nonpublishing promotion rehearsal remain to
 be recorded before claiming full acceptance. The isolated port-mapped TLS
 release-image browser smoke passes in 2.70 seconds. Its readiness request validates
@@ -62,3 +71,18 @@ is test-only. The deployed loopback/TLS listener requirements remain enforced.
 
 YAML parsing and actionlint pass. Publication is not requested and no registry
 image, release tag or production installation has been changed.
+
+Source checks verify HEAD and the working tree again after execution. A mutated
+source or regenerated uncommitted asset cannot produce a consumable successful
+receipt. A successful full browser/workspace result can cover a requested subset;
+its declared commands are still validated before reuse. CLI-copy container
+candidates rely on the actual image build rather than compiling another standalone
+release binary. Held playback promises replace the old sub-second timing assumption,
+and the lifecycle journey explicitly opens its known entry after global import.
+
+The first complete Linux sweep also exposed a pre-existing Homebrew-only FLAC
+path in the game-audio fixture. It now resolves the real encoder from PATH (or
+`COLLECTOR_TEST_FLAC`) and checks availability before creating the fixture.
+Production encoder selection is unchanged. The corrected prior source run reached
+and passed the superseded-playback, pagination, lifecycle, security, local-route,
+account, purchase and intake cases before this fixture prerequisite stopped it.
