@@ -54,3 +54,10 @@ The beta.5 version digest is unchanged. Stable `latest` remains absent (404), as
 before this prerelease. [Release notes](../releases/v0.1.0-beta.6.md) describe update
 and recovery requirements. This is publication acceptance, not NAS deployment or
 physical iPhone acceptance of the new warning/filter.
+
+## Subsequent NAS deployment — 2026-10-25 JST
+
+The separately authorized [beta.6 NAS update](container-beta6-nas-2026-10-25.md)
+now passes retained-state, runtime and production HTTPS checks. This supersedes
+the NAS-deployment limitation above; the publication evidence remains historical.
+Physical iPhone acceptance of the new album warning/filter remains outstanding.

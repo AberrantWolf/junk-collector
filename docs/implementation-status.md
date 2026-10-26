@@ -75,6 +75,18 @@ Runtime settings, identities and 18 unrelated containers are retained; see
 [publication/deployment acceptance](validation/container-beta7-publication-2026-10-25.md).
 
 
+## Standalone raw CD capture helper — 2026-10-25
+
+`scripts/rip-cd.sh NAME DESTINATION [DRIVE]` creates a fresh named directory and
+runs redumper acquisition, extended-area acquisition and refinement, retaining
+all raw masters/sidecars/logs without generating BIN/CUE or playback copies.
+After automatic initial selection it pins the logged drive for later invocations;
+failure messages identify the stopped stage without declaring earlier reads failed.
+This is an operator helper outside Collector's import/domain services, not an
+integrated ripping subsystem. See [usage](getting-started.md#import-options) and
+[validation/limits](validation/raw-cd-capture-2026-10-25.md). Physical-drive
+acceptance remains unrun; completion is not audio/catalog verification.
+
 ## Utoipa 6 maintenance cleanup — 2026-10-25
 
 Utoipa 6.0.0 / utoipa-gen 6.0.1 and utoipa-axum 0.3.0 replace the final
@@ -167,7 +179,9 @@ Published in beta.6 after exact-source checks and native AMD64/ARM64 container
 smoke acceptance. Real Chrome browse, purchase and full smoke journeys pass;
 public images/assets and `preview` are independently verified. See
 [publication evidence](validation/container-beta6-publication-2026-10-24.md).
-NAS deployment and physical iPhone acceptance of this UI remain outstanding.
+Beta.6 is now installed on the NAS; retained-state, runtime and production HTTPS
+checks pass. See [deployment evidence](validation/container-beta6-nas-2026-10-25.md).
+Physical iPhone acceptance of this UI remains outstanding.
 
 ## Browser lock-screen metadata — iPhone accepted, 2026-10-24
 

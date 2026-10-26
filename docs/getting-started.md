@@ -75,6 +75,25 @@ Run the server as an ordinary user with access to its storage and configured inb
 Supported Redumper CDs need TOC, SCRAM, STATE and SUBCODE companions.
 Preservation can succeed even when identification or verification is unavailable.
 
+For a raw CD capture with redumper already installed, run:
+
+```sh
+./scripts/rip-cd.sh "Album - Disc 1" /path/to/dumps disk7
+```
+
+This creates `/path/to/dumps/Album - Disc 1` with `disc.*` raw masters,
+disc sidecars and logs, without generating BIN/CUE or playback derivatives.
+The optional last argument is the drive (`diskN` on macOS, `/dev/sgN` on Linux);
+omit it only when the first available drive is the intended one. The helper reads
+the selected device from the initial dump log and pins it for later stages. Keep the same
+disc inserted for all stages. Use `diskutil list` to find a macOS drive; Linux
+media must be unmounted before dumping. `RETRIES=100` is the default;
+`REDUMPER=/path/to/redumper` selects an executable outside PATH.
+Existing folders are refused and failed captures are retained. Review `disc.log`
+for unresolved errors, then import the complete folder with `disc.toc` as the
+analysis anchor. Command completion/file presence does not establish error-free
+audio or catalog verification. See `./scripts/rip-cd.sh --help`.
+
 Intake supports **10,000 packages / 100,000 files**. Split larger folders at package boundaries.
 Known Synology/macOS housekeeping is excluded; other hidden and unknown files stay.
 

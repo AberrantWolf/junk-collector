@@ -68,6 +68,17 @@ verified; see [publication/deployment evidence](validation/container-beta7-publi
 No archive-history pruning was performed.
 
 
+## Requested standalone CD capture script — 2026-10-25
+
+Delivered `scripts/rip-cd.sh` with named destination folders, raw redumper
+acquisition/refinement, retained sidecars/logs, overwrite refusal and partial-file
+preservation. A reported macOS failure between stages now pins the initially
+selected drive and identifies the stopped stage. Physical recovery is unrun.
+See [usage](getting-started.md#import-options) and
+[dated validation](validation/raw-cd-capture-2026-10-25.md). Fixture acceptance
+passed; physical-CD acceptance remains operator-run. This does not add an
+integrated ripping subsystem or absorb unrelated active assignments.
+
 ## Requested dependency security repair — 2026-10-25
 
 The user's first pass covers easy dependency upgrades. Quinn, rustls,
@@ -122,8 +133,11 @@ See [acceptance and limits](validation/album-playback-attention-2026-10-24.md).
 build/smoke jobs passed. Publication reused the validated images and advanced
 `preview`; public digests, source labels and release assets are independently
 verified. See [publication evidence](validation/container-beta6-publication-2026-10-24.md)
-and [release notes](releases/v0.1.0-beta.6.md). NAS deployment and physical iPhone
-acceptance of the new warning/filter remain outstanding. No unrelated queue work
+and [release notes](releases/v0.1.0-beta.6.md). **NAS updated (2026-10-25 JST):**
+core and media run the verified beta.6 image, with a retained recovery point,
+unchanged runtime settings and passing production HTTPS checks. See
+[deployment evidence](validation/container-beta6-nas-2026-10-25.md). Physical iPhone
+acceptance of the new warning/filter remains outstanding. No unrelated queue work
 is absorbed.
 
 **Beta.5 published and NAS updated (2026-10-23):** direct HTTPS media and browser
