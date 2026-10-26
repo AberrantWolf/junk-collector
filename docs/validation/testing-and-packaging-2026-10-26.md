@@ -1,7 +1,7 @@
 # Testing and packaging delivery — 2026-10-26
 
-Implementation and acceptance are in progress. This record distinguishes completed
-local checks from remaining native/hosted qualification. The
+Delivered and qualified on source `2fe08847383c3c515b0c84d58cc96613cd71715c`.
+This record distinguishes local measurements from hosted qualification. The
 [approved plan](../testing-and-packaging-plan.md) records the prior workflow costs;
 [testing instructions](../testing.md) describe current commands and selection.
 
@@ -62,9 +62,8 @@ application build. These are local timings, not an estimate of hosted release la
 The existing host-network Compose smoke did not become reachable from macOS Docker
 Desktop. No Docker setting or production configuration was changed to work around
 that host-specific limitation. Both native Linux architecture runtime/media jobs now pass; the corrected AMD64
-release-image browser acceptance also passes. Full source qualification and
-nonpublishing promotion rehearsal remain to
-be recorded before claiming full acceptance. The isolated port-mapped TLS
+release-image browser acceptance also passes. Full hosted source qualification
+and nonpublishing promotion rehearsal pass as recorded below. The isolated port-mapped TLS
 release-image browser smoke passes in 2.70 seconds. Its readiness request validates
 against the fixture's exact generated certificate; browser self-signed acceptance
 is test-only. The deployed loopback/TLS listener requirements remain enforced.
@@ -91,3 +90,55 @@ The hosted full suite takes longer than the original 15-minute reuse wait. The
 wait is now bounded at 30 minutes so a concurrently requested container candidate
 can consume the successful source receipt instead of starting duplicate tests.
 The enclosing job allows time for a fresh run if no usable receipt appears.
+
+## Completed hosted qualification
+
+[Checks 40272025020](https://github.com/AberrantWolf/junk-collector/actions/runs/40272025020)
+passed the complete workspace, warnings-denied Clippy, web/model, tooling/provenance
+and all 26 named browser journeys on the qualified source above. Its downloaded,
+digest-verified receipt reports full coverage, committed source and unchanged HEAD/
+working tree after execution. This is full functional coverage even though the
+push workflow's requested level is beta; it selected the infrastructure profile.
+
+[Candidate validation 40272028960](https://github.com/AberrantWolf/junk-collector/actions/runs/40272028960)
+passed both native runtime/media smokes and AMD64 browser acceptance against the
+actual optimized image. Image builds overlapped source checks. The source job
+waited for and reused Checks' exact-SHA receipt; it skipped tool installation and
+execution rather than running the suite twice. Failed earlier source checks had
+correctly prevented assembly/sealing even with successful native image jobs.
+
+| Measurement | Observed duration |
+| --- | ---: |
+| Complete source workflow | 15m12s |
+| Workspace tests, including compilation | 351.92s |
+| Workspace/all-target Clippy | 21.83s |
+| Additional browser-server build | 1.12s |
+| All 26 browser journeys | 443.29s |
+| Short smoke within that suite | 5.07s |
+| Retained broad integration | 137.63s |
+| Routine pagination journey | 6.80s |
+| Cached AMD64 / ARM64 image build steps | 7s / 5s |
+| AMD64 / ARM64 runtime/media smoke steps, including tooling | 32s / 42s |
+| AMD64 browser step, including installation | 27s |
+| Complete candidate validation | 15m57s |
+
+The hosted runners restored the Rust compilation cache. Both native dependency
+cook and application-build layers were cached on the subsequent hosted run. The
+separate local changed-web-asset experiment above establishes dependency reuse
+when an application rebuild is actually needed; a fully cached image is not its
+equivalent. The original candidate took approximately 24 minutes and did not run
+the broad browser suite in CI. These runs have different coverage and cache state;
+the measurements demonstrate the implemented overlap/reuse rather than guarantee
+a fixed release latency.
+
+[Promotion rehearsal 40273497267](https://github.com/AberrantWolf/junk-collector/actions/runs/40273497267)
+passed in **47 seconds**. It authenticated and restored the saved exact-source OCI
+exports, reverified both platform/source/digest records and packaged the installation
+bundle with provenance. Source checks and builds were skipped. Registry login,
+publication, channel promotion and release attachment were skipped. No release,
+registry image or running installation changed.
+
+`AGENTS.md` and the maintained guide now require change-based checks, no units for
+reviewed text-only edits, supported browser launches and release-only deployment.
+This record and the status/queue closeout are documentation-only changes after
+the qualified code snapshot; they do not alter build inputs or testing policy.

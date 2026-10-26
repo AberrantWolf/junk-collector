@@ -173,5 +173,6 @@ Publication continues to copy the exact accepted exports without recompilation.
 
 See [container publication](container-release-pipeline.md) for artifact recovery,
 source identity, expiry and promotion, and the [delivery plan](testing-and-packaging-plan.md)
-for the original baseline and acceptance targets. Actual hosted cache effectiveness
-and end-to-end timing belong in the dated delivery record, not assumed savings.
+for the original baseline and acceptance targets. See the
+[dated delivery record](validation/testing-and-packaging-2026-10-26.md) for measured
+local and hosted timings, cache effectiveness and completed promotion rehearsal.

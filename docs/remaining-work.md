@@ -1,6 +1,6 @@
 # Remaining work — home-lab priorities
 
-## Faster checks and packaging — implementation acceptance, 2026-10-26
+## Faster checks and packaging — delivered, 2026-10-26
 
 The requested [testing workflow](testing.md) now selects checks from the complete
 change, exempts reviewed display/prose edits from unit tests, and separates short
@@ -10,10 +10,12 @@ owned process cleanup. Container source checks and native image builds run in
 parallel, with dependency caching, exact-source check reuse and profile-aware
 validation evidence. Discarded standalone release compilation is removed.
 
-Local source, lifecycle, short-smoke and broad integration checks pass. Remaining
-feature journeys and hosted native/cache/promotion acceptance are in progress;
-see [dated evidence](validation/testing-and-packaging-2026-10-26.md). No release
-publication or production deployment is included.
+Full workspace/model/browser qualification, both native release-image smokes,
+hosted cache reuse and exact-source nonpublishing promotion rehearsal pass. The
+full candidate completed in 15m57s and artifact-only rehearsal in 47s; short smoke
+takes about five seconds. See [dated evidence](validation/testing-and-packaging-2026-10-26.md)
+for source/run identities, measurements and limits. No release publication or
+production deployment is included.
 
 
 ## Requested UI copy cleanup — local source, 2026-10-26
