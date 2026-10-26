@@ -61,6 +61,18 @@ or stable candidate, use the prior full baseline and its check receipt through
 Text changes do not cause unit tests, but unqualified functional changes since
 the last full baseline still need full qualification.
 
+For ordinary pushes, CI can use the latest commit's `Check-Classification: ui-copy`
+trailer after you review the **whole push diff**. An optional `Check-Base: vVERSION`
+trailer supplies a validated baseline for a new branch. Without a reviewed trailer,
+CI conservatively infers behavior from changed paths. Contradictory paths or an
+unknown classification fail; missing release baselines still require broader checks.
+Candidate dispatch inputs take precedence over push trailers. Cheap copy-only
+candidate checks do not wait for an unrelated broader push run to finish.
+
+```sh
+git commit -m "Clarify metadata guidance" -m "Check-Classification: ui-copy"
+```
+
 ## Browser tests
 
 Install the Playwright-version-matched browser once per dependency update:

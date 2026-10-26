@@ -51,7 +51,9 @@ candidate since its validated baseline. Preview with `python3 scripts/check_chan
   overflow and accessible names. CLI copy requires compiling the affected executable
   and inspecting output. Review the entire diff before declaring `ui-copy` or
   `cli-copy`; machine-readable strings, identifiers, URLs and protocol/configuration
-  values require checks for their actual behavior.
+  values require checks for their actual behavior. For copy-only pushes, use the
+  documented `Check-Classification: ui-copy` commit trailer after reviewing the
+  whole push diff so CI applies the same exemption.
 - CSS/layout changes require focused rendering checks. UI behavior changes require
   related model/browser tests. Rust changes require affected package/consumer tests
   and Clippy plus architecture/format checks. Authentication, authorization,

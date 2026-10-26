@@ -56,11 +56,19 @@ jobs:
           from pathlib import Path
           revision = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
           base = os.environ.get('BASE_REF', '')
+          classification = os.environ['CLASSIFICATION']
+          if os.environ['REUSE_CHECKS'] != 'true' and os.environ['GITHUB_EVENT_NAME'] == 'push':
+              # A reviewed trailer applies to the entire push diff, never just
+              # the final file/commit. Candidate dispatch inputs remain authoritative.
+              trailer = subprocess.check_output(['git','log','-1','--format=%(trailers:key=Check-Classification,valueonly)'],text=True).strip()
+              baseline = subprocess.check_output(['git','log','-1','--format=%(trailers:key=Check-Base,valueonly)'],text=True).strip()
+              if trailer: classification = trailer
+              if baseline: base = baseline
           if base and set(base) == {'0'}: base = ''
           if base: base = subprocess.check_output(['git','rev-parse',base], text=True).strip()
           version = tomllib.loads(Path('Cargo.toml').read_text())['workspace']['package']['version']
           level = os.environ['CHECK_LEVEL'] if re.search(r'-(?:alpha|beta)(?:\.|$)', version) else 'full'
-          arguments = ['--level', level, '--classification', os.environ['CLASSIFICATION']]
+          arguments = ['--level', level, '--classification', classification]
           if base: arguments += ['--base', base]
           for journey in filter(None, os.environ.get('JOURNEYS', '').split(',')):
               arguments += ['--journey', journey]
@@ -73,7 +81,7 @@ jobs:
           Path('/tmp/check-arguments.json').write_text(json.dumps(arguments))
           reused = False
           if os.environ['REUSE_CHECKS'] == 'true':
-              command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds','900','--plan','/tmp/check-plan.json']
+              command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds',('900' if any(step['name'] in ('workspace-tests','affected-tests','browser-server') for step in report['steps']) else '0'),'--plan','/tmp/check-plan.json']
               if base: command += ['--base', base]
               if level == 'full': command += ['--full']
               reused = subprocess.run(command).returncode == 0
