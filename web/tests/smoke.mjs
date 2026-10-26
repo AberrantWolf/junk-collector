@@ -660,6 +660,63 @@ try{
  assert.ok(await restoredCurator.getByRole('region',{name:'Album disc coverage'}).getByRole('button',{name:'Inspect CD structure'}).count()>0,'missing structure lacks a next action');
  assert.equal(await restoredCurator.getByRole('region',{name:'Prepare audio'}).locator('.music-track').count(),2,'publication did not refresh tracks without reopening');
  const musicItemId=await page.evaluate(()=>localStorage.getItem('primary-music-item-id'));
+ // A release-ID lookup must apply track names before a Disc ID is registered.
+ const submissionOriginalChoice=await page.evaluate(async id=>{const review=await(await fetch(`/api/v1/items/${id}/metadata`)).json();return review.authority.selected_candidate??review.display.candidate;},musicItemId);
+ const submissionReleaseId='66666666-6666-4666-8666-666666666666';
+ const submissionRelease={...release(submissionReleaseId,'Unregistered CD fixture','en',''),media:[{position:1,discs:[],tracks:[{position:1,title:'Unregistered opening'},{position:2,title:'Unregistered finale'}]}]};
+ releases.push(submissionRelease);
+ const submissionCollection=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).collection_id,musicItemId);
+ await restoredCurator.getByRole('button',{name:'Close curator'}).click();
+ await page.goto(`https://localhost:${port}/library-care/metadata?collection=${submissionCollection}&item=${musicItemId}`);
+ const submissionReview=page.getByRole('region',{name:'Review selected metadata'});
+ await submissionReview.getByRole('combobox',{name:'Search method'}).selectOption('custom-release');
+ await submissionReview.getByLabel('Search value').fill(submissionReleaseId);
+ await submissionReview.getByRole('button',{name:'Look up all album tracks',exact:true}).click();
+ const submissionCandidate=submissionReview.locator('article.candidate').filter({has:page.getByText('Unregistered CD fixture',{exact:true})});
+ await submissionCandidate.getByRole('button',{name:'Use this album release',exact:true}).click();
+ async function openSubmissionTracks(){
+  await page.goto(`https://localhost:${port}/?collection=${submissionCollection}`);
+  await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
+  await clickAction(page,'Edit / attach files');
+  await restoredCurator.getByRole('button',{name:'Music',exact:true}).click();
+  await restoredCurator.getByText('Disc details & checks',{exact:true}).click();
+ }
+ await openSubmissionTracks();
+ await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered opening$/)).toBeVisible();
+ await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered finale$/)).toBeVisible();
+ const submissionLink=restoredCurator.getByRole('link',{name:'Submit Disc ID to MusicBrainz',exact:true});
+ await expect(submissionLink).toHaveCount(1); // Only the complete CD source, never the uninspected original.
+ const submissionUrl=new URL(await submissionLink.getAttribute('href'));
+ assert.equal(submissionUrl.origin,'https://musicbrainz.org');assert.equal(submissionUrl.pathname,'/cdtoc/attach');
+ assert.equal(submissionUrl.searchParams.get('filter-release.query'),submissionReleaseId);
+ assert.equal(submissionUrl.searchParams.get('toc'),'1 2 601 150 375');
+ await page.setViewportSize({width:390,height:844});
+ await submissionLink.scrollIntoViewIfNeeded();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Disc ID submission overflows mobile');
+ await page.screenshot({path:path.join(root,'web/test-results/disc-id-submission-mobile.png'),fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});
+ // Follow the real link, intercepting only the external destination so no live edit is entered.
+ await page.context().route('https://musicbrainz.org/cdtoc/attach?**',route=>route.fulfill({contentType:'text/html',body:'<title>MusicBrainz submission destination</title>'}));
+ const popupPromise=page.waitForEvent('popup');await submissionLink.click();const submissionPopup=await popupPromise;
+ await submissionPopup.waitForLoadState();assert.equal(new URL(submissionPopup.url()).searchParams.get('toc'),'1 2 601 150 375');
+ await submissionPopup.close();await page.context().unroute('https://musicbrainz.org/cdtoc/attach?**');
+ const registeredDisc=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-disc-coverage`)).json()).sources.find(source=>source.recorded_disc_id)?.recorded_disc_id,musicItemId);
+ assert.ok(registeredDisc);submissionRelease.media[0].discs=[{id:registeredDisc}];
+ await restoredCurator.getByRole('button',{name:'Close curator'}).click();
+ await page.goto(`https://localhost:${port}/library-care/metadata?collection=${submissionCollection}&item=${musicItemId}`);
+ await submissionReview.locator('article.candidate').filter({has:page.getByText('Unregistered CD fixture',{exact:true})}).getByRole('button',{name:'Refresh release and tracks',exact:true}).click();
+ await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-disc-coverage`)).json()).sources.find(source=>source.recorded_disc_id)?.musicbrainz_submission_toc,musicItemId),{timeout:30000}).toBeNull();
+ await openSubmissionTracks();
+ await expect(submissionLink).toHaveCount(0);
+ await expect(restoredCurator.getByRole('region',{name:'Prepare audio'}).getByText(/Unregistered opening$/)).toBeVisible();
+ releases.splice(releases.indexOf(submissionRelease),1);
+ // Restore this shared smoke fixture before the independent playback journey.
+ await page.evaluate(async({id,candidate})=>{
+  const review=await(await fetch(`/api/v1/items/${id}/metadata`)).json();
+  const response=await fetch(`/api/v1/items/${id}/metadata`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:review.revision,change:candidate?{change:'select_candidate',candidate}:{change:'clear_selected_candidate'}})});
+  if(!response.ok)throw Error(`restore metadata fixture: ${response.status} ${await response.text()}`);
+ },{id:musicItemId,candidate:submissionOriginalChoice});
+ await clickAction(restoredCurator,'Refresh tracks');
  const orderingPaths=['music-tracks','music-disc-coverage','music-preparation-plan'].map(endpoint=>`/api/v1/items/${musicItemId}/${endpoint}`);
  const [originalRows,originalCoverage,originalPlan]=await page.evaluate(async paths=>Promise.all(paths.map(async path=>(await fetch(path)).json())),orderingPaths);
  const originalRow=originalRows[0];

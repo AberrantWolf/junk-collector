@@ -1,5 +1,22 @@
 # Remaining work — home-lab priorities
 
+## MusicBrainz track names and Disc ID submission — 2026-10-26
+
+An effective single-disc release now supplies track names when recorded track
+positions match even if its Disc ID is unregistered. Explicit multidisc assignments
+also work without registration; positive matches to another disc still conflict,
+and incomplete/ambiguous layouts stay unresolved. Manual titles retain authority.
+
+Music → Disc details & checks offers **Submit Disc ID to MusicBrainz** beside each
+complete recorded CD original when its ID is absent from the effective release.
+It opens MusicBrainz with the recorded TOC and release ID for user review/sign-in
+and confirmation. The button is hidden when that ID is already registered; refresh
+the release in Metadata after submitting. Reads use current committed observations
+without opening/hashing audio. No MusicBrainz credentials, automatic edits or
+submission-success receipts are introduced. See [acceptance and limits](validation/musicbrainz-disc-submission-2026-10-26.md).
+Source checks and full Chrome smoke acceptance pass. Source delivery only;
+release and NAS deployment are separate.
+
 ## Completed live-use repair — edition fit and equivalent matches, 2026-10-25
 
 The user reported a normal 2-disc album automatically assigned to a 3-disc limited

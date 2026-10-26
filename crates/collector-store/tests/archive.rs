@@ -25324,6 +25324,148 @@ fn automatic_group_metadata_options(
     identities
 }
 #[test]
+fn unregistered_disc_uses_selected_release_tracks_and_preserves_manual_titles_after_reindex() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, mut release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[6]);
+    release.disc_ids.clear();
+    release.media[0].disc_ids.clear();
+    let choices = automatic_group_metadata_options(&service, &actor, &items[0], &[release.clone()]);
+    automatic_group_select(&service, &actor, &items[0], &choices[0]);
+    let coverage = service.music_album_coverage(&actor, items[0].id).unwrap();
+    let source = coverage.sources[0].source_representation_id;
+    assert_eq!(
+        coverage.sources[0].musicbrainz_submission_toc.as_deref(),
+        Some("1 2 156 150 153")
+    );
+    assert_eq!(
+        coverage.sources[0].match_state,
+        collector_app::MusicDiscMatchState::SingleMedium
+    );
+    let rows = service
+        .recorded_music_track_availability(&actor, items[0].id)
+        .unwrap();
+    assert!(
+        rows.iter()
+            .any(|row| row.track_position == 1 && row.title == "Opening")
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.track_position == 2 && row.title == "Finale")
+    );
+    let record = service.metadata_view(&actor, items[0].id).unwrap();
+    service.update_metadata_authority(&actor, items[0].id, UpdateMetadataAuthorityCommand {
+        expected_revision:record.revision,
+        change:MetadataAuthorityChange::SetDomainOverrides {overrides:ModuleData {
+            module:ModuleId("org.junk.music".into()),schema_version:1,
+            payload:RawJson::from_value(serde_json::json!({"track_overrides":[{
+                "source_representation_id":source,"track_position":1,"title":"My opening"
+            }]})),
+        }},
+    }, &command()).unwrap();
+    store.reindex().unwrap();
+    let rows = service
+        .recorded_music_track_availability(&actor, items[0].id)
+        .unwrap();
+    assert!(
+        rows.iter()
+            .any(|row| row.track_position == 1 && row.title == "My opening")
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.track_position == 2 && row.title == "Finale")
+    );
+    let mut refreshed = store
+        .metadata_candidates(collection.id, items[0].id)
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.identity == choices[0])
+        .unwrap();
+    let id = coverage.sources[0].recorded_disc_id.clone().unwrap();
+    release.disc_ids.push(id.clone());
+    release.media[0].disc_ids.push(id);
+    refreshed.observation = RawJson::from_value(serde_json::to_value(&release).unwrap());
+    refreshed.identity.provider_record_version =
+        Some(Digest::sha256(&serde_json::to_vec(&release).unwrap()).hex);
+    let record = service.metadata_view(&actor, items[0].id).unwrap();
+    service
+        .refresh_metadata(
+            &actor,
+            items[0].id,
+            RefreshMetadataCommand {
+                source_import: None,
+                expected_revision: record.revision,
+                observation: MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates: vec![refreshed],
+                    raw_observation: RawJson::from_value(
+                        serde_json::json!({"fixture":"registered after submission"}),
+                    ),
+                    observed_at: chrono::Utc::now(),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .metadata_view(&actor, items[0].id)
+            .unwrap()
+            .authority
+            .selected_candidate,
+        Some(choices[0].clone())
+    );
+    assert!(
+        service
+            .music_album_coverage(&actor, items[0].id)
+            .unwrap()
+            .sources[0]
+            .musicbrainz_submission_toc
+            .is_none()
+    );
+    store.reindex().unwrap();
+    assert!(
+        service
+            .music_album_coverage(&actor, items[0].id)
+            .unwrap()
+            .sources[0]
+            .musicbrainz_submission_toc
+            .is_none()
+    );
+    assert!(
+        service
+            .recorded_music_track_availability(&actor, items[0].id)
+            .unwrap()
+            .iter()
+            .any(|row| row.title == "My opening")
+    );
+    let viewer_id = store
+        .create_user(
+            "disc-submission-viewer",
+            "another long test password",
+            false,
+        )
+        .unwrap();
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(service.music_album_coverage(&viewer, items[0].id).is_ok());
+    let outsider = Principal {
+        user_id: UserId::new(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.music_album_coverage(&outsider, items[0].id),
+        Err(Error::Forbidden)
+    ));
+}
+
+#[test]
 fn automatic_disc_grouping_recovers_existing_metadata_preserves_inventory_and_honors_undo() {
     let (root, store, actor, service, collection) = setup();
     let (items, release) =

@@ -15327,6 +15327,13 @@
             "format": "int32",
             "minimum": 0
           },
+          "musicbrainz_submission_toc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "MusicBrainz TOC argument, present only for a current complete layout whose\nID is absent from the effective release. Opening a link does not submit an edit."
+          },
           "recorded_disc_id": {
             "type": [
               "string",

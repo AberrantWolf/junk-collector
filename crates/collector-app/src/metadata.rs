@@ -1031,6 +1031,35 @@ impl CollectionService {
             .transpose()
     }
 
+    /// Registration eligibility follows a refreshed observation of the same
+    /// release, even when a curator retains an older immutable metadata choice.
+    pub(crate) fn music_release_submission_observation(
+        &self,
+        item: &Item,
+        selected: &collector_modules::music::MusicBrainzReleaseObservation,
+    ) -> Result<collector_modules::music::MusicBrainzReleaseObservation> {
+        let LoadedMetadataAuthority {
+            legacy, current, ..
+        } = self.authority_or_inventory(item)?;
+        let mut candidates = self
+            .processing
+            .metadata_candidates(item.collection_id, item.id)?;
+        merge_metadata_candidates(
+            &mut candidates,
+            legacy.iter().flat_map(|value| &value.candidates),
+        )?;
+        if let Some(current) = current
+            && let Some(candidate) = candidates.iter().find(|candidate| {
+                candidate.identity.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+                    && candidate.identity.provider_record_id == selected.release_id
+                    && current.contains(&candidate.identity)
+            })
+        {
+            return candidate.observation.parse();
+        }
+        Ok(selected.clone())
+    }
+
     pub(crate) fn music_disc_assignments(
         &self,
         item: &Item,

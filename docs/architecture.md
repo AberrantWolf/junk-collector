@@ -1,5 +1,29 @@
 # Architecture
 
+## MusicBrainz track mapping and Disc ID submission — 2026-10-26
+
+The existing application disc resolver treats an unregistered local Disc ID as
+missing provider evidence. An effective single-medium release can supply track
+names when every recorded track position matches; multi-medium releases require
+an unambiguous registered ID or an explicit source/release/medium assignment.
+A positive ID match to another medium still conflicts with an assignment. Manual
+track titles retain authority. This is descriptive metadata, not catalog or audio
+verification.
+
+Authorized album coverage derives a bounded MusicBrainz TOC argument from the
+current source-fingerprint-bound recorded layout, using the same module mapping
+and shared TOC validation as Disc ID calculation. It requires a complete audio
+layout and agreement with its recorded ID. No media payloads are read or hashed.
+The argument is absent without an effective release/layout or when the recorded
+ID is already listed anywhere on that release. No persistent record or new job is
+needed. The browser adapter builds a MusicBrainz attach link with this TOC and the
+effective release ID. Users review the disc and confirm the edit on MusicBrainz;
+Collector stores no MusicBrainz credentials and does not claim submission success.
+Refreshing release metadata updates button eligibility from the current observation
+of the same release, even when a manual choice retains older immutable text.
+Existing browse/collection
+access applies to coverage; the link itself grants no new Collector access.
+
 ## Evidence-aware music editions and equivalent matches — 2026-10-25
 
 Application metadata policy ranks editions against current, committed CD-layout

@@ -76,3 +76,5 @@
 .playback-source{display:block;font-size:10px;color:var(--muted);overflow-wrap:anywhere;margin:4px 0}
 .album-track-toolbar{flex-wrap:wrap}
 .music-track>div.track-title>.track-play{flex:none;min-height:32px;border:1px solid var(--line);color:var(--ink);background:var(--paper);padding:3px 7px;font-size:11px}
+
+.musicbrainz-submit{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:10px 15px;text-decoration:none;color:inherit}.musicbrainz-submit:hover{background:#e5ebf6}.musicbrainz-submission small{display:block;margin-top:.5rem;color:var(--muted)}

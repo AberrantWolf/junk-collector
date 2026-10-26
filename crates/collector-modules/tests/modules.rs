@@ -1140,6 +1140,12 @@ fn music_layout_matches_published_arver_ids_without_pcm_allocation() {
     assert_eq!(ids.freedb, "19117f03");
     assert_eq!(ids.accuraterip_id1, "00084264");
     assert_eq!(ids.accuraterip_id2, "001cc184");
+    let toc = recorded_cd_toc(&tracks).unwrap();
+    assert_eq!(toc.track_offsets, vec![150, 75_408, 130_223]);
+    assert_eq!(toc.leadout_sector, 336_103);
+    let mut skipped = tracks.clone();
+    skipped[1].position = 3;
+    assert!(recorded_cd_toc(&skipped).is_err());
 }
 
 #[test]

@@ -250,6 +250,117 @@ mod tests {
     }
 
     #[test]
+    fn missing_registered_id_allows_selection_but_not_ambiguous_or_incomplete_tracks() {
+        use collector_modules::music::*;
+        let mut release: MusicBrainzReleaseObservation =
+            serde_json::from_value(serde_json::json!({
+                "release_id":"a327f683-6c09-4ac5-a224-e9397de814d2", "title":"Album",
+                "artist_ids":[], "disc_ids":[],
+                "media":[{"position":1,"disc_ids":[],"tracks":[{"position":1,"title":"Opening"}]}]
+            }))
+            .unwrap();
+        let assignment = MusicDiscAssignment {
+            source_representation_id: RepresentationId::new(),
+            release_id: release.release_id.clone(),
+            medium_position: 1,
+        };
+        let (medium, state) =
+            resolve_music_medium(Some(&release), Some("unregistered"), None, Some(&[1]));
+        assert_eq!(medium.unwrap().tracks[0].title, "Opening");
+        assert_eq!(state, MusicDiscMatchState::SingleMedium);
+        assert_eq!(
+            resolve_music_medium(Some(&release), Some("unregistered"), None, Some(&[1, 2])).1,
+            MusicDiscMatchState::TrackLayoutMismatch
+        );
+        release.media.push(MusicBrainzMediumObservation {
+            position: 2,
+            ..release.media[0].clone()
+        });
+        assert!(
+            resolve_music_medium(Some(&release), Some("unregistered"), None, Some(&[1]))
+                .0
+                .is_none()
+        );
+        let (medium, state) = resolve_music_medium(
+            Some(&release),
+            Some("unregistered"),
+            Some(&assignment),
+            Some(&[1]),
+        );
+        assert_eq!(medium.unwrap().position, 1);
+        assert_eq!(state, MusicDiscMatchState::CuratorAssigned);
+        release.media[1].disc_ids.push("unregistered".into());
+        assert_eq!(
+            resolve_music_medium(
+                Some(&release),
+                Some("unregistered"),
+                Some(&assignment),
+                Some(&[1])
+            )
+            .1,
+            MusicDiscMatchState::AssignmentConflictsWithDiscId
+        );
+    }
+
+    #[test]
+    fn submission_uses_recorded_toc_and_hides_registered_or_inconsistent_ids() {
+        use collector_core::{CdSector, CdTrackKind, CdTrackLayout};
+        use collector_modules::music::*;
+        let tracks = vec![
+            CdTrackLayout {
+                position: 1,
+                kind: CdTrackKind::Audio,
+                index_00: None,
+                index_01: CdSector(0),
+                pcm_start: Some(PcmFrame(0)),
+                pcm_length: Some(PcmFrame(225 * 588)),
+            },
+            CdTrackLayout {
+                position: 2,
+                kind: CdTrackKind::Audio,
+                index_00: None,
+                index_01: CdSector(225),
+                pcm_start: Some(PcmFrame(225 * 588)),
+                pcm_length: Some(PcmFrame(226 * 588)),
+            },
+        ];
+        let ids = calculate_cd_ids(&tracks).unwrap();
+        let id = ids.musicbrainz.clone();
+        let mut layout = CdProcessingResult::Layout {
+            tracks,
+            disc_ids: Some(ids),
+            source_spans: vec![],
+            limitations: vec![],
+        };
+        let mut release: MusicBrainzReleaseObservation =
+            serde_json::from_value(serde_json::json!({
+                "release_id":"a327f683-6c09-4ac5-a224-e9397de814d2", "title":"Album",
+                "artist_ids":[], "disc_ids":[], "media":[{"position":1,"disc_ids":[],"tracks":[]}]
+            }))
+            .unwrap();
+        assert_eq!(
+            musicbrainz_submission_toc(Some(&layout), Some(&release)).as_deref(),
+            Some("1 2 601 150 375")
+        );
+        assert!(musicbrainz_submission_toc(None, Some(&release)).is_none());
+        assert!(musicbrainz_submission_toc(Some(&layout), None).is_none());
+        release.media[0].disc_ids.push(id.clone());
+        assert!(musicbrainz_submission_toc(Some(&layout), Some(&release)).is_none());
+        release.media[0].disc_ids.clear();
+        release.disc_ids.push(id);
+        assert!(musicbrainz_submission_toc(Some(&layout), Some(&release)).is_none());
+        release.disc_ids.clear();
+        if let CdProcessingResult::Layout { tracks, .. } = &mut layout {
+            tracks[1].index_01 = CdSector(226);
+        }
+        assert!(musicbrainz_submission_toc(Some(&layout), Some(&release)).is_none());
+        if let CdProcessingResult::Layout { disc_ids, .. } = &mut layout {
+            *disc_ids = None;
+        }
+        assert!(musicbrainz_submission_toc(Some(&layout), Some(&release)).is_none());
+    }
+
+    #[test]
     fn presets_seal_exact_music_owned_ranges_and_encoder_identity() {
         let tracks = vec![
             collector_modules::disc_audio::ConversionPcmTrack {
@@ -375,6 +486,9 @@ pub struct MusicDiscSourceCoverage {
     pub file_label: String,
     pub file_count: usize,
     pub recorded_disc_id: Option<String>,
+    /// MusicBrainz TOC argument, present only for a current complete layout whose
+    /// ID is absent from the effective release. Opening a link does not submit an edit.
+    pub musicbrainz_submission_toc: Option<String>,
     pub track_count: Option<usize>,
     pub assigned_medium_position: Option<u16>,
     pub medium_position: Option<u16>,
@@ -862,6 +976,10 @@ impl CollectionService {
         } else {
             None
         };
+        let submission_release = release
+            .as_ref()
+            .map(|release| self.music_release_submission_observation(&item, release))
+            .transpose()?;
         let assignments = self.music_disc_assignments(&item)?;
         let mut sources = Vec::new();
         for capture in item
@@ -873,6 +991,8 @@ impl CollectionService {
                 representation.role == collector_core::RepresentationRole::PreservationMaster
             }) {
                 let layout = self.recorded_music_layout(item.collection_id, source.id)?;
+                let submission_toc =
+                    musicbrainz_submission_toc(layout.as_ref(), submission_release.as_ref());
                 let game_audio = if item.domain.module.0 == "org.junk.games" {
                     self.recorded_game_audio(item.collection_id, source.id)?
                 } else {
@@ -947,6 +1067,7 @@ impl CollectionService {
                     },
                     file_count: source.files.len(),
                     recorded_disc_id: disc_id,
+                    musicbrainz_submission_toc: submission_toc,
                     track_count: positions.as_ref().map(Vec::len),
                     assigned_medium_position: assignment.map(|value| value.medium_position),
                     medium_position: medium.map(|value| value.position),
@@ -1607,6 +1728,50 @@ fn matching_musicbrainz_medium<'a>(
     resolve_music_medium(Some(release), disc_id, None, Some(&positions)).0
 }
 
+fn musicbrainz_submission_toc(
+    layout: Option<&collector_modules::music::CdProcessingResult>,
+    release: Option<&collector_modules::music::MusicBrainzReleaseObservation>,
+) -> Option<String> {
+    let release = release?;
+    let collector_modules::music::CdProcessingResult::Layout {
+        tracks,
+        disc_ids: Some(ids),
+        ..
+    } = layout?
+    else {
+        return None;
+    };
+    if release.disc_ids.contains(&ids.musicbrainz)
+        || release
+            .media
+            .iter()
+            .any(|medium| medium.disc_ids.contains(&ids.musicbrainz))
+    {
+        return None;
+    }
+    // Do not attribute a different TOC to a previously recorded identifier.
+    if collector_modules::music::calculate_cd_ids(tracks)
+        .ok()?
+        .musicbrainz
+        != ids.musicbrainz
+    {
+        return None;
+    }
+    let toc = collector_modules::music::recorded_cd_toc(tracks).ok()?;
+    Some(
+        [
+            u32::from(toc.first_track),
+            u32::from(toc.last_track),
+            toc.leadout_sector,
+        ]
+        .into_iter()
+        .chain(toc.track_offsets)
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(" "),
+    )
+}
+
 pub(crate) fn resolve_music_medium<'a>(
     release: Option<&'a collector_modules::music::MusicBrainzReleaseObservation>,
     disc_id: Option<&str>,
@@ -1630,7 +1795,15 @@ pub(crate) fn resolve_music_medium<'a>(
         else {
             return (None, MusicDiscMatchState::NeedsAssignment);
         };
-        if disc_id.is_some_and(|id| !medium.disc_ids.iter().any(|value| value == id)) {
+        // An absent ID is missing provider evidence, not a contradiction of the
+        // curator. A positive match to a different disc still conflicts.
+        if disc_id.is_some_and(|id| {
+            !medium.disc_ids.iter().any(|value| value == id)
+                && release
+                    .media
+                    .iter()
+                    .any(|other| other.disc_ids.iter().any(|value| value == id))
+        }) {
             return (None, MusicDiscMatchState::AssignmentConflictsWithDiscId);
         }
         (medium, MusicDiscMatchState::CuratorAssigned)
@@ -1639,13 +1812,16 @@ pub(crate) fn resolve_music_medium<'a>(
             .media
             .iter()
             .filter(|medium| medium.disc_ids.iter().any(|value| value == id));
-        let Some(medium) = matches.next() else {
+        if let Some(medium) = matches.next() {
+            if matches.next().is_some() {
+                return (None, MusicDiscMatchState::AmbiguousDiscId);
+            }
+            (medium, MusicDiscMatchState::DiscIdMatched)
+        } else if release.media.len() == 1 {
+            (&release.media[0], MusicDiscMatchState::SingleMedium)
+        } else {
             return (None, MusicDiscMatchState::DiscIdNotListed);
-        };
-        if matches.next().is_some() {
-            return (None, MusicDiscMatchState::AmbiguousDiscId);
         }
-        (medium, MusicDiscMatchState::DiscIdMatched)
     } else if release.media.len() == 1 {
         (&release.media[0], MusicDiscMatchState::SingleMedium)
     } else {

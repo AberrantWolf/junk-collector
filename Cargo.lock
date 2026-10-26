@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "collector-api-types"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "chrono",
  "collector-core",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "collector-app"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "collector-client"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -628,7 +628,7 @@ dependencies = [
 
 [[package]]
 name = "collector-core"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "chrono",
  "hex",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "collector-media"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "anyhow",
  "axum",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "collector-modules"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "collector-core",
  "junk-libs-accuraterip",
@@ -689,7 +689,7 @@ dependencies = [
 
 [[package]]
 name = "collector-providers"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "collector-app",
  "collector-core",
@@ -713,7 +713,7 @@ dependencies = [
 
 [[package]]
 name = "collector-server"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "anyhow",
  "axum",
@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "collector-store"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.8"
 dependencies = [
  "anyhow",
  "argon2",

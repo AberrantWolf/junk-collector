@@ -4196,6 +4196,11 @@ export interface components {
             match_state: components["schemas"]["MusicDiscMatchState"];
             /** Format: int32 */
             medium_position?: number | null;
+            /**
+             * @description MusicBrainz TOC argument, present only for a current complete layout whose
+             *     ID is absent from the effective release. Opening a link does not submit an edit.
+             */
+            musicbrainz_submission_toc?: string | null;
             recorded_disc_id?: string | null;
             source_representation_id: components["schemas"]["RepresentationId"];
             track_count?: number | null;

@@ -1007,9 +1007,25 @@ pub fn analyze_cue_package(
 }
 
 pub fn calculate_cd_ids(tracks: &[CdTrackLayout]) -> ModuleResult<CdDiscIds> {
+    let toc = recorded_cd_toc(tracks)?;
+    let ids = junk_libs_disc_id::calculate_disc_ids(&toc)
+        .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+    Ok(CdDiscIds {
+        musicbrainz: ids.musicbrainz,
+        freedb: ids.freedb,
+        accuraterip_id1: ids.accuraterip_id1,
+        accuraterip_id2: ids.accuraterip_id2,
+    })
+}
+
+/// Map a complete recorded layout to the shared identifier coordinates, without
+/// reading media or estimating offsets from track durations.
+pub fn recorded_cd_toc(tracks: &[CdTrackLayout]) -> ModuleResult<junk_libs_disc_id::Toc> {
     if tracks.is_empty()
-        || tracks.iter().any(|track| {
+        || tracks.len() > 99
+        || tracks.iter().enumerate().any(|(index, track)| {
             track.kind != CdTrackKind::Audio
+                || usize::from(track.position) != usize::from(tracks[0].position) + index
                 || track.index_01.0 < 0
                 || track
                     .pcm_length
@@ -1047,14 +1063,9 @@ pub fn calculate_cd_ids(tracks: &[CdTrackLayout]) -> ModuleResult<CdDiscIds> {
         leadout_sector: leadout,
         track_offsets: offsets,
     };
-    let ids = junk_libs_disc_id::calculate_disc_ids(&toc)
+    toc.validate()
         .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
-    Ok(CdDiscIds {
-        musicbrainz: ids.musicbrainz,
-        freedb: ids.freedb,
-        accuraterip_id1: ids.accuraterip_id1,
-        accuraterip_id2: ids.accuraterip_id2,
-    })
+    Ok(toc)
 }
 
 pub fn open_cue_pcm_package(
