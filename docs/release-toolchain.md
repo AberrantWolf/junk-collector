@@ -1,5 +1,11 @@
 # Release Rust toolchain
 
+Beta.9 preparation, 2026-10-26: rechecked the official
+[current-stable manifest](https://static.rust-lang.org/dist/channel-rust-stable.toml).
+It remains dated 2026-10-15 and selects Rust/rustc 1.99.1
+(`58cf8f9c3`, 2026-10-13), matching the installed toolchain, CI and Docker.
+No toolchain or shared-library change is needed.
+
 Beta.8 preparation, 2026-10-26: the official current-stable manifest still selects
 Rust/rustc 1.99.1 (`58cf8f9c3`, 2026-10-13), dated 2026-10-15. It matches the
 installed toolchain, CI and Docker builder. No toolchain or shared-library update
