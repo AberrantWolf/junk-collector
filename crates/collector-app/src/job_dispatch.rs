@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 pub const IMPORT_COPY_JOB_KIND: &str = "import_staging";
 pub const PROVIDER_JOB_SLOTS: u32 = 1;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct JobSettings {
     pub processing_workers: u8,

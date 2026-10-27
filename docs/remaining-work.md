@@ -1,5 +1,52 @@
 # Remaining work — home-lab priorities
 
+## Beta.10 release candidate — 2026-10-27
+
+The user requested release and NAS deployment of all current changes: one-click
+AccurateRip and collection/worker defaults, original artwork acquisition, Library
+import progress and the standalone CD capture/naming helpers. The candidate is
+being qualified through the existing native image pipeline; publication and NAS
+installation are not yet claimed. See [release notes](releases/v0.1.0-beta.10.md).
+
+
+## One-click AccurateRip and configurable defaults — 2026-10-27
+
+Source delivery adds **Check this disc with AccurateRip**, sharing one durable
+application workflow across the album view, advanced checks, guided ingest and
+library batches. It records missing structure, acquires the matching response and
+checks audio without a manual fetch step. Only qualified matching audio becomes
+verified. No-data, ambiguity, unsupported input and failures remain visible.
+
+**Administration → Library settings** owns per-music-collection automatic ingest
+checks (on by default) and the maximum offset. **Check unconfirmed rips** queues
+existing eligible originals through the existing bounded batch/recovery flow;
+confirmed sources and digital purchases are skipped. **Administration → Server
+settings → Background workers** saves live processing/copy limits. Saved settings
+survive restart and reindex; accepted ingest settings remain frozen. Existing
+unfinished intents retain their previous policy. Other collection types have no
+invented configuration fields. See [delivery and acceptance](validation/automatic-accuraterip-2026-10-27.md).
+Workspace tests, Clippy, web/contracts/models and all selected Chrome journeys
+pass. No release, NAS deployment or live-library batch is included.
+
+
+## Requested oversized album artwork repair — 2026-10-26
+
+Source implementation accepts bounded full-quality originals, compares suitable
+front-cover sizes and freezes selection through restart. The browser retains
+explicit lookup dismissal across reopening. Full workspace tests, Clippy, web
+checks/build/models and focused real-browser acceptance pass; see
+[delivery scope, acceptance and limits](validation/provider-artwork-originals-2026-10-26.md).
+Delivered in source; the NAS remains unchanged. The user is handling GLS-0130-02's
+separate bad dump.
+
+## Requested Library import progress — 2026-10-26
+
+Delivered neutral import progress in album rows, with automatic refresh and
+playback-attention filtering deferred until the import settles or stops. Includes
+downstream enrichment/preparation; cancellation and terminal failure stop the
+progress cue. See [acceptance](validation/library-import-progress-2026-10-26.md).
+Deployment is outside this request and remains unperformed.
+
 ## Beta.9 published and installed — 2026-10-26
 
 Beta.9 includes the faster testing/packaging workflow, active-release/Disc ID
@@ -99,13 +146,35 @@ No archive-history pruning was performed.
 
 ## Requested standalone CD capture script — 2026-10-25
 
+Automatic folder naming requested 2026-10-27 is delivered in source as
+`rip-cd.sh --auto DESTINATION [DRIVE]`: unique generated capture directories,
+TOC-only shared-library identity and one MusicBrainz lookup capped at 15 seconds.
+Only an unambiguous release/medium/catalog number permits an exclusive rename;
+multi-disc releases include the disc position. Other outcomes keep the generated
+name, without interrupting capture or replacing existing folders. Manual naming
+remains available. See [usage](getting-started.md#import-options) and the
+[dated acceptance](validation/cd-folder-naming-2026-10-27.md). Physical-drive and
+successful live-provider naming acceptance remain unrun; this adds descriptive
+naming, not audio/catalog verification or an integrated ripping subsystem.
+
 Delivered `scripts/rip-cd.sh` with named destination folders, raw redumper
 acquisition/refinement, retained sidecars/logs, overwrite refusal and partial-file
 preservation. A reported macOS failure between stages now pins the initially
-selected drive and identifies the stopped stage. Physical recovery is unrun.
-See [usage](getting-started.md#import-options) and
-[dated validation](validation/raw-cd-capture-2026-10-25.md). Fixture acceptance
-passed; physical-CD acceptance remains operator-run. This does not add an
+selected drive and identifies the stopped stage; dated manual recovery and
+hardware limits are recorded in the linked validation.
+On 2026-10-26 the user reported refinement leaves the drive at 1x until a power
+cycle. Refinement is now conditional on initial SCSI/C2 errors, with Q-only
+errors skipped and unknown summaries stopped for review. Offline decision/failure
+checks pass.
+On 2026-10-27 an operator run exercised the Q-only skip on one owned disc, with
+manual Q refinement recovering 15 of 31 sectors; a second BU40N at default
+optimal speed and requested 8x recovered none of the remaining 16. The
+[accepted tradeoff](decisions/cd-audio-capture-tradeoff.md) keeps Q-only refinement
+optional and uses AccurateRip to assess audio within its reported coverage.
+Preserve raw subchannels/logs; persistent Q counts alone are not an outstanding
+recovery assignment. No AccurateRip result or general physical-drive acceptance
+is claimed. See [usage](getting-started.md#import-options) and
+[dated validation](validation/raw-cd-capture-2026-10-25.md). This does not add an
 integrated ripping subsystem or absorb unrelated active assignments.
 
 ## Requested dependency security repair — 2026-10-25

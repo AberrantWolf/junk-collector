@@ -646,6 +646,18 @@ impl CollectionService {
                 },
             });
             intents.push(GuidedIngestIntent {
+                cd_check_settings: if eligibility.owner.0 == "org.junk.music"
+                    && command.analysis != IngestAnalysisPolicy::PreserveOnly
+                    && package.anchors.iter().any(|anchor| anchor.selected)
+                    && package.purchase.is_none()
+                    && command.purchase.is_none()
+                {
+                    let settings = self.care.cd_settings(command.plan.collection_id)?;
+                    settings.check_accuraterip_on_ingest.then_some(settings)
+                } else {
+                    None
+                },
+                cd_check_error: None,
                 purchase: package
                     .purchase
                     .clone()
@@ -1249,7 +1261,20 @@ impl CollectionService {
                             None => true,
                         }
                     };
-                intent.settled = enrichment_done && preparation_done;
+                let check_done =
+                    if intent.cd_check_settings.is_none() || intent.cd_check_error.is_some() {
+                        true
+                    } else {
+                        match self.advance_ingest_cd_check(&intent, &record) {
+                            Ok(done) => done,
+                            Err(error) => {
+                                intent.cd_check_error =
+                                    Some(error.to_string().chars().take(512).collect());
+                                true
+                            }
+                        }
+                    };
+                intent.settled = enrichment_done && preparation_done && check_done;
                 intent.updated_at = self.authentication.now();
                 self.provisional_imports.save_guided_ingest_intent(intent)?;
             }
@@ -1405,7 +1430,8 @@ impl CollectionService {
                     || super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some()
             })
             || intent.enrichment_error.is_some()
-            || intent.preparation_error.is_some();
+            || intent.preparation_error.is_some()
+            || intent.cd_check_error.is_some();
         let active = jobs
             .iter()
             .filter(|job| job.kind != "inbox_cleanup")
@@ -1421,6 +1447,15 @@ impl CollectionService {
             IngestStepState::Failed
         } else if active || !intent.settled || !matches!(view.phase, ImportPhase::Published) {
             IngestStepState::Active
+        } else if jobs.iter().any(|j| {
+            j.kind == "accuraterip_check"
+                && j.result
+                    .as_ref()
+                    .and_then(|r| r.get("completion").unwrap_or(r).get("confirmed"))
+                    .and_then(|r| r.as_bool())
+                    == Some(false)
+        }) {
+            IngestStepState::NeedsInput
         } else {
             IngestStepState::Succeeded
         };
@@ -1836,9 +1871,32 @@ impl CollectionService {
             metadata_step,
             artwork_step,
             preparation_step,
+            {
+                let job = jobs.iter().find(|j| j.kind == "accuraterip_check");
+                let mut step = job_step(
+                    "accuraterip",
+                    job,
+                    intent.cd_check_settings.is_none(),
+                    intent.cd_check_error.clone(),
+                );
+                if job.is_some_and(|j| {
+                    j.state == JobState::Completed
+                        && j.result
+                            .as_ref()
+                            .and_then(|r| r.get("completion").unwrap_or(r).get("confirmed"))
+                            .and_then(|r| r.as_bool())
+                            == Some(false)
+                }) {
+                    step.state = IngestStepState::NeedsInput;
+                    step.message=Some("Audio check finished without confirming this disc. See its AccurateRip result in the album.".into());
+                }
+                step
+            },
         ];
         if !music {
-            steps.retain(|step| step.step != "preparation" && step.step != "metadata");
+            steps.retain(|step| {
+                step.step != "preparation" && step.step != "metadata" && step.step != "accuraterip"
+            });
         }
         Ok(IngestDetail {
             inbox_cleanup: self.provisional_imports.inbox_cleanup_status(id)?,
@@ -1958,6 +2016,7 @@ impl CollectionService {
             })?;
         } else {
             intent.enrichment_error = None;
+            intent.cd_check_error = None;
             if intent.preparation_batch_id.is_none() {
                 intent.preparation_error = None;
             }

@@ -54,6 +54,7 @@ function Artwork({item,large=false,retryable=false}:{item:Item;large?:boolean;re
 }
 
 function AlbumPlaybackStatus({item,detail=false}:{item:Item;detail?:boolean}){
+ if(!detail&&item.import_in_progress)return <span className="album-import-status"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><strong>Import in progress</strong></span>;
  const state=item.album_playback;
  if(state?.status!=='needs_attention')return null;
  return <span className={detail?'album-playback-notice':'album-playback-status'} title={state.reason}><span aria-hidden="true">⚠ </span><strong>Album playback needs attention</strong>{detail?<span>{state.reason}</span>:null}</span>;
@@ -73,6 +74,8 @@ function App(){
  const [recovered,setRecovered]=useState(false);const [features,setFeatures]=useState<Features>();const [actor,setActorState]=useState<Principal>();const [ready,setReady]=useState(false);
  const [collectionPage,setCollectionPage]=useState<CollectionPageState>({key:'',items:[],cursor:null,ready:false,loading:true,error:''});const [collectionSearch,setCollectionSearch]=useState('');const [collectionRevision,setCollectionRevision]=useState(0);const [selectedCollectionExact,setSelectedCollectionExact]=useState<Collection>();const [collectionTypes,setCollectionTypes]=useState<CollectionType[]>([]);const [items,setItems]=useState<Item[]>([]);const [cursor,setCursor]=useState<string|null>(null);const [selected,setSelected]=useState<Item>();const [error,setError]=useState('');const [loginMessage,setLoginMessage]=useState('');const [notice,setNotice]=useState('');const [busy,setBusy]=useState(false);const [refresh,setRefresh]=useState(0);
  const [canCurateAny,setCanCurateAny]=useState(false);const [canManageAny,setCanManageAny]=useState(false);
+ const [importPoll,setImportPoll]=useState(0);
+ useEffect(()=>{if(!actor||route.page!=='library'||!items.some(item=>item.import_in_progress))return;const timer=setTimeout(()=>setImportPoll(value=>value+1),2000);return()=>clearTimeout(timer);},[actor,route.page,collection,search,sort,filter,items]);
  const collectionKey=JSON.stringify([actor?.user_id,collectionSearch,collectionRevision]);const collectionReads=useOperationScope(collectionKey);const collectionCurrent=collectionPage.key===collectionKey;const collections=collectionCurrent?collectionPage.items:[];const collectionCursor=collectionCurrent?collectionPage.cursor:null;const collectionsReady=collectionCurrent&&collectionPage.ready;const collectionLoading=!collectionCurrent||collectionPage.loading;const collectionError=collectionCurrent?collectionPage.error:'';
  useEffect(()=>{function escape(event:KeyboardEvent){if(event.key!=='Escape'||document.querySelector('[role="dialog"], :popover-open'))return;if(collectionPicker.current?.open){collectionPicker.current.open=false;collectionPicker.current.querySelector('summary')?.focus();return;}if(menuOpen){setMenuOpen(false);menuToggle.current?.focus();return;}if(route.item){managementRequest.current?.abort();closeDetails();}}function outside(event:PointerEvent){const picker=collectionPicker.current;if(picker?.open&&event.target instanceof Node&&!picker.contains(event.target))picker.open=false;}document.addEventListener('keydown',escape);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',escape);document.removeEventListener('pointerdown',outside);};},[route.item,menuOpen]);
  useEffect(()=>{setMusicQueueUser(actor?.user_id);return()=>setMusicQueueUser(undefined);},[actor?.user_id]);
@@ -135,7 +138,7 @@ function App(){
   }catch(e){if(!controller.signal.aborted&&current===generation.current){setItems([]);setCursor(null);setListFailed(true);handleFailure(e);}}
   finally{if(!controller.signal.aborted&&current===generation.current)setBusy(false);}},180);
   return()=>{clearTimeout(timer);controller.abort();generation.current++;};
- },[actor,collection,search,sort,filter,refresh,navigation.pages,route.page]);
+ },[actor,collection,search,sort,filter,refresh,importPoll,navigation.pages,route.page]);
 
  useEffect(()=>{
   if(!actor||!route.item||route.page!=='library'){setSelected(undefined);setDetailLoading(false);setDetailError('');return;}

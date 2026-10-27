@@ -56,6 +56,15 @@ claims, unknown records or originals. This decision narrows the previous blanket
 “preserve provider observations/history” policy for future design; safe treatment
 of existing records remains part of HL-01, not a deletion performed by this edit.
 
+## Music-CD capture tradeoff — clarified 2026-10-27
+
+For ordinary music CDs, retain complete captured raw packages and logs while
+accepting documented Q-subchannel imperfections. Q-only refinement remains
+optional; use AccurateRip to assess audio within its reported coverage, without
+claiming complete subchannel preservation. Persistent Q counts alone do not
+create mandatory recovery work. See the
+[accepted decision and optional operator command](cd-audio-capture-tradeoff.md).
+
 ## Security proportional to a public home server
 
 Authentication, authorization, trusted HTTPS, recovery, private/public composition,

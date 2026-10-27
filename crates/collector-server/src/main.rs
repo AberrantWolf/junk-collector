@@ -248,7 +248,7 @@ fn metadata_readiness(config: &ProviderConfig) {
 
 fn instructions(config: &Config, path: &std::path::Path) {
     println!(
-        "Background jobs: {} processing workers; inbox copy limit {}; provider limit 1. Limits apply after restart.",
+        "Background job defaults: {} processing workers; inbox copy limit {}; provider limit 1. Saved Administration worker settings override these defaults.",
         config.jobs.processing_workers, config.jobs.copy_workers
     );
     println!(
@@ -1052,12 +1052,9 @@ async fn main() -> Result<()> {
                 state.service = state
                     .service
                     .clone()
-                    .with_streaming_provider(
-                        cover_art_id.clone(),
-                        Arc::new(collector_app::BoundedProviderAdapter(cover_art.clone())),
-                    )?
+                    .with_streaming_provider(cover_art_id.clone(), cover_art.clone())?
                     .with_catalog_parser(cover_art_id, cover_art.clone())?
-                    .with_artwork_preview(cover_art);
+                    .with_artwork_source(cover_art);
             }
             state.catalog_sources = Arc::new(
                 dat_provider

@@ -179,6 +179,46 @@ impl Store {
         Ok(active)
     }
 
+    pub(crate) fn metadata_artwork_selection_record(
+        &self,
+        claim: &JobClaim,
+        proposed: Option<&RawJson>,
+    ) -> Result<Option<RawJson>> {
+        if proposed.is_some_and(|value| value.get().len() > 1024) {
+            return Err(Error::Invalid("artwork selection is too large".into()));
+        }
+        let mut db = lock(&self.db)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let checkpoint: String = tx.query_row(
+            "SELECT p.checkpoint FROM private.jobs j JOIN private.processing_jobs p ON p.job_id=j.id
+             WHERE j.id=? AND j.user_id=? AND j.kind='metadata_resolution'
+             AND j.claim_token=? AND j.state='running' AND j.cancellation_requested=0 AND j.lease_expires>?",
+            params![claim.id.to_string(), claim.user_id.to_string(), claim.claim_token, self.clock.now().timestamp()],
+            |row| row.get(0),
+        ).optional().map_err(storage)?.ok_or(Error::CommandInProgress)?;
+        let selected = if let Some(value) = checkpoint.strip_prefix("artwork_selection:") {
+            Some(RawJson::from_value(
+                serde_json::from_str(value).map_err(storage)?,
+            ))
+        } else if let Some(query) = proposed {
+            tx.execute(
+                "UPDATE private.processing_jobs SET checkpoint=? WHERE job_id=?",
+                params![
+                    format!("artwork_selection:{}", query.get()),
+                    claim.id.to_string()
+                ],
+            )
+            .map_err(storage)?;
+            Some(query.clone())
+        } else {
+            None
+        };
+        tx.commit().map_err(storage)?;
+        Ok(selected)
+    }
+
     pub(crate) fn frozen_job_input_record(
         &self,
         id: JobId,
@@ -637,6 +677,30 @@ impl Store {
                 return Err(Error::Unavailable("This entry already has 16 unfinished metadata requests; finish or cancel a request before starting another.".into()));
             }
         }
+        if let Some(FrozenJobInput::AccurateRip(proposed)) = &spec.frozen_input {
+            let mut stmt=tx.prepare("SELECT p.frozen_input FROM private.jobs j JOIN private.processing_jobs p ON p.job_id=j.id WHERE j.kind='accuraterip_check' AND j.item_id=? AND j.id<>? AND j.state IN ('queued','running','cancel_requested')").map_err(storage)?;
+            let active = stmt
+                .query_map(
+                    params![proposed.item_id.to_string(), spec.id.to_string()],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?;
+            for raw in active {
+                if let FrozenJobInput::AccurateRip(active) =
+                    serde_json::from_str(&raw).map_err(storage)?
+                    && proposed.sources.iter().any(|source| {
+                        active
+                            .sources
+                            .iter()
+                            .any(|other| source.source == other.source)
+                    })
+                {
+                    return Err(Error::Unavailable("An AccurateRip check is already pending for this disc. Wait for it to finish or cancel it before checking again.".into()));
+                }
+            }
+        }
         ensure_import_allows_work(&tx, &spec.request)?;
         if let Some((parent, token)) = batch {
             let allowed: bool = tx
@@ -702,6 +766,30 @@ impl Store {
             }
         }
         // Creation time belongs to the first durable request, not output identity.
+        if let Some(FrozenJobInput::AccurateRip(mut proposed)) = spec.frozen_input.clone() {
+            let old: Option<String> = tx
+                .query_row(
+                    "SELECT frozen_input FROM private.processing_jobs WHERE job_id=?",
+                    [spec.id.to_string()],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(storage)?;
+            if let Some(old) = old
+                && let FrozenJobInput::AccurateRip(original) =
+                    serde_json::from_str(&old).map_err(storage)?
+            {
+                for source in &mut proposed.sources {
+                    if let Some(old) = original.sources.iter().find(|s| s.source == source.source) {
+                        source.created_at = old.created_at;
+                    }
+                }
+                frozen_input = Some(
+                    serde_json::to_string(&FrozenJobInput::AccurateRip(proposed))
+                        .map_err(storage)?,
+                );
+            }
+        }
         if let Some(FrozenJobInput::GameIdentification(mut proposed)) = spec.frozen_input.clone() {
             let saved: Option<String> = tx
                 .query_row(
@@ -904,6 +992,7 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
         let mut dispatch = lock(&self.job_dispatch)?;
+        let settings = crate::library_settings::read_workers(&tx, dispatch.settings)?.jobs;
         let candidate: Option<String> = tx
             .query_row(
                 "WITH active AS (
@@ -955,7 +1044,7 @@ impl Store {
                    candidate.created_at,candidate.id LIMIT 1",
                 params![worker_instance, now, collector_app::IMPORT_COPY_JOB_KIND,
                     dispatch.prefers_copy(), collector_app::PROVIDER_JOB_SLOTS,
-                    dispatch.settings.processing_workers, dispatch.settings.copy_workers,
+                    settings.processing_workers, settings.copy_workers,
                     serde_json::to_string(&dispatch.preferred_imports()).map_err(storage)?,
                     dispatch.preferred_publication(), dispatch.prefers_metadata()],
                 |row| row.get(0),
@@ -1498,6 +1587,7 @@ impl Store {
                     | "import_publication"
                     | "catalog_acquisition"
                     | "processing_operation"
+                    | "accuraterip_check"
                     | "music_derivative"
                     | "metadata_resolution"
                     | "bulk_intake"

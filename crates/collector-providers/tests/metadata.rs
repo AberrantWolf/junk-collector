@@ -111,10 +111,16 @@ fn serve(replies: Vec<Reply>) -> FixtureServer {
                 String::from_utf8_lossy(&request[..read]).into_owned(),
             ));
             thread::sleep(reply.delay);
+            let length = if reply.status_and_headers.contains("Content-Length:")
+                || reply.status_and_headers.contains("X-Omit-Length:")
+            {
+                String::new()
+            } else {
+                format!("Content-Length: {}\r\n", reply.body.len())
+            };
             let response = format!(
-                "HTTP/1.1 {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                reply.status_and_headers,
-                reply.body.len()
+                "HTTP/1.1 {}\r\n{length}Connection: close\r\n\r\n",
+                reply.status_and_headers
             );
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.write_all(&reply.body);
@@ -700,7 +706,7 @@ fn cached_bounds_candidate_versions_and_malformed_successes_are_checked() {
 
 #[test]
 fn artwork_previews_use_small_endpoint_and_bound_redirects_bytes_types_and_cancellation() {
-    use collector_app::ArtworkPreviewPort;
+    use collector_app::ArtworkSourcePort;
     let release = "00000000-0000-4000-8000-000000000001";
     let server = serve(vec![reply("200 OK\r\nContent-Type: image/png", b"preview")]);
     let provider = CoverArtArchiveProvider::with_test_origins(
@@ -765,6 +771,146 @@ fn artwork_previews_use_small_endpoint_and_bound_redirects_bytes_types_and_cance
         provider.preview(release, "12345", &|| Ok(checks
             .fetch_add(1, Ordering::SeqCst)
             >= 2)),
+        Err(collector_core::Error::JobCancelled)
+    ));
+}
+
+fn original_provider(server: &FixtureServer) -> CoverArtArchiveProvider {
+    CoverArtArchiveProvider::with_test_origins(
+        "collector-test/1 (test@example.invalid)",
+        &server.origin,
+        &[],
+        Duration::from_secs(2),
+    )
+    .unwrap()
+}
+
+#[test]
+fn original_size_inspection_follows_pinned_head_redirects_and_preserves_unknown_lengths() {
+    use collector_app::ArtworkSourcePort;
+    let release = "00000000-0000-4000-8000-000000000001";
+    let server = serve(vec![
+        reply("307 Temporary Redirect\r\nLocation: /original", []),
+        reply("200 OK\r\nContent-Length: 61037975", []),
+        reply("200 OK\r\nX-Omit-Length: yes", []),
+        reply("405 Method Not Allowed", []),
+    ]);
+    let provider = original_provider(&server);
+    assert_eq!(
+        provider
+            .original_size(release, "12345", &|| Ok(false))
+            .unwrap(),
+        Some(61037975)
+    );
+    assert_eq!(
+        provider
+            .original_size(release, "12345", &|| Ok(false))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        provider
+            .original_size(release, "12345", &|| Ok(false))
+            .unwrap(),
+        None
+    );
+    assert!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(_, value)| value.starts_with("HEAD "))
+    );
+    assert!(matches!(
+        provider.original_size(release, "12345", &|| Ok(true)),
+        Err(collector_core::Error::JobCancelled)
+    ));
+    for status in [
+        "403 Forbidden",
+        "429 Too Many Requests",
+        "307 Temporary Redirect\r\nLocation: http://untrusted.invalid/cover",
+    ] {
+        let server = serve(vec![reply(status, [])]);
+        assert!(
+            original_provider(&server)
+                .original_size(release, "12345", &|| Ok(false))
+                .is_err()
+        );
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn original_stream_handles_large_images_unknown_lengths_bounds_truncation_and_cancellation() {
+    use collector_app::StreamingProviderPort;
+    let query = CoverArtArchiveQuery::Image {
+        release_id: "00000000-0000-4000-8000-000000000001".into(),
+        image_id: "12345".into(),
+    };
+    let large = vec![71_u8; 21 * 1024 * 1024];
+    let server = serve(vec![reply(
+        "200 OK\r\nContent-Type: image/png",
+        large.clone(),
+    )]);
+    let provider = original_provider(&server);
+    let mut response = provider
+        .acquire_stream(
+            &caa_request(&query, collector_app::MAX_PROVIDER_ARTWORK_BYTES as u64),
+            &mut Execution::active(),
+        )
+        .unwrap();
+    assert_eq!(response.bytes.0, large.len() as u64);
+    assert_eq!(response.digest, Digest::sha256(&large));
+    let mut actual = Vec::new();
+    response.reader.read_to_end(&mut actual).unwrap();
+    assert_eq!(actual, large);
+    for (headers, body, limit) in [
+        (
+            "200 OK\r\nContent-Type: image/png\r\nContent-Length: 61037975",
+            vec![],
+            1024,
+        ),
+        (
+            "200 OK\r\nContent-Type: image/png\r\nX-Omit-Length: yes",
+            vec![0; 2048],
+            1024,
+        ),
+        (
+            "200 OK\r\nContent-Type: image/png\r\nContent-Length: 2048",
+            vec![0; 1024],
+            4096,
+        ),
+        ("200 OK\r\nContent-Type: text/html", vec![0; 1024], 4096),
+    ] {
+        let server = serve(vec![reply(headers, body)]);
+        assert!(
+            original_provider(&server)
+                .acquire_stream(&caa_request(&query, limit), &mut Execution::active())
+                .is_err()
+        );
+    }
+    let server = serve(vec![reply(
+        "200 OK\r\nContent-Type: image/png\r\nX-Omit-Length: yes",
+        b"original",
+    )]);
+    let mut response = original_provider(&server)
+        .acquire_stream(&caa_request(&query, 1024), &mut Execution::active())
+        .unwrap();
+    let mut actual = Vec::new();
+    response.reader.read_to_end(&mut actual).unwrap();
+    assert_eq!(actual, b"original");
+    let server = serve(vec![reply(
+        "200 OK\r\nContent-Type: image/png",
+        vec![1; 256 * 1024],
+    )]);
+    let mut execution = Execution {
+        cancel_after: Some(4),
+        checks: AtomicUsize::new(0),
+    };
+    assert!(matches!(
+        original_provider(&server)
+            .acquire_stream(&caa_request(&query, 1024 * 1024), &mut execution),
         Err(collector_core::Error::JobCancelled)
     ));
 }

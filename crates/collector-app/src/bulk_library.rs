@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub enum BulkLibraryKind {
     Metadata,
     MusicPreparation,
+    AccurateRip,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "selection", rename_all = "snake_case", deny_unknown_fields)]
@@ -218,6 +219,9 @@ impl CollectionService {
             return Err(Error::Conflict);
         }
         match command.kind {
+            BulkLibraryKind::AccurateRip => Ok(FrozenJobInput::AccurateRip(
+                self.freeze_accuraterip_check(actor.user_id, item, child, None, true)?,
+            )),
             BulkLibraryKind::MusicPreparation => {
                 let plan = self.music_album_preparation_plan(actor, item.id)?;
                 let chosen = command.sources.get(&item.id);
@@ -410,6 +414,7 @@ impl CollectionService {
                 }
                 let input = member.input.ok_or(Error::Conflict)?;
                 let (id, kind, units) = match &input {
+                    FrozenJobInput::AccurateRip(v) => (v.job_id, "accuraterip_check", 0),
                     FrozenJobInput::DerivativeBatch(v) => {
                         (v.batch_id, "music_derivative_batch", v.members.len() as u64)
                     }
@@ -527,6 +532,26 @@ impl CollectionService {
                                 } else {
                                     let job = self.jobs.job_record(job, record.user_id)?;
                                     match job.state {
+                                        JobState::Completed
+                                            if record.summary.kind
+                                                == BulkLibraryKind::AccurateRip =>
+                                        {
+                                            let confirmed = job
+                                                .result
+                                                .as_ref()
+                                                .and_then(|r| {
+                                                    r.get("completion")
+                                                        .unwrap_or(r)
+                                                        .get("confirmed")
+                                                })
+                                                .and_then(|r| r.as_bool())
+                                                .unwrap_or(false);
+                                            Some(if confirmed {
+                                                (BulkMemberState::Succeeded, None)
+                                            } else {
+                                                (BulkMemberState::Review,Some("Audio check finished without confirming every disc. Open the album for AccurateRip results.".into()))
+                                            })
+                                        }
                                         JobState::Completed => {
                                             let partial = job
                                                 .result

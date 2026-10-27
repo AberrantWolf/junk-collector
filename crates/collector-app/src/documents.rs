@@ -1,6 +1,9 @@
 //! Attachment authorization and preview policy; shared libraries own byte reads.
 use crate::*;
 pub const MAX_ASSET_BYTES: usize = 20 * 1024 * 1024;
+/// Original provider covers are kept separately from the interactive upload cap.
+/// Image dimensions and decoder allocation remain independently bounded.
+pub const MAX_PROVIDER_ARTWORK_BYTES: usize = 128 * 1024 * 1024;
 const TEXT_PREVIEW_BYTES: usize = 128 * 1024;
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct DocumentTextPreview {

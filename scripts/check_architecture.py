@@ -9,6 +9,7 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "collector-cd-identity": set(),
     "collector-core": set(),
     "collector-api-types": {"collector-core"},
     "collector-media": {"collector-core", "collector-api-types"},

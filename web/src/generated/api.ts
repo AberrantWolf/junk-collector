@@ -244,6 +244,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["worker_settings"];
+        put: operations["update_worker_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/album-groups": {
         parameters: {
             query?: never;
@@ -829,6 +845,22 @@ export interface paths {
         };
         get: operations["curation_catalog_snapshots"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collections/{id}/cd-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["cd_library_settings"];
+        put: operations["update_cd_library_settings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1453,6 +1485,38 @@ export interface paths {
         };
         get: operations["item"];
         put: operations["save_item"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/accuraterip-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["check_accuraterip"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/accuraterip-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["accuraterip_checks"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -2506,6 +2570,21 @@ export interface components {
             revision: components["schemas"]["Revision"];
             username: string;
         };
+        AccurateRipCheckResult: {
+            confirmed: boolean;
+            discs: components["schemas"]["AccurateRipDiscResult"][];
+            limitations: string[];
+        };
+        AccurateRipCheckView: {
+            job: components["schemas"]["JobView"];
+            result?: components["schemas"]["AccurateRipCheckResult"] | null;
+            sources: components["schemas"]["RepresentationId"][];
+        };
+        AccurateRipDiscResult: {
+            observation_id: components["schemas"]["ObservationId"];
+            source_id: components["schemas"]["RepresentationId"];
+            status: components["schemas"]["AudioVerificationStatus"];
+        };
         AcquireAccurateRipCommand: {
             representation_id: components["schemas"]["RepresentationId"];
             structure_observation_id: components["schemas"]["ObservationId"];
@@ -2685,7 +2764,7 @@ export interface components {
             token: string;
         };
         /** @enum {string} */
-        BulkLibraryKind: "metadata" | "music_preparation";
+        BulkLibraryKind: "metadata" | "music_preparation" | "accurate_rip";
         BulkLibraryMemberView: {
             /** Format: int32 */
             already_ready: number;
@@ -2864,10 +2943,19 @@ export interface components {
             /** Format: int32 */
             member_count: number;
         };
+        CdLibrarySettings: {
+            check_accuraterip_on_ingest: boolean;
+            /** Format: int32 */
+            maximum_offset: number;
+            revision: components["schemas"]["Revision"];
+        };
         ChangePassword: {
             confirmation: string;
             expected_revision: components["schemas"]["Revision"];
             new_password: string;
+        };
+        CheckAccurateRip: {
+            representation_id?: components["schemas"]["RepresentationId"] | null;
         };
         CleanReimportOptions: {
             expected_metadata_revision: components["schemas"]["Revision"];
@@ -3729,6 +3817,18 @@ export interface components {
             kind: "catalog_snapshot";
             response_status?: components["schemas"]["ProviderResponseStatus"] | null;
             snapshot_id: components["schemas"]["SnapshotId"];
+        };
+        JobSettings: {
+            /**
+             * Format: int32
+             * @default 1
+             */
+            copy_workers: number;
+            /**
+             * Format: int32
+             * @default 4
+             */
+            processing_workers: number;
         };
         /** @enum {string} */
         JobState: "queued" | "running" | "cancel_requested" | "completed" | "failed" | "cancelled";
@@ -4682,6 +4782,7 @@ export interface components {
                 identifiers: components["schemas"]["ProviderIdentity"][];
                 identity: components["schemas"]["IdentityState"];
                 identity_link: components["schemas"]["ItemIdentityLink"];
+                import_in_progress: boolean;
                 inventory_subtitle?: string | null;
                 inventory_title?: string | null;
                 merge_group?: components["schemas"]["TransactionId"] | null;
@@ -4941,6 +5042,7 @@ export interface components {
             identifiers: components["schemas"]["ProviderIdentity"][];
             identity: components["schemas"]["IdentityState"];
             identity_link: components["schemas"]["ItemIdentityLink"];
+            import_in_progress: boolean;
             inventory_subtitle?: string | null;
             inventory_title?: string | null;
             merge_group?: components["schemas"]["TransactionId"] | null;
@@ -5310,6 +5412,12 @@ export interface components {
             command: components["schemas"]["UpdateAssetCommand"];
             expected_revision: components["schemas"]["Revision"];
         };
+        UpdateCdLibrarySettings: {
+            check_accuraterip_on_ingest: boolean;
+            expected_revision: components["schemas"]["Revision"];
+            /** Format: int32 */
+            maximum_offset: number;
+        };
         UpdateCollectionList: {
             change: components["schemas"]["CollectionListChange"];
             expected_revision: components["schemas"]["Revision"];
@@ -5325,6 +5433,10 @@ export interface components {
         UpdateMetadataPreferences: {
             expected_revision: components["schemas"]["Revision"];
             language: components["schemas"]["LanguageTag"];
+        };
+        UpdateWorkerSettings: {
+            expected_revision: components["schemas"]["Revision"];
+            jobs: components["schemas"]["JobSettings"];
         };
         Upload: {
             capture_id: components["schemas"]["CaptureId"];
@@ -5413,6 +5525,10 @@ export interface components {
             id: components["schemas"]["JobId"];
             /** @enum {string} */
             kind: "job";
+        };
+        WorkerSettings: {
+            jobs: components["schemas"]["JobSettings"];
+            revision: components["schemas"]["Revision"];
         };
     };
     responses: never;
@@ -6105,6 +6221,71 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    worker_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerSettings"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_worker_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkerSettings"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerSettings"];
+                };
             };
             /** @description Forbidden */
             403: {
@@ -7754,6 +7935,75 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    cd_library_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CdLibrarySettings"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_cd_library_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCdLibrarySettings"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CdLibrarySettings"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9540,6 +9790,68 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    check_accuraterip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckAccurateRip"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    accuraterip_checks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccurateRipCheckView"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

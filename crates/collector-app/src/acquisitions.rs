@@ -41,6 +41,12 @@ impl CollectionService {
                 return Err(Error::JobCancelled);
             }
             let binding = match self.jobs.frozen_job_input(owner.id, owner.user_id)? {
+                Some(FrozenJobInput::AccurateRip(input)) => input
+                    .sources
+                    .first()
+                    .ok_or(Error::Conflict)?
+                    .collection_binding
+                    .clone(),
                 Some(FrozenJobInput::Acquisition(input)) => input.collection_binding,
                 Some(FrozenJobInput::MetadataResolution(input)) => {
                     input.acquisition.collection_binding

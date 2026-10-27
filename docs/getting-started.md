@@ -78,17 +78,43 @@ Preservation can succeed even when identification or verification is unavailable
 For a raw CD capture with redumper already installed, run:
 
 ```sh
+cargo build --release --locked -p collector-cd-identity # once, for automatic lookup
+./scripts/rip-cd.sh --auto /path/to/dumps disk7
+```
+
+This captures into a fresh `cd-<UTC timestamp>-<random suffix>` folder with
+`disc.*` raw masters, sidecars and logs, without generating BIN/CUE or playback
+derivatives. After a successful capture, automatic naming waits at most 15 seconds
+total for a MusicBrainz lookup, without retries or additional audio reads. Exactly
+one release, matching medium/track count and safe catalog number permits naming
+the folder, for example `SQEX-11226`; multi-disc releases append ` - Disc N`.
+Missing/ambiguous metadata, unavailable tools/network, unsupported TOCs and existing
+destinations keep the generated folder. Naming is descriptive, not verification.
+The lookup uses Python 3 and `collector-cd-identity` from PATH or this checkout's
+`target/release`; `COLLECTOR_CD_IDENTITY=/path/to/collector-cd-identity` overrides
+the executable. Ripping remains available without these optional naming tools.
+For a manual folder name without any lookup, use:
+
+```sh
 ./scripts/rip-cd.sh "Album - Disc 1" /path/to/dumps disk7
 ```
 
-This creates `/path/to/dumps/Album - Disc 1` with `disc.*` raw masters,
-disc sidecars and logs, without generating BIN/CUE or playback derivatives.
 The optional last argument is the drive (`diskN` on macOS, `/dev/sgN` on Linux);
 omit it only when the first available drive is the intended one. The helper reads
 the selected device from the initial dump log and pins it for later stages. Keep the same
 disc inserted for all stages. Use `diskutil list` to find a macOS drive; Linux
 media must be unmounted before dumping. `RETRIES=100` is the default;
 `REDUMPER=/path/to/redumper` selects an executable outside PATH.
+Refinement runs only when the initial dump reports SCSI or C2 errors. Q-subchannel
+errors alone do not trigger this normal refinement pass. An unreadable error
+summary stops the helper for review without starting refinement.
+For ordinary music CDs, documented Q-only imperfections are an accepted home-lab
+tradeoff. Retain the complete raw package and logs, then use **Check audio with
+AccurateRip** to assess the audio within its reported coverage. A match does not
+establish complete subchannels; a mismatch or missing reference is inconclusive
+on its own. Further Q-only refinement is optional, not a prerequisite to import
+or listening when the existing structural requirements are met. See the
+[accepted policy and optional fish command](decisions/cd-audio-capture-tradeoff.md).
 Existing folders are refused and failed captures are retained. Review `disc.log`
 for unresolved errors, then import the complete folder with `disc.toc` as the
 analysis anchor. Command completion/file presence does not establish error-free

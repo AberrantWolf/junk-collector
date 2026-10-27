@@ -83,6 +83,24 @@ musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
 rips = "/srv/incoming"
 ```
 
+
+### CD library defaults
+
+In **Administration → Library settings**, choose a music collection you own.
+Automatic AccurateRip checking during new CD ingest defaults on; save the checkbox
+to turn it off. The maximum offset accepts 0–2939 stereo sample frames and defaults
+to 2939. A new import freezes these settings at acceptance. Existing unfinished
+imports keep their previously accepted behavior. Preservation-only imports and
+digital purchases do not acquire CD checks.
+
+**Check unconfirmed rips** starts a bounded batch over the collection's existing
+originals. Confirmed sources are skipped, and every other eligible source gets a
+structure/response/audio workflow. Open the batch's album results for no-data,
+ambiguity, missing files or unsupported packages. The button is an explicit run;
+there is no perpetual retry of absent provider data. New ingests check automatically
+when enabled. Defaults are private operational state retained through restart and
+reindex, independent of portable metadata authority.
+
 ### Background workers
 
 ```toml
@@ -95,9 +113,12 @@ copy_workers = 1
 publication and audio preparation. `copy_workers` independently caps concurrent
 inbox staging (including the older combined inbox import command); it accepts
 1 through `processing_workers` and defaults to one. Provider downloads always have
-one additional, separate slot. `doctor` and startup report the effective limits.
-Omitting `[jobs]` uses four processing workers and one copy. Restart to apply edits;
-invalid settings are rejected before opening storage.
+one additional, separate slot. Omitting `[jobs]` uses four processing workers and
+one copy. These are startup defaults. **Administration → Server settings →
+Background workers** saves an override that survives restart and reindex. Saved
+limits apply to new claims immediately; reducing them lets current jobs finish.
+Configuration-file edits require restart and do not replace a saved override.
+Invalid settings are rejected before opening storage.
 
 Ready copied discs get bounded priority for analysis and original publication.
 With one worker this normally finishes one disc's originals before the next copy.

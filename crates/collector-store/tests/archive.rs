@@ -268,10 +268,13 @@ fn metadata_fixture_server(replies: Vec<(&'static str, Vec<u8>)>) -> MetadataFix
                 .lock()
                 .unwrap()
                 .push(String::from_utf8_lossy(&request[..count]).into_owned());
-            let response = format!(
-                "HTTP/1.1 {status_and_headers}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
+            let length = if status_and_headers.contains("Content-Length:") {
+                String::new()
+            } else {
+                format!("Content-Length: {}\r\n", body.len())
+            };
+            let response =
+                format!("HTTP/1.1 {status_and_headers}\r\n{length}Connection: close\r\n\r\n");
             stream.write_all(response.as_bytes()).unwrap();
             stream.write_all(&body).unwrap();
         }
@@ -7307,6 +7310,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
 #[test]
 fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser_chaining() {
     let (root, store, actor, service, collection) = setup();
+    disable_automatic_cd_checks(&service, &actor, collection.id);
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
@@ -7989,6 +7993,23 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
 fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
     use collector_app::IngestWorkState;
     let (_root, store, actor, service, collection) = setup();
+    let target = store.save(item(collection.id), Revision(0)).unwrap();
+    let attention = || {
+        service
+            .browse_presented(
+                &actor,
+                BrowseQuery {
+                    collection_id: Some(collection.id),
+                    filter: BrowseFilter::AlbumPlaybackNeedsAttention,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .items
+            .iter()
+            .any(|item| item.id == target.id)
+    };
+    assert!(attention());
     let plan = service
         .plan_ingest(
             &actor,
@@ -8022,12 +8043,25 @@ fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
-                destination: None,
+                destination: Some(collector_app::IngestDestination {
+                    item_id: target.id,
+                    expected_revision: target.revision,
+                }),
             },
             &command(),
         )
         .unwrap();
     let id = accepted.imports[0].import_id;
+    assert!(
+        service
+            .item_presented(&actor, target.id)
+            .unwrap()
+            .import_in_progress
+    );
+    assert!(
+        !attention(),
+        "An unfinished upload is not an actionable playback failure"
+    );
     service
         .stage_provisional_import_chunk(&actor, id, 0, 0, b"ab")
         .unwrap();
@@ -8054,6 +8088,12 @@ fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
         .unwrap();
     let active = service.ingest_detail(&actor, id).unwrap();
     assert!(
+        service
+            .item_presented(&actor, target.id)
+            .unwrap()
+            .import_in_progress
+    );
+    assert!(
         active
             .summary
             .work
@@ -8067,15 +8107,57 @@ fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
         device_id: None,
     };
     assert!(service.ingest_detail(&outsider, id).is_err());
+    assert!(matches!(
+        service.item_presented(&outsider, target.id),
+        Err(Error::Forbidden)
+    ));
     assert!(
         store
             .import_work_records(id, outsider.user_id)
             .unwrap()
             .is_empty()
     );
+    store
+        .fail_job(claim.id, &claim.claim_token, "Publication failed")
+        .unwrap();
+    assert!(
+        !service
+            .item_presented(&actor, target.id)
+            .unwrap()
+            .import_in_progress
+    );
+    assert!(
+        attention(),
+        "A blocked import must not display progress forever"
+    );
+    service
+        .retry_ingest(
+            &actor,
+            id,
+            collector_app::RetryIngestCommand {
+                job_id: Some(claim.id),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        service
+            .item_presented(&actor, target.id)
+            .unwrap()
+            .import_in_progress
+    );
+    assert!(!attention());
+    let claim = store.claim_job("activity-retry", 30).unwrap().unwrap();
     service
         .cancel_ingest(&actor, id, active.import.revision, &command())
         .unwrap();
+    assert!(
+        !service
+            .item_presented(&actor, target.id)
+            .unwrap()
+            .import_in_progress
+    );
+    assert!(attention());
     assert!(
         service
             .ingest_detail(&actor, id)
@@ -8101,6 +8183,7 @@ fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
 #[test]
 fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
     let (root, store, actor, service, collection) = setup();
+    disable_automatic_cd_checks(&service, &actor, collection.id);
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let pcm = vec![0; 2352 * 10];
@@ -8203,6 +8286,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
 #[test]
 fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
     let (_root, store, actor, service, collection) = setup();
+    disable_automatic_cd_checks(&service, &actor, collection.id);
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let toc = b"TRACK AUDIO\nFILE \"disc.bin\" 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
@@ -8313,6 +8397,14 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         service.ingest_detail(&actor, id).unwrap()
     );
     let during = service.ingest_detail(&actor, id).unwrap();
+    let importing_item = during.summary.target_item_id.unwrap();
+    assert!(
+        service
+            .item_presented(&actor, importing_item)
+            .unwrap()
+            .import_in_progress,
+        "Preserved originals do not settle downstream audio preparation"
+    );
     let preparation = during
         .steps
         .iter()
@@ -8334,6 +8426,12 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
     let observing_service = service.clone();
     let observing_actor = actor.clone();
     *encoder.after_encode.lock().unwrap() = Some(Box::new(move || {
+        assert!(
+            observing_service
+                .item_presented(&observing_actor, importing_item)
+                .unwrap()
+                .import_in_progress
+        );
         let working = observing_service
             .ingest_detail(&observing_actor, id)
             .unwrap();
@@ -8360,6 +8458,12 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
         step.step == "preparation" && step.state == collector_app::IngestStepState::Succeeded
     }));
     let target = completed.summary.target_item_id.unwrap();
+    assert!(
+        !service
+            .item_presented(&actor, target)
+            .unwrap()
+            .import_in_progress
+    );
     let capture = store.capture(completed.summary.capture_id).unwrap();
     assert_eq!(capture.representations.len(), 2);
     assert_eq!(
@@ -8542,6 +8646,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
 #[test]
 fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manual_authority() {
     let (_root, store, actor, service, collection) = setup();
+    disable_automatic_cd_checks(&service, &actor, collection.id);
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let plan = service
@@ -8638,7 +8743,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .unwrap();
     let art = encoded.into_inner();
     let caa_listing = format!(
-        r#"{{"release":"https://musicbrainz.org/release/{release_id}","images":[{{"id":"12345","front":true,"back":false,"approved":true,"types":["Front"],"comment":"","edit":1}}]}}"#
+        r#"{{"release":"https://musicbrainz.org/release/{release_id}","images":[{{"id":"12344","front":true,"approved":true,"types":["Front","Booklet"]}},{{"id":"12345","front":true,"back":false,"approved":true,"types":["Front"],"comment":"","edit":1}},{{"id":"12346","front":true,"approved":true,"types":["Front"]}}]}}"#
     )
     .into_bytes();
     let caa_server = metadata_fixture_server(vec![
@@ -8647,6 +8752,8 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             b"retry me".to_vec(),
         ),
         ("200 OK\r\nContent-Type: application/json", caa_listing),
+        ("200 OK\r\nContent-Length: 61037975", vec![]),
+        ("200 OK\r\nContent-Length: 10000", vec![]),
         ("200 OK\r\nContent-Type: image/png", art.clone()),
     ]);
     let cover_art = Arc::new(
@@ -8671,14 +8778,15 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .unwrap()
         .with_streaming_provider(
             ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
-            Arc::new(collector_app::BoundedProviderAdapter(cover_art.clone())),
+            cover_art.clone(),
         )
         .unwrap()
         .with_catalog_parser(
             ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
-            cover_art,
+            cover_art.clone(),
         )
-        .unwrap();
+        .unwrap()
+        .with_artwork_source(cover_art);
     assert!(service.run_next_job("guided-provider-publication").unwrap());
     provider_drain(&service);
     let requests = mb_server.requests.lock().unwrap();
@@ -8765,6 +8873,15 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
     );
     assert!(metadata.authority.field_overrides.is_empty());
     assert!(metadata.authority.artwork_choice.is_none());
+    let requests = caa_server.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        5,
+        "selection must survive continuations without repeated probes"
+    );
+    assert!(requests[2].starts_with(&format!("HEAD /release/{release_id}/12345 ")));
+    assert!(requests[3].starts_with(&format!("HEAD /release/{release_id}/12346 ")));
+    assert!(requests[4].starts_with(&format!("GET /release/{release_id}/12346 ")));
 }
 
 #[test]
@@ -11849,7 +11966,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
         .unwrap()
         .with_streaming_provider(
             ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
-            Arc::new(collector_app::BoundedProviderAdapter(cover_art.clone())),
+            cover_art.clone(),
         )
         .unwrap()
         .with_catalog_parser(
@@ -22948,10 +23065,7 @@ fn cover_art_retention_reuses_responses_with_item_owned_assets_and_durable_retri
     );
     let configure = |service: CollectionService| {
         service
-            .with_streaming_provider(
-                ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
-                Arc::new(collector_app::BoundedProviderAdapter(caa.clone())),
-            )
+            .with_streaming_provider(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
             .unwrap()
             .with_catalog_parser(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
             .unwrap()
@@ -23219,9 +23333,7 @@ impl CoverArtReviewFixture {
         let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
             .with_streaming_provider(
                 ModuleId(collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID.into()),
-                Arc::new(collector_app::BoundedProviderAdapter(
-                    artwork_provider.clone(),
-                )),
+                artwork_provider.clone(),
             )
             .unwrap()
             .with_catalog_parser(
@@ -23292,10 +23404,7 @@ fn cover_art_review_fixture(replies: Vec<(&'static str, Vec<u8>)>) -> CoverArtRe
         .unwrap()
         .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), mb)
         .unwrap()
-        .with_streaming_provider(
-            ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
-            Arc::new(collector_app::BoundedProviderAdapter(caa.clone())),
-        )
+        .with_streaming_provider(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
         .unwrap()
         .with_catalog_parser(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
         .unwrap();
@@ -26915,4 +27024,831 @@ fn music_metadata_maintenance_recovers_all_pages_of_legacy_duplicate_choices() {
         );
     }
     store.reindex().unwrap();
+}
+
+#[test]
+fn provider_cover_above_upload_limit_retains_original_thumbnail_and_reindex_identity() {
+    use image::ImageEncoder;
+    let mut image = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut image,
+        image::codecs::png::CompressionType::Uncompressed,
+        image::codecs::png::FilterType::NoFilter,
+    )
+    .write_image(
+        &vec![71; 2700 * 2700 * 3],
+        2700,
+        2700,
+        image::ExtendedColorType::Rgb8,
+    )
+    .unwrap();
+    assert!(image.len() > collector_app::MAX_ASSET_BYTES);
+    let fixture =
+        cover_art_review_fixture(vec![("200 OK\r\nContent-Type: image/png", image.clone())]);
+    let job = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&fixture.service);
+    let finished = fixture.service.job(&fixture.actor, job).unwrap();
+    assert_eq!(finished.state, JobState::Completed, "{:?}", finished.error);
+    let artwork = fixture
+        .service
+        .metadata_view(&fixture.actor, fixture.item.id)
+        .unwrap()
+        .authority
+        .artwork_choice
+        .unwrap();
+    assert_eq!(
+        resource_bytes(
+            fixture
+                .service
+                .asset(&fixture.actor, fixture.item.id, artwork, false)
+                .unwrap()
+        ),
+        image
+    );
+    let thumbnail = image::load_from_memory(&resource_bytes(
+        fixture
+            .service
+            .asset(&fixture.actor, fixture.item.id, artwork, true)
+            .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!((thumbnail.width(), thumbnail.height()), (192, 192));
+    let current = fixture.store.item(fixture.item.id).unwrap();
+    assert!(matches!(
+        fixture.service.publish_cover(
+            &fixture.actor,
+            current.id,
+            current.revision,
+            &image,
+            "Manual upload".into(),
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+    fixture.store.reindex().unwrap();
+    assert_eq!(
+        resource_bytes(
+            fixture
+                .service
+                .asset(&fixture.actor, fixture.item.id, artwork, false)
+                .unwrap()
+        ),
+        image
+    );
+    assert_eq!(
+        fixture
+            .service
+            .metadata_view(&fixture.actor, fixture.item.id)
+            .unwrap()
+            .authority
+            .artwork_choice,
+        Some(artwork)
+    );
+}
+
+#[test]
+fn automatic_cover_selection_survives_restart_and_rejects_cancelled_or_superseded_claims() {
+    let fixture = cover_art_review_fixture(vec![(
+        "200 OK\r\nContent-Type: image/png",
+        review_cover_image(),
+    )]);
+    let job = fixture
+        .service
+        .resolve_metadata(
+            &fixture.actor,
+            fixture.item.id,
+            fixture.image_command.clone(),
+            &command(),
+        )
+        .unwrap();
+    assert!(fixture.service.run_next_job("artwork-upstream").unwrap());
+    let claim = fixture
+        .store
+        .claim_job("artwork-selection", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.id, job);
+    let selection = RawJson::from_value(
+        serde_json::json!({"query":"image","release_id":"22222222-2222-4222-8222-222222222222","image_id":"9001"}),
+    );
+    assert_eq!(
+        fixture
+            .store
+            .metadata_artwork_selection(&claim, Some(&selection))
+            .unwrap(),
+        Some(selection.clone())
+    );
+    fixture.clock.advance(31);
+    let fixture = fixture.reopen();
+    assert!(
+        fixture
+            .store
+            .metadata_artwork_selection(&claim, None)
+            .is_err()
+    );
+    let current = fixture
+        .store
+        .claim_job("artwork-after-restart", 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.id, job);
+    let changed = RawJson::from_value(
+        serde_json::json!({"query":"image","release_id":"22222222-2222-4222-8222-222222222222","image_id":"9002"}),
+    );
+    assert_eq!(
+        fixture
+            .store
+            .metadata_artwork_selection(&current, Some(&changed))
+            .unwrap(),
+        Some(selection)
+    );
+    fixture
+        .store
+        .request_job_cancellation(job, fixture.actor.user_id)
+        .unwrap();
+    assert!(
+        fixture
+            .store
+            .metadata_artwork_selection(&current, None)
+            .is_err()
+    );
+}
+
+#[test]
+fn cd_check_defaults_and_workers_are_scoped_revisioned_and_persisted() {
+    use collector_app::{JobSettings, UpdateCdLibrarySettings, UpdateWorkerSettings};
+    let (root, store, actor, service, collection) = setup();
+    let defaults = service.cd_library_settings(&actor, collection.id).unwrap();
+    assert!(defaults.check_accuraterip_on_ingest);
+    let update = UpdateCdLibrarySettings {
+        expected_revision: defaults.revision,
+        check_accuraterip_on_ingest: false,
+        maximum_offset: 0,
+    };
+    let receipt = command();
+    let saved = service
+        .update_cd_library_settings(&actor, collection.id, update.clone(), &receipt)
+        .unwrap();
+    assert_eq!(
+        service
+            .update_cd_library_settings(&actor, collection.id, update.clone(), &receipt)
+            .unwrap()
+            .revision,
+        saved.revision
+    );
+    assert!(matches!(
+        service.update_cd_library_settings(&actor, collection.id, update, &command()),
+        Err(Error::Conflict)
+    ));
+    let viewer_id = store
+        .create_user("cd-settings-viewer", "long test password", false)
+        .unwrap();
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.cd_library_settings(&viewer, collection.id),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.worker_settings(&viewer),
+        Err(Error::Forbidden)
+    ));
+    let before = service.worker_settings(&actor).unwrap();
+    let worker = UpdateWorkerSettings {
+        expected_revision: before.revision,
+        jobs: JobSettings {
+            processing_workers: 2,
+            copy_workers: 1,
+        },
+    };
+    service
+        .update_worker_settings(&actor, worker, &command())
+        .unwrap();
+    assert_eq!(service.job_settings().unwrap().processing_workers, 2);
+    for _ in 0..3 {
+        store
+            .enqueue_job(JobSpec {
+                id: JobId::new(),
+                user_id: actor.user_id,
+                collection_id: Some(collection.id),
+                item_id: None,
+                kind: "worker-budget-fixture".into(),
+                phase: "queued".into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+    }
+    let first = store.claim_job("live-worker-limits", 30).unwrap().unwrap();
+    let second = store.claim_job("live-worker-limits", 30).unwrap().unwrap();
+    assert!(store.claim_job("live-worker-limits", 30).unwrap().is_none());
+    service
+        .update_worker_settings(
+            &actor,
+            UpdateWorkerSettings {
+                expected_revision: Revision(1),
+                jobs: JobSettings {
+                    processing_workers: 1,
+                    copy_workers: 1,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        store.job_record(first.id, actor.user_id).unwrap().state,
+        JobState::Running,
+        "reducing limits leaves admitted work running"
+    );
+    store
+        .complete_job(first.id, &first.claim_token, serde_json::json!({}))
+        .unwrap();
+    assert!(store.claim_job("live-worker-limits", 30).unwrap().is_none());
+    store
+        .complete_job(second.id, &second.claim_token, serde_json::json!({}))
+        .unwrap();
+    let third = store.claim_job("live-worker-limits", 30).unwrap().unwrap();
+    store
+        .complete_job(third.id, &third.claim_token, serde_json::json!({}))
+        .unwrap();
+    service
+        .update_worker_settings(
+            &actor,
+            UpdateWorkerSettings {
+                expected_revision: Revision(2),
+                jobs: JobSettings {
+                    processing_workers: 2,
+                    copy_workers: 1,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        service
+            .update_worker_settings(
+                &actor,
+                UpdateWorkerSettings {
+                    expected_revision: Revision(1),
+                    jobs: JobSettings {
+                        processing_workers: 1,
+                        copy_workers: 2
+                    }
+                },
+                &command()
+            )
+            .is_err()
+    );
+    service
+        .reindex(&test_authentication(&actor), &command())
+        .unwrap();
+    assert_eq!(
+        service
+            .cd_library_settings(&actor, collection.id)
+            .unwrap()
+            .maximum_offset,
+        0
+    );
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open(root.path().join("archive"), root.path().join("state"))
+            .unwrap()
+            .with_job_settings(JobSettings {
+                processing_workers: 8,
+                copy_workers: 4,
+            })
+            .unwrap(),
+    );
+    let service = CollectionService::new(store, Arc::new(Registry::builtins()));
+    assert_eq!(
+        service.job_settings().unwrap().processing_workers,
+        2,
+        "saved override survives config defaults and restart"
+    );
+    assert!(
+        !service
+            .cd_library_settings(&actor, collection.id)
+            .unwrap()
+            .check_accuraterip_on_ingest
+    );
+}
+
+#[test]
+fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
+    use collector_app::{
+        BulkLibraryKind, CheckAccurateRip, LibrarySelection, PreviewBulkLibrary,
+        UpdateCdLibrarySettings,
+    };
+    let (root, store, actor, base_service, collection) = setup();
+    let frames = 451_u64 * 588;
+    let pcm = [1_u8, 0, 0, 0].repeat(frames as usize);
+    // Independent constant-PCM v1 oracle, also used by the qualified CD workflow.
+    let checksum = ((2940_u64 + (frames - 2940)) * (frames - 5879) / 2) as u32;
+    let mut dbar = vec![1];
+    for value in [451_u32, 903, 0x0200_0601] {
+        dbar.extend_from_slice(&value.to_le_bytes());
+    }
+    dbar.push(17);
+    dbar.extend_from_slice(&checksum.to_le_bytes());
+    dbar.extend_from_slice(&0_u32.to_le_bytes());
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let no_data = Arc::new(AtomicBool::new(false));
+    let provider = Arc::new(FixtureAccurateRipProvider {
+        bytes: dbar,
+        unavailable: unavailable.clone(),
+        no_data: no_data.clone(),
+    });
+    let make_service = |store: Arc<Store>| {
+        CollectionService::new(store, Arc::new(Registry::builtins()))
+            .with_streaming_provider(
+                ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+                Arc::new(collector_app::BoundedProviderAdapter(provider.clone())),
+            )
+            .unwrap()
+            .with_catalog_parser(
+                ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+                Arc::new(
+                    AccurateRipProvider::with_test_origin(
+                        "junk-collector-test/1",
+                        "http://127.0.0.1:1/",
+                        Duration::from_millis(50),
+                    )
+                    .unwrap(),
+                ),
+            )
+            .unwrap()
+    };
+    let service = make_service(store.clone());
+    drop(base_service);
+    service
+        .update_cd_library_settings(
+            &actor,
+            collection.id,
+            UpdateCdLibrarySettings {
+                expected_revision: Revision(0),
+                check_accuraterip_on_ingest: true,
+                maximum_offset: 0,
+            },
+            &command(),
+        )
+        .unwrap();
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: Some(0),
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Automatic CD".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "alternative.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = accepted.imports[0].import_id;
+    let item = accepted.imports[0].target_item_id.unwrap();
+    service
+        .update_cd_library_settings(
+            &actor,
+            collection.id,
+            UpdateCdLibrarySettings {
+                expected_revision: Revision(1),
+                check_accuraterip_on_ingest: false,
+                maximum_offset: 1,
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import, 1, 0, &pcm)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import, 2, 0, cue)
+        .unwrap();
+    for _ in 0..20 {
+        service.run_next_job("automatic-cd").unwrap();
+        if service
+            .accuraterip_checks(&actor, item)
+            .unwrap()
+            .first()
+            .is_some_and(|v| v.job.phase.starts_with("waiting_"))
+        {
+            break;
+        }
+    }
+    let checks = service.accuraterip_checks(&actor, item).unwrap();
+    assert_eq!(checks.len(), 1);
+    assert!(
+        matches!(
+            service.check_accuraterip(
+                &actor,
+                item,
+                CheckAccurateRip {
+                    representation_id: Some(checks[0].sources[0])
+                },
+                &command()
+            ),
+            Err(Error::Unavailable(_))
+        ),
+        "overlapping disc workflows cannot duplicate CPU work"
+    );
+    let job = checks[0].job.id;
+    assert!(!store.guided_ingest_intent(import).unwrap().unwrap().settled);
+    let Some(FrozenJobInput::AccurateRip(frozen)) =
+        store.frozen_job_input(job, actor.user_id).unwrap()
+    else {
+        panic!("missing CD check")
+    };
+    assert_eq!(
+        frozen.maximum_offset, 0,
+        "ingest uses its accepted defaults"
+    );
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = make_service(store.clone());
+    for _ in 0..20 {
+        service.resume_guided_ingests().unwrap();
+        if !service.run_next_job("restarted-cd").unwrap() {
+            break;
+        }
+    }
+    let checks = service.accuraterip_checks(&actor, item).unwrap();
+    assert_eq!(checks[0].job.state, JobState::Completed);
+    assert!(checks[0].result.as_ref().unwrap().confirmed);
+    assert!(store.guided_ingest_intent(import).unwrap().unwrap().settled);
+    let source = checks[0].sources[0];
+    let excluded = service
+        .preview_bulk_library(
+            &actor,
+            PreviewBulkLibrary {
+                kind: BulkLibraryKind::AccurateRip,
+                selection: LibrarySelection::Explicit { items: vec![item] },
+                sources: Default::default(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(excluded.excluded, 1, "confirmed originals are excluded");
+    no_data.store(true, Ordering::SeqCst);
+    let receipt = command();
+    let direct = service
+        .check_accuraterip(
+            &actor,
+            item,
+            CheckAccurateRip {
+                representation_id: Some(source),
+            },
+            &receipt,
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .check_accuraterip(
+                &actor,
+                item,
+                CheckAccurateRip {
+                    representation_id: Some(source)
+                },
+                &receipt
+            )
+            .unwrap(),
+        direct
+    );
+    for _ in 0..15 {
+        if !service.run_next_job("one-click-cd").unwrap() {
+            break;
+        }
+    }
+    let result = service
+        .accuraterip_checks(&actor, item)
+        .unwrap()
+        .into_iter()
+        .find(|v| v.job.id == direct)
+        .unwrap()
+        .result
+        .unwrap();
+    assert!(!result.confirmed);
+    assert_eq!(
+        result.discs[0].status,
+        music::AudioVerificationStatus::NoData
+    );
+    let batch = service
+        .preview_bulk_library(
+            &actor,
+            PreviewBulkLibrary {
+                kind: BulkLibraryKind::AccurateRip,
+                selection: LibrarySelection::AllMatching {
+                    query: collector_app::MetadataCareQuery {
+                        collection_id: Some(collection.id),
+                        search: String::new(),
+                        reason: None,
+                        needs_attention: false,
+                        cursor: None,
+                        limit: Some(200),
+                    },
+                    exclusions: vec![],
+                },
+                sources: Default::default(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(batch.pending, 1);
+    service
+        .start_bulk_library(&actor, batch.id, &command())
+        .unwrap();
+    for _ in 0..20 {
+        service.resume_bulk_library().unwrap();
+        if !service.run_next_job("bulk-cd").unwrap() {
+            break;
+        }
+    }
+    service.resume_bulk_library().unwrap();
+    let batch = service.bulk_library(&actor, batch.id).unwrap();
+    assert_eq!(batch.pending, 0);
+    assert_eq!(batch.failed, 1);
+    assert_eq!(
+        batch.succeeded, 0,
+        "a completed search without data is not confirmation"
+    );
+    // Constant PCM matches several offsets; freeze zero for a unique retry oracle.
+    service
+        .update_cd_library_settings(
+            &actor,
+            collection.id,
+            UpdateCdLibrarySettings {
+                expected_revision: Revision(2),
+                check_accuraterip_on_ingest: false,
+                maximum_offset: 0,
+            },
+            &command(),
+        )
+        .unwrap();
+    unavailable.store(true, Ordering::SeqCst);
+    let failed = service
+        .check_accuraterip(
+            &actor,
+            item,
+            CheckAccurateRip {
+                representation_id: Some(source),
+            },
+            &command(),
+        )
+        .unwrap();
+    for _ in 0..10 {
+        if !service.run_next_job("failed-cd").unwrap() {
+            break;
+        }
+    }
+    assert_eq!(service.job(&actor, failed).unwrap().state, JobState::Failed);
+    unavailable.store(false, Ordering::SeqCst);
+    no_data.store(false, Ordering::SeqCst);
+    service.retry_job(&actor, failed, &command()).unwrap();
+    for _ in 0..10 {
+        if !service.run_next_job("retried-cd").unwrap() {
+            break;
+        }
+    }
+    assert_eq!(
+        service.job(&actor, failed).unwrap().state,
+        JobState::Completed
+    );
+    assert!(
+        service
+            .accuraterip_checks(&actor, item)
+            .unwrap()
+            .iter()
+            .find(|v| v.job.id == failed)
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .confirmed
+    );
+    let cancelled = service
+        .check_accuraterip(
+            &actor,
+            item,
+            CheckAccurateRip {
+                representation_id: Some(source),
+            },
+            &command(),
+        )
+        .unwrap();
+    service.run_next_job("cancel-cd").unwrap();
+    service.cancel_job(&actor, cancelled, &command()).unwrap();
+    for _ in 0..10 {
+        if !service.run_next_job("cancel-cd").unwrap() {
+            break;
+        }
+    }
+    assert_eq!(
+        service.job(&actor, cancelled).unwrap().state,
+        JobState::Cancelled
+    );
+    // Older preservation-only originals acquire their missing structure in the same workflow.
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Older uninspected CD".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let older = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let older = older.imports[0].clone();
+    service
+        .stage_provisional_import_chunk(&actor, older.import_id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, older.import_id, 1, 0, &pcm)
+        .unwrap();
+    for _ in 0..10 {
+        if !service.run_next_job("preserve-only-cd").unwrap() {
+            break;
+        }
+    }
+    let older_item = older.target_item_id.unwrap();
+    let check = service
+        .check_accuraterip(
+            &actor,
+            older_item,
+            CheckAccurateRip {
+                representation_id: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    for _ in 0..15 {
+        if !service.run_next_job("inspect-and-check-cd").unwrap() {
+            break;
+        }
+    }
+    assert!(
+        service
+            .accuraterip_checks(&actor, older_item)
+            .unwrap()
+            .iter()
+            .find(|v| v.job.id == check)
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .confirmed
+    );
+    let payloads = files_named(&root.path().join("archive"), "disc.bin");
+    for path in &payloads {
+        std::fs::rename(path, path.with_extension("temporarily-missing")).unwrap();
+    }
+    let missing = service
+        .check_accuraterip(
+            &actor,
+            older_item,
+            CheckAccurateRip {
+                representation_id: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    for _ in 0..10 {
+        if !service.run_next_job("missing-source-cd").unwrap() {
+            break;
+        }
+    }
+    assert_eq!(
+        service.job(&actor, missing).unwrap().state,
+        JobState::Failed,
+        "admission reads recorded fingerprints; the worker validates actual bytes before success"
+    );
+    for path in &payloads {
+        std::fs::rename(path.with_extension("temporarily-missing"), path).unwrap();
+    }
+    service
+        .reindex(&test_authentication(&actor), &command())
+        .unwrap();
+    assert!(
+        !service
+            .accuraterip_checks(&actor, item)
+            .unwrap()
+            .iter()
+            .any(|v| v.job.id == cancelled && v.result.as_ref().is_some_and(|r| r.confirmed))
+    );
+}
+
+// These small preservation/metadata/encoder fixtures intentionally have no AR provider.
+// The complete automatic CD workflow has its own independent, supported PCM fixture.
+fn disable_automatic_cd_checks(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+) {
+    let settings = service.cd_library_settings(actor, collection).unwrap();
+    service
+        .update_cd_library_settings(
+            actor,
+            collection,
+            collector_app::UpdateCdLibrarySettings {
+                expected_revision: settings.revision,
+                check_accuraterip_on_ingest: false,
+                maximum_offset: settings.maximum_offset,
+            },
+            &command(),
+        )
+        .unwrap();
 }

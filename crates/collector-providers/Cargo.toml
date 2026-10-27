@@ -21,8 +21,6 @@ junk-libs-dat.workspace = true
 junk-libs-disc.workspace = true
 junk-libs-core.workspace = true
 junk-libs-audio = { workspace = true, features = ["derivative-validation"] }
-
-[dev-dependencies]
 tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]

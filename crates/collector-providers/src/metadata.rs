@@ -1,8 +1,9 @@
 use collector_app::{
     CatalogParserPort, ParsedCatalogSnapshot, ProcessingExecutionContext, ProviderPort,
-    ProviderRequest, ProviderResponse, SnapshotRecord,
+    ProviderRequest, ProviderResponse, ProviderStreamResponse, SnapshotRecord,
+    StreamingProviderPort,
 };
-use collector_core::{Digest, Error, RawJson, Result};
+use collector_core::{ByteLength, Digest, Error, RawJson, Result};
 use collector_modules::music::{
     COVER_ART_ARCHIVE_ACQUIRE_OPERATION, COVER_ART_ARCHIVE_PROVIDER_ID,
     COVER_ART_ARCHIVE_SNAPSHOT_SCHEMA_VERSION, CoverArtArchiveQuery,
@@ -17,9 +18,10 @@ use reqwest::{
     header::{CONTENT_TYPE, LOCATION, RETRY_AFTER},
 };
 use serde::Deserialize;
+use sha2::{Digest as _, Sha256};
 use std::{
     collections::{BTreeMap, HashMap},
-    io::Read,
+    io::{Read, Seek, Write},
     net::IpAddr,
     sync::{Arc, Mutex},
     thread,
@@ -600,9 +602,22 @@ impl CoverArtArchiveProvider {
                 "Cover Art Archive request exceeds its response limit".into(),
             ));
         }
+        let response = self.fetch_response(&query, limit, execution)?;
+        let status = response.status();
+        let media_type = content_type(&response);
+        let bytes = read_bounded(response, limit, execution, "Cover Art Archive")?;
+        freeze_cover_art(query, status, bytes, media_type)
+    }
+
+    fn fetch_response(
+        &self,
+        query: &CoverArtArchiveQuery,
+        limit: u64,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<Response> {
         let mut last_error = None;
         for attempt in 0..MAX_ATTEMPTS {
-            let response = match self.send_redirects(self.request_url(&query)?, &|| {
+            let response = match self.send_redirects(self.request_url(query)?, &|| {
                 execution.cancellation_requested()
             }) {
                 Ok(response) => response,
@@ -617,14 +632,17 @@ impl CoverArtArchiveProvider {
                 }
             };
             let status = response.status();
-            let media_type = content_type(&response);
             if matches!(status, StatusCode::OK | StatusCode::NOT_FOUND) {
-                let bytes = read_bounded(response, limit, execution, "Cover Art Archive")?;
-                return freeze_cover_art(query, status, bytes, media_type);
+                return Ok(response);
             }
             if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
                 let delay = retry_after(response.headers()).unwrap_or(DEFAULT_RETRY_DELAY);
-                let _ = read_bounded(response, limit, execution, "Cover Art Archive")?;
+                let _ = read_bounded(
+                    response,
+                    limit.min(MAX_JSON_BYTES),
+                    execution,
+                    "Cover Art Archive",
+                )?;
                 last_error = Some(Error::Unavailable(format!(
                     "Cover Art Archive returned HTTP {status}"
                 )));
@@ -637,7 +655,12 @@ impl CoverArtArchiveProvider {
                 }
                 break;
             }
-            let _ = read_bounded(response, limit, execution, "Cover Art Archive")?;
+            let _ = read_bounded(
+                response,
+                limit.min(MAX_JSON_BYTES),
+                execution,
+                "Cover Art Archive",
+            )?;
             return Err(Error::Unavailable(format!(
                 "Cover Art Archive returned HTTP {status}"
             )));
@@ -645,9 +668,14 @@ impl CoverArtArchiveProvider {
         Err(last_error.unwrap_or_else(|| Error::Unavailable("Cover Art Archive outage".into())))
     }
 
-    fn send_redirects(
+    fn send_redirects(&self, url: Url, cancelled: &dyn Fn() -> Result<bool>) -> Result<Response> {
+        self.send_redirects_with_method(url, reqwest::Method::GET, cancelled)
+    }
+
+    fn send_redirects_with_method(
         &self,
         mut url: Url,
+        method: reqwest::Method,
         cancelled: &dyn Fn() -> Result<bool>,
     ) -> Result<Response> {
         for redirects in 0..=MAX_REDIRECTS {
@@ -659,7 +687,7 @@ impl CoverArtArchiveProvider {
                 .client
                 .as_ref()
                 .expect("provider client exists until drop")
-                .get(url.clone())
+                .request(method.clone(), url.clone())
                 .send()
                 .map_err(|error| {
                     Error::Unavailable(format!("Cover Art Archive request: {error}"))
@@ -707,7 +735,45 @@ impl Drop for CoverArtArchiveProvider {
     }
 }
 
-impl collector_app::ArtworkPreviewPort for CoverArtArchiveProvider {
+impl collector_app::ArtworkSourcePort for CoverArtArchiveProvider {
+    fn original_size(
+        &self,
+        release_id: &str,
+        image_id: &str,
+        cancelled: &dyn Fn() -> Result<bool>,
+    ) -> Result<Option<u64>> {
+        let query = CoverArtArchiveQuery::Image {
+            release_id: release_id.into(),
+            image_id: image_id.into(),
+        };
+        let response = self.send_redirects_with_method(
+            self.request_url(&query)?,
+            reqwest::Method::HEAD,
+            cancelled,
+        )?;
+        if cancelled()? {
+            return Err(Error::JobCancelled);
+        }
+        match response.status() {
+            StatusCode::OK => response
+                .headers()
+                .get(reqwest::header::CONTENT_LENGTH)
+                .map(|value| {
+                    value
+                        .to_str()
+                        .ok()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .ok_or_else(|| Error::Unavailable("invalid artwork Content-Length".into()))
+                })
+                .transpose(),
+            StatusCode::NOT_FOUND => Err(Error::NotFound),
+            StatusCode::METHOD_NOT_ALLOWED | StatusCode::NOT_IMPLEMENTED => Ok(None),
+            status => Err(Error::Unavailable(format!(
+                "Cover Art Archive size inspection returned HTTP {status}"
+            ))),
+        }
+    }
+
     fn preview(
         &self,
         release_id: &str,
@@ -772,6 +838,89 @@ impl ProviderPort for CoverArtArchiveProvider {
         let query: CoverArtArchiveQuery = request.query.parse()?;
         self.fetch(query, request.maximum_response_bytes, execution)
     }
+}
+
+impl StreamingProviderPort for CoverArtArchiveProvider {
+    fn acquire_stream(
+        &self,
+        request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        request.validate()?;
+        if request.provider.0 != COVER_ART_ARCHIVE_PROVIDER_ID
+            || request.operation.as_str() != COVER_ART_ARCHIVE_ACQUIRE_OPERATION
+            || request.maximum_response_bytes > collector_app::MAX_PROVIDER_ARTWORK_BYTES as u64
+        {
+            return Err(Error::Invalid(
+                "unsupported or oversized Cover Art Archive request".into(),
+            ));
+        }
+        let query: CoverArtArchiveQuery = request.query.parse()?;
+        query.validate()?;
+        if matches!(query, CoverArtArchiveQuery::Listing { .. }) {
+            // JSON is small; retain the same parser and publication pipeline.
+            let response = self.acquire(request, execution)?;
+            return Ok(ProviderStreamResponse {
+                bytes: ByteLength(response.bytes.len() as u64),
+                digest: response.digest,
+                media_type: response.media_type,
+                parsed_observation: response.parsed_observation,
+                reader: Box::new(std::io::Cursor::new(response.bytes)),
+            });
+        }
+        let mut response =
+            self.fetch_response(&query, request.maximum_response_bytes, execution)?;
+        let status = response.status();
+        let media_type = content_type(&response);
+        // Validate the status/type envelope before reading an image payload.
+        let envelope = freeze_cover_art(query, status, Vec::new(), media_type)?;
+        let limit = request.maximum_response_bytes;
+        if let Some(length) = response.content_length()
+            && length > limit
+        {
+            return Err(cover_size_error(length, limit));
+        }
+        let mut spool = tempfile::tempfile().map_err(cover_io)?;
+        let mut hash = Sha256::new();
+        let mut bytes = 0_u64;
+        let mut buffer = [0_u8; READ_CHUNK_BYTES];
+        loop {
+            checkpoint(execution)?;
+            let count = response.read(&mut buffer).map_err(cover_io)?;
+            if count == 0 {
+                break;
+            }
+            bytes += count as u64;
+            if bytes > limit {
+                return Err(cover_size_error(bytes, limit));
+            }
+            spool.write_all(&buffer[..count]).map_err(cover_io)?;
+            hash.update(&buffer[..count]);
+            execution.report_progress("downloading_provider_response", bytes, limit)?;
+        }
+        checkpoint(execution)?;
+        spool.rewind().map_err(cover_io)?;
+        Ok(ProviderStreamResponse {
+            media_type: envelope.media_type,
+            bytes: ByteLength(bytes),
+            digest: Digest {
+                algorithm: collector_core::HashAlgorithm::Sha256,
+                hex: hex::encode(hash.finalize()),
+            },
+            parsed_observation: envelope.parsed_observation,
+            reader: Box::new(spool),
+        })
+    }
+}
+
+fn cover_size_error(bytes: u64, limit: u64) -> Error {
+    Error::Unavailable(format!(
+        "Cover Art Archive original is too large ({bytes} bytes; limit {limit} bytes). Choose a smaller front cover in Find cover art, or upload a smaller image."
+    ))
+}
+
+fn cover_io(error: std::io::Error) -> Error {
+    Error::Unavailable(format!("Cover Art Archive transfer: {error}"))
 }
 
 impl CatalogParserPort for CoverArtArchiveProvider {

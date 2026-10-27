@@ -1212,7 +1212,21 @@ impl Store {
             visibility,
             alt_text,
         } = command;
-        if bytes.len() > collector_app::MAX_ASSET_BYTES || alt_text.len() > 4096 {
+        let provider_cover = kind == AssetKind::Cover
+            && matches!(
+                context,
+                collector_app::AssetWriteContext::Item(collector_app::ItemEffectContext {
+                    source: collector_app::ItemEffectSource::Snapshot(_)
+                        | collector_app::ItemEffectSource::Job { .. },
+                    ..
+                })
+            );
+        let byte_limit = if provider_cover {
+            collector_app::MAX_PROVIDER_ARTWORK_BYTES
+        } else {
+            collector_app::MAX_ASSET_BYTES
+        };
+        if bytes.len() > byte_limit || alt_text.len() > 4096 {
             return Err(Error::Invalid("asset exceeds upload limit".into()));
         }
         let (extension, media_type, thumbnail) = if kind == AssetKind::Document {

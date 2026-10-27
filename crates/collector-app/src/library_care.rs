@@ -15,6 +15,13 @@ pub struct UpdateMetadataPreferences {
 }
 
 pub trait LibraryCarePort: Send + Sync {
+    fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<JobRecord>>;
+    fn cd_settings(&self, collection: CollectionId) -> Result<CdLibrarySettings>;
+    fn save_cd_settings(
+        &self,
+        collection: CollectionId,
+        command: &UpdateCdLibrarySettings,
+    ) -> Result<CdLibrarySettings>;
     fn metadata_resolution_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<JobRecord>>;
     fn metadata_care_items(&self, user: UserId, query: &MetadataCareQuery) -> Result<Page<Item>>;
     fn album_group_proposals(

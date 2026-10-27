@@ -14,7 +14,7 @@ POLICY = 'change-checks-v1'
 POLICY_DOCS = {'docs/architecture.md', 'docs/release-requirements.md', 'docs/release-toolchain.md', 'docs/container-release-pipeline.md', 'docs/testing-and-packaging-plan.md', 'docs/testing.md'}
 KINDS = ('auto', 'docs', 'ui-copy', 'cli-copy', 'style', 'ui', 'rust', 'infra')
 BROWSER = ('smoke', 'integration', 'browse', 'audio-checks', 'accuraterip-snapshots', 'actions',
-           'scans', 'work', 'fx04', 'fx05', 'fx06', 'fx04-review', 'local-playback', 'lists',
+           'cd-library', 'scans', 'work', 'fx04', 'fx05', 'fx06', 'fx04-review', 'local-playback', 'lists',
            'accounts', 'pair', 'navigation', 'certificate', 'numeric-ip', 'game-catalog',
            'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media')
 FIXTURE = {'audio-checks', 'accuraterip-snapshots', 'actions', 'lists'}

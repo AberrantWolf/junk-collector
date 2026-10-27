@@ -1,0 +1,13 @@
+[package]
+name = "collector-cd-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+junk-libs-disc.workspace = true
+junk-libs-disc-id.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

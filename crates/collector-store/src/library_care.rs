@@ -17,6 +17,31 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.metadata_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),revision INTEGER NOT NULL,language TEXT NOT NULL);").map_err(storage)
 }
 impl LibraryCarePort for Store {
+    fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<collector_app::JobRecord>> {
+        let ids = {
+            let db = lock(&self.db)?;
+            let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='accuraterip_check' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 100").map_err(storage)?;
+            stmt.query_map(params![user.to_string(), item.to_string()], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(storage)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+        };
+        ids.into_iter()
+            .map(|id| self.job_record(id.parse().map_err(storage)?, user))
+            .collect()
+    }
+    fn cd_settings(&self, collection: CollectionId) -> Result<collector_app::CdLibrarySettings> {
+        crate::library_settings::read_cd_settings(&*lock(&self.db)?, collection)
+    }
+    fn save_cd_settings(
+        &self,
+        collection: CollectionId,
+        command: &collector_app::UpdateCdLibrarySettings,
+    ) -> Result<collector_app::CdLibrarySettings> {
+        self.save_cd_settings_record(collection, command)
+    }
     fn metadata_resolution_jobs(
         &self,
         user: UserId,

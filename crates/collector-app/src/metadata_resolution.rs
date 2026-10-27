@@ -269,7 +269,7 @@ impl CollectionService {
                         release_id: candidate.provider_record_id.clone(),
                         image_id,
                     }),
-                    20 * 1024 * 1024,
+                    MAX_PROVIDER_ARTWORK_BYTES as u64,
                     Some(candidate),
                 )
             }
@@ -507,7 +507,7 @@ impl CollectionService {
             serde_json::to_value(&query).map_err(|error| Error::Invalid(error.to_string()))?,
         );
         acquisition.request.maximum_response_bytes = if stage == "image" {
-            20 * 1024 * 1024
+            MAX_PROVIDER_ARTWORK_BYTES as u64
         } else {
             8 * 1024 * 1024
         };
@@ -535,25 +535,94 @@ impl CollectionService {
             },
             "listing",
         )?;
-        let mut options = self.resolution_artwork_options(claim, frozen, listing)?;
-        options.sort_by_key(|value| (!value.front, !value.approved, value.image_id.clone()));
-        let Some(option) = options.into_iter().find(|value| value.front) else {
-            return Ok(());
+        let options = self.resolution_artwork_options(claim, frozen, listing)?;
+        let query = if let Some(query) = self.jobs.metadata_artwork_selection(claim, None)? {
+            query.parse::<CoverArtArchiveQuery>()?
+        } else {
+            // Only standalone front covers are interchangeable. A booklet spread,
+            // rear scan or medium must never win just because it is smaller.
+            let mut fronts: Vec<_> = options
+                .iter()
+                .filter(|option| option.front && option.types.iter().all(|kind| kind == "Front"))
+                .collect();
+            fronts.sort_by_key(|value| (!value.approved, value.image_id.clone()));
+            fronts.truncate(16);
+            let compare_sizes = fronts.len() > 1;
+            let mut choices = Vec::new();
+            for option in fronts {
+                self.resolution_item(claim, frozen)?;
+                if option.release_id != candidate.provider_record_id {
+                    return Err(Error::Invalid(
+                        "artwork belongs to a different album release".into(),
+                    ));
+                }
+                let size = if compare_sizes && let Some(source) = &self.artwork_source {
+                    self.report_processing_phase(claim, "inspecting_artwork")?;
+                    match source.original_size(&option.release_id, &option.image_id, &|| {
+                        self.jobs
+                            .renew_job_lease(claim.id, &claim.claim_token, 30)?;
+                        self.jobs
+                            .cancellation_requested(claim.id, &claim.claim_token)
+                    }) {
+                        Ok(size) => size,
+                        Err(Error::NotFound) => continue,
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    None
+                };
+                choices.push((option, size));
+            }
+            // Prefer approved originals within the acquisition bound, then the
+            // smallest advertised original; unknown sizes are tried after known
+            // usable sizes. The transfer independently enforces actual bytes.
+            choices.sort_by_key(|(option, size)| {
+                (
+                    size.is_some_and(|n| n > MAX_PROVIDER_ARTWORK_BYTES as u64),
+                    !option.approved,
+                    size.is_none(),
+                    size.unwrap_or(u64::MAX),
+                    option.image_id.clone(),
+                )
+            });
+            let Some((option, _)) = choices.into_iter().next() else {
+                return Ok(());
+            };
+            let proposed = CoverArtArchiveQuery::Image {
+                release_id: option.release_id.clone(),
+                image_id: option.image_id.clone(),
+            };
+            let proposed = RawJson::from_value(
+                serde_json::to_value(proposed)
+                    .map_err(|error| Error::Storage(error.to_string()))?,
+            );
+            self.jobs
+                .metadata_artwork_selection(claim, Some(&proposed))?
+                .ok_or_else(|| Error::Storage("artwork selection was not retained".into()))?
+                .parse::<CoverArtArchiveQuery>()?
         };
-        if option.release_id != candidate.provider_record_id {
+        let CoverArtArchiveQuery::Image {
+            ref release_id,
+            ref image_id,
+        } = query
+        else {
             return Err(Error::Invalid(
-                "artwork belongs to a different album release".into(),
+                "automatic artwork selection is not an image".into(),
+            ));
+        };
+        if release_id != &candidate.provider_record_id
+            || !options.iter().any(|option| {
+                option.release_id == *release_id
+                    && option.image_id == *image_id
+                    && option.front
+                    && option.types.iter().all(|kind| kind == "Front")
+            })
+        {
+            return Err(Error::Invalid(
+                "automatic artwork selection disagrees with its listing".into(),
             ));
         }
-        let image = self.artwork_acquisition(
-            claim,
-            frozen,
-            CoverArtArchiveQuery::Image {
-                release_id: option.release_id,
-                image_id: option.image_id,
-            },
-            "image",
-        )?;
+        let image = self.artwork_acquisition(claim, frozen, query, "image")?;
         let asset = self.publish_resolution_artwork(claim, frozen, image)?;
         self.refresh_resolution_metadata(
             claim,
@@ -612,7 +681,7 @@ impl CollectionService {
         let bytes = crate::metadata::read_exact_snapshot_bytes_controlled(
             self.processing.as_ref(),
             &snapshot,
-            20 * 1024 * 1024,
+            MAX_PROVIDER_ARTWORK_BYTES as u64,
             &mut || {
                 self.jobs
                     .cancellation_requested(claim.id, &claim.claim_token)

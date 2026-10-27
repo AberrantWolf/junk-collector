@@ -82,6 +82,25 @@ line between them ends the trailer block, so Git may omit the classification and
 CI will conservatively select broader checks. Omit `Check-Base` when the normal
 push/PR baseline already covers the reviewed diff.
 
+## Standalone CD capture checks
+
+For the standalone operator CD capture helper, use focused offline checks:
+
+```sh
+cargo test --locked -p collector-cd-identity
+cargo clippy --locked -p collector-cd-identity --all-targets -- -D warnings
+cargo build --release --locked -p collector-cd-identity
+python3 -B scripts/test_rip_cd.py
+COLLECTOR_CD_IDENTITY="$PWD/target/release/collector-cd-identity" python3 -B scripts/test_cd_naming.py
+```
+
+The naming suite uses the release utility with fake redumper/HTTP inputs and
+checks timeout/termination cleanup through process-state inspection. On macOS,
+run these executable fixtures outside Codex's seatbelt context; sandbox launch
+delays/process-inspection denial are infrastructure failures. These tests never
+open an optical drive or contact MusicBrainz. See
+[the naming acceptance record](validation/cd-folder-naming-2026-10-27.md).
+
 ## Browser tests
 
 Install the Playwright-version-matched browser once per dependency update:
@@ -108,6 +127,7 @@ failures and remain visible. Do not repeatedly retry the known-broken context.
 npm --prefix web run test:smoke        # short real-server acceptance
 npm --prefix web run test:integration  # retained broad provider/media/recovery journey
 npm --prefix web run test:models       # queue, async work context, evidence labels
+npm --prefix web run test:cd-library   # saved CD defaults and a real library AccurateRip batch
 npm --prefix web run test:full         # all named browser journeys, serially isolated
 node web/tests/run-suite.mjs browse fx04-review
 node web/tests/browser-launch-check.mjs

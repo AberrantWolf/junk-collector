@@ -1642,6 +1642,40 @@ impl Store {
         {
             return Err(Error::Conflict);
         }
+        if let Some(collector_app::FrozenJobInput::AccurateRip(frozen)) = &claim.frozen_input {
+            let item = self.item(frozen.item_id)?;
+            if item.deleted || item.lifecycle.generation != frozen.generation {
+                return Err(Error::Conflict);
+            }
+            for source in &frozen.sources {
+                if self.collection(collection)?.binding != source.collection_binding
+                    || self.recorded_source(collection, source.source)? != source.source_fingerprint
+                    || !item
+                        .captures
+                        .iter()
+                        .filter(|c| c.association.item_id == Some(item.id))
+                        .flat_map(|c| &c.representations)
+                        .any(|r| PackageScope::Representation(r.id) == source.source)
+                {
+                    return Err(Error::Conflict);
+                }
+            }
+            self.validate_item_effect(
+                collector_app::ItemEffectContext {
+                    item_id: item.id,
+                    generation: frozen.generation,
+                    source: collector_app::ItemEffectSource::Job {
+                        id: claim.id,
+                        claim: claim.claim_token.parse().map_err(storage)?,
+                    },
+                },
+                collection,
+            )?;
+            let allowed:bool=lock(&self.db)?.query_row("SELECT EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=? AND u.enabled=1 AND g.collection_id=? AND g.role>=1)",params![claim.user_id.to_string(),collection.to_string()],|r|r.get(0)).map_err(storage)?;
+            if !allowed {
+                return Err(Error::Forbidden);
+            }
+        }
         if let Some(collector_app::FrozenJobInput::GameIdentification(frozen)) = &claim.frozen_input
         {
             let item = self.item(frozen.item_id)?;

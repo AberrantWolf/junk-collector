@@ -24,7 +24,16 @@ pub struct ArtworkPreview {
     pub media_type: String,
 }
 pub const MAX_ARTWORK_PREVIEW_BYTES: u64 = 1024 * 1024;
-pub trait ArtworkPreviewPort: Send + Sync {
+pub trait ArtworkSourcePort: Send + Sync {
+    /// Advisory original size, without downloading its body. Unknown lengths
+    /// remain unknown; acquisition must enforce its own bound on actual bytes.
+    fn original_size(
+        &self,
+        release_id: &str,
+        image_id: &str,
+        cancelled: &dyn Fn() -> Result<bool>,
+    ) -> Result<Option<u64>>;
+
     fn preview(
         &self,
         release_id: &str,
@@ -472,7 +481,7 @@ impl CollectionService {
         ) {
             8 * 1024 * 1024
         } else {
-            20 * 1024 * 1024
+            crate::MAX_PROVIDER_ARTWORK_BYTES as u64
         };
         let job =
             crate::deterministic_job_id(actor.user_id, "metadata.cover-art.acquire", context.key());
@@ -553,7 +562,7 @@ impl CollectionService {
                 })?;
                 if snapshot.provider.0
                     != collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID
-                    || snapshot.bytes.0 > 20 * 1024 * 1024
+                    || snapshot.bytes.0 > crate::MAX_PROVIDER_ARTWORK_BYTES as u64
                 {
                     return Err(Error::Invalid(
                         "metadata artwork requires a bounded Cover Art Archive image snapshot"
@@ -585,7 +594,7 @@ impl CollectionService {
                 let bytes = read_exact_snapshot_bytes(
                     self.processing.as_ref(),
                     &snapshot,
-                    20 * 1024 * 1024,
+                    crate::MAX_PROVIDER_ARTWORK_BYTES as u64,
                 )?;
                 effects.create_asset(
                     asset_id,
@@ -1634,11 +1643,8 @@ impl CollectionService {
         self.metadata_review(actor, item_id)
     }
 
-    pub fn with_artwork_preview(
-        mut self,
-        provider: std::sync::Arc<dyn ArtworkPreviewPort>,
-    ) -> Self {
-        self.artwork_preview = Some(provider);
+    pub fn with_artwork_source(mut self, provider: std::sync::Arc<dyn ArtworkSourcePort>) -> Self {
+        self.artwork_source = Some(provider);
         self
     }
 
@@ -1661,7 +1667,7 @@ impl CollectionService {
             return Err(Error::JobCancelled);
         }
         let preview = self
-            .artwork_preview
+            .artwork_source
             .as_ref()
             .ok_or_else(|| Error::Unavailable("Artwork previews are not configured.".into()))?
             .preview(&option.release_id, &option.image_id, cancelled)?;

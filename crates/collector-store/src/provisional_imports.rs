@@ -444,8 +444,9 @@ impl Store {
             )
             .map_err(storage)?;
             tx.execute(
-                "UPDATE private.guided_ingest_intents SET bulk_context=? WHERE import_id=?",
+                "UPDATE private.guided_ingest_intents SET cd_check_settings=?,bulk_context=? WHERE import_id=?",
                 params![
+                    intent.cd_check_settings.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,
                     intent
                         .bulk_context
                         .as_ref()
@@ -463,6 +464,31 @@ impl Store {
 }
 
 impl ProvisionalImportPort for Store {
+    fn item_has_active_ingest(&self, item: ItemId) -> Result<bool> {
+        let db = lock(&self.db)?;
+        db.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM private.guided_ingest_intents g
+                JOIN private.imports i ON i.id=g.import_id
+                WHERE g.target_item_id=?1 AND g.settled=0 AND g.cancelled=0
+                  AND i.phase!='cancelled'
+                  AND (
+                    EXISTS(SELECT 1 FROM private.jobs j
+                      WHERE j.user_id=g.user_id AND json_extract(j.request,'$.import_id')=g.import_id
+                        AND j.kind!='inbox_cleanup' AND j.state IN ('queued','running','cancel_requested'))
+                    OR (g.enrichment_error IS NULL AND g.preparation_error IS NULL
+                      AND NOT EXISTS(SELECT 1 FROM private.jobs j
+                        WHERE j.user_id=g.user_id AND json_extract(j.request,'$.import_id')=g.import_id
+                          AND j.kind!='inbox_cleanup' AND j.state IN ('failed','cancelled')
+                          AND NOT (j.kind='import_analysis' AND i.phase IN ('awaiting_review','published'))))
+                  )
+            )",
+            [item.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(storage)
+    }
+
     fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId> {
         self.queue_inbox_source_cleanup(id, source, spec)
     }
@@ -762,14 +788,16 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context,purchase FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context,purchase,cd_check_settings,cd_check_error FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?,row.get::<_, Option<String>>(18)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?,row.get::<_, Option<String>>(18)?,row.get::<_, Option<String>>(19)?,row.get::<_, Option<String>>(20)?)),
             )
             .optional()
             .map_err(storage)?
             .map(|row| {
                 Ok(GuidedIngestIntent {
+                    cd_check_settings:row.19.map(|v|serde_json::from_str(&v).map_err(storage)).transpose()?,
+                    cd_check_error:row.20,
             purchase: row.18.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
                     import_id: id,
                     bulk_context: row.17.map(|value|serde_json::from_str(&value).map_err(storage)).transpose()?,
@@ -888,7 +916,7 @@ impl ProvisionalImportPort for Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        let changed = tx.execute("UPDATE private.guided_ingest_intents SET enrichment_error=?,prepare_music=?,preparation_batch_id=?,preparation_error=?,updated_at=?,settled=CASE WHEN cancelled=1 THEN 1 ELSE ? END,cancelled=MAX(cancelled,?) WHERE import_id=? AND user_id=? AND plan_token=? AND target_item_id=?", params![intent.enrichment_error,intent.prepare_music,intent.preparation_batch_id.map(|id| id.to_string()),intent.preparation_error,intent.updated_at.timestamp(),intent.settled,intent.cancelled,intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string()]).map_err(storage)?;
+        let changed = tx.execute("UPDATE private.guided_ingest_intents SET cd_check_error=?,enrichment_error=?,prepare_music=?,preparation_batch_id=?,preparation_error=?,updated_at=?,settled=CASE WHEN cancelled=1 THEN 1 ELSE ? END,cancelled=MAX(cancelled,?) WHERE import_id=? AND user_id=? AND plan_token=? AND target_item_id=?", params![intent.cd_check_error,intent.enrichment_error,intent.prepare_music,intent.preparation_batch_id.map(|id| id.to_string()),intent.preparation_error,intent.updated_at.timestamp(),intent.settled,intent.cancelled,intent.import_id.to_string(),intent.user_id.to_string(),intent.plan_token,intent.target_item_id.to_string()]).map_err(storage)?;
         if changed != 1 {
             return Err(Error::Conflict);
         }

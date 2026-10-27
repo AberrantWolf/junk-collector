@@ -19,6 +19,7 @@ mod index_checkpoint;
 mod item_lifecycle;
 mod jobs;
 mod library_care;
+mod library_settings;
 mod migration;
 mod migration_v3;
 mod music_search;
@@ -1415,7 +1416,7 @@ impl ImportPort for Store {
 
 impl JobPort for Store {
     fn job_settings(&self) -> Result<collector_app::JobSettings> {
-        Ok(lock(&self.job_dispatch)?.settings)
+        Ok(self.worker_settings_record()?.jobs)
     }
     fn work_job_records(
         &self,
@@ -1564,6 +1565,13 @@ impl JobPort for Store {
     ) -> Result<Option<SnapshotId>> {
         self.acquire_for_owner(claim, frozen)
     }
+    fn metadata_artwork_selection(
+        &self,
+        claim: &JobClaim,
+        proposed: Option<&RawJson>,
+    ) -> Result<Option<RawJson>> {
+        self.metadata_artwork_selection_record(claim, proposed)
+    }
     fn acquisition_owners(&self, claim: &JobClaim) -> Result<Vec<JobRecord>> {
         self.provider_owners(claim)
     }
@@ -1667,6 +1675,15 @@ impl JobPort for Store {
 }
 
 impl AdministrationPort for Store {
+    fn worker_settings(&self) -> Result<collector_app::WorkerSettings> {
+        self.worker_settings_record()
+    }
+    fn save_worker_settings(
+        &self,
+        command: &collector_app::UpdateWorkerSettings,
+    ) -> Result<collector_app::WorkerSettings> {
+        self.save_worker_settings_record(command)
+    }
     fn default_username(&self) -> Result<String> {
         Store::default_username(self)
     }
@@ -2540,6 +2557,8 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     }
     for (column, declaration) in [
         ("purchase", "TEXT"),
+        ("cd_check_settings", "TEXT"),
+        ("cd_check_error", "TEXT"),
         ("prepare_music", "INTEGER NOT NULL DEFAULT 0"),
         ("preparation_batch_id", "TEXT"),
         ("preparation_error", "TEXT"),
@@ -2556,7 +2575,8 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
             .map_err(storage)?;
         }
     }
-    db.execute_batch("CREATE TABLE IF NOT EXISTS private.item_job_generations(job_id TEXT PRIMARY KEY, generation INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS private.item_import_generations(import_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)").map_err(storage)?;
+    db.execute_batch("CREATE INDEX IF NOT EXISTS private.guided_ingest_item_activity ON guided_ingest_intents(target_item_id,settled,cancelled);
+        CREATE TABLE IF NOT EXISTS private.item_job_generations(job_id TEXT PRIMARY KEY, generation INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS private.item_import_generations(import_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)").map_err(storage)?;
     let cleanup_complete_column: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('import_cleanup','private') WHERE name='completed')", [], |row| row.get(0)).map_err(storage)?;
     if !cleanup_complete_column {
         db.execute_batch(
@@ -2955,6 +2975,10 @@ impl CollectionTypePort for Store {
                         }
                         collector_app::FrozenJobInput::GameCatalogScan(_) => {
                             collector_core::OperationId::new("org.junk.games.identify")
+                                .expect("static operation")
+                        }
+                        collector_app::FrozenJobInput::AccurateRip(_) => {
+                            OperationId::new("org.junk.music.accuraterip-verification")
                                 .expect("static operation")
                         }
                         collector_app::FrozenJobInput::Processing(job) => job.operation,

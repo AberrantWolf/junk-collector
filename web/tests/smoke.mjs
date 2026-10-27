@@ -9,6 +9,7 @@ import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
+import {deflateSync,crc32} from 'node:zlib';
 import {collectionListsJourney} from './collection-lists-journey.mjs';
 import {bulkLibraryJourney} from './bulk-library-journey.mjs';
 async function deadline(promise,label,millis=20000){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+' timed out')),millis);})]);}finally{clearTimeout(timer);}}
@@ -23,6 +24,12 @@ const releaseIds={english:'11111111-1111-4111-8111-111111111111',alternate:'2222
 const release=(id,title,language,disambiguation)=>({id,title,disambiguation,'text-representation':{language,script:language==='ja'?'Jpan':'Latn'},'artist-credit':[{name:'Test ensemble',artist:{id:'44444444-4444-4444-8444-444444444444',name:'Test ensemble'}}],media:[{discs:[{id:'fixture-disc-id'}]}],'release-group':{id:'55555555-5555-4555-8555-555555555555'}});
 const releases=[release(releaseIds.english,'Provider pressing','en','2001 fixture'),release(releaseIds.alternate,'Provider pressing alternate','en','2001 fixture'),release(releaseIds.japanese,'試験盤','ja','日本盤')];
 const providerPng=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
+// Valid original above the former 20 MiB cap; tiny previews remain independent.
+function pngChunk(type,data){const name=Buffer.from(type);const chunk=Buffer.alloc(data.length+12);chunk.writeUInt32BE(data.length);name.copy(chunk,4);data.copy(chunk,8);chunk.writeUInt32BE(crc32(Buffer.concat([name,data])),data.length+8);return chunk;}
+const coverSide=2700;const coverHeader=Buffer.alloc(13);coverHeader.writeUInt32BE(coverSide,0);coverHeader.writeUInt32BE(coverSide,4);coverHeader[8]=8;coverHeader[9]=2;
+const providerLargePng=Buffer.concat([providerPng.subarray(0,8),pngChunk('IHDR',coverHeader),pngChunk('IDAT',deflateSync(Buffer.alloc((coverSide*3+1)*coverSide),{level:0})),pngChunk('IEND',Buffer.alloc(0))]);
+assert.ok(providerLargePng.length>20*1024*1024);
+let useLargeCover=false;let refuseCoverSize=false;
 const hasFlac=spawnSync('flac',['--version'],{encoding:'utf8'}).status===0;
 const flacPath=hasFlac?spawnSync('which',['flac'],{encoding:'utf8'}).stdout.trim():'';
 const trackFrames=[225*588,226*588];const frames=trackFrames[0]+trackFrames[1];
@@ -34,7 +41,7 @@ let accurateRipRequests=0;let accurateRipDelay=0;
 const accurateRipServer=createServer(async(_request,response)=>{accurateRipRequests++;if(accurateRipDelay)await new Promise(resolve=>setTimeout(resolve,accurateRipDelay));response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
 await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
 let bulkFixture=false;const bulkDiscIds=[];
-const metadataRequests=[];const metadataProviderServer=createServer((request,response)=>{metadataRequests.push(request.url);const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const discId=url.pathname.split('/').at(-1);if(bulkFixture&&!bulkDiscIds.includes(discId))bulkDiscIds.push(discId);const body=Buffer.from(JSON.stringify({id:discId,releases:releases.map(value=>({...value,...bulkFixture?{title:'Bulk resolved album'}:{},media:bulkFixture?bulkDiscIds.map((id,index)=>({position:index+1,discs:[{id:bulkDiscIds[value.id===releaseIds.japanese?bulkDiscIds.length-1-index:index]}],tracks:[{position:1,title:'Opening'}]})):[{discs:[{id:discId}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const matches=url.searchParams.get('query')?.includes('unmatched fixture')?[]:releases;const body=Buffer.from(JSON.stringify({releases:matches}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){response.writeHead(200,{'content-type':'image/png','content-length':providerPng.length});response.end(providerPng);return;}response.writeHead(404);response.end();});
+const metadataRequests=[];const metadataProviderServer=createServer((request,response)=>{metadataRequests.push(request.url);const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const discId=url.pathname.split('/').at(-1);if(bulkFixture&&!bulkDiscIds.includes(discId))bulkDiscIds.push(discId);const body=Buffer.from(JSON.stringify({id:discId,releases:releases.map(value=>({...value,...bulkFixture?{title:'Bulk resolved album'}:{},media:bulkFixture?bulkDiscIds.map((id,index)=>({position:index+1,discs:[{id:bulkDiscIds[value.id===releaseIds.japanese?bulkDiscIds.length-1-index:index]}],tracks:[{position:1,title:'Opening'}]})):[{discs:[{id:discId}]}]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const matches=url.searchParams.get('query')?.includes('unmatched fixture')?[]:releases;const body=Buffer.from(JSON.stringify({releases:matches}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){if(refuseCoverSize&&!url.pathname.endsWith('-250')){response.writeHead(200,{'content-type':'image/png','content-length':128*1024*1024+1});response.end();return;}const body=useLargeCover&&!url.pathname.endsWith('-250')?providerLargePng:providerPng;response.writeHead(200,{'content-type':'image/png','content-length':body.length});response.end(body);return;}response.writeHead(404);response.end();});
 await new Promise((resolve,reject)=>{metadataProviderServer.once('error',reject);metadataProviderServer.listen(metadataProviderPort,'127.0.0.1',resolve);});
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
@@ -399,8 +406,32 @@ try{
  await page.unroute('**/metadata/artwork/**/thumbnail?attempt=*');
  await metadataReview.getByRole('button',{name:'Retry front cover preview',exact:true}).click();
  await page.waitForFunction(()=>{const image=document.querySelector('img[alt="Front cover preview"]');return image?.complete&&image.naturalWidth>0;});
+ refuseCoverSize=true;
+ await metadataReview.getByRole('button',{name:/Front cover/}).click();
+ await metadataReview.getByText('original is too large',{exact:false}).first().waitFor();
+ await page.setViewportSize({width:390,height:844});
+ await metadataReview.locator('.metadata-job').scrollIntoViewIfNeeded();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'oversized-cover recovery overflows on mobile');
+ await page.screenshot({path:path.join(root,'web/test-results/provider-cover-limit-mobile.png'),fullPage:true});
+ await metadataReview.getByRole('button',{name:'Dismiss lookup',exact:true}).click();
+ await page.setViewportSize({width:1440,height:1000});
+ refuseCoverSize=false;
+ useLargeCover=true;
  await metadataReview.getByRole('button',{name:/Front cover/}).click();
  await metadataReview.getByText('Artwork request completed.',{exact:false}).waitFor();
+ const fullCover=await page.evaluate(async()=>{
+  const id=localStorage.getItem('primary-music-item-id');
+  const item=await(await fetch(`/api/v1/items/${id}`)).json();
+  const metadata=await(await fetch(`/api/v1/items/${id}/metadata`)).json();
+  const response=await fetch(`/api/v1/collections/${item.collection_id}/assets/${metadata.authority.artwork_choice}/original`);
+  if(!response.ok)throw new Error(`original cover: ${response.status}`);
+  const bytes=await response.arrayBuffer();
+  const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(n=>n.toString(16).padStart(2,'0')).join('');
+  return {bytes:bytes.byteLength,digest};
+ });
+ assert.equal(fullCover.bytes,providerLargePng.length);
+ assert.equal(fullCover.digest,createHash('sha256').update(providerLargePng).digest('hex'),'saved provider original was resized or altered');
+
  // A fresh lookup has its own recoverable Job but adds no equivalent provider
  // snapshot, cover Asset or authority revision. Exercise the actual UI commands.
  const retainedCoverState=()=>page.evaluate(async()=>{
@@ -758,16 +789,15 @@ try{
  const cdCurator=page.getByRole('dialog',{name:/Edit entry/});
  const musicAnalysis=cdCurator.getByRole('region',{name:'Music CD checks'});await musicAnalysis.waitFor();
  const cdDocket=musicAnalysis.locator('.import-docket').filter({hasText:'2 files'});
- await expect(cdDocket.locator('select').first()).toHaveValue('org.junk.music.accuraterip-verification');
- await cdDocket.locator('select').first().selectOption('org.junk.music.cd-structure');
- await cdDocket.locator('select').nth(1).selectOption('0');
- await cdDocket.getByRole('button',{name:'Run check',exact:true}).click();
- await cdDocket.getByText('CD structure recorded · 2 tracks',{exact:true}).waitFor();
- await cdDocket.getByRole('button',{name:'Fetch AccurateRip response',exact:true}).click();
- await cdDocket.locator('select').first().selectOption('org.junk.music.accuraterip-verification');
- await cdDocket.getByLabel('Maximum offset (stereo sample frames)').fill('0');
- await cdDocket.getByRole('button',{name:'Run check',exact:true}).click();
- await cdDocket.getByText('AccurateRip: Verified',{exact:true}).waitFor();
+ // One command owns structure, acquisition and checksum comparison.
+ const checkSettings=await page.evaluate(async()=>{
+  const id=new URL(location.href).searchParams.get('item');const item=await(await fetch('/api/v1/items/'+id)).json();
+  const value=await(await fetch(`/api/v1/collections/${item.collection_id}/cd-settings`)).json();
+  const response=await fetch(`/api/v1/collections/${item.collection_id}/cd-settings`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:value.revision,check_accuraterip_on_ingest:false,maximum_offset:0})});if(!response.ok)throw Error(await response.text());return {collection:item.collection_id};
+ });
+ await cdDocket.getByRole('button',{name:'Check this disc with AccurateRip',exact:true}).click();
+ await expect(cdDocket.getByText('AccurateRip: Verified',{exact:true}).first()).toBeVisible({timeout:30000});
+ await expect(cdDocket.locator('.stored-file').filter({hasText:'AccurateRip: Verified'})).toBeVisible();
  assert.equal(await cdDocket.locator('.processing-raw[open]').count(),0,'technical detail expanded by default');
  await cdDocket.getByText('Technical details',{exact:true}).first().click();
  assert.match(await cdDocket.innerText(), /confidence 17/);
@@ -785,7 +815,7 @@ try{
  const checkShortcut=page.getByRole('button',{name:`AccurateRip for ${checkedAlbum.title}: ${checkedLabel}. Open audio checks`,exact:true});
  await checkShortcut.waitFor();await checkShortcut.click();
  await expect(cdCurator).toBeVisible();
- await expect(cdCurator.locator('.import-docket select').first()).toHaveValue('org.junk.music.accuraterip-verification');
+ await expect(cdCurator.getByRole('button',{name:'Check this disc with AccurateRip',exact:true}).first()).toBeVisible();
  await cdCurator.getByRole('button',{name:'Close curator'}).click();
  await page.locator(`[data-item-id="${checkedAlbumId}"]`).click();
  await clickAction(page,'Edit / attach files');
@@ -834,11 +864,16 @@ try{
   const beforeDownload=accurateRipRequests;accurateRipDelay=3000;
   await cdCurator.getByRole('button',{name:'Advanced evidence',exact:true}).click();
   if(!await musicAnalysis.isVisible())await cdCurator.getByText('Technical processing history',{exact:true}).click();
-  const [providerRequest]=await Promise.all([page.waitForRequest(request=>request.method()==='POST'&&request.url().includes('/accuraterip')),cdDocket.getByRole('button',{name:'Fetch AccurateRip response',exact:true}).click()]);
-  const duplicate=await page.evaluate(async({url,body})=>{const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body});if(!response.ok)throw new Error(await response.text());return response.json();},{url:providerRequest.url(),body:providerRequest.postData()});
+  const [providerRequest]=await Promise.all([page.waitForRequest(request=>request.method()==='POST'&&request.url().includes('/accuraterip-check')),cdDocket.getByRole('button',{name:'Check this disc with AccurateRip',exact:true}).click()]);
+  // A separate low-level API owner shares the workflow's provider acquisition.
+  const duplicate=await page.evaluate(async({item,source})=>{
+   const record=await(await fetch('/api/v1/items/'+item)).json();const capture=record.captures.find(c=>c.representations.some(r=>r.id===source));
+   const plan=await(await fetch(`/api/v1/captures/${capture.id}/operations/plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operation:'org.junk.music.accuraterip-verification',operation_version:1,representation_id:source,snapshot_id:null,selection:{maximum_offset:0}})})).json();
+   const response=await fetch(`/api/v1/captures/${capture.id}/accuraterip-snapshots`,{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({representation_id:source,structure_observation_id:plan.accuraterip_structure_observation_id})});if(!response.ok)throw Error(await response.text());return response.json();
+  },{item:checkedAlbumId,source:JSON.parse(providerRequest.postData()).representation_id});
   await expect.poll(()=>accurateRipRequests,{timeout:3000}).toBe(beforeDownload+1);
   assert.equal(await page.evaluate(async()=>((await(await fetch('/api/v1/jobs?limit=100')).json()).items).filter(job=>job.kind==='music_derivative'&&job.state==='running').length),2,'provider download waited for encoding capacity');
-  await cdDocket.getByText('Sharing provider download',{exact:true}).waitFor();
+  await expect(cdDocket.getByRole('button',{name:'Checking disc with AccurateRip…'})).toBeDisabled();
   const cancellationPage=await context.newPage();await cancellationPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
   await cancellationPage.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Activity',exact:true}).click();
   await cancellationPage.locator(`[data-work-open="job:${duplicate.job_id||duplicate.id}"]`).click();
@@ -847,7 +882,7 @@ try{
   await cancellationPage.close();
   await cdCurator.getByRole('button',{name:'Close curator'}).click();
   await clickAction(page,'Check audio with AccurateRip');
-  await cdDocket.getByText('Checked again; response unchanged',{exact:true}).waitFor({timeout:30000});
+  await expect(cdDocket.getByText('AccurateRip: Verified',{exact:true}).first()).toBeVisible({timeout:30000});
   await expect.poll(async()=>page.evaluate(async id=>(await(await fetch('/api/v1/jobs/'+id)).json()).state,duplicate.job_id||duplicate.id),{timeout:30000}).toBe('cancelled');
   assert.equal(accurateRipRequests,beforeDownload+1,'equivalent concurrent requests downloaded twice');accurateRipDelay=0;console.log('Concurrent provider journey passed: two same-account encodes, reserved download, shared waiting, one-requester cancellation, reopen and unchanged refresh.');
   await cdCurator.getByRole('button',{name:'Music',exact:true}).click();

@@ -410,3 +410,168 @@ pub fn scan_identity_from(
         }),
     })
 }
+
+impl CollectionService {
+    pub(crate) fn run_frozen_processing(
+        &self,
+        claim: &JobClaim,
+        frozen: FrozenProcessingJob,
+    ) -> Result<serde_json::Value> {
+        if self
+            .processing
+            .processing_record(frozen.observation_id)
+            .is_ok()
+        {
+            return Ok(serde_json::json!({"observation_id":frozen.observation_id}));
+        }
+        frozen.validate()?;
+        let eligibility = self.content_write_eligibility_for_job(
+            claim.user_id,
+            claim.collection_id,
+            claim.item_id,
+        )?;
+        self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
+        let registered_version =
+            self.validate_operation_eligibility(&eligibility, &frozen.operation)?;
+        if registered_version != frozen.operation_version {
+            return Err(Error::Conflict);
+        }
+        let inventory = self
+            .processing
+            .package_inventory(frozen.collection_id, frozen.source)?;
+        frozen.source_fingerprint.validate_inventory(&inventory)?;
+        self.report_processing_phase(claim, "validating_source")?;
+        if self.fingerprint_inventory_checked(&inventory, &mut || {
+            if self
+                .jobs
+                .cancellation_requested(claim.id, &claim.claim_token)?
+            {
+                Err(Error::JobCancelled)
+            } else {
+                Ok(())
+            }
+        })? != frozen.source_fingerprint
+        {
+            return Err(Error::Conflict);
+        }
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        let host = ProcessingHost {
+            port: self.processing.as_ref(),
+            access: PackageAccess {
+                collection_id: frozen.collection_id,
+                scope: frozen.source,
+            },
+            source_fingerprint: &frozen.source_fingerprint,
+            frozen_snapshot_id: frozen.snapshot_id,
+            catalog_parsers: self.catalog_parsers.as_ref(),
+            jobs: self.jobs.clone(),
+            job_id: claim.id,
+            claim_token: claim.claim_token.clone(),
+        };
+        let phase = if frozen.operation.as_str()
+            == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
+        {
+            "checking_accuraterip"
+        } else {
+            "processing_files"
+        };
+        self.report_processing_phase(claim, phase)?;
+        let (module, version) = self.modules.capability_owner(&frozen.operation)?;
+        let operated = self.modules.operate(
+            OperationRequest {
+                capability: frozen.operation.clone(),
+                input: frozen.selection.clone(),
+                collection_id: frozen.collection_id,
+                entity: OperationEntity::Representation(match frozen.source {
+                    PackageScope::Representation(id) => id,
+                    _ => {
+                        return Err(Error::Invalid(
+                            "durable processing operation requires a Representation".into(),
+                        ));
+                    }
+                }),
+                idempotency_key: claim.id.to_string(),
+            },
+            &host,
+        );
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        let (support, payload, limitations) = match operated {
+            Ok(output) => (OperationSupport::Supported, output.value, vec![]),
+            Err(ModuleError::UnavailableCapability(reason)) => (
+                OperationSupport::UnavailableDependency {
+                    dependency: module.0.clone(),
+                    reason: reason.clone(),
+                },
+                RawJson::from_value(serde_json::json!({"unavailable":reason})),
+                vec![reason],
+            ),
+            Err(error) => return Err(error.into()),
+        };
+        if self
+            .jobs
+            .cancellation_requested(claim.id, &claim.claim_token)?
+        {
+            return Err(Error::JobCancelled);
+        }
+        let current = self.content_write_eligibility_for_job(
+            claim.user_id,
+            claim.collection_id,
+            claim.item_id,
+        )?;
+        self.validate_frozen_binding(&current, &frozen.collection_binding)?;
+        self.validate_operation_eligibility(&current, &frozen.operation)?;
+        self.report_processing_phase(claim, "rechecking_source")?;
+        if self.fingerprint_inventory_checked(&inventory, &mut || {
+            if self
+                .jobs
+                .cancellation_requested(claim.id, &claim.claim_token)?
+            {
+                Err(Error::JobCancelled)
+            } else {
+                Ok(())
+            }
+        })? != frozen.source_fingerprint
+        {
+            return Err(Error::Conflict);
+        }
+        let inputs = Some(self.scan_identity(&frozen)?);
+        let observation = ProcessingObservation {
+            id: frozen.observation_id,
+            collection_id: frozen.collection_id,
+            operation: frozen.operation,
+            operation_version: frozen.operation_version,
+            source_fingerprint: frozen.source_fingerprint,
+            snapshot_id: frozen.snapshot_id,
+            support,
+            raw_observations: vec![],
+            typed_result: ModuleData {
+                module,
+                schema_version: version,
+                payload,
+            },
+            limitations,
+            created_at: self.authentication.now(),
+        };
+        observation.validate()?;
+        self.report_processing_phase(claim, "recording_check")?;
+        self.processing.publish_processing_record(
+            claim,
+            PortableProcessingRecord {
+                inputs,
+                observation,
+                import_rebinding: None,
+            },
+        )?;
+        Ok(serde_json::json!({"observation_id":frozen.observation_id}))
+    }
+}

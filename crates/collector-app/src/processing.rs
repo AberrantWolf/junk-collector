@@ -341,8 +341,8 @@ pub struct ActivateCatalogSnapshotCommand {
     pub snapshot_id: SnapshotId,
 }
 
-/// JSON/dBAR providers enforce an 8 MiB cap; bounded artwork may use the existing
-/// 20 MiB Asset ingress cap. Large catalogs use StreamingProviderPort directly.
+/// JSON/dBAR providers enforce an 8 MiB cap; buffered responses are capped at
+/// 20 MiB. Original artwork and large catalogs use StreamingProviderPort directly.
 pub trait ProviderPort: Send + Sync {
     fn acquire(
         &self,
@@ -382,6 +382,7 @@ pub struct FrozenAcquisitionJob {
 #[serde(tag = "kind", content = "input", rename_all = "snake_case")]
 pub enum FrozenJobInput {
     Processing(FrozenProcessingJob),
+    AccurateRip(crate::FrozenAccurateRipCheck),
     GameIdentification(crate::FrozenGameIdentification),
     GameCatalogScan(crate::FrozenGameCatalogScan),
     Acquisition(FrozenAcquisitionJob),
@@ -394,6 +395,7 @@ impl FrozenJobInput {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Processing(job) => job.validate(),
+            Self::AccurateRip(job) => job.validate(),
             Self::GameIdentification(job) => job.validate(),
             Self::GameCatalogScan(job) => job.validate(),
             Self::MetadataResolution(job) => job.validate(),

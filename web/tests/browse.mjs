@@ -109,7 +109,43 @@ try{
  const directWork=await openWork();await directWork.getByRole('button',{name:'Close work history'}).click();await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item')&&!new URL(location.href).searchParams.has('work'));assert.equal(new URL(page.url()).searchParams.get('collection'),seed.music);assert.equal(await work.count(),0);
  await page.goto(origin+'/?collection='+seed.music);await page.locator('.collection-row').first().waitFor();
  await page.route('**/api/v1/items?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/items?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
- assert.deepEqual(errors,[]);console.log(`FX-01 browser journey passed (${await browser.version()}): pagination/history/edit, nested work return and intentional browser Back/Forward, sorting/filtering, responsive keyboard navigation, delayed evidence and read recovery.`);
+ // Real unfinished uploads take precedence over playback attention. The list
+ // must refresh after cancellation/completion without a manual reload.
+ const beginImport=()=>page.evaluate(async ({collection,item})=>{
+  async function request(url,body){const response=await fetch('/api/v1'+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:body?JSON.stringify(body):undefined});if(!response.ok)throw Error(await response.text());return response.json();}
+  const current=await request('/items/'+item);
+  const plan=await request('/ingests/plan',{collection_id:collection,packages:[{source:{kind:'browser',label:null,package_name:'Library progress'},files:[{name:'original.bin',bytes:4,sha256:null}],anchor_file_index:null}]});
+  const accepted=await request('/ingests',{plan,analysis:'preserve_only',enrichment:'none',prepare_music:false,destination:{item_id:item,expected_revision:current.revision}});
+  return accepted.imports[0].import_id;
+ },{collection:seed.music,item:seed.ids[0]});
+ const progressImport=await beginImport();
+ const concurrentImport=await beginImport();
+ await page.goto(origin+'/?collection='+seed.music);
+ const progressRow=page.locator(`[data-item-id="${seed.ids[0]}"]`);
+ await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ await expect(progressRow.locator('.album-playback-status')).toHaveCount(0);
+ await expect(progressRow).toHaveAccessibleName(/Import in progress/);
+ if(process.env.BROWSE_SCREENSHOTS)await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'desktop-import-progress.png')});
+ await page.setViewportSize({width:390,height:844});
+ await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
+ if(process.env.BROWSE_SCREENSHOTS)await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'mobile-import-progress.png')});
+ const cancelImport=id=>page.evaluate(async id=>{
+  const detail=await(await fetch('/api/v1/ingests/'+id)).json();
+  const response=await fetch(`/api/v1/ingests/${id}/cancel`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({expected_revision:detail.import.revision})});if(!response.ok)throw Error(await response.text());
+ },id);
+ await cancelImport(progressImport);
+ assert.equal(await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()).import_in_progress,seed.ids[0]),true,'Another unfinished import must retain progress');
+ await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ await cancelImport(concurrentImport);
+ await expect(progressRow.getByText('Album playback needs attention',{exact:true})).toBeVisible();
+ await expect(progressRow.getByText('Import in progress',{exact:true})).toHaveCount(0);
+ const completedImport=await beginImport();
+ await page.reload();await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ await page.evaluate(async id=>{const response=await fetch(`/api/v1/imports/${id}/files/0?offset=0`,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:new Uint8Array([1,2,3,4])});if(!response.ok)throw Error(await response.text());},completedImport);
+ await expect(progressRow.getByText('Album playback needs attention',{exact:true})).toBeVisible({timeout:30000});
+ await expect(progressRow.getByText('Import in progress',{exact:true})).toHaveCount(0);
+ assert.deepEqual(errors,[]);console.log(`FX-01 browser journey passed (${await browser.version()}): pagination/history/edit, nested work return and intentional browser Back/Forward, sorting/filtering, responsive keyboard navigation, delayed evidence, read recovery and live import progress.`);
 }catch(error){if(page){console.error(await page.locator('body').ariaSnapshot({timeout:2000}).catch(()=> '[browser diagnostic unavailable]'));await page.screenshot({path:'/tmp/fx01-browser-failure.png',fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{
  if(browser)await browser.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});
 }

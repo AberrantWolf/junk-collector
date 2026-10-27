@@ -47,7 +47,7 @@ if(process.env.INGEST_WORKERS)await writeFile(config,(await readFile(config,'utf
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='',server,browser,page;
-async function startServer(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:'http://127.0.0.1:19874/',JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:'http://127.0.0.1:19874/'}});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
+async function startServer(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:'http://127.0.0.1:19874/',JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:'http://127.0.0.1:19874/',JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:'http://127.0.0.1:19874/'}});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19871/healthz')).ok)return;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}throw Error('Server readiness timed out');}
 async function stopServer(){await stopProcess(server);}
 try{

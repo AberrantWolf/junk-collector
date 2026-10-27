@@ -11,6 +11,7 @@
     "test:smoke": "node tests/quick-smoke.mjs",
     "test:browse": "node tests/browse.mjs",
     "test:audio-checks": "node tests/audio-check-status.mjs",
+    "test:cd-library": "node tests/cd-library.mjs",
     "test:accuraterip-snapshots": "node tests/accuraterip-snapshots.mjs",
     "test:actions": "node tests/action-menu.mjs",
     "test:scans": "node tests/scans.mjs",

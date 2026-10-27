@@ -765,6 +765,58 @@
         }
       }
     },
+    "/api/v1/admin/workers": {
+      "get": {
+        "operationId": "worker_settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerSettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_worker_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkerSettings"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerSettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
     "/api/v1/album-groups": {
       "post": {
         "operationId": "confirm_album_group",
@@ -2637,6 +2689,78 @@
           },
           "403": {
             "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/collections/{id}/cd-settings": {
+      "get": {
+        "operationId": "cd_library_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdLibrarySettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_cd_library_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCdLibrarySettings"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdLibrarySettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
           }
         }
       }
@@ -4706,6 +4830,80 @@
           },
           "422": {
             "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/accuraterip-check": {
+      "post": {
+        "operationId": "check_accuraterip",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckAccurateRip"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/accuraterip-checks": {
+      "get": {
+        "operationId": "accuraterip_checks",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccurateRipCheckView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
           }
         }
       }
@@ -8204,6 +8402,78 @@
           }
         }
       },
+      "AccurateRipCheckResult": {
+        "type": "object",
+        "required": [
+          "confirmed",
+          "limitations",
+          "discs"
+        ],
+        "properties": {
+          "confirmed": {
+            "type": "boolean"
+          },
+          "discs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccurateRipDiscResult"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AccurateRipCheckView": {
+        "type": "object",
+        "required": [
+          "job",
+          "sources"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobView"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccurateRipCheckResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepresentationId"
+            }
+          }
+        }
+      },
+      "AccurateRipDiscResult": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "status",
+          "observation_id"
+        ],
+        "properties": {
+          "observation_id": {
+            "$ref": "#/components/schemas/ObservationId"
+          },
+          "source_id": {
+            "$ref": "#/components/schemas/RepresentationId"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AudioVerificationStatus"
+          }
+        }
+      },
       "AcquireAccurateRipCommand": {
         "type": "object",
         "required": [
@@ -9004,7 +9274,8 @@
         "type": "string",
         "enum": [
           "metadata",
-          "music_preparation"
+          "music_preparation",
+          "accurate_rip"
         ]
       },
       "BulkLibraryMemberView": {
@@ -9772,6 +10043,27 @@
           }
         }
       },
+      "CdLibrarySettings": {
+        "type": "object",
+        "required": [
+          "revision",
+          "check_accuraterip_on_ingest",
+          "maximum_offset"
+        ],
+        "properties": {
+          "check_accuraterip_on_ingest": {
+            "type": "boolean"
+          },
+          "maximum_offset": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
       "ChangePassword": {
         "type": "object",
         "required": [
@@ -9788,6 +10080,22 @@
           },
           "new_password": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CheckAccurateRip": {
+        "type": "object",
+        "properties": {
+          "representation_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RepresentationId"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -13333,6 +13641,24 @@
             }
           }
         ]
+      },
+      "JobSettings": {
+        "type": "object",
+        "properties": {
+          "copy_workers": {
+            "type": "integer",
+            "format": "int32",
+            "default": 1,
+            "minimum": 0
+          },
+          "processing_workers": {
+            "type": "integer",
+            "format": "int32",
+            "default": 4,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "JobState": {
         "type": "string",
@@ -17303,6 +17629,7 @@
               "type": "object",
               "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
               "required": [
+                "import_in_progress",
                 "supports_listening",
                 "digital_audio",
                 "workflow_generation",
@@ -17394,6 +17721,9 @@
                 },
                 "identity_link": {
                   "$ref": "#/components/schemas/ItemIdentityLink"
+                },
+                "import_in_progress": {
+                  "type": "boolean"
                 },
                 "inventory_subtitle": {
                   "type": [
@@ -18443,6 +18773,7 @@
         "type": "object",
         "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
         "required": [
+          "import_in_progress",
           "supports_listening",
           "digital_audio",
           "workflow_generation",
@@ -18534,6 +18865,9 @@
           },
           "identity_link": {
             "$ref": "#/components/schemas/ItemIdentityLink"
+          },
+          "import_in_progress": {
+            "type": "boolean"
           },
           "inventory_subtitle": {
             "type": [
@@ -20124,6 +20458,27 @@
         },
         "additionalProperties": false
       },
+      "UpdateCdLibrarySettings": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "check_accuraterip_on_ingest",
+          "maximum_offset"
+        ],
+        "properties": {
+          "check_accuraterip_on_ingest": {
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "maximum_offset": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateCollectionList": {
         "type": "object",
         "required": [
@@ -20190,6 +20545,22 @@
           },
           "language": {
             "$ref": "#/components/schemas/LanguageTag"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateWorkerSettings": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "jobs"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "jobs": {
+            "$ref": "#/components/schemas/JobSettings"
           }
         },
         "additionalProperties": false
@@ -20572,6 +20943,21 @@
             }
           }
         ]
+      },
+      "WorkerSettings": {
+        "type": "object",
+        "required": [
+          "revision",
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "$ref": "#/components/schemas/JobSettings"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
       }
     }
   }

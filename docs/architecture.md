@@ -1,5 +1,65 @@
 # Architecture
 
+## Standalone capture folder naming — 2026-10-27
+
+The operator-only `rip-cd.sh --auto` workflow captures into a fresh generated
+directory before attempting descriptive naming. The `collector-cd-identity`
+executable is a narrow filesystem/CLI adapter over `junk-libs-disc` TOC parsing
+and `junk-libs-disc-id`; it reads bounded TOC sidecars only, without audio reads,
+hashing, drive access or Collector state. `scripts/name_cd_capture.py` owns the
+standalone naming policy and bounded MusicBrainz request. A unique exact release,
+one matching medium and one safe catalog number permit an atomic rename without
+replacement; all other outcomes retain the generated directory. This optional
+operator convenience neither participates in Collector's provider acquisition
+registry nor publishes metadata/evidence. Its lookup has a 15-second wall-clock
+budget, bounded response bytes, no redirects or retries, and no capture mutations
+before lookup completes. Raw sidecar contents and failed captures stay intact.
+
+## Automatic CD checks and operational defaults — 2026-10-27
+
+Application services own one durable AccurateRip workflow: freeze current source
+fingerprints, selected layout observations and settings without reading payloads,
+inspect missing structure,
+acquire through the shared provider registry, then run the existing audio check.
+Only complete AccurateRip matches confirm audio. Source/generation, permissions,
+cancellation and claim fences apply to every continuation and publication.
+The existing bounded library batch machinery also runs unconfirmed CD sources.
+Ingest freezes its collection check defaults on admission and tracks the optional
+check independently of preservation, metadata and preparation. Existing intents
+retain their prior behavior. CD defaults are collection-scoped private operational
+settings; global worker limits live in Administration and govern new claims live.
+Configuration supplies worker defaults until an administrator saves an override.
+Settings use optimistic revisions and command receipts; reindex preserves them.
+
+
+## Original cover acquisition — 2026-10-26
+
+Application metadata resolution selects only standalone front covers from the
+immutable release listing. When several are available, its existing artwork
+source adapter inspects at most sixteen original lengths with HEAD, using the
+same pinned destinations and cancellation rules as acquisition. Prefer approved
+originals within 128 MiB and then smaller known originals; unknown lengths remain
+eligible. Freeze the chosen image in the claimed parent computation's private
+checkpoint before admitting its existing shared acquisition. Resumed work reuses
+that selection, regardless of later HTTP headers. Explicit image selections keep
+the selected image. Refusals stop inspection instead of probing more images.
+
+CAA originals use the single streaming provider/snapshot publication pipeline:
+check declared length, spool and hash bounded chunks with cancellation, then let
+the snapshot writer verify the local stream. Originals retain their exact pixels
+and bytes; there is no automatic thumbnail substitution. Provider cover Assets
+accept up to 128 MiB independently of the 20 MiB interactive/document upload cap.
+Materialization still verifies snapshot bytes and uses the existing bounded image
+decoder (12,000 pixels per dimension, 256 MiB allocation) and local thumbnails.
+That final decoder consumes a bounded in-memory snapshot; network acquisition
+does not buffer the whole cover. Item/generation/claim, cancellation, manual
+artwork authority, restore/reuse and reindex rules remain applicable. Oversized
+original failures state the bytes/limit and point to explicit cover selection or
+manual upload. The browser remembers up to 64 explicitly dismissed lookup IDs
+per account/album, so reopening does not promote an old dismissed failure back
+into the active panel. Active work still resumes and server history is retained.
+No automatic data conversion or production update is introduced.
+
 ## MusicBrainz track mapping and Disc ID submission — 2026-10-26
 
 The existing application disc resolver treats an unregistered local Disc ID as
@@ -53,6 +113,17 @@ provider edition lists additional media. Missing media remains visible through
 album coverage; source ambiguity, authorization and unavailable audio still apply.
 
 ## Album playback readiness — 2026-10-24
+
+The 2026-10-26 Library follow-up adds a derived `import_in_progress` boolean to
+authorized item presentation. The import port answers an indexed existence query
+over the item's durable guided intents and their owned jobs, including the gap
+between publication and downstream enrichment/preparation. Unsettled, uncancelled
+intents count unless blocked by a terminal failure without remaining active work.
+No requester, source path or job details are exposed. Playback readiness retains
+its separate meaning; application browse excludes importing albums from playback
+attention results. The web list gives import progress precedence, uses a muted
+clock, and polls with scope cancellation until no visible imports remain. This
+adds no stored projection, media reads, hashing or workflow mutations.
 
 Presented music entries carry typed recorded album playback readiness. Application
 policy reuses the album/list target resolver, with committed track observations
@@ -1283,7 +1354,7 @@ Before adding a module: identify its owned data, invariants, capabilities, persi
 
 Cover Art Archive listing options carry their retained Snapshot identity. The
 curation-only preview API resolves that verified listing and enforces collection
-Curate access before passing its release/image IDs to `ArtworkPreviewPort`.
+Curate access before passing its release/image IDs to `ArtworkSourcePort`.
 The existing CAA adapter implements the port using its pinned redirect/DNS policy
 and bounded reader, requesting the provider's [250px endpoint](https://musicbrainz.org/doc/Cover_Art_Archive/API).
 Previews are transient image bytes, not Assets, provider observations or evidence;

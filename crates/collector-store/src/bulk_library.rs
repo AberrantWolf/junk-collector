@@ -264,7 +264,9 @@ impl BulkLibraryPort for Store {
     }
     fn bulk_library_capacity(&self, user: UserId, kind: BulkLibraryKind) -> Result<u32> {
         let db = lock(&self.db)?;
-        let count: u32 = if kind == BulkLibraryKind::MusicPreparation {
+        let count: u32 = if kind == BulkLibraryKind::AccurateRip {
+            db.query_row("SELECT count(*) FROM private.jobs WHERE user_id=? AND kind='accuraterip_check' AND state IN ('queued','running','cancel_requested')",[user.to_string()],|r|r.get(0)).map_err(storage)?
+        } else if kind == BulkLibraryKind::MusicPreparation {
             db.query_row("SELECT count(*) FROM private.jobs j WHERE user_id=? AND kind='music_derivative_batch' AND cancellation_requested=0 AND (state IN ('queued','running','cancel_requested') OR EXISTS(SELECT 1 FROM private.preparation_members m JOIN private.jobs c ON c.id=m.job_id WHERE m.batch_id=j.id AND c.state IN ('queued','running','cancel_requested')))",[user.to_string()],|r|r.get(0)).map_err(storage)?
         } else {
             db.query_row("SELECT count(*) FROM private.jobs WHERE user_id=? AND kind IN ('metadata_resolution','metadata_existing') AND state IN ('queued','running','cancel_requested')",[user.to_string()],|r|r.get(0)).map_err(storage)?

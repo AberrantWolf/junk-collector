@@ -43,6 +43,10 @@ pub use guided_ingest::{is_inbox_cleanup_directory, is_intake_housekeeping};
 pub use inbox_cleanup::*;
 mod item_lifecycle;
 pub use item_lifecycle::prepare_clean_reimport;
+mod cd_checks;
+pub use cd_checks::*;
+mod library_settings;
+pub use library_settings::*;
 mod library_care;
 mod metadata_resolution;
 pub use library_care::*;
@@ -648,6 +652,10 @@ pub struct GuidedBulkContext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GuidedIngestIntent {
+    #[serde(default)]
+    pub cd_check_settings: Option<CdLibrarySettings>,
+    #[serde(default)]
+    pub cd_check_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purchase: Option<DigitalPurchase>,
     #[serde(default)]
@@ -809,6 +817,10 @@ pub struct RetryIngestCommand {
 }
 
 pub trait ProvisionalImportPort: Send + Sync {
+    /// Derived activity for an authorized album. Includes downstream work and
+    /// transition gaps; excludes cancelled/settled or terminally blocked imports.
+    /// This discloses no private workflow details and never reads media payloads.
+    fn item_has_active_ingest(&self, item: ItemId) -> Result<bool>;
     fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId>;
     fn inbox_cleanup_status(&self, id: ImportId) -> Result<Option<InboxCleanupView>>;
     fn clean_inbox_source(
@@ -1044,6 +1056,7 @@ impl From<JobRecord> for JobView {
                     | "import_publication"
                     | "catalog_acquisition"
                     | "processing_operation"
+                    | "accuraterip_check"
                     | "music_derivative"
                     | "music_derivative_batch"
                     | "metadata_resolution"
@@ -1057,7 +1070,7 @@ impl From<JobRecord> for JobView {
         let result = safe_job_result(&record.kind, record.result.as_ref());
         let progress_kind = if matches!(
             record.kind.as_str(),
-            "processing_operation" | "inbox_cleanup"
+            "processing_operation" | "accuraterip_check" | "inbox_cleanup"
         ) && matches!(
             record.state,
             JobState::Queued | JobState::Running | JobState::CancelRequested
@@ -1175,6 +1188,13 @@ pub trait JobPort: Send + Sync {
         claim: &JobClaim,
         frozen: &FrozenAcquisitionJob,
     ) -> Result<Option<SnapshotId>>;
+    /// Freeze the chosen image before child acquisition; later continuations
+    /// reuse it even if advisory HTTP lengths change.
+    fn metadata_artwork_selection(
+        &self,
+        claim: &JobClaim,
+        proposed: Option<&RawJson>,
+    ) -> Result<Option<RawJson>>;
     fn acquisition_owners(&self, claim: &JobClaim) -> Result<Vec<JobRecord>>;
     fn acquisition_response_status(
         &self,
@@ -1221,6 +1241,8 @@ pub trait JobPort: Send + Sync {
 }
 
 pub trait AdministrationPort: Send + Sync {
+    fn worker_settings(&self) -> Result<WorkerSettings>;
+    fn save_worker_settings(&self, command: &UpdateWorkerSettings) -> Result<WorkerSettings>;
     fn default_username(&self) -> Result<String>;
     fn default_user_id(&self) -> Result<UserId>;
     fn create_user(&self, username: &str, password: &str, administrator: bool) -> Result<UserId>;
@@ -1620,7 +1642,7 @@ pub struct CollectionService {
     bulk_port: Arc<dyn BulkLibraryPort>,
     lists: Arc<dyn CollectionListPort>,
     audio_converter: Option<Arc<dyn AudioConversionPort>>,
-    artwork_preview: Option<Arc<dyn ArtworkPreviewPort>>,
+    artwork_source: Option<Arc<dyn ArtworkSourcePort>>,
     catalog_uploads: Option<Arc<dyn UploadedCatalogPort>>,
     backup_history: Option<Arc<dyn BackupHistoryPort>>,
     catalog_inspector: Option<Arc<dyn CatalogUploadInspectionPort>>,
@@ -2056,6 +2078,7 @@ pub struct PresentedAudioCheck {
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
+    pub import_in_progress: bool,
     pub album_playback: Option<collector_api_types::AlbumPlaybackReadiness>,
     pub supports_listening: bool,
     pub digital_audio: bool,
@@ -2385,7 +2408,7 @@ impl CollectionService {
             bulk_port,
             lists,
             audio_converter: None,
-            artwork_preview: None,
+            artwork_source: None,
             catalog_uploads: None,
             backup_history: None,
             catalog_inspector: None,
@@ -2648,10 +2671,13 @@ impl CollectionService {
                 let effective_metadata = self.effective_metadata_for_user(&item, actor.user_id)?;
                 let view = self.presented(item, role, actor, effective_metadata)?;
                 if !attention
-                    || matches!(
-                        view.album_playback,
-                        Some(collector_api_types::AlbumPlaybackReadiness::NeedsAttention { .. })
-                    )
+                    || (!view.import_in_progress
+                        && matches!(
+                            view.album_playback,
+                            Some(
+                                collector_api_types::AlbumPlaybackReadiness::NeedsAttention { .. }
+                            )
+                        ))
                 {
                     items.push(view);
                 }
@@ -2685,6 +2711,9 @@ impl CollectionService {
         mut effective_metadata: ResolvedMetadataDisplay,
     ) -> Result<PresentedItem> {
         let user = actor.user_id;
+        let import_in_progress = !item.deleted
+            && item.domain.module.0 == "org.junk.music"
+            && self.provisional_imports.item_has_active_ingest(item.id)?;
         let album_playback = if !item.deleted && item.domain.module.0 == "org.junk.music" {
             Some(self.album_playback_readiness(actor, &item)?)
         } else {
@@ -2821,6 +2850,7 @@ impl CollectionService {
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
+            import_in_progress,
             album_playback,
             supports_listening,
             digital_audio,
@@ -5026,33 +5056,7 @@ impl CollectionService {
                 {
                     return Err(Error::Conflict);
                 }
-                let result: collector_modules::music::CdProcessingResult =
-                    if structure.operation.as_str() == "org.junk.music.import-analysis" {
-                        let output: collector_modules::music::MusicImportAnalysisOutput =
-                            structure.typed_result.payload.parse()?;
-                        let mut layouts = output.observations.iter().filter_map(|value| {
-                            value
-                                .parse::<collector_modules::music::CdProcessingResult>()
-                                .ok()
-                                .filter(|value| {
-                                    matches!(
-                                        value,
-                                        collector_modules::music::CdProcessingResult::Layout { .. }
-                                    )
-                                })
-                        });
-                        let layout = layouts.next().ok_or_else(|| {
-                            Error::Invalid("Import analysis has no recorded CD layout".into())
-                        })?;
-                        if layouts.next().is_some() {
-                            return Err(Error::Invalid(
-                                "Import analysis has ambiguous CD layouts".into(),
-                            ));
-                        }
-                        layout
-                    } else {
-                        structure.typed_result.payload.parse()?
-                    };
+                let result = cd_checks::recorded_cd_layout_observation(&structure)?;
                 let query = collector_modules::music::accuraterip_query_from_structure(&result)
                     .map_err(|error| Error::Invalid(error.to_string()))?;
                 let job = deterministic_job_id(actor.user_id, "catalog.acquire", context.key());
@@ -5647,168 +5651,13 @@ impl CollectionService {
             "metadata_existing" => self.run_existing_metadata(&claim),
             "music_derivative" => self.run_music_derivative(&claim),
             "music_derivative_batch" => self.run_music_derivative_batch(&claim),
-            "processing_operation" => (|| {
-                let frozen = match claim.frozen_input.clone() {
-                    Some(FrozenJobInput::Processing(value)) => value,
-                    _ => return Err(Error::Storage("processing job has no frozen input".into())),
-                };
-                if self
-                    .processing
-                    .processing_record(frozen.observation_id)
-                    .is_ok()
-                {
-                    return Ok(serde_json::json!({"observation_id":frozen.observation_id}));
+            "accuraterip_check" => self.run_accuraterip_check(&claim),
+            "processing_operation" => match claim.frozen_input.clone() {
+                Some(FrozenJobInput::Processing(frozen)) => {
+                    self.run_frozen_processing(&claim, frozen)
                 }
-                frozen.validate()?;
-                let eligibility = self.content_write_eligibility_for_job(
-                    claim.user_id,
-                    claim.collection_id,
-                    claim.item_id,
-                )?;
-                self.validate_frozen_binding(&eligibility, &frozen.collection_binding)?;
-                let registered_version =
-                    self.validate_operation_eligibility(&eligibility, &frozen.operation)?;
-                if registered_version != frozen.operation_version {
-                    return Err(Error::Conflict);
-                }
-                let inventory = self
-                    .processing
-                    .package_inventory(frozen.collection_id, frozen.source)?;
-                frozen.source_fingerprint.validate_inventory(&inventory)?;
-                self.report_processing_phase(&claim, "validating_source")?;
-                if self.fingerprint_inventory_checked(&inventory, &mut || {
-                    if self
-                        .jobs
-                        .cancellation_requested(claim.id, &claim.claim_token)?
-                    {
-                        Err(Error::JobCancelled)
-                    } else {
-                        Ok(())
-                    }
-                })? != frozen.source_fingerprint
-                {
-                    return Err(Error::Conflict);
-                }
-                if self
-                    .jobs
-                    .cancellation_requested(claim.id, &claim.claim_token)?
-                {
-                    return Err(Error::JobCancelled);
-                }
-                let host = ProcessingHost {
-                    port: self.processing.as_ref(),
-                    access: PackageAccess {
-                        collection_id: frozen.collection_id,
-                        scope: frozen.source,
-                    },
-                    source_fingerprint: &frozen.source_fingerprint,
-                    frozen_snapshot_id: frozen.snapshot_id,
-                    catalog_parsers: self.catalog_parsers.as_ref(),
-                    jobs: self.jobs.clone(),
-                    job_id: claim.id,
-                    claim_token: claim.claim_token.clone(),
-                };
-                let phase = if frozen.operation.as_str()
-                    == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION
-                {
-                    "checking_accuraterip"
-                } else {
-                    "processing_files"
-                };
-                self.report_processing_phase(&claim, phase)?;
-                let (module, version) = self.modules.capability_owner(&frozen.operation)?;
-                let operated = self.modules.operate(
-                    OperationRequest {
-                        capability: frozen.operation.clone(),
-                        input: frozen.selection.clone(),
-                        collection_id: frozen.collection_id,
-                        entity: OperationEntity::Representation(match frozen.source {
-                            PackageScope::Representation(id) => id,
-                            _ => {
-                                return Err(Error::Invalid(
-                                    "durable processing operation requires a Representation".into(),
-                                ));
-                            }
-                        }),
-                        idempotency_key: claim.id.to_string(),
-                    },
-                    &host,
-                );
-                if self
-                    .jobs
-                    .cancellation_requested(claim.id, &claim.claim_token)?
-                {
-                    return Err(Error::JobCancelled);
-                }
-                let (support, payload, limitations) = match operated {
-                    Ok(output) => (OperationSupport::Supported, output.value, vec![]),
-                    Err(ModuleError::UnavailableCapability(reason)) => (
-                        OperationSupport::UnavailableDependency {
-                            dependency: module.0.clone(),
-                            reason: reason.clone(),
-                        },
-                        RawJson::from_value(serde_json::json!({"unavailable":reason})),
-                        vec![reason],
-                    ),
-                    Err(error) => return Err(error.into()),
-                };
-                if self
-                    .jobs
-                    .cancellation_requested(claim.id, &claim.claim_token)?
-                {
-                    return Err(Error::JobCancelled);
-                }
-                let current = self.content_write_eligibility_for_job(
-                    claim.user_id,
-                    claim.collection_id,
-                    claim.item_id,
-                )?;
-                self.validate_frozen_binding(&current, &frozen.collection_binding)?;
-                self.validate_operation_eligibility(&current, &frozen.operation)?;
-                self.report_processing_phase(&claim, "rechecking_source")?;
-                if self.fingerprint_inventory_checked(&inventory, &mut || {
-                    if self
-                        .jobs
-                        .cancellation_requested(claim.id, &claim.claim_token)?
-                    {
-                        Err(Error::JobCancelled)
-                    } else {
-                        Ok(())
-                    }
-                })? != frozen.source_fingerprint
-                {
-                    return Err(Error::Conflict);
-                }
-                let inputs = Some(self.scan_identity(&frozen)?);
-                let observation = ProcessingObservation {
-                    id: frozen.observation_id,
-                    collection_id: frozen.collection_id,
-                    operation: frozen.operation,
-                    operation_version: frozen.operation_version,
-                    source_fingerprint: frozen.source_fingerprint,
-                    snapshot_id: frozen.snapshot_id,
-                    support,
-                    raw_observations: vec![],
-                    typed_result: ModuleData {
-                        module,
-                        schema_version: version,
-                        payload,
-                    },
-                    limitations,
-                    created_at: self.authentication.now(),
-                };
-                observation.validate()?;
-                self.report_processing_phase(&claim, "recording_check")?;
-                self.processing.publish_processing_record(
-                    &claim,
-                    PortableProcessingRecord {
-                        inputs,
-                        observation,
-                        import_rebinding: None,
-                    },
-                )?;
-                Ok(serde_json::json!({"observation_id":frozen.observation_id}))
-            })(),
+                _ => Err(Error::Storage("processing job has no frozen input".into())),
+            },
             _ => Err(Error::Unavailable(format!(
                 "job kind {} has no registered executor",
                 claim.kind
@@ -5991,6 +5840,7 @@ impl CollectionService {
                 | "import_publication"
                 | "catalog_acquisition"
                 | "processing_operation"
+                | "accuraterip_check"
                 | "music_derivative"
                 | "music_derivative_batch"
                 | "metadata_resolution"
@@ -6021,7 +5871,8 @@ impl CollectionService {
                 | "game_identification"
                 | "game_catalog_scan"
                 | "music_derivative"
-                | "processing_operation" => effects.retry_failed_job(id, actor.user_id),
+                | "processing_operation"
+                | "accuraterip_check" => effects.retry_failed_job(id, actor.user_id),
                 "music_derivative_batch" => effects
                     .retry_preparation_batch(id, actor.user_id)
                     .map(|()| id),

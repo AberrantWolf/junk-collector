@@ -1,5 +1,56 @@
 # Implementation status
 
+## Beta.10 release candidate — 2026-10-27
+
+The user requested release and NAS deployment of all current changes: one-click
+AccurateRip and collection/worker defaults, original artwork acquisition, Library
+import progress and the standalone CD capture/naming helpers. The candidate is
+being qualified through the existing native image pipeline; publication and NAS
+installation are not yet claimed. See [release notes](releases/v0.1.0-beta.10.md).
+
+
+## One-click AccurateRip and configurable defaults — 2026-10-27
+
+Source delivery adds **Check this disc with AccurateRip**, sharing one durable
+application workflow across the album view, advanced checks, guided ingest and
+library batches. It records missing structure, acquires the matching response and
+checks audio without a manual fetch step. Only qualified matching audio becomes
+verified. No-data, ambiguity, unsupported input and failures remain visible.
+
+**Administration → Library settings** owns per-music-collection automatic ingest
+checks (on by default) and the maximum offset. **Check unconfirmed rips** queues
+existing eligible originals through the existing bounded batch/recovery flow;
+confirmed sources and digital purchases are skipped. **Administration → Server
+settings → Background workers** saves live processing/copy limits. Saved settings
+survive restart and reindex; accepted ingest settings remain frozen. Existing
+unfinished intents retain their previous policy. Other collection types have no
+invented configuration fields. See [delivery and acceptance](validation/automatic-accuraterip-2026-10-27.md).
+Workspace tests, Clippy, web/contracts/models and all selected Chrome journeys
+pass. No release, NAS deployment or live-library batch is included.
+
+
+## Original provider artwork repair — 2026-10-26
+
+Source implementation accepts full-quality CAA cover originals up to 128 MiB
+through the streaming snapshot pipeline. When multiple standalone front covers
+are available, application policy compares advisory original sizes and freezes
+its choice across continuations/restart. Explicit selections retain their exact
+image. Upload and decoder limits remain independent; oversized failures provide
+recovery through explicit cover choice. Dismissed lookup failures stay dismissed
+when the panel reopens, independently per account/album. Workspace tests, Clippy,
+web checks/build/models and focused real-browser acceptance pass; see the
+[delivery record and limits](validation/provider-artwork-originals-2026-10-26.md).
+No NAS deployment is included.
+
+## Library import progress — 2026-10-26
+
+Album rows show a muted clock and “Import in progress” while their guided import
+is uploading or processing, including downstream enrichment/audio preparation.
+The Library refreshes active rows automatically. Playback-attention filtering
+excludes importing albums; settled, cancelled or blocked imports resume the
+ordinary playback-readiness display. See [validation](validation/library-import-progress-2026-10-26.md).
+This source change has not been deployed.
+
 ## Beta.9 published and installed — 2026-10-26
 
 Beta.9 includes the faster testing/packaging workflow, active-release/Disc ID
@@ -107,14 +158,34 @@ Runtime settings, identities and 18 unrelated containers are retained; see
 ## Standalone raw CD capture helper — 2026-10-25
 
 `scripts/rip-cd.sh NAME DESTINATION [DRIVE]` creates a fresh named directory and
-runs redumper acquisition, extended-area acquisition and refinement, retaining
+runs redumper acquisition, extended-area acquisition and conditional refinement, retaining
 all raw masters/sidecars/logs without generating BIN/CUE or playback copies.
+The 2026-10-27 `--auto DESTINATION [DRIVE]` option starts with a unique generated
+name, then attempts one exact MusicBrainz lookup within a 15-second wall budget.
+The optional release-built `collector-cd-identity` adapter reuses shared TOC
+parsing/Disc ID code and reads no audio or drive. One release, matching medium
+and usable catalog number allows an exclusive atomic folder rename, with a disc
+suffix for multi-disc releases. Ambiguity, timeout, unavailable tools, unsafe names
+and destination collisions retain the generated folder. Manual names skip lookup.
+The lookup publishes no Collector metadata or verification evidence.
 After automatic initial selection it pins the logged drive for later invocations;
 failure messages identify the stopped stage without declaring earlier reads failed.
+The 2026-10-26 adjustment starts refinement only for nonzero initial SCSI/C2
+counts; Q-only errors skip it, matching normal redumper refinement eligibility.
+Missing/malformed summaries stop for review without starting refinement. Offline
+regressions cover the decision and failures. The 2026-10-27 operator run exercised
+the Q-only skip on one owned audio CD; additional manual Q refinement recovered
+15 of 31 reported Q sectors, leaving 16. Another BU40N recovered none of those
+remaining sectors at default optimal speed or requested 8x. This is bounded
+operator evidence, not complete drive/format qualification or an AccurateRip result.
+The [accepted capture tradeoff](decisions/cd-audio-capture-tradeoff.md) keeps
+Q-only refinement optional, retains captured subchannels/logs and uses AccurateRip
+to assess audio within its actual coverage. Persistent Q counts alone are not
+mandatory recovery work or evidence of damaged audio.
 This is an operator helper outside Collector's import/domain services, not an
 integrated ripping subsystem. See [usage](getting-started.md#import-options) and
-[validation/limits](validation/raw-cd-capture-2026-10-25.md). Physical-drive
-acceptance remains unrun; completion is not audio/catalog verification.
+[validation/limits](validation/raw-cd-capture-2026-10-25.md). Broader physical-drive
+acceptance remains unqualified; completion is not audio/catalog verification.
 
 ## Utoipa 6 maintenance cleanup — 2026-10-25
 

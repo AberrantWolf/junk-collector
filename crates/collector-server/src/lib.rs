@@ -125,7 +125,7 @@ impl Drop for JobRuntime {
 }
 
 pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> {
-    let settings = state.service.job_settings()?;
+    state.service.job_settings()?.validate()?;
     let worker_instance = ServerId::new().to_string();
     let mut workers = Vec::new();
     let recovery_state = state.clone();
@@ -155,7 +155,7 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }));
-    for worker_index in 0..settings.execution_loops() {
+    for worker_index in 0..9 {
         let service = state.service.clone();
         let worker_instance = worker_instance.clone();
         workers.push(tokio::spawn(async move {
@@ -735,6 +735,12 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(start_bulk_library))
         .routes(routes!(cancel_bulk_library))
         .routes(routes!(retry_bulk_library))
+        .routes(routes!(
+            cd_library_settings,
+            update_cd_library_settings,
+            check_accuraterip
+        ))
+        .routes(routes!(accuraterip_checks))
         .routes(routes!(album_group_proposals))
         .routes(routes!(preview_album_group))
         .routes(routes!(confirm_album_group))
@@ -754,6 +760,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
 fn administration_api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(routes!(settings))
+        .routes(routes!(worker_settings, update_worker_settings))
         .routes(routes!(inboxes))
         .routes(routes!(import_inbox))
         .routes(routes!(create_user))
@@ -5241,4 +5248,90 @@ fn same_upload_inventory(
                 .get(file.name.as_str())
                 .is_some_and(|actual| actual.bytes == file.bytes && actual.sha256 == file.sha256)
         })
+}
+
+#[utoipa::path(get, path="/api/v1/admin/workers", responses((status=200,body=collector_app::WorkerSettings),(status=403)))]
+async fn worker_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<collector_app::WorkerSettings>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.worker_settings(&actor)).await?,
+    ))
+}
+#[utoipa::path(put, path="/api/v1/admin/workers", request_body=collector_app::UpdateWorkerSettings,responses((status=200,body=collector_app::WorkerSettings),(status=403),(status=409)))]
+async fn update_worker_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::UpdateWorkerSettings>,
+) -> ApiResult<Json<collector_app::WorkerSettings>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .update_worker_settings(&actor, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/collections/{id}/cd-settings",params(("id"=CollectionId,Path)),responses((status=200,body=collector_app::CdLibrarySettings),(status=403)))]
+async fn cd_library_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+) -> ApiResult<Json<collector_app::CdLibrarySettings>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.cd_library_settings(&actor, id)).await?,
+    ))
+}
+#[utoipa::path(put,path="/api/v1/collections/{id}/cd-settings",params(("id"=CollectionId,Path)),request_body=collector_app::UpdateCdLibrarySettings,responses((status=200,body=collector_app::CdLibrarySettings),(status=403),(status=409)))]
+async fn update_cd_library_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<CollectionId>,
+    Json(command): Json<collector_app::UpdateCdLibrarySettings>,
+) -> ApiResult<Json<collector_app::CdLibrarySettings>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .update_cd_library_settings(&actor, id, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/items/{id}/accuraterip-check",params(("id"=ItemId,Path)),request_body=collector_app::CheckAccurateRip,responses((status=202,body=JobAccepted),(status=403)))]
+async fn check_accuraterip(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<collector_app::CheckAccurateRip>,
+) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .check_accuraterip(&actor, id, command, &context)
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(JobAccepted { job_id })))
+}
+
+#[utoipa::path(get,path="/api/v1/items/{id}/accuraterip-checks",params(("id"=ItemId,Path)),responses((status=200,body=Vec<collector_app::AccurateRipCheckView>),(status=403)))]
+async fn accuraterip_checks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<Json<Vec<collector_app::AccurateRipCheckView>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.accuraterip_checks(&actor, id)).await?,
+    ))
 }
