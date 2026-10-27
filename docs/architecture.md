@@ -14,6 +14,13 @@ operator convenience neither participates in Collector's provider acquisition
 registry nor publishes metadata/evidence. Its lookup has a 15-second wall-clock
 budget, bounded response bytes, no redirects or retries, and no capture mutations
 before lookup completes. Raw sidecar contents and failed captures stay intact.
+The supervised worker returns a small diagnostic envelope so provider statuses,
+identity errors, inconclusive metadata and naming failures remain distinguishable.
+Successful capture, including a generated-name fallback, ends with redumper's
+`eject` command for the pinned drive only. Eject receives no image options, so it
+cannot append/replace capture logs. Nonzero exits and redumper's zero-exit SCSI
+eject warning are reported separately from preservation success. Failed or
+incomplete capture never reaches eject.
 
 ## Automatic CD checks and operational defaults — 2026-10-27
 

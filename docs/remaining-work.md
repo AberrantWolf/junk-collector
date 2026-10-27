@@ -152,7 +152,10 @@ TOC-only shared-library identity and one MusicBrainz lookup capped at 15 seconds
 Only an unambiguous release/medium/catalog number permits an exclusive rename;
 multi-disc releases include the disc position. Other outcomes keep the generated
 name, without interrupting capture or replacing existing folders. Manual naming
-remains available. See [usage](getting-started.md#import-options) and the
+remains available. The later 2026-10-27 user requests add specific naming-failure
+diagnostics and eject the pinned drive after successful capture, including naming
+fallbacks. Failed/incomplete captures remain inserted; eject errors preserve the
+successful capture outcome and are reported separately. See [usage](getting-started.md#import-options) and the
 [dated acceptance](validation/cd-folder-naming-2026-10-27.md). Physical-drive and
 successful live-provider naming acceptance remain unrun; this adds descriptive
 naming, not audio/catalog verification or an integrated ripping subsystem.

@@ -11,7 +11,7 @@ Usage: rip-cd.sh --auto DESTINATION [DRIVE]
 when MusicBrainz returns one exact release, matching disc and usable number.
 Naming waits at most 15 seconds after capture, never retries, and otherwise keeps
 the generated name. Multi-disc releases include a Disc N suffix; collisions keep
-the generated name. No extra audio reads or drive commands are performed.
+the generated name. Naming performs no extra audio reads or drive commands.
 Example: rip-cd.sh --auto /Volumes/Archive/incoming disk7
 
 Supplying NAME instead creates DESTINATION/NAME without a metadata lookup.
@@ -27,6 +27,8 @@ COLLECTOR_CD_IDENTITY=/path/to/collector-cd-identity overrides that executable.
 Missing naming tools keep the generated folder; ripping still works.
 Refinement runs only when the initial dump reports SCSI or C2 errors.
 Q-subchannel errors alone do not trigger the normal SCSI/C2 refinement pass.
+After successful capture and naming, ejects the selected drive using redumper.
+Failed captures leave the disc inserted. Eject failures are reported separately.
 
 Keeps raw SCRAM, STATE, SUBCODE, TOC and all additional disc sidecars/logs.
 Does not generate BIN/CUE, skeletons, FLAC or other playback derivatives.
@@ -146,9 +148,25 @@ if (( automatic )); then
         else
             printf '\nAutomatic naming stopped; capture retained at: %s\n' "$output" >&2
         fi
+    elif ! command -v python3 >/dev/null 2>&1; then
+        printf '\nPython 3 is unavailable; keeping generated folder. See --help.\n' >&2
     else
-        printf '\nAutomatic naming tools unavailable; keeping generated folder. See --help.\n' >&2
+        printf '\nIdentity executable unavailable: %s; keeping generated folder. See --help.\n' "$identity_binary" >&2
     fi
 fi
 
 printf '\nRaw capture saved to: %s\nReview disc.log for unresolved read errors. Import the entire folder into Collector using disc.toc as the analysis anchor.\n' "$output"
+
+# Eject only the pinned drive, after every capture stage and required-file check.
+# Do not pass image options: eject must not open/append the preserved capture log.
+# Some redumper versions return zero even when the SCSI eject command fails.
+printf '\nEjecting drive: %s\n' "$drive"
+if eject_output=$("$redumper" eject "--drive=$drive" 2>&1); then
+    case "$eject_output" in
+        *'failed to eject'*) printf '%s\nCapture saved, but the drive could not eject the disc.\n' "$eject_output" >&2 ;;
+        *) printf '%s\nEject command completed for %s.\n' "$eject_output" "$drive" ;;
+    esac
+else
+    eject_status=$?
+    printf '%s\nCapture saved, but eject failed for %s (exit %s).\n' "$eject_output" "$drive" "$eject_status" >&2
+fi

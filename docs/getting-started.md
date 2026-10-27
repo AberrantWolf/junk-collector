@@ -90,6 +90,8 @@ one release, matching medium/track count and safe catalog number permits naming
 the folder, for example `SQEX-11226`; multi-disc releases append ` - Disc N`.
 Missing/ambiguous metadata, unavailable tools/network, unsupported TOCs and existing
 destinations keep the generated folder. Naming is descriptive, not verification.
+Failures report their specific cause, including HTTP status, identity-tool
+diagnostics, missing/ambiguous catalog metadata, timeouts or the occupied path.
 The lookup uses Python 3 and `collector-cd-identity` from PATH or this checkout's
 `target/release`; `COLLECTOR_CD_IDENTITY=/path/to/collector-cd-identity` overrides
 the executable. Ripping remains available without these optional naming tools.
@@ -115,6 +117,9 @@ establish complete subchannels; a mismatch or missing reference is inconclusive
 on its own. Further Q-only refinement is optional, not a prerequisite to import
 or listening when the existing structural requirements are met. See the
 [accepted policy and optional fish command](decisions/cd-audio-capture-tradeoff.md).
+After successful capture and naming (including a generated-name fallback), the
+helper ejects the same selected drive. Failed/incomplete captures leave the disc
+inserted. Eject failures are reported separately and do not invalidate saved files.
 Existing folders are refused and failed captures are retained. Review `disc.log`
 for unresolved errors, then import the complete folder with `disc.toc` as the
 analysis anchor. Command completion/file presence does not establish error-free

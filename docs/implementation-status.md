@@ -168,6 +168,12 @@ and usable catalog number allows an exclusive atomic folder rename, with a disc
 suffix for multi-disc releases. Ambiguity, timeout, unavailable tools, unsafe names
 and destination collisions retain the generated folder. Manual names skip lookup.
 The lookup publishes no Collector metadata or verification evidence.
+The 2026-10-27 follow-up preserves specific worker/identity/provider diagnostics,
+distinguishes inconclusive metadata and rename errors, and ejects the pinned drive
+after successful capture/naming, including generated-name fallbacks. Eject receives
+no image options and reports failures separately; failed/incomplete captures leave
+the disc inserted. Offline diagnostics/eject acceptance is recorded with the
+[naming delivery](validation/cd-folder-naming-2026-10-27.md).
 After automatic initial selection it pins the logged drive for later invocations;
 failure messages identify the stopped stage without declaring earlier reads failed.
 The 2026-10-26 adjustment starts refinement only for nonzero initial SCSI/C2

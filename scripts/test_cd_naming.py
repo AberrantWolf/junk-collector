@@ -72,16 +72,24 @@ class CatalogPolicyTests(unittest.TestCase):
         candidates.extend((None, {}, {"id": DISC_ID, "releases": [None]}))
         for data in candidates:
             with self.subTest(data=data):
-                self.assertIsNone(naming.catalog_folder(data, DISC_ID, 6))
+                with self.assertRaises(naming.NamingFailure):
+                    naming.catalog_folder(data, DISC_ID, 6)
 
 
 class LookupTests(unittest.TestCase):
     def test_refusal_no_match_and_malformed_or_oversized_body_are_not_retried(self):
         identity = subprocess.CompletedProcess([], 0, json.dumps({
             "disc_id": DISC_ID, "track_count": 6}).encode())
-        for body in (b"not json", b"x" * (naming.MAX_RESPONSE + 1),
-                     json.dumps({"id": DISC_ID, "releases": []}).encode(),
-                     urllib.error.HTTPError("https://musicbrainz.org", 503, "busy", {}, None)):
+        cases = [(b"not json", "malformed JSON"),
+                 (b"x" * (naming.MAX_RESPONSE + 1), "1 MiB"),
+                 (json.dumps({"id": DISC_ID, "releases": []}).encode(), "no release")]
+        for code in (400, 404, 429, 503, 302):
+            cases.append((urllib.error.HTTPError("https://musicbrainz.org", code, "fixture", {}, None),
+                          f"HTTP {code}"))
+        cases.append((urllib.error.HTTPError(
+            "https://musicbrainz.org", 400, "fixture", {},
+            io.BytesIO(b'{"error":"unsupported include parameter"}')), "unsupported include parameter"))
+        for body, reason in cases:
             with self.subTest(body=type(body)):
                 class Opener:
                     calls = 0
@@ -97,11 +105,25 @@ class LookupTests(unittest.TestCase):
                 opener = Opener()
                 with patch.object(naming.subprocess, "run", return_value=identity), \
                      patch.object(naming.urllib.request, "build_opener", return_value=opener):
-                    try:
-                        self.assertIsNone(naming.lookup(Path("unused"), "identity"))
-                    except (ValueError, urllib.error.HTTPError):
-                        pass
+                    with self.assertRaisesRegex(naming.NamingFailure, reason):
+                        naming.lookup(Path("unused"), "identity")
                 self.assertEqual(opener.calls, 1)
+
+    def test_identity_and_connection_errors_keep_their_stage_and_detail(self):
+        failure = subprocess.CalledProcessError(1, ["identity"], stderr=b"unsupported audio TOC\n")
+        with patch.object(naming.subprocess, "run", side_effect=failure):
+            reply = naming.lookup_reply(Path("unused"), "identity")
+        self.assertIn("Disc identity failed (exit 1)", reply["error"])
+        self.assertIn("unsupported audio TOC", reply["error"])
+        identity = subprocess.CompletedProcess([], 0, json.dumps({
+            "disc_id": DISC_ID, "track_count": 6}).encode())
+        for error, reason in ((TimeoutError(), "timed out"),
+                              (urllib.error.URLError("fixture DNS failure"), "DNS failure")):
+            opener = unittest.mock.Mock()
+            opener.open.side_effect = error
+            with patch.object(naming.subprocess, "run", return_value=identity), \
+                 patch.object(naming.urllib.request, "build_opener", return_value=opener):
+                self.assertIn(reason, naming.lookup_reply(Path("unused"), "identity")["error"])
 
     def test_redirects_are_refused(self):
         self.assertIsNone(naming.NoRedirect().redirect_request(
@@ -187,7 +209,7 @@ class LookupTests(unittest.TestCase):
                      "set COLLECTOR_CD_IDENTITY to the release utility for wrapper acceptance")
 class AutomaticCaptureTests(unittest.TestCase):
     def run_capture(self, payload=RESPONSE, slow=False, fail_stage="", occupied=False,
-                    invalid_toc=False, missing_tool=False):
+                    invalid_toc=False, missing_tool=False, http_error=0):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -203,15 +225,16 @@ class AutomaticCaptureTests(unittest.TestCase):
         fake.chmod(0o755)
         worker = root / "http_fixture.py"
         worker.write_text(
-            "import sys, os, json, io, time\nfrom pathlib import Path\n"
+            "import sys, os, json, io, time, urllib.error\nfrom pathlib import Path\n"
             f"sys.path.insert(0, {str(SCRIPT.parent)!r})\nimport name_cd_capture as naming\n"
             "class Opener:\n"
             "    def open(self, request, timeout):\n"
             "        Path(os.environ['TEST_HTTP_MARKER']).write_text(request.full_url)\n"
+            f"        if {http_error}: raise urllib.error.HTTPError(request.full_url, {http_error}, 'fixture', {{}}, None)\n"
             f"        time.sleep({30 if slow else 0})\n"
             f"        return io.BytesIO({json.dumps(payload).encode()!r})\n"
             "naming.urllib.request.build_opener = lambda *args: Opener()\n"
-            "print(json.dumps(naming.lookup(Path(sys.argv[2]), sys.argv[3])))\n")
+            "print(json.dumps(naming.lookup_reply(Path(sys.argv[2]), sys.argv[3])))\n")
         # Intercept only the naming helper, retaining the real identity binary
         # and its shared parser. Provider I/O happens in the supervised worker.
         python = root / "python3"
@@ -232,7 +255,8 @@ class AutomaticCaptureTests(unittest.TestCase):
             ["bash", str(SCRIPT), "--auto", str(destination)],
             env=dict(environment, PATH=str(root) + os.pathsep + os.environ["PATH"],
                      REDUMPER=str(fake), TEST_SUMMARY="media errors:\n  SCSI: 0 samples\n  C2: 0 samples",
-                     TEST_FAIL_STAGE=fail_stage, TEST_HTTP_MARKER=str(marker)),
+                     TEST_FAIL_STAGE=fail_stage, TEST_HTTP_MARKER=str(marker),
+                     TEST_EJECT_MARKER=str(root / 'eject.called')),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
         )
         try:
@@ -252,6 +276,7 @@ class AutomaticCaptureTests(unittest.TestCase):
         self.assertEqual((output / "disc.toc").read_bytes(), b"invalid" if invalid_toc else toc_bytes())
         self.assertTrue((output / "disc.state").exists())
         self.assertEqual(output.stat().st_mode & 0o777, destination.stat().st_mode & 0o777)
+        self.assertEqual((root / 'eject.called').exists(), result.returncode == 0, result.stderr)
         return result, output, marker
 
     def test_completed_capture_uses_unambiguous_catalog_number(self):
@@ -266,7 +291,7 @@ class AutomaticCaptureTests(unittest.TestCase):
         ambiguous = copy.deepcopy(RESPONSE)
         ambiguous["releases"].append(copy.deepcopy(ambiguous["releases"][0]))
         for options in ({"payload": {"id": DISC_ID, "releases": []}},
-                        {"payload": ambiguous}, {"slow": True}, {"occupied": True}):
+                        {"payload": ambiguous}, {"slow": True}, {"occupied": True}, {"http_error": 503}):
             with self.subTest(options=options):
                 result, output, marker = self.run_capture(**options)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -275,6 +300,15 @@ class AutomaticCaptureTests(unittest.TestCase):
                 self.assertIn(str(output), result.stdout)
                 if options.get("occupied"):
                     self.assertEqual((output.parent / "SQEX-11226" / "keep").read_bytes(), b"existing")
+                    self.assertIn(str(output.parent / "SQEX-11226"), result.stderr)
+                elif options.get("slow"):
+                    self.assertIn("deadline", result.stderr)
+                elif options.get("http_error"):
+                    self.assertIn("HTTP 503", result.stderr)
+                elif options.get("payload") == ambiguous:
+                    self.assertIn("2 releases", result.stderr)
+                else:
+                    self.assertIn("no release", result.stderr)
 
     def test_capture_failure_never_starts_naming_and_retains_generated_files(self):
         result, output, marker = self.run_capture(fail_stage="dump::extra")
@@ -289,6 +323,8 @@ class AutomaticCaptureTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(output.name.startswith("cd-"))
                 self.assertFalse(marker.exists())
+                self.assertIn("Disc identity failed" if options.get("invalid_toc")
+                              else "Identity executable unavailable", result.stderr)
 
 
 if __name__ == "__main__":

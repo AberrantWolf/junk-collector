@@ -1,5 +1,58 @@
 # Automatic CD capture folder naming — 2026-10-27
 
+## Follow-up: specific diagnostics and automatic eject — 2026-10-27
+
+The user reported repeated generic naming errors and requested automatic eject.
+The worker now returns a JSON result/error envelope instead of losing its cause
+through suppressed stderr. Identity failures include exit status and the utility's
+bounded, single-line diagnostic. Provider errors distinguish HTTP status (including
+404/429/503 and refused redirects), connection failures, socket/overall deadline,
+malformed/oversized JSON, no release, multiple releases, missing/ambiguous/unsafe
+catalog numbers and inconsistent medium data. A rename collision reports its
+destination path; other filesystem failures preserve the OS diagnostic. Missing
+Python/identity executables are identified separately. These are functional error
+propagation changes, not a copy-only classification. The fifteen-second total
+budget, no-retry policy, exclusive rename and generated fallback are retained.
+
+After successful capture, required-file checks and naming, the helper calls
+`redumper eject --drive=<pinned device>`, including in manual mode and after
+naming fallbacks. The eject command receives no image options, preventing writes
+to the capture log. Upstream `redumper_eject` can log `warning: failed to eject`
+while returning zero; that warning and nonzero exits both produce an eject-failure
+message without reclassifying a saved capture as failed. Failed/incomplete captures
+never reach eject. The installed executable's `--help` confirms the command;
+no physical eject/read was performed during this delivery.
+
+Focused validation uses the unchanged existing release identity utility and fake
+HTTP/redumper fixtures. The naming suite covers actual worker diagnostic transport
+through the shell, 503/404/429/refused redirects, connection/socket timeout and
+identity details, ambiguous/no-match metadata, occupied paths, deadline/termination
+cleanup, preserved originals and eject after naming fallbacks. The capture suite
+covers automatic and explicit drive pinning, no eject after failed/incomplete
+capture and both nonzero/zero-exit-warning eject failures. Final check outcomes:
+
+- `python3 -B scripts/test_rip_cd.py`: eight tests passed in 3.479 seconds.
+- `COLLECTOR_CD_IDENTITY="$PWD/target/release/collector-cd-identity" python3 -B
+  scripts/test_cd_naming.py`: twelve tests passed in 6.637 seconds, no skips.
+  This includes propagation of the provider's bounded JSON explanation for HTTP
+  400, rather than merely showing a generic request rejection.
+- Both fixture suites used the permitted outside-sandbox execution context;
+  no drive was opened and no provider contacted. The unchanged release utility
+  was reused without rebuilding.
+- `bash -n`, actual `--help` inspection, Python syntax/whitespace checks,
+  `python3 scripts/check_architecture.py` and `git diff --check`: passed.
+- Selector preview conservatively selected infra/full coverage for the generic
+  script paths. Focused shell/process/HTTP-fixture checks were selected because
+  this follow-up changes only operator scripts and documentation. Rust/shared
+  consumers, web/browser, container and live-drive/provider checks were omitted;
+  their earlier evidence is not represented as new follow-up validation.
+
+The original delivery evidence below remains dated
+historical qualification; no Rust, shared library or deployed binary changes are
+part of this follow-up.
+
+## Original automatic naming delivery — 2026-10-27
+
 The standalone [capture helper](../../scripts/rip-cd.sh) accepts `--auto
 DESTINATION [DRIVE]`. It captures into a unique UTC timestamp/random directory,
 retaining that name for failed/partial capture. Successful capture first checks
