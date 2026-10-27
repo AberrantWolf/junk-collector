@@ -1,5 +1,15 @@
 # Automatic CD capture folder naming — 2026-10-27
 
+## Beta.10 release follow-up — 2026-10-27
+
+Included in the signed beta.10 source release. Collector core/media are deployed
+on the NAS after complete exact-source and native image qualification; the
+standalone CD helper remains operator source tooling. See [publication, recovery
+point and actual-host acceptance](container-beta10-publication-2026-10-27.md).
+The dated source-delivery results and unrun physical/live cases below are retained
+as historical evidence; no live-library batch or physical capture/eject was run
+as part of deployment.
+
 ## Repair: Disc ID includes and native macOS eject — 2026-10-27
 
 The operator's HTTP 400 confirms the earlier `inc=releases+labels+discids`

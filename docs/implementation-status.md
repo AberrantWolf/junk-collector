@@ -1,12 +1,18 @@
 # Implementation status
 
-## Beta.10 release candidate — 2026-10-27
+## Beta.10 published and installed — 2026-10-27
 
-The user requested release and NAS deployment of all current changes: one-click
-AccurateRip and collection/worker defaults, original artwork acquisition, Library
-import progress and the standalone CD capture/naming helpers. The candidate is
-being qualified through the existing native image pipeline; publication and NAS
-installation are not yet claimed. See [release notes](releases/v0.1.0-beta.10.md).
+Beta.10 releases all current changes: one-click/automatic-ingest AccurateRip,
+collection and live worker defaults, original artwork acquisition, Library import
+progress and standalone capture/naming fixes. Broad exact-source checks, all 27
+configured browser journeys, both native images and release-image browser
+acceptance pass. Publication reused the accepted bytes and advanced `preview`.
+The NAS runs the pinned beta.10 image after a complete read-only recovery snapshot
+and a 4.25-second switch, retaining config/identity/TLS and 18 unrelated containers.
+Public HTTPS and all nine changed assets are verified. See [release notes](releases/v0.1.0-beta.10.md)
+and [publication/deployment evidence](validation/container-beta10-publication-2026-10-27.md).
+No live-library batch was started; physical CD capture/eject and authenticated
+production listening remain separately unqualified.
 
 
 ## One-click AccurateRip and configurable defaults — 2026-10-27
@@ -26,7 +32,7 @@ survive restart and reindex; accepted ingest settings remain frozen. Existing
 unfinished intents retain their previous policy. Other collection types have no
 invented configuration fields. See [delivery and acceptance](validation/automatic-accuraterip-2026-10-27.md).
 Workspace tests, Clippy, web/contracts/models and all selected Chrome journeys
-pass. No release, NAS deployment or live-library batch is included.
+pass. Included in beta.10 on the NAS; no live-library batch was started.
 
 
 ## Original provider artwork repair — 2026-10-26
@@ -40,7 +46,7 @@ recovery through explicit cover choice. Dismissed lookup failures stay dismissed
 when the panel reopens, independently per account/album. Workspace tests, Clippy,
 web checks/build/models and focused real-browser acceptance pass; see the
 [delivery record and limits](validation/provider-artwork-originals-2026-10-26.md).
-No NAS deployment is included.
+Included in the beta.10 NAS update recorded above.
 
 ## Library import progress — 2026-10-26
 
@@ -49,15 +55,15 @@ is uploading or processing, including downstream enrichment/audio preparation.
 The Library refreshes active rows automatically. Playback-attention filtering
 excludes importing albums; settled, cancelled or blocked imports resume the
 ordinary playback-readiness display. See [validation](validation/library-import-progress-2026-10-26.md).
-This source change has not been deployed.
+Included in the beta.10 NAS update recorded above.
 
 ## Beta.9 published and installed — 2026-10-26
 
 Beta.9 includes the faster testing/packaging workflow, active-release/Disc ID
 controls and copy cleanup. Full exact-source checks, both native images and
 release-image browser acceptance pass. Publication reused validated bytes and
-advanced `preview`; public digests/assets are independently verified. The NAS now
-runs the pinned beta.9 image after a complete recovery snapshot and a 3.94-second
+advanced `preview`; public digests/assets are independently verified. The NAS update used
+the pinned beta.9 image after a complete recovery snapshot and a 3.94-second
 switch, retaining configuration/identity/TLS and 18 unrelated containers. See
 [publication and NAS evidence](validation/container-beta9-publication-2026-10-26.md).
 

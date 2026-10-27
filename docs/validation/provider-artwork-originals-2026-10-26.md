@@ -1,5 +1,16 @@
 # Original provider artwork — 2026-10-26 JST
 
+## Beta.10 release follow-up — 2026-10-27
+
+Included in the signed beta.10 source release. Collector core/media are deployed
+on the NAS after complete exact-source and native image qualification. See [publication, recovery
+point and actual-host acceptance](container-beta10-publication-2026-10-27.md).
+The dated source-delivery results and unrun physical/live cases below are retained
+as historical evidence; no live-library batch or physical capture/eject was run
+as part of deployment.
+
+## Original source delivery
+
 ## Problem and scope
 
 The NAS SQEX-10945 import preserved its originals and prepared all nine FLAC

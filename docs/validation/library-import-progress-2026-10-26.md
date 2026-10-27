@@ -1,5 +1,16 @@
 # Library import progress — 2026-10-26
 
+## Beta.10 release follow-up — 2026-10-27
+
+Included in the signed beta.10 source release. Collector core/media are deployed
+on the NAS after complete exact-source and native image qualification. See [publication, recovery
+point and actual-host acceptance](container-beta10-publication-2026-10-27.md).
+The dated source-delivery results and unrun physical/live cases below are retained
+as historical evidence; no live-library batch or physical capture/eject was run
+as part of deployment.
+
+## Original source delivery
+
 Album rows previously showed playback attention while imports were still
 uploading, publishing, enriching metadata or preparing audio. They now prefer
 “Import in progress” with a muted clock. The list polls while visible imports are
