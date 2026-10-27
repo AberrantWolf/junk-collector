@@ -16,11 +16,14 @@ budget, bounded response bytes, no redirects or retries, and no capture mutation
 before lookup completes. Raw sidecar contents and failed captures stay intact.
 The supervised worker returns a small diagnostic envelope so provider statuses,
 identity errors, inconclusive metadata and naming failures remain distinguishable.
-Successful capture, including a generated-name fallback, ends with redumper's
-`eject` command for the pinned drive only. Eject receives no image options, so it
-cannot append/replace capture logs. Nonzero exits and redumper's zero-exit SCSI
-eject warning are reported separately from preservation success. Failed or
-incomplete capture never reaches eject.
+The Disc ID endpoint supplies releases, media and disc IDs by default; the request
+adds only `inc=labels` for catalog numbers. Successful capture, including a
+generated-name fallback, ends with `diskutil eject /dev/diskN` on macOS or
+redumper's `eject` command elsewhere, always for the pinned drive. macOS block/raw
+device aliases normalize to the whole block device; unrecognized identifiers are
+refused. Eject receives no image options, so it cannot append/replace capture logs.
+Nonzero exits and redumper's zero-exit SCSI eject warning are reported separately
+from preservation success. Failed or incomplete capture never reaches eject.
 
 ## Automatic CD checks and operational defaults — 2026-10-27
 

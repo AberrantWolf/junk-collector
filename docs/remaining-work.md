@@ -156,8 +156,12 @@ remains available. The later 2026-10-27 user requests add specific naming-failur
 diagnostics and eject the pinned drive after successful capture, including naming
 fallbacks. Failed/incomplete captures remain inserted; eject errors preserve the
 successful capture outcome and are reported separately. See [usage](getting-started.md#import-options) and the
-[dated acceptance](validation/cd-folder-naming-2026-10-27.md). Physical-drive and
-successful live-provider naming acceptance remain unrun; this adds descriptive
+[dated acceptance](validation/cd-folder-naming-2026-10-27.md). Owned-disc naming and
+physical-drive acceptance remain operator-run; the later
+operator-reported invalid `inc=releases` request is fixed with `inc=labels`
+(live HTTP 200 and an unambiguous catalog number for the published test Disc ID).
+Native `diskutil eject` replaces redumper eject on macOS; block/raw
+device normalization and both platform paths pass offline fixtures. This adds descriptive
 naming, not audio/catalog verification or an integrated ripping subsystem.
 
 Delivered `scripts/rip-cd.sh` with named destination folders, raw redumper

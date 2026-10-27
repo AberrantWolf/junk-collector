@@ -295,7 +295,7 @@ try{
  page.once('dialog',dialog=>dialog.accept());
  await photoRecord.getByRole('button',{name:'Archive image',exact:true}).click();
  await photoRecord.waitFor({state:'detached'});
- assert.equal(await assetForm.getByLabel('Artwork image').evaluate(node=>node===document.activeElement),true,'focus was not restored after archiving an image');
+ await expect(assetForm.getByLabel('Artwork image'),'focus was not restored after archiving an image').toBeFocused();
  await page.setViewportSize({width:390,height:844});
  await coverRecord.scrollIntoViewIfNeeded();
  await page.screenshot({path:path.join(root,'web/test-results/assets-mobile.png'),fullPage:true});

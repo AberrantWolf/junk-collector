@@ -2,11 +2,29 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
 SCRIPT = Path(__file__).with_name("rip-cd.sh")
+
+
+def install_eject_tools(root):
+    """Every test shadows host detection and diskutil; never eject real media."""
+    uname = root / "uname"
+    uname.write_text('#!/bin/sh\nprintf "%s\\n" "${TEST_PLATFORM:-Darwin}"\n')
+    uname.chmod(0o755)
+    diskutil = root / "diskutil"
+    diskutil.write_text(
+        f'#!{sys.executable}\nimport os, sys\nfrom pathlib import Path\n'
+        "assert sys.argv[1] == 'eject' and len(sys.argv) == 3\n"
+        "Path(os.environ['TEST_EJECT_MARKER']).write_text(sys.argv[2])\n"
+        "print('fixture diskutil eject')\n"
+        "sys.exit(23 if os.environ.get('TEST_FAIL_STAGE') == 'eject' else 0)\n")
+    diskutil.chmod(0o755)
+
+
 FAKE = """#!/usr/bin/env python3
 import os
 from pathlib import Path
@@ -15,6 +33,7 @@ import sys
 stage = sys.argv[1]
 options = dict(arg[2:].split('=', 1) for arg in sys.argv[2:])
 if stage == 'eject':
+    assert os.environ.get('TEST_PLATFORM') == 'Linux', 'macOS must not use redumper eject'
     assert options == {'drive': os.environ.get('TEST_EXPECTED_DRIVE', 'disk11')}, 'eject must use only the pinned drive'
     Path(os.environ['TEST_EJECT_MARKER']).write_text(options['drive'])
     if os.environ.get('TEST_EJECT_WARNING'):
@@ -39,10 +58,12 @@ else:
 
 
 class RipCdTests(unittest.TestCase):
-    def run_capture(self, summary, fail_stage="", drive="", eject_warning=False, missing_required=False):
+    def run_capture(self, summary, fail_stage="", drive="", eject_warning=False, missing_required=False,
+                    platform="Darwin", invalid_eject=False):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
+        install_eject_tools(root)
         fake = root / "fake redumper"
         fake.write_text(FAKE)
         fake.chmod(0o755)
@@ -50,6 +71,7 @@ class RipCdTests(unittest.TestCase):
         result = subprocess.run(
             ["bash", str(SCRIPT), "Album - Disc 1", str(root / "dump path"), *([drive] if drive else [])],
             env=dict(os.environ, REDUMPER=str(fake), TEST_SUMMARY=summary,
+                     PATH=str(root) + os.pathsep + os.environ['PATH'], TEST_PLATFORM=platform,
                      TEST_FAIL_STAGE=fail_stage, TEST_EJECT_MARKER=str(marker),
                      TEST_EXPECTED_DRIVE=drive or 'disk11', TEST_EJECT_WARNING='1' if eject_warning else '',
                      TEST_MISSING_REQUIRED='1' if missing_required else ''),
@@ -59,9 +81,12 @@ class RipCdTests(unittest.TestCase):
         calls = (output / "calls").read_text().splitlines()
         self.assertEqual((output / "disc.scram").read_bytes(), b"raw fixture")
         self.assertTrue((output / "disc.fulltoc").exists())
-        self.assertEqual(marker.exists(), result.returncode == 0, result.stderr)
+        self.assertEqual(marker.exists(), result.returncode == 0 and not invalid_eject, result.stderr)
         if marker.exists():
-            self.assertEqual(marker.read_text(), drive or 'disk11')
+            expected = drive or 'disk11'
+            if platform == 'Darwin':
+                expected = '/dev/' + expected.removeprefix('/dev/').removeprefix('r')
+            self.assertEqual(marker.read_text(), expected)
         return result, calls
 
     def test_clean_and_q_only_dumps_do_not_start_refinement(self):
@@ -106,7 +131,20 @@ class RipCdTests(unittest.TestCase):
         self.assertEqual(calls, ["dump", "dump::extra", "refine"])
 
     def test_explicit_drive_is_reused_for_eject(self):
-        result, _ = self.run_capture("media errors:\n  SCSI: 0 samples\n  C2: 0 samples", drive="disk7")
+        for drive in ('disk7', '/dev/disk7', '/dev/rdisk7'):
+            with self.subTest(drive=drive):
+                result, _ = self.run_capture("media errors:\n  SCSI: 0 samples\n  C2: 0 samples", drive=drive)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unrecognized_mac_device_is_not_ejected(self):
+        result, _ = self.run_capture("media errors:\n  SCSI: 0 samples\n  C2: 0 samples",
+                                     drive='disk7s1', invalid_eject=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('cannot map macOS drive', result.stderr)
+
+    def test_linux_uses_redumper_for_the_pinned_drive(self):
+        result, _ = self.run_capture("media errors:\n  SCSI: 0 samples\n  C2: 0 samples",
+                                     platform='Linux', drive='/dev/sg2')
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_incomplete_capture_is_not_ejected(self):
@@ -115,7 +153,9 @@ class RipCdTests(unittest.TestCase):
         self.assertIn("disc.toc", result.stderr)
 
     def test_eject_failures_do_not_reclassify_a_saved_capture(self):
-        for options in ({"fail_stage": "eject"}, {"eject_warning": True}):
+        for options in ({"fail_stage": "eject"},
+                        {"platform": "Linux", "fail_stage": "eject"},
+                        {"platform": "Linux", "eject_warning": True}):
             with self.subTest(options=options):
                 result, _ = self.run_capture("media errors:\n  SCSI: 0 samples\n  C2: 0 samples", **options)
                 self.assertEqual(result.returncode, 0, result.stderr)

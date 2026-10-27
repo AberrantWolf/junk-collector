@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 import urllib.error
 
-from test_rip_cd import FAKE, SCRIPT
+from test_rip_cd import FAKE, SCRIPT, install_eject_tools
 import name_cd_capture as naming
 
 
@@ -96,7 +96,8 @@ class LookupTests(unittest.TestCase):
 
                     def open(self, request, timeout):
                         self.calls += 1
-                        self_test.assertIn("inc=releases%2Blabels%2Bdiscids", request.full_url)
+                        query = naming.urllib.parse.parse_qs(naming.urllib.parse.urlparse(request.full_url).query)
+                        self_test.assertEqual(query['inc'], ['labels'])
                         if isinstance(body, Exception):
                             raise body
                         return io.BytesIO(body)
@@ -213,6 +214,7 @@ class AutomaticCaptureTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
+        install_eject_tools(root)
         destination = root / "dump path"
         destination.mkdir()
         if occupied:
@@ -225,11 +227,14 @@ class AutomaticCaptureTests(unittest.TestCase):
         fake.chmod(0o755)
         worker = root / "http_fixture.py"
         worker.write_text(
-            "import sys, os, json, io, time, urllib.error\nfrom pathlib import Path\n"
+            "import sys, os, json, io, time, urllib.error, urllib.parse\nfrom pathlib import Path\n"
             f"sys.path.insert(0, {str(SCRIPT.parent)!r})\nimport name_cd_capture as naming\n"
             "class Opener:\n"
             "    def open(self, request, timeout):\n"
             "        Path(os.environ['TEST_HTTP_MARKER']).write_text(request.full_url)\n"
+            "        query = urllib.parse.parse_qs(urllib.parse.urlparse(request.full_url).query)\n"
+            "        if query.get('inc') != ['labels']:\n"
+            "            raise urllib.error.HTTPError(request.full_url, 400, 'invalid discid inc parameter', {}, None)\n"
             f"        if {http_error}: raise urllib.error.HTTPError(request.full_url, {http_error}, 'fixture', {{}}, None)\n"
             f"        time.sleep({30 if slow else 0})\n"
             f"        return io.BytesIO({json.dumps(payload).encode()!r})\n"
@@ -256,6 +261,7 @@ class AutomaticCaptureTests(unittest.TestCase):
             env=dict(environment, PATH=str(root) + os.pathsep + os.environ["PATH"],
                      REDUMPER=str(fake), TEST_SUMMARY="media errors:\n  SCSI: 0 samples\n  C2: 0 samples",
                      TEST_FAIL_STAGE=fail_stage, TEST_HTTP_MARKER=str(marker),
+                     TEST_PLATFORM='Darwin',
                      TEST_EJECT_MARKER=str(root / 'eject.called')),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
         )

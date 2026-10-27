@@ -27,7 +27,8 @@ COLLECTOR_CD_IDENTITY=/path/to/collector-cd-identity overrides that executable.
 Missing naming tools keep the generated folder; ripping still works.
 Refinement runs only when the initial dump reports SCSI or C2 errors.
 Q-subchannel errors alone do not trigger the normal SCSI/C2 refinement pass.
-After successful capture and naming, ejects the selected drive using redumper.
+After successful capture and naming, ejects the selected drive using diskutil on
+macOS and redumper on other platforms.
 Failed captures leave the disc inserted. Eject failures are reported separately.
 
 Keeps raw SCRAM, STATE, SUBCODE, TOC and all additional disc sidecars/logs.
@@ -158,10 +159,24 @@ fi
 printf '\nRaw capture saved to: %s\nReview disc.log for unresolved read errors. Import the entire folder into Collector using disc.toc as the analysis anchor.\n' "$output"
 
 # Eject only the pinned drive, after every capture stage and required-file check.
+printf '\nEjecting drive: %s\n' "$drive"
+if [[ $(uname -s) == Darwin ]]; then
+    # diskutil uses the block device even when redumper was given its raw alias.
+    eject_drive=${drive#/dev/}
+    eject_drive=${eject_drive#r}
+    if [[ $eject_drive =~ ^disk[0-9]+$ ]]; then
+        if eject_output=$(diskutil eject "/dev/$eject_drive" 2>&1); then
+            printf '%s\nEject command completed for %s.\n' "$eject_output" "$drive"
+        else
+            eject_status=$?
+            printf '%s\nCapture saved, but diskutil eject failed for %s (exit %s).\n' "$eject_output" "$drive" "$eject_status" >&2
+        fi
+    else
+        printf 'Capture saved, but cannot map macOS drive %s to a whole disk for eject.\n' "$drive" >&2
+    fi
 # Do not pass image options: eject must not open/append the preserved capture log.
 # Some redumper versions return zero even when the SCSI eject command fails.
-printf '\nEjecting drive: %s\n' "$drive"
-if eject_output=$("$redumper" eject "--drive=$drive" 2>&1); then
+elif eject_output=$("$redumper" eject "--drive=$drive" 2>&1); then
     case "$eject_output" in
         *'failed to eject'*) printf '%s\nCapture saved, but the drive could not eject the disc.\n' "$eject_output" >&2 ;;
         *) printf '%s\nEject command completed for %s.\n' "$eject_output" "$drive" ;;

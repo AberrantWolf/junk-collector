@@ -135,7 +135,9 @@ def lookup(output, identity_binary):
         raise NamingFailure("Identity utility returned an invalid Disc ID or track count")
     request = urllib.request.Request(
         f"https://musicbrainz.org/ws/2/discid/{disc_id}?"
-        + urllib.parse.urlencode({"fmt": "json", "inc": "releases+labels+discids", "cdstubs": "no"}),
+        # /discid already includes releases, media and disc IDs. Only request
+        # labels explicitly; release-resource subquery rules do not apply here.
+        + urllib.parse.urlencode({"fmt": "json", "inc": "labels", "cdstubs": "no"}),
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
     )
     opener = urllib.request.build_opener(NoRedirect)

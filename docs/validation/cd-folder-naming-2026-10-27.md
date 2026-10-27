@@ -1,5 +1,49 @@
 # Automatic CD capture folder naming — 2026-10-27
 
+## Repair: Disc ID includes and native macOS eject — 2026-10-27
+
+The operator's HTTP 400 confirms the earlier `inc=releases+labels+discids`
+request was invalid. The earlier experiment's inferred requirement to add
+`releases` was wrong; its HTTP 503 did not establish a valid request contract.
+The MusicBrainz [Disc ID controller](https://github.com/metabrainz/musicbrainz-server/blob/master/lib/MusicBrainz/Server/Controller/WS/2/DiscID.pm)
+accepts `labels` and supplies releases itself, explicitly enabling media and disc
+IDs internally. The helper now requests only `inc=labels`, retaining `fmt=json`
+and `cdstubs=no`. No retries or extra lookups were added; the existing total budget
+and diagnostic/fallback behavior remain in place. Offline provider fixtures now
+reject unsupported Disc ID includes instead of accepting the broken request.
+
+The operator also reports redumper cannot eject their drives on macOS. Darwin
+now calls `diskutil eject /dev/diskN` directly, normalizing `diskN`, `/dev/diskN`
+and `/dev/rdiskN` from the pinned selection. Unknown/slice identifiers are refused,
+and failed/incomplete capture never invokes eject. Other platforms retain the
+existing redumper eject behavior and zero-exit-warning handling. Native eject
+failures report the command's diagnostic/status without invalidating the capture.
+All ejection commands are replaced by explicit fixture executables during tests;
+neither real diskutil nor an optical drive was exercised.
+
+Validation:
+
+- `python3 -B scripts/test_rip_cd.py`: ten tests pass in 8.637 seconds, including
+  all three macOS identifier forms, native eject failure, unknown/slice refusal,
+  auto-selected drive retention, no eject on failed/incomplete capture and the
+  retained Linux command/failure paths.
+- `COLLECTOR_CD_IDENTITY="$PWD/target/release/collector-cd-identity" python3 -B
+  scripts/test_cd_naming.py`: twelve tests pass in 9.548 seconds, no skips. Actual
+  supervised lookup/naming uses a provider-contract fixture and fake native eject,
+  including generated-name fallback. Both suites ran outside the macOS sandbox.
+- One bounded live GET of the published six-track Disc ID with `inc=labels`
+  returned HTTP 200. No provider refusal was retried. This validates the corrected
+  request and response shape. The real response contained one release and resolved
+  through `catalog_folder` to `DR E006`; no capture directory was changed. This
+  does not qualify an owned-disc identification or physical eject.
+- Focused shell/Python syntax, help inspection, architecture/documentation links
+  and diff whitespace are checked for this operator-script repair. The selector
+  preview conservatively selects infra/full for generic scripts; broad Rust/web,
+  container, sibling and physical-drive qualification are omitted because this
+  repair changes no compiled/shared/application code. The existing release identity
+  utility is reused without rebuilding. Earlier records below retain their dated
+  results and are superseded only for the corrected request/native-eject behavior.
+
 ## Follow-up: specific diagnostics and automatic eject — 2026-10-27
 
 The user reported repeated generic naming errors and requested automatic eject.

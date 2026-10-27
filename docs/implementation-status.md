@@ -170,9 +170,13 @@ and destination collisions retain the generated folder. Manual names skip lookup
 The lookup publishes no Collector metadata or verification evidence.
 The 2026-10-27 follow-up preserves specific worker/identity/provider diagnostics,
 distinguishes inconclusive metadata and rename errors, and ejects the pinned drive
-after successful capture/naming, including generated-name fallbacks. Eject receives
-no image options and reports failures separately; failed/incomplete captures leave
-the disc inserted. Offline diagnostics/eject acceptance is recorded with the
+after successful capture/naming, including generated-name fallbacks. The subsequent
+operator-reported HTTP 400 is repaired by requesting only `inc=labels` on the
+Disc ID endpoint, whose default response includes releases/media/disc IDs. The
+corrected request returned HTTP 200. macOS now uses `diskutil eject` directly with
+normalized block/raw drive identifiers; other platforms retain redumper eject.
+Eject receives no image options and reports failures separately; failed/incomplete
+captures leave the disc inserted. Offline diagnostics/eject acceptance is recorded with the
 [naming delivery](validation/cd-folder-naming-2026-10-27.md).
 After automatic initial selection it pins the logged drive for later invocations;
 failure messages identify the stopped stage without declaring earlier reads failed.

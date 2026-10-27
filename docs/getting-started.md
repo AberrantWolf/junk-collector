@@ -119,7 +119,9 @@ or listening when the existing structural requirements are met. See the
 [accepted policy and optional fish command](decisions/cd-audio-capture-tradeoff.md).
 After successful capture and naming (including a generated-name fallback), the
 helper ejects the same selected drive. Failed/incomplete captures leave the disc
-inserted. Eject failures are reported separately and do not invalidate saved files.
+inserted. macOS uses `diskutil eject /dev/diskN` directly (including when redumper
+was given `/dev/rdiskN`); other platforms use redumper eject. Eject failures are
+reported separately and do not invalidate saved files.
 Existing folders are refused and failed captures are retained. Review `disc.log`
 for unresolved errors, then import the complete folder with `disc.toc` as the
 analysis anchor. Command completion/file presence does not establish error-free
