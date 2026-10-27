@@ -156,6 +156,73 @@ mod tests {
     }
 
     #[test]
+    fn rapid_rechecks_use_full_timestamps_across_pages_instead_of_id_order() {
+        use collector_core::{
+            CollectionId, ModuleData, ModuleId, ObservationId, OperationId, OperationSupport, Page,
+            ProcessingObservation, RawJson,
+        };
+        use collector_modules::music::{
+            ACCURATERIP_VERIFICATION_OPERATION, AudioVerificationStatus, CdProcessingResult,
+        };
+        let fingerprint = source();
+        let older_id: ObservationId = "ffffffff-ffff-4fff-8fff-ffffffffffff".parse().unwrap();
+        let newer_id: ObservationId = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+        let observation = |id, time: &str, status| ProcessingObservation {
+            id,
+            collection_id: CollectionId::new(),
+            operation: OperationId::new(ACCURATERIP_VERIFICATION_OPERATION).unwrap(),
+            operation_version: 1,
+            source_fingerprint: fingerprint.clone(),
+            snapshot_id: None,
+            support: OperationSupport::Supported,
+            raw_observations: vec![],
+            typed_result: ModuleData {
+                module: ModuleId("org.junk.music".into()),
+                schema_version: 1,
+                payload: RawJson::from_value(serde_json::json!({
+                    "result":"audio_verification", "verification":{
+                        "status":status,"selected_offset":null,"ambiguous_offsets":[],"algorithm_version":1,
+                        "database":{"track_count":1,"accuraterip_id1":1,"accuraterip_id2":2,"cddb_id":3},
+                        "database_response_count":0,"database_response_digest":Digest::sha256(b"fixture"),
+                        "input_digests":[],"tracks":[],"limitations":[]
+                    }
+                })),
+            },
+            limitations: vec![],
+            created_at: time.parse().unwrap(),
+        };
+        let older = observation(older_id, "2026-10-27T00:00:00.100000001Z", "verified");
+        let newer = observation(newer_id, "2026-10-27T00:00:00.100000002Z", "no_data");
+        let mut unrelated = observation(ObservationId::new(), "2026-10-28T00:00:00Z", "verified");
+        unrelated.source_fingerprint = source();
+        let mut pages = 0;
+        let (id, result) =
+            newest_music_result(ACCURATERIP_VERIFICATION_OPERATION, &fingerprint, |after| {
+                pages += 1;
+                if after.is_none() {
+                    Ok(Page {
+                        items: vec![unrelated.clone(), older.clone()],
+                        next_cursor: Some(older_id.to_string()),
+                    })
+                } else {
+                    assert_eq!(after, Some(older_id));
+                    Ok(Page {
+                        items: vec![newer.clone()],
+                        next_cursor: None,
+                    })
+                }
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(pages, 2);
+        assert_eq!(id, newer_id);
+        let CdProcessingResult::AudioVerification { verification } = result else {
+            panic!("expected audio evidence")
+        };
+        assert_eq!(verification.status, AudioVerificationStatus::NoData);
+    }
+
+    #[test]
     fn track_names_require_the_right_disc_and_complete_positions() {
         let release: collector_modules::music::MusicBrainzReleaseObservation =
             serde_json::from_value(serde_json::json!({
@@ -1114,45 +1181,16 @@ impl CollectionService {
             Err(Error::NotFound) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let mut after = None;
-        loop {
-            let page = self.processing.observations(&crate::ProcessingQuery {
+        newest_music_result(operation, &fingerprint, |after| {
+            self.processing.observations(&crate::ProcessingQuery {
                 collection_id,
                 source: scope,
                 source_fingerprint: fingerprint.clone(),
                 operation: Some(collector_core::OperationId::new(operation)?),
                 after,
                 limit: 200,
-            })?;
-            for observation in &page.items {
-                if observation.source_fingerprint != fingerprint {
-                    continue;
-                }
-                if operation == "org.junk.music.import-analysis" {
-                    if let Ok(output) = observation
-                        .typed_result
-                        .payload
-                        .parse::<collector_modules::music::MusicImportAnalysisOutput>(
-                    ) && let Some(result) = output.observations.iter().find_map(|value| {
-                        value
-                            .parse::<collector_modules::music::CdProcessingResult>()
-                            .ok()
-                    }) {
-                        return Ok(Some((observation.id, result)));
-                    }
-                } else if let Ok(result) = observation
-                    .typed_result
-                    .payload
-                    .parse::<collector_modules::music::CdProcessingResult>()
-                {
-                    return Ok(Some((observation.id, result)));
-                }
-            }
-            if page.next_cursor.is_none() {
-                return Ok(None);
-            }
-            after = page.items.last().map(|value| value.id);
-        }
+            })
+        })
     }
 
     pub(super) fn recorded_music_layout(
@@ -1712,6 +1750,63 @@ pub(super) fn profile_for_recipe(recipe: &ConversionRecipe) -> ConversionProfile
     match recipe.settings {
         ConversionSettings::Flac { .. } => ConversionProfile::Flac,
         ConversionSettings::Opus { bitrate_kbps, .. } => ConversionProfile::Opus { bitrate_kbps },
+    }
+}
+
+// Observation pages use a coarse index timestamp and deterministic IDs. Resolve
+// currency from the full immutable timestamp, across every page, rather than
+// allowing the index's ID tie-breaker to revive an older confirmation.
+fn newest_music_result(
+    operation: &str,
+    fingerprint: &SourceFingerprint,
+    mut page: impl FnMut(
+        Option<collector_core::ObservationId>,
+    ) -> Result<collector_core::Page<collector_core::ProcessingObservation>>,
+) -> Result<
+    Option<(
+        collector_core::ObservationId,
+        collector_modules::music::CdProcessingResult,
+    )>,
+> {
+    use collector_modules::music::CdProcessingResult;
+    let mut newest = None;
+    let mut after = None;
+    loop {
+        let observations = page(after)?;
+        for observation in &observations.items {
+            if observation.source_fingerprint != *fingerprint {
+                continue;
+            }
+            let result = if operation == "org.junk.music.import-analysis" {
+                observation
+                    .typed_result
+                    .payload
+                    .parse::<collector_modules::music::MusicImportAnalysisOutput>()
+                    .ok()
+                    .and_then(|output| {
+                        output
+                            .observations
+                            .iter()
+                            .find_map(|value| value.parse::<CdProcessingResult>().ok())
+                    })
+            } else {
+                observation
+                    .typed_result
+                    .payload
+                    .parse::<CdProcessingResult>()
+                    .ok()
+            };
+            if let Some(result) = result {
+                let key = (observation.created_at, observation.id);
+                if newest.as_ref().is_none_or(|(current, _)| key > *current) {
+                    newest = Some((key, result));
+                }
+            }
+        }
+        if observations.next_cursor.is_none() {
+            return Ok(newest.map(|((_, id), result)| (id, result)));
+        }
+        after = observations.items.last().map(|value| value.id);
     }
 }
 

@@ -40,6 +40,10 @@ retain their prior behavior. CD defaults are collection-scoped private operation
 settings; global worker limits live in Administration and govern new claims live.
 Configuration supplies worker defaults until an administrator saves an override.
 Settings use optimistic revisions and command receipts; reindex preserves them.
+Current music results select the greatest full recorded timestamp (then ID) across
+all pages with the current source fingerprint. Coarse history-index timestamps
+and deterministic IDs cannot establish which rapid recheck is current. Resolution
+reads observation metadata only; archive evidence and index formats stay intact.
 
 
 ## Original cover acquisition — 2026-10-26
