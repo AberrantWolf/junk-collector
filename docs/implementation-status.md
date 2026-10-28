@@ -1,6 +1,6 @@
 # Implementation status
 
-## Change-driven Library summaries — validation in progress, 2026-10-28
+## Change-driven Library summaries — beta.13 installed, 2026-10-28
 
 Library reads no longer build missing summaries. Inventory supplies immediate
 basic rows with typed pending/retry state, while a separate bounded worker
@@ -9,9 +9,14 @@ startup and reindex prepare views without a Library request; source tokens fence
 publication, and failures retry without starving peers. File/playability/listening
 filter predicates are materialized on changes too. Web polling includes empty
 filtered pending pages. Focused storage/recovery/filter regressions and web model
-checks pass, as do focused browse/smoke/CD Library browser journeys. Atomic
-additive-install rollback also passes. Complete exact-source source/container
-qualification remains pending. See
+checks pass, including atomic additive-install rollback. Exact-source workspace
+tests/Clippy, all 27 browser journeys, both native images and release-image browser
+acceptance pass. Beta.13 is published and installed after a complete stopped-server
+snapshot and a 4.28-second interruption. All 79 required summaries are prepared
+before browsing; the first observed Library request takes 8 ms for 40 entries,
+and a full refresh takes 10 ms. Config/TLS/identity/mounts, all 18 unrelated
+containers, HTTPS and nine assets pass. No user jobs were unfinished at the update.
+See [publication and NAS acceptance](validation/container-beta13-publication-2026-10-28.md) and
 [delivery and validation](validation/change-driven-library-summaries-2026-10-28.md).
 
 ## Compact Library row cache — beta.12 installed, 2026-10-28

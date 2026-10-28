@@ -1,15 +1,23 @@
 # Remaining work — home-lab priorities
 
-## Active assignment: build Library summaries when data changes — 2026-10-28
+## Beta.13 change-driven summaries published and installed — 2026-10-28
 
-Replace request-time cache filling with a bounded background projector driven by
-committed item generations and current role/language demand. Recover missing work
-after restart/reindex without a browser request. Return safe basic rows immediately
-while summaries update; expose pending/retry state and poll filtered empty pages.
-Validate cold and invalidated reads without detailed data access, proactive rebuild,
-concurrent invalidation, failure fairness, role/language changes and real browser UI.
-Preserve the dated beta.12 deployment evidence; do not claim new NAS acceptance.
-See [delivery and current validation](validation/change-driven-library-summaries-2026-10-28.md).
+Library reads use ready summaries or immediate basic pending rows. A separate
+worker prepares changed/missing summaries for current role/language demand,
+recovers after startup/reindex and retries failed rows without starving peers.
+File/playability/listening filters are materialized on changes. Pending/retrying
+web pages poll to completion, including empty attention results.
+
+Exact-source full checks, all 27 browser journeys, native image/runtime acceptance
+and release-image browser acceptance pass. Beta.13 is published and installed on
+the NAS after a stopped-server snapshot and a 4.28-second interruption. Before
+opening Library, all 79 required summaries are prepared. The first observed
+request returns all 40 visible entries in 8 ms; the resource after full refresh
+takes 10 ms. Config/TLS/identity/mounts, all 18 unrelated containers, public HTTPS
+and nine assets pass. No user jobs were unfinished and no production mutation or
+new load benchmark was performed. See
+[implementation evidence](validation/change-driven-library-summaries-2026-10-28.md) and
+[publication/recovery/production acceptance](validation/container-beta13-publication-2026-10-28.md).
 
 ## Beta.12 cached Library published and installed — 2026-10-28
 

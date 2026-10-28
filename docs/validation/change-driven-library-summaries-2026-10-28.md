@@ -42,7 +42,7 @@ page also retains pending/retry state, avoiding a false empty result and ensurin
 that later matches appear automatically. Retry failures stay visible. Existing
 scope/actor/navigation cancellation fences apply to these refreshes.
 
-## Validation in progress
+## Validation
 
 - Architecture/document links, formatting, generated OpenAPI/TypeScript, web type
   checking/build and web model suites pass.
@@ -67,8 +67,29 @@ scope/actor/navigation cancellation fences apply to these refreshes.
   local fixture measurements, not production or a new load benchmark.
 - Review made additive installation atomic so interruption cannot retain basic
   rows with half-built filter flags. The final candidate includes that adjustment
-  and the beta.13 version; complete exact-source qualification is pending.
+  and the beta.13 version; complete exact-source qualification passes below.
 
-This is the [beta.13 candidate](../releases/v0.1.0-beta.13.md). Beta.12 remains
-installed while final source/container qualification proceeds. New production
-Library acceptance has not yet been claimed.
+## Exact-source qualification and NAS acceptance
+
+[Beta.13](../releases/v0.1.0-beta.13.md) source
+`5837a65f3230d47cf3dc8f4db9f90cc1d2346dab` passes
+[Checks 40636781292](https://github.com/AberrantWolf/junk-collector/actions/runs/40636781292):
+workspace tests/Clippy, web/models and all 27 browser journeys, with full coverage
+since beta.12 and unchanged source. Native AMD64/ARM64 runtime acceptance and AMD64
+release-image browser acceptance pass in
+[validation 40636796225](https://github.com/AberrantWolf/junk-collector/actions/runs/40636796225),
+attempt 1. Publication copies those accepted bytes.
+
+Beta.13 is installed on the NAS after a complete stopped-server snapshot and a
+4.28-second interruption. A read-only sample before opening Library finds all
+79 required summaries prepared, including removed entries. The first observed
+signed-in Library request returns all 40 visible entries in 8 ms; repeat requests
+take 26/12/11 ms and a full-refresh resource takes 10 ms. Every row is ready; the
+response is 30,784 UTF-8 bytes without full item/capture/domain graphs. Artwork
+and status rendering are visually inspected. Config/TLS/identity/mounts, all 18
+unrelated containers, public HTTPS and nine served assets pass. No user jobs were
+unfinished at this update. These settled-batch observations are not a controlled
+cold-cache or concurrent-load benchmark. No production mutation was performed
+merely to force invalidation; cold/invalidated reads and proactive updates are
+covered by the tests above. See
+[publication and full acceptance](container-beta13-publication-2026-10-28.md).

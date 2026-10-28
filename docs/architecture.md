@@ -1,6 +1,6 @@
 # Architecture
 
-## Change-driven Library summaries — active delivery, 2026-10-28
+## Change-driven Library summaries — 2026-10-28
 
 Library reads select compact, authorized projections and never run the detailed
 album resolver. Inventory projection also writes a cheap basic row. While a full
@@ -24,8 +24,9 @@ current grants/preferences; publication prunes obsolete variants rather than
 cycling through an arbitrary twelve-row limit. Import progress remains a live
 indexed operational query. Cache state is derived, outside archive checkpoints;
 additive installation backfills basic rows without forcing catalog replay. No
-originals, manual authority or accepted evidence are changed. Beta.12's measured
-lazy-cache behavior remains a dated record; this section describes its replacement.
+originals, manual authority or accepted evidence are changed. Beta.13 is published
+and installed; [qualification and production acceptance](validation/container-beta13-publication-2026-10-28.md)
+record preparation before browsing and the first observed 8 ms Library request.
 
 ## Processing cancellation polling — 2026-10-28
 
