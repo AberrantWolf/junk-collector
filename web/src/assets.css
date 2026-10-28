@@ -95,3 +95,5 @@
 @media(max-width:700px){.sidebar nav{overflow-y:visible}.sidebar-search{min-width:12rem}}
 
 .document-attachments{margin-block:1.5rem;min-width:0}.document-record{padding-block:1rem;border-bottom:1px solid var(--line);display:grid;gap:.5rem;min-width:0}.document-record>strong{overflow-wrap:anywhere}.document-icon{display:grid;place-items:center;width:64px;height:80px;border:1px solid currentColor;border-radius:4px;font-weight:700}.document-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow:auto;font:inherit}.document-preview h2{overflow-wrap:anywhere}
+
+.asset-upload{min-width:0}.asset-upload input[type=file]{width:100%;min-width:0}.asset-upload .asset-preview span{min-width:0;overflow-wrap:anywhere}.cover-upload{margin-inline:0}

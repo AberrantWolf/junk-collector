@@ -95,6 +95,7 @@ pub struct PrivateBulkLibrary {
 #[derive(Clone, Copy, Debug)]
 pub enum BulkMemberFilter {
     All,
+    Selected,
     Admission,
     Unsettled,
 }
@@ -346,13 +347,15 @@ impl CollectionService {
         after: Option<u32>,
         limit: u16,
     ) -> Result<Page<BulkLibraryMemberView>> {
-        let page = self.bulk_port.bulk_library_members(
-            actor.user_id,
-            id,
-            after,
-            limit,
-            BulkMemberFilter::All,
-        )?;
+        let record = self.bulk_port.bulk_library(actor.user_id, id)?;
+        let filter = if record.summary.kind == BulkLibraryKind::AccurateRip {
+            BulkMemberFilter::Selected
+        } else {
+            BulkMemberFilter::All
+        };
+        let page = self
+            .bulk_port
+            .bulk_library_members(actor.user_id, id, after, limit, filter)?;
         Ok(Page {
             items: page.items.into_iter().map(|member| member.view).collect(),
             next_cursor: page.next_cursor,

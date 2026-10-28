@@ -58,6 +58,8 @@ pub use work_history::*;
 mod scans;
 pub use scans::*;
 mod processing;
+mod processing_cancellation;
+use processing_cancellation::ProcessingCancellation;
 pub mod security;
 
 use chrono::{DateTime, Utc};
@@ -1664,9 +1666,7 @@ struct ProcessingHost<'a> {
     source_fingerprint: &'a SourceFingerprint,
     frozen_snapshot_id: Option<SnapshotId>,
     catalog_parsers: &'a std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>,
-    jobs: Arc<dyn JobPort>,
-    job_id: JobId,
-    claim_token: String,
+    cancellation: Arc<ProcessingCancellation>,
 }
 
 struct DurableProcessingContext {
@@ -1747,16 +1747,14 @@ fn processing_module_error(error: Error) -> ModuleError {
 
 struct ProcessingReader {
     reader: Box<dyn RepresentationReader>,
-    jobs: Arc<dyn JobPort>,
-    job_id: JobId,
-    claim_token: String,
+    cancellation: Arc<ProcessingCancellation>,
 }
 
 impl std::io::Read for ProcessingReader {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if self
-            .jobs
-            .cancellation_requested(self.job_id, &self.claim_token)
+            .cancellation
+            .requested()
             .map_err(std::io::Error::other)?
         {
             return Err(std::io::Error::other("processing cancelled"));
@@ -1774,8 +1772,8 @@ impl std::io::Seek for ProcessingReader {
 impl ModuleHost for ProcessingHost<'_> {
     fn checkpoint(&self) -> ModuleResult<()> {
         if self
-            .jobs
-            .cancellation_requested(self.job_id, &self.claim_token)
+            .cancellation
+            .requested()
             .map_err(processing_module_error)?
         {
             return Err(ModuleError::FailedOperation("processing cancelled".into()));
@@ -1805,9 +1803,7 @@ impl ModuleHost for ProcessingHost<'_> {
             .map(|reader| {
                 Box::new(ProcessingReader {
                     reader: Box::new(reader),
-                    jobs: self.jobs.clone(),
-                    job_id: self.job_id,
-                    claim_token: self.claim_token.clone(),
+                    cancellation: self.cancellation.clone(),
                 }) as Box<dyn RepresentationReader>
             })
             .map_err(processing_module_error)
@@ -1852,12 +1848,9 @@ impl ModuleHost for ProcessingHost<'_> {
             .port
             .snapshot_bytes(query)
             .map_err(processing_module_error)?;
-        let jobs = self.jobs.clone();
-        let job_id = self.job_id;
-        let claim_token = self.claim_token.clone();
         let parsed = parser
             .parse_snapshot(&record, reader.as_mut(), &mut || {
-                jobs.cancellation_requested(job_id, &claim_token)
+                self.cancellation.requested()
             })
             .map_err(processing_module_error)?;
         parsed.validate().map_err(processing_module_error)?;
@@ -4402,9 +4395,11 @@ impl CollectionService {
             source_fingerprint: &frozen.source_fingerprint,
             frozen_snapshot_id: frozen.snapshot_id,
             catalog_parsers: self.catalog_parsers.as_ref(),
-            jobs: self.jobs.clone(),
-            job_id: claim.id,
-            claim_token: claim.claim_token.clone(),
+            cancellation: Arc::new(ProcessingCancellation::new(
+                self.jobs.clone(),
+                claim.id,
+                claim.claim_token.clone(),
+            )),
         };
         let analyzed = self.modules.operate(
             OperationRequest {

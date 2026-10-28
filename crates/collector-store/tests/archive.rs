@@ -27348,6 +27348,115 @@ fn cd_check_defaults_and_workers_are_scoped_revisioned_and_persisted() {
 }
 
 #[test]
+fn accurate_rip_member_pages_skip_exclusions_before_pagination() {
+    use collector_app::{
+        BulkLibraryKind, BulkLibraryPort, BulkMemberFilter, BulkMemberState, LibrarySelection,
+        PreviewBulkLibrary, PrivateBulkLibrary,
+    };
+    let (_root, store, actor, service, collection) = setup();
+    let saved = Catalog::save(&*store, item(collection.id), Revision(0)).unwrap();
+    let preview = service
+        .preview_bulk_library(
+            &actor,
+            PreviewBulkLibrary {
+                kind: BulkLibraryKind::AccurateRip,
+                selection: LibrarySelection::Explicit {
+                    items: vec![saved.id],
+                },
+                sources: Default::default(),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(preview.excluded, 1);
+    let empty = service
+        .bulk_library_members(&actor, preview.id, None, 1)
+        .unwrap();
+    assert!(empty.items.is_empty());
+    assert!(empty.next_cursor.is_none());
+    let template = BulkLibraryPort::bulk_library_members(
+        &*store,
+        actor.user_id,
+        preview.id,
+        None,
+        1,
+        BulkMemberFilter::All,
+    )
+    .unwrap()
+    .items
+    .remove(0);
+    // A read fixture puts actionable and terminal outcomes between long runs of
+    // exclusions. The query must fill pages without exposing or paging over skips.
+    let states = [
+        BulkMemberState::Ready,
+        BulkMemberState::Succeeded,
+        BulkMemberState::Failed,
+        BulkMemberState::Review,
+        BulkMemberState::Cancelled,
+    ];
+    let members = (0..306)
+        .map(|position| {
+            let mut member = template.clone();
+            member.view.position = position;
+            if position % 60 == 59 && position < 300 {
+                member.view.state = states[(position / 60) as usize];
+            }
+            member
+        })
+        .collect::<Vec<_>>();
+    for kind in [BulkLibraryKind::AccurateRip, BulkLibraryKind::Metadata] {
+        let mut summary = preview.clone();
+        summary.id = JobId::new();
+        summary.kind = kind;
+        summary.selected = 306;
+        summary.excluded = 301;
+        BulkLibraryPort::freeze_bulk_library(
+            &*store,
+            PrivateBulkLibrary {
+                user_id: actor.user_id,
+                summary: summary.clone(),
+            },
+            members.clone(),
+        )
+        .unwrap();
+        if kind == BulkLibraryKind::Metadata {
+            let page = service
+                .bulk_library_members(&actor, summary.id, None, 2)
+                .unwrap();
+            assert_eq!(page.items.len(), 2);
+            assert!(
+                page.items
+                    .iter()
+                    .all(|m| m.state == BulkMemberState::Excluded)
+            );
+            assert!(page.next_cursor.is_some());
+            continue;
+        }
+        let mut after = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = service
+                .bulk_library_members(&actor, summary.id, after, 2)
+                .unwrap();
+            assert_eq!(page.items.len(), if seen.len() == 4 { 1 } else { 2 });
+            seen.extend(page.items.into_iter().map(|m| (m.position, m.state)));
+            let Some(next) = page.next_cursor else {
+                break;
+            };
+            after = Some(next.parse().unwrap());
+        }
+        assert_eq!(
+            seen,
+            states
+                .into_iter()
+                .enumerate()
+                .map(|(i, state)| ((i as u32 + 1) * 60 - 1, state))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
 fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
     use collector_app::{
         BulkLibraryKind, CheckAccurateRip, LibrarySelection, PreviewBulkLibrary,
@@ -27548,6 +27657,13 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
         )
         .unwrap();
     assert_eq!(excluded.excluded, 1, "confirmed originals are excluded");
+    assert!(
+        service
+            .bulk_library_members(&actor, excluded.id, None, 50)
+            .unwrap()
+            .items
+            .is_empty()
+    );
     no_data.store(true, Ordering::SeqCst);
     let receipt = command();
     let direct = service

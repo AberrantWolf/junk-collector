@@ -469,9 +469,11 @@ impl CollectionService {
             source_fingerprint: &frozen.source_fingerprint,
             frozen_snapshot_id: frozen.snapshot_id,
             catalog_parsers: self.catalog_parsers.as_ref(),
-            jobs: self.jobs.clone(),
-            job_id: claim.id,
-            claim_token: claim.claim_token.clone(),
+            cancellation: Arc::new(ProcessingCancellation::new(
+                self.jobs.clone(),
+                claim.id,
+                claim.claim_token.clone(),
+            )),
         };
         let phase = if frozen.operation.as_str()
             == collector_modules::music::ACCURATERIP_VERIFICATION_OPERATION

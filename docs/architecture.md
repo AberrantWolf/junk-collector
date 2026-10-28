@@ -1,5 +1,18 @@
 # Architecture
 
+## Processing cancellation polling — 2026-10-28
+
+The application processing host coalesces durable cancellation/claim queries
+across its readers, module checkpoints and snapshot parser within a one-second
+monotonic window. A raw redumper read is at most one sector; checking SQLite on
+every such read can monopolize the database shared by Library presentation.
+The first checkpoint always queries durable state. Only successful clear checks
+are reusable, with time measured before the query; cancellation and query errors
+remain fail-closed. Each claimed execution has its own shared poll, which is never
+persisted or reused across claims. Source validation, final permission/cancellation
+checks and publication fences still read durable state directly. Modules and shared
+audio readers retain their existing cooperative checkpoints and byte bounds.
+
 ## Standalone capture folder naming — 2026-10-27
 
 The operator-only `rip-cd.sh --auto` workflow captures into a fresh generated

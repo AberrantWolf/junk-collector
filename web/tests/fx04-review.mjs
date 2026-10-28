@@ -98,5 +98,52 @@ try{
  await page.getByRole('article',{name:'Effective metadata'}).scrollIntoViewIfNeeded();
  await page.screenshot({path:path.join(root,'web/test-results/metadata-manual-source-mobile.png'),fullPage:true});
 
- assert.deepEqual(errors,[]);console.log('FX-04 review browser passed: existing destination drafts, preserved fields, stable section during background updates, and album-match/history disclosure.');
+ // Manual cover upload uses real storage and authority commands, with lost-response recovery.
+ await page.unroute(`**/api/v1/items/${seeded.id}/metadata`);
+ await page.getByRole('button',{name:'Refresh panel',exact:true}).click();
+ const coverForm=page.getByRole('form',{name:'Upload manual cover art'});
+ await expect(coverForm).toBeVisible();
+ await coverForm.getByLabel('Alternative text').fill('My manual cover');
+ await coverForm.getByLabel('Cover image',{exact:true}).setInputFiles({name:'invalid.png',mimeType:'image/png',buffer:Buffer.from('invalid image bytes')});
+ await coverForm.getByRole('button',{name:'Upload cover',exact:true}).click();
+ await expect(coverForm.getByRole('alert')).toBeVisible();
+ assert.equal((await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()).assets,seeded.id)).length,0,'invalid image was archived');
+ const png=Buffer.from(await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=180;canvas.height=180;const ctx=canvas.getContext('2d');ctx.fillStyle='#375e53';ctx.fillRect(0,0,180,180);ctx.fillStyle='#e5d69a';ctx.beginPath();ctx.arc(90,90,60,0,Math.PI*2);ctx.fill();return canvas.toDataURL('image/png').split(',')[1];}),'base64');
+ await coverForm.getByLabel('Cover image',{exact:true}).setInputFiles({name:'manual-cover-with-a-long-filename-for-mobile-wrapping.png',mimeType:'image/png',buffer:png});
+ await expect(coverForm.getByRole('img',{name:'Selected image preview'})).toBeVisible();
+ await coverForm.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'cover draft overflows mobile');
+ await page.screenshot({path:path.join(root,'web/test-results/metadata-cover-draft-mobile.png'),fullPage:true});
+ await page.route(`**/api/v1/collections/${seeded.collectionId}/assets?*`,route=>route.fulfill({status:413,json:{error:{code:'payload_too_large',message:'Upload exceeds the 20 MiB limit.'}}}),{times:1});
+ await coverForm.getByRole('button',{name:'Upload cover',exact:true}).click();
+ await expect(coverForm.getByRole('alert')).toContainText('20 MiB');
+ await expect(coverForm.getByLabel('Cover image',{exact:true})).toBeEnabled();
+ await expect(coverForm.getByRole('button',{name:'Upload cover',exact:true})).toBeEnabled();
+ const uploadKeys=[];page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname===`/api/v1/collections/${seeded.collectionId}/assets`)uploadKeys.push(request.headers()['idempotency-key']);});
+ await page.route(`**/api/v1/collections/${seeded.collectionId}/assets?*`,async route=>{const response=await route.fetch();assert.equal(response.status(),200);await route.abort('failed');},{times:2});
+ await coverForm.getByRole('button',{name:'Upload cover',exact:true}).click();
+ await expect(coverForm.getByRole('button',{name:'Retry attachment',exact:true})).toBeVisible();
+ await expect(coverForm.getByLabel('Cover image',{exact:true})).toBeDisabled();
+ await coverForm.getByRole('button',{name:'Retry attachment',exact:true}).click();
+ const manualChoice=page.locator('.manual-artwork').getByRole('radio',{name:'My manual cover',exact:true});
+ await expect(manualChoice).toBeChecked();
+ assert.equal(uploadKeys.length,3);assert.equal(new Set(uploadKeys).size,1,'retry changed upload receipt inputs');
+ const uploaded=await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
+ assert.equal(uploaded.assets.length,1,'retry duplicated the uploaded cover');const asset=uploaded.assets[0];assert.equal(asset.kind,'cover');assert.equal(asset.subject.kind,'item');assert.equal(asset.subject.item_id,seeded.id);
+ const original=await page.request.get(`${origin}/api/v1/collections/${seeded.collectionId}/assets/${asset.id}/original`);assert.equal(original.status(),200);assert.deepEqual(await original.body(),png,'manual original changed');
+ // Polling must not discard the upload selection or another unsaved field draft.
+ await page.waitForTimeout(3500);await expect(manualChoice).toBeChecked();
+ await expect(page.getByLabel('Displayed title',{exact:true})).toHaveValue('Keep this unsaved correction');
+ await coverForm.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'cover uploader overflows mobile');
+ await page.screenshot({path:path.join(root,'web/test-results/metadata-cover-upload-mobile.png'),fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await page.locator('.manual-artwork').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(root,'web/test-results/metadata-cover-upload-desktop.png'),fullPage:true});
+ await page.getByRole('button',{name:'Use selected artwork',exact:true}).click();
+ await page.waitForFunction(async ({id,asset})=>{const response=await fetch('/api/v1/items/'+id+'/metadata');return response.ok&&(await response.json()).authority.artwork_choice===asset;},{id:seeded.id,asset:asset.id});
+ await page.reload();await expect(page.getByRole('form',{name:'Upload manual cover art'})).toBeVisible();await expect(page.locator('.manual-artwork').getByRole('radio',{name:'My manual cover',exact:true})).toBeChecked();
+ const retained=await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);assert.equal(retained.primary_artwork,asset.id);
+ await page.route(`**/api/v1/items/${seeded.id}/metadata`,async route=>{const response=await route.fetch();const review=await response.json();review.permissions.can_update=false;await route.fulfill({response,json:review});});
+ await page.getByRole('button',{name:'Refresh panel',exact:true}).click();
+ await expect(page.getByRole('form',{name:'Upload manual cover art'})).toHaveCount(0);
+ await expect(page.locator('.manual-artwork').getByRole('radio',{name:'My manual cover',exact:true})).toBeDisabled();
+
+ assert.deepEqual(errors,[]);console.log('FX-04 review browser passed: existing destination drafts, preserved fields, stable section during background updates, album-match/history disclosure, and manual cover upload/retry/selection/reload with mobile layout.');
 }catch(error){if(page){console.error(await page.locator('body').ariaSnapshot({timeout:2000}).catch(()=> '[browser diagnostic unavailable]'));console.error(logs.slice(-3000));}throw error;}finally{if(browser)await browser.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

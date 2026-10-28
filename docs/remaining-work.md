@@ -1,5 +1,43 @@
 # Remaining work — home-lab priorities
 
+## Beta.11 release candidate — 2026-10-28
+
+The authorized candidate includes the one-second processing cancellation poll,
+manual metadata cover uploads and focused AccurateRip batch result pages. See
+[release notes](releases/v0.1.0-beta.11.md). Exact-source source/container checks,
+publication and the NAS update are pending; beta.10 remains the installed release.
+Deployment acceptance will compare durable unfinished jobs and Library loading
+before and after the update, using a complete stopped-server recovery snapshot.
+
+
+## Library responsiveness during audio checks — 2026-10-28
+
+The processing host shares an ephemeral cancellation poll across its package
+readers, module CPU checkpoints and catalog parser. Clear durable Job checks are
+reused for at most one second, measured with a monotonic clock before the storage query;
+cancellation and errors are never cached as permission to continue. Sector-sized
+redumper reads therefore no longer issue a shared-database query for every read.
+Source validation, final authorization/cancellation checks and storage publication
+fences remain direct durable checks. No archive records, results or worker settings
+change. See [diagnosis and validation](validation/library-audio-check-contention-2026-10-28.md).
+This is a local source repair; the live NAS has not been updated by this delivery.
+
+
+## Metadata cover uploads and focused rip-check results — 2026-10-28
+
+Metadata review now offers a manual cover upload beside **Cover choice**, using
+its existing authorized Asset upload service and the shared attachment form.
+Uploads retain the original, visibility and alternative text, immediately appear
+among saved images and are selected for **Use selected artwork**. Unsaved artwork
+choices survive background metadata polling. Invalid files and unconfirmed uploads
+remain visible; retries reuse the frozen upload inputs and command identity.
+
+AccurateRip batch member reads omit excluded entries before storage pagination,
+including completed/older batches. Summary counts and durable frozen membership
+remain intact; eligible pending and terminal results still appear. Other batch
+kinds retain their existing member view. See [delivery and validation](validation/metadata-cover-upload-and-rip-results-2026-10-28.md).
+Local source changes only; publication/deployment is separate.
+
 ## Beta.10 published and installed — 2026-10-27
 
 Beta.10 releases all current changes: one-click/automatic-ingest AccurateRip,

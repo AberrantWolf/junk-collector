@@ -83,9 +83,7 @@ impl ModuleHost for GameHost<'_> {
             access: self.base.access,
             source_fingerprint: self.base.source_fingerprint,
             catalog_parsers: self.base.catalog_parsers,
-            jobs: self.base.jobs.clone(),
-            job_id: self.base.job_id,
-            claim_token: self.base.claim_token.clone(),
+            cancellation: self.base.cancellation.clone(),
         }
         .catalog_snapshot(id)
     }
@@ -377,9 +375,11 @@ impl CollectionService {
                 source_fingerprint: &frozen.processing.source_fingerprint,
                 frozen_snapshot_id: None,
                 catalog_parsers: self.catalog_parsers.as_ref(),
-                jobs: self.jobs.clone(),
-                job_id: claim.id,
-                claim_token: claim.claim_token.clone(),
+                cancellation: Arc::new(ProcessingCancellation::new(
+                    self.jobs.clone(),
+                    claim.id,
+                    claim.claim_token.clone(),
+                )),
             },
             snapshots: &frozen.snapshots,
         };

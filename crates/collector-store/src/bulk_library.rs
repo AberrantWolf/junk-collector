@@ -154,9 +154,10 @@ impl BulkLibraryPort for Store {
         let page_limit = limit(page_limit)?;
         let db = lock(&self.db)?;
         read(&db, user, id)?;
-        let mut stmt=db.prepare("SELECT record FROM private.bulk_library_members WHERE batch_id=? AND (? IS NULL OR position>?) AND (?='all' OR ?='admission' AND state='ready' OR ?='unsettled' AND state IN ('queued','running')) ORDER BY position LIMIT ?").map_err(storage)?;
+        let mut stmt=db.prepare("SELECT record FROM private.bulk_library_members WHERE batch_id=? AND (? IS NULL OR position>?) AND (?='all' OR ?='selected' AND state!='excluded' OR ?='admission' AND state='ready' OR ?='unsettled' AND state IN ('queued','running')) ORDER BY position LIMIT ?").map_err(storage)?;
         let filter = match filter {
             BulkMemberFilter::All => "all",
+            BulkMemberFilter::Selected => "selected",
             BulkMemberFilter::Admission => "admission",
             BulkMemberFilter::Unsettled => "unsettled",
         };
@@ -165,6 +166,7 @@ impl BulkLibraryPort for Store {
                 id.to_string(),
                 after,
                 after,
+                filter,
                 filter,
                 filter,
                 filter,
