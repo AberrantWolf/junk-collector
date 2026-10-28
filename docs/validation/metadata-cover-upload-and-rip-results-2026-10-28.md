@@ -86,7 +86,9 @@ No commit, push, release, deployment or production-library mutation is included.
 The final source was subsequently included in signed beta.11. Exact-source full
 checks, all 27 browser journeys and native container qualification pass; the
 validated image is published and installed on the NAS. Actual unfinished jobs
-survived the stopped-server snapshot/update and resumed. The authenticated
-production Library comparison is still pending while the signed-in Mac is locked.
+survived the stopped-server snapshot/update and resumed. After the Mac was
+unlocked, the signed-in Library returned all 40 entries in 4.7 seconds and rendered
+artwork/status after a full refresh. The batch had already settled; responsiveness
+under the original concurrent load remains unqualified.
 See [publication, recovery and acceptance](container-beta11-publication-2026-10-28.md).
 The earlier local-only scope and intermediate checks above remain historical.

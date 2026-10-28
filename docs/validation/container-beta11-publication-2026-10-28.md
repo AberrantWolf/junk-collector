@@ -5,8 +5,9 @@ unfinished AccurateRip jobs and Library loading. [Beta.11](https://github.com/Ab
 is published on `preview` and installed on `fatchocobo`. It includes the shared
 one-second processing cancellation poll, manual metadata cover uploads and focused
 AccurateRip batch results. See [release notes](../releases/v0.1.0-beta.11.md).
-Durable job recovery is verified. The authenticated production Library comparison
-is still pending because the Mac containing the signed-in browser is locked.
+Durable job recovery and authenticated production Library loading are verified.
+The browser check followed the batch's completion, so it does not qualify
+responsiveness under the original concurrent audio workload.
 
 ## Source and qualification
 
@@ -108,9 +109,12 @@ running jobs were reclaimed by the new worker instance, and all four queued jobs
 started. The post-restart sample therefore contains **six completed, six running,
 zero missing and zero failed** jobs. This checks actual durable recovery of the
 user's existing batch without submitting a replacement batch. Private operation
-receipts remain in `collector-beta11-update-20261028` on the NAS.
+receipts remain in `collector-beta11-update-20261028` on the NAS. A subsequent
+read-only sample after the Mac was unlocked confirms all **12 completed**, with
+no missing IDs, changed creation timestamps or failed jobs in this restart cohort.
+The earlier six-running sample remains the direct worker-reclamation evidence.
 
-## Public HTTPS acceptance and remaining browser check
+## Public HTTPS and authenticated Library acceptance
 
 Certificate-validated control HTML returns 200. Control and media identities match
 the retained ServerId; media identity traverses the actual Unix-socket authority
@@ -126,10 +130,21 @@ changed assets are:
 
 Before the update, the signed-in Library showed the reported 504. A read-only
 50-item request for Scott's Music also exceeded a 30-second client deadline under
-load. Post-update signed-in Library timing, visible entries and absence of the 504
-are **not yet verified**: native browser control reports the Mac is locked, and
-the user has been asked to unlock it. Passing public routes and disposable browser
-tests do not substitute for that requested production comparison.
+load. Initial post-update browser acceptance was blocked by the locked Mac. After
+the user unlocked it, the same authenticated 50-item request returned HTTP **200**,
+all **40** entries, in **4,702 ms**, measured through response-body decoding at
+01:52:54 UTC. Library navigation and a full page reload both rendered all 40
+entries, including artwork and per-original AccurateRip summaries, without the
+504. The loaded desktop screen was visually inspected and left open for the user.
+
+The original batch now reports **Completed**, **22 successful**, **three needing
+attention**, **15 excluded** and **zero pending**. The attention cases are Babel's
+unrecovered redumper C2 audio, SQ Relax's no-data result and The 2nd Law's ambiguous
+offsets. These remain visible rather than being promoted to verified results.
+The batch settled at 01:34:19 UTC, before browser access was restored. This proves
+post-update loading after recovery and completion, not a controlled before/after
+benchmark under the same active load. No replacement production batch was started
+merely to obtain that comparison.
 
 Authenticated production listening, new manual cover uploads, physical CD
 capture/ejection and optional scale/owned-disc qualification were not performed

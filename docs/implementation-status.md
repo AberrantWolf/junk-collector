@@ -8,10 +8,11 @@ all 27 browser journeys and native container acceptance pass; publication reused
 those validated bytes. The NAS runs the pinned beta.11 image after a complete
 stopped-server recovery snapshot and a 66.25-second interruption. Config, TLS,
 identity, mounts and 18 unrelated containers are retained. All 12 unfinished jobs
-retain their identities and creation timestamps: six completed after restart and
-six are running, including the four previously queued jobs. Public HTTPS and all
-nine checked assets pass. The authenticated production Library comparison remains
-pending while the Mac containing the signed-in browser is locked. See
+retain their identities and creation timestamps; all subsequently completed.
+Public HTTPS and all nine checked assets pass. The signed-in Library returns all
+40 entries in 4.7 seconds and renders artwork/status after a full refresh. The
+batch has settled: 22 successful, three needing attention, zero pending. This
+post-batch check does not qualify responsiveness under the original load. See
 [release notes](releases/v0.1.0-beta.11.md) and
 [qualification, recovery and acceptance](validation/container-beta11-publication-2026-10-28.md).
 
@@ -26,8 +27,8 @@ redumper reads therefore no longer issue a shared-database query for every read.
 Source validation, final authorization/cancellation checks and storage publication
 fences remain direct durable checks. No archive records, results or worker settings
 change. See [diagnosis and validation](validation/library-audio-check-contention-2026-10-28.md).
-Included in beta.11 on the NAS; durable job recovery is verified. The production
-Library comparison remains pending as recorded above.
+Included in beta.11 on the NAS; durable job recovery and post-batch production
+Library loading are verified as recorded above.
 
 
 ## Metadata cover uploads and focused rip-check results — 2026-10-28
