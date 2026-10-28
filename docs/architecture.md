@@ -1,27 +1,31 @@
 # Architecture
 
-## Library row cache — 2026-10-28
+## Change-driven Library summaries — active delivery, 2026-10-28
 
-Library browsing uses a compact application-owned row projection, separate
-from full Item/album detail. A row contains display text, authorized artwork,
-permissions, import progress, playback readiness and per-original AccurateRip
-status; it contains no track lists, conversion recipes or capture/file graphs.
-The existing detail and playback APIs retain their full authorized records.
+Library reads select compact, authorized projections and never run the detailed
+album resolver. Inventory projection also writes a cheap basic row. While a full
+summary is missing or invalidated, that basic row is returned with an explicit
+pending/retrying state, without stale artwork or audio conclusions. The page
+reports pending summaries even when the playback-attention filter excludes those
+unknown rows. The web polls until summaries settle, including empty filtered pages.
 
-The storage adapter persists rebuildable cached rows by item, role, metadata
-language and presentation-policy/module identity. Indexed browse selects only
-identities and cached rows. Each item retains at most twelve disposable variants. Cache builds resolve metadata
-from the same captured language used in their key. Application services authorize current access before
-using a cached result, and calculate a missing row through the existing policy.
-Per-item projection generations fence cache publication against concurrent edits.
-Catalog changes invalidate the affected item transactionally; collection-level
-identity/artwork changes may invalidate their collection. Import progress is read
-live from the existing indexed workflow query rather than cached with job state.
-Job heartbeats must not invalidate settled rows. Reindex clears derived caches;
-no originals or accepted evidence are changed. Beta.12 is installed on the NAS;
-[qualification and deployment](validation/container-beta12-publication-2026-10-28.md)
-record exact-source tests, authenticated production rendering and initial/repeat
-request timing, including the cold-calculation limit.
+A separate bounded server worker derives summaries through application presentation
+policy. Transactionally changed item tokens act as durable dirty state: the worker
+finds missing/stale rows for current enabled users' distinct collection-role and
+metadata-language variants without a Library request. Startup/reindex, grant and
+preference changes are found by the same reconciliation query. Builds freeze the
+language and token; conditional publication refuses superseded calculations.
+Failures have durable bounded retry delay, remain visible as retrying, and do not
+starve other entries. Neither browsing nor building reads original audio bytes.
+
+Rows remain partitioned by role, language and versioned presentation/module policy.
+Current access is checked for reads. Variants are bounded by actual enabled users'
+current grants/preferences; publication prunes obsolete variants rather than
+cycling through an arbitrary twelve-row limit. Import progress remains a live
+indexed operational query. Cache state is derived, outside archive checkpoints;
+additive installation backfills basic rows without forcing catalog replay. No
+originals, manual authority or accepted evidence are changed. Beta.12's measured
+lazy-cache behavior remains a dated record; this section describes its replacement.
 
 ## Processing cancellation polling — 2026-10-28
 

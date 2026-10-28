@@ -155,6 +155,24 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }));
+    let summaries = state.service.clone();
+    workers.push(tokio::spawn(async move {
+        loop {
+            let service = summaries.clone();
+            match tokio::task::spawn_blocking(move || service.rebuild_next_library_entry()).await {
+                Ok(Ok(true)) => continue,
+                Ok(Ok(false)) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
+                Ok(Err(error)) => {
+                    tracing::error!(%error, "library summary rebuild failed; retry deferred");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+                Err(error) => {
+                    tracing::error!(%error, "library summary worker panicked");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+    }));
     for worker_index in 0..9 {
         let service = state.service.clone();
         let worker_instance = worker_instance.clone();
@@ -1621,12 +1639,12 @@ async fn music_search(
         blocking(move || state.service.music_search(&actor, collection, query)).await?,
     ))
 }
-#[utoipa::path(get, path = "/api/v1/library", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<collector_app::LibraryEntry>), (status = 401)))]
+#[utoipa::path(get, path = "/api/v1/library", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = collector_app::LibraryPage), (status = 401)))]
 async fn library_entries(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<BrowseQuery>,
-) -> ApiResult<Json<Page<collector_app::LibraryEntry>>> {
+) -> ApiResult<Json<collector_app::LibraryPage>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.library_entries(&actor, query)).await?,

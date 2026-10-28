@@ -36,7 +36,31 @@ try{
   const response=await fetch('/api/v1/imports',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({collection_id:music.id,package_name:'Browse return work',files:[{name:'disc.bin',bytes:4,sha256:null}]})});if(!response.ok)throw new Error(await response.text());
   return {music:music.id,ids,importId:(await response.json()).id};
  });
- await page.reload();await page.locator('.collection-row').first().waitFor();await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
+ // Changes prepare summaries before any Library read for these new entries.
+ // Inspect only the disposable fixture's derived index, without calling Library.
+ const prepared=spawnSync('python3',['-c',`import sqlite3,time,sys
+c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True,timeout=1)
+end=time.monotonic()+15
+while True:
+ count=c.execute('SELECT COUNT(*) FROM library_entries c JOIN library_entry_versions v ON v.item_id=c.item_id AND v.token=c.token JOIN items i ON i.id=c.item_id WHERE i.collection_id=?',(sys.argv[2],)).fetchone()[0]
+ if count==62: print(count);break
+ if time.monotonic()>end: raise RuntimeError('Background Library projection did not settle: '+str(count))
+ time.sleep(.05)
+`,path.join(scratch,'state/catalog.sqlite'),seed.music],{encoding:'utf8',timeout:18000});
+ assert.equal(prepared.status,0,prepared.stderr);assert.equal(prepared.stdout.trim(),'62');
+ // A pending response must render basic rows immediately and poll to readiness.
+ let holdSummary=true;const pendingSummaryRoute=async route=>{const response=await route.fetch();if(!holdSummary){await route.fulfill({response});return;}const body=await response.json();await route.fulfill({response,json:{...body,summary_state:'pending',items:body.items.map(item=>({...item,summary_state:'pending',artwork:null,accuraterip:null,album_playback:null,can_edit:false}))}});};
+ await page.route('**/api/v1/library?*',pendingSummaryRoute);
+ await page.reload();await page.locator('.collection-row').first().waitFor();
+ await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toBeVisible();
+ await expect(page.locator('.collection-row').first().getByLabel('Artwork summary updating')).toBeVisible();
+ assert.equal(await page.getByText('No originals',{exact:true}).count(),0,'pending summary claimed missing originals');
+ if(process.env.BROWSE_SCREENSHOTS){await mkdir(process.env.BROWSE_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'desktop-summary-pending.png')});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'mobile-summary-pending.png')});await page.setViewportSize({width:1440,height:1000});}
+ holdSummary=false;
+ await expect(page.locator('.collection-row').first()).toContainText('Alpha');
+ await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toHaveCount(0);
+ await page.unroute('**/api/v1/library?*',pendingSummaryRoute);
+ await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
  assert.equal(await page.locator('.collection-row').count(),50);assert.match(await page.locator('.collection-row').first().innerText(),/Album 000/);
  const nextPageRequests=[];page.on('request',request=>{if(new URL(request.url()).pathname==='/api/v1/library')nextPageRequests.push(request.url());});
  await page.getByRole('button',{name:'Load more',exact:true}).click();await page.locator(`[data-item-id="${seed.ids[61]}"]`).waitFor();assert.equal(await page.locator('.collection-row').count(),62);assert.equal(nextPageRequests.length,1,'loading another page refetched earlier pages');assert.ok(new URL(nextPageRequests[0]).searchParams.has('cursor'));
@@ -94,6 +118,14 @@ try{
  },{times:1});
  await page.getByLabel('Show',{exact:true}).selectOption('album_playback_needs_attention');
  await page.waitForFunction(()=>new URL(location.href).searchParams.get('filter')==='album_playback_needs_attention'&&document.querySelectorAll('.collection-row').length===12);
+ await expect(page.locator('.collection-row').first().getByText('Album playback needs attention',{exact:true})).toBeVisible();
+ await page.getByLabel('Show',{exact:true}).selectOption('all');await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
+ // An empty filtered page with a failed summary is still unfinished work.
+ await page.route('**/api/v1/library?*',async route=>{const response=await route.fetch(),body=await response.json();await route.fulfill({response,json:{...body,summary_state:'retrying',items:[],next_cursor:null}});},{times:1});
+ await page.getByLabel('Show',{exact:true}).selectOption('album_playback_needs_attention');
+ await expect(page.getByRole('alert').filter({hasText:'Some summaries could not be updated'})).toBeVisible();
+ assert.equal(await page.getByRole('heading',{name:'No matching entries',exact:true}).count(),0,'unfinished filtered page appeared empty');
+ await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50||document.querySelectorAll('.collection-row').length===12);
  await expect(page.locator('.collection-row').first().getByText('Album playback needs attention',{exact:true})).toBeVisible();
  await page.reload();await expect(page.getByLabel('Show',{exact:true})).toHaveValue('album_playback_needs_attention');
  await page.locator('.collection-row').first().click();

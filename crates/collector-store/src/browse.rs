@@ -3,6 +3,10 @@
 use super::*;
 use collector_core::{BrowseFilter, BrowseSort};
 
+pub(crate) const FILES_ATTACHED: &str = "EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r, json_each(r.value,'$.files') f WHERE c.item_id=i.id)";
+pub(crate) const PLAYABLE: &str = "EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r, json_each(r.value,'$.files') f WHERE c.item_id=i.id AND ((json_extract(r.value,'$.role')='preservation_master' AND (lower(json_extract(f.value,'$.name')) GLOB '*.flac' OR lower(json_extract(f.value,'$.name')) GLOB '*.mp3' OR lower(json_extract(f.value,'$.name')) GLOB '*.wav' OR lower(json_extract(f.value,'$.name')) GLOB '*.opus' OR lower(json_extract(f.value,'$.name')) GLOB '*.ogg')) OR (json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile.codec') IN ('flac','opus') AND EXISTS(SELECT 1 FROM conversion_recipes cr WHERE cr.id=json_extract(r.value,'$.id') AND cr.collection_id=i.collection_id AND json_array_length(cr.record,'$.tracks')=1))))";
+pub(crate) const LISTENING: &str = "(json_extract(i.record,'$.domain.module')='org.junk.music' OR EXISTS(SELECT 1 FROM music_search m WHERE m.item_id=i.id) OR EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=i.id AND EXISTS(SELECT 1 FROM conversion_recipes recipe WHERE recipe.id=json_extract(r.value,'$.id'))))";
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Cursor {
@@ -22,6 +26,7 @@ pub(super) fn project(db: &Connection, item: &Item) -> Result<()> {
         }
     };
     db.execute("INSERT INTO browse_items VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title_key=excluded.title_key,artist_key=excluded.artist_key,platform_key=excluded.platform_key", params![item.id.to_string(),item.collection_id.to_string(),item.title.to_lowercase(),missing_last(artist),missing_last(platform),recent_key(item.updated_at)]).map_err(storage)?;
+    crate::library::project_basic(db, item)?;
     library_care::project_preparation(db, item.id)?;
     library_care::project_health(db, item)
 }
@@ -111,6 +116,8 @@ pub(crate) struct BrowseRow {
     pub role: Role,
     pub generation: String,
     pub record: Option<String>,
+    pub basic: String,
+    pub retrying: bool,
 }
 
 pub(crate) fn rows(
@@ -162,19 +169,37 @@ pub(crate) fn rows(
     // Attention is deliberately requester-scoped: it cannot reveal private jobs.
     let filter = match query.filter {
         BrowseFilter::All => "1",
-        BrowseFilter::Wishlist => "json_extract(i.record,'$.wishlist')=1",
+        BrowseFilter::Wishlist => {
+            if cache.is_some() {
+                "json_extract(basic.record,'$.wishlist')=1"
+            } else {
+                "json_extract(i.record,'$.wishlist')=1"
+            }
+        }
         BrowseFilter::FilesAttached => {
-            "EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r, json_each(r.value,'$.files') f WHERE c.item_id=i.id)"
+            if cache.is_some() {
+                "basic.files_attached=1"
+            } else {
+                FILES_ATTACHED
+            }
         }
         BrowseFilter::Playable => {
-            "EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r, json_each(r.value,'$.files') f WHERE c.item_id=i.id AND ((json_extract(r.value,'$.role')='preservation_master' AND (lower(json_extract(f.value,'$.name')) GLOB '*.flac' OR lower(json_extract(f.value,'$.name')) GLOB '*.mp3' OR lower(json_extract(f.value,'$.name')) GLOB '*.wav' OR lower(json_extract(f.value,'$.name')) GLOB '*.opus' OR lower(json_extract(f.value,'$.name')) GLOB '*.ogg')) OR (json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile.codec') IN ('flac','opus') AND EXISTS(SELECT 1 FROM conversion_recipes cr WHERE cr.id=json_extract(r.value,'$.id') AND cr.collection_id=i.collection_id AND json_array_length(cr.record,'$.tracks')=1))))"
+            if cache.is_some() {
+                "basic.playable=1"
+            } else {
+                PLAYABLE
+            }
         }
         BrowseFilter::NeedsAttention => {
             "(EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.state='failed') OR EXISTS(SELECT 1 FROM private.imports p WHERE p.item_id=i.id AND p.user_id=?1 AND p.phase='awaiting_review'))"
         }
         // The application evaluates the shared album resolver over these candidates.
         BrowseFilter::AlbumPlaybackNeedsAttention => {
-            "json_extract(i.record,'$.domain.module')='org.junk.music'"
+            if cache.is_some() {
+                "json_extract(basic.record,'$.module')='org.junk.music'"
+            } else {
+                "json_extract(i.record,'$.domain.module')='org.junk.music'"
+            }
         }
         BrowseFilter::Removed => "1",
     };
@@ -189,20 +214,29 @@ pub(crate) fn rows(
         " AND i.id IN (SELECT id FROM search WHERE search MATCH ?7)"
     };
     let listening = if query.listening_only {
-        "(json_extract(i.record,'$.domain.module')='org.junk.music' OR EXISTS(SELECT 1 FROM music_search m WHERE m.item_id=i.id) OR EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=i.id AND EXISTS(SELECT 1 FROM conversion_recipes recipe WHERE recipe.id=json_extract(r.value,'$.id'))))"
+        if cache.is_some() {
+            "basic.listening=1"
+        } else {
+            LISTENING
+        }
     } else {
         "1"
     };
     let (selected, joins) = if cache.is_some() {
         (
             "cached.record,COALESCE(v.token,'')",
-            " LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries cached ON cached.item_id=i.id AND cached.token=v.token AND cached.namespace=?9 AND cached.language=?10 AND cached.role=g.role",
+            " LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries cached ON cached.item_id=i.id AND cached.token=v.token AND cached.namespace=?9 AND cached.language=?10 AND cached.role=g.role LEFT JOIN library_entry_basics basic ON basic.item_id=i.id LEFT JOIN library_entry_attempts attempts ON attempts.item_id=i.id AND attempts.namespace=?9 AND attempts.language=?10 AND attempts.role=g.role LEFT JOIN metadata_language_display display ON display.item_id=i.id AND display.language=lower(substr(?10,1,instr(?10||'-','-')-1))",
         )
     } else {
         ("i.record,''", "")
     };
+    let basics = if cache.is_some() {
+        "json_set(basic.record,'$.title',COALESCE(display.title,i.title),'$.subtitle',COALESCE(display.subtitle,i.subtitle)),COALESCE(attempts.token=v.token,0)"
+    } else {
+        "'',0"
+    };
     let sql = format!(
-        "SELECT {selected},{key},b.title_key,i.id,i.collection_id,g.role FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1{joins} WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND ({listening}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
+        "SELECT {selected},{key},b.title_key,i.id,i.collection_id,g.role,{basics} FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1{joins} WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND ({listening}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
         i64::from(query.filter == BrowseFilter::Removed),
         if query.filter == BrowseFilter::Removed {
             "g.role>=1"
@@ -256,6 +290,8 @@ pub(crate) fn rows(
             role: role_from_database(row.get(6).map_err(storage)?)?,
             generation: row.get(1).map_err(storage)?,
             record: row.get(0).map_err(storage)?,
+            basic: row.get(7).map_err(storage)?,
+            retrying: row.get(8).map_err(storage)?,
         };
         next = Some(Cursor {
             scope: scope.clone(),

@@ -1,5 +1,16 @@
 # Remaining work — home-lab priorities
 
+## Active assignment: build Library summaries when data changes — 2026-10-28
+
+Replace request-time cache filling with a bounded background projector driven by
+committed item generations and current role/language demand. Recover missing work
+after restart/reindex without a browser request. Return safe basic rows immediately
+while summaries update; expose pending/retry state and poll filtered empty pages.
+Validate cold and invalidated reads without detailed data access, proactive rebuild,
+concurrent invalidation, failure fairness, role/language changes and real browser UI.
+Preserve the dated beta.12 deployment evidence; do not claim new NAS acceptance.
+See [delivery and current validation](validation/change-driven-library-summaries-2026-10-28.md).
+
 ## Beta.12 cached Library published and installed — 2026-10-28
 
 Compact cached listing is delivered across application, storage, HTTP and web.

@@ -12,10 +12,10 @@ Use an explicit image version or digest supplied by a release. On Synology DS152
 automatic platform selection uses linux/amd64.
 
 <!-- release-image:start -->
-- **Image:** `ghcr.io/aberrantwolf/junk-collector:v0.1.0-beta.12` (AMD64 and ARM64).
-- **Download:** [GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.12). The installation bundle pins the verified digest.
+- **Image:** `ghcr.io/aberrantwolf/junk-collector:v0.1.0-beta.13` (AMD64 and ARM64).
+- **Download:** [GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.13). The installation bundle pins the verified digest.
 - **Channels:** `preview` follows prereleases; `latest` is reserved for stable releases.
-- **Before updating:** read the [beta notes](../../docs/releases/v0.1.0-beta.12.md).
+- **Before updating:** read the [beta notes](../../docs/releases/v0.1.0-beta.13.md).
 
 <!-- release-image:end -->
 

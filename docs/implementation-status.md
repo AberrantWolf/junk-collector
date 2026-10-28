@@ -1,5 +1,19 @@
 # Implementation status
 
+## Change-driven Library summaries — validation in progress, 2026-10-28
+
+Library reads no longer build missing summaries. Inventory supplies immediate
+basic rows with typed pending/retry state, while a separate bounded worker
+reconciles durable item generations for current role/language demand. Changes,
+startup and reindex prepare views without a Library request; source tokens fence
+publication, and failures retry without starving peers. File/playability/listening
+filter predicates are materialized on changes too. Web polling includes empty
+filtered pending pages. Focused storage/recovery/filter regressions and web model
+checks pass, as do focused browse/smoke/CD Library browser journeys. Atomic
+additive-install rollback also passes. Complete exact-source source/container
+qualification remains pending. See
+[delivery and validation](validation/change-driven-library-summaries-2026-10-28.md).
+
 ## Compact Library row cache — beta.12 installed, 2026-10-28
 
 The web Library now uses a compact application-owned row API and a persistent,

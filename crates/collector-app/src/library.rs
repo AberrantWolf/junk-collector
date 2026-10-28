@@ -8,8 +8,24 @@ pub struct LibraryArtwork {
     pub alt_text: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LibrarySummaryState {
+    Ready,
+    Pending,
+    Retrying,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LibraryPage {
+    pub items: Vec<LibraryEntry>,
+    pub next_cursor: Option<String>,
+    pub summary_state: LibrarySummaryState,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LibraryEntry {
+    pub summary_state: LibrarySummaryState,
     pub id: ItemId,
     pub collection_id: CollectionId,
     pub title: String,
@@ -35,6 +51,43 @@ pub struct LibraryEntrySource {
     pub role: Role,
     pub generation: String,
     pub cached: Option<LibraryEntry>,
+    pub pending: LibraryEntry,
+    pub retrying: bool,
+}
+
+/// One derived view required by an enabled user's current grant/preference.
+pub struct LibraryEntryBuild {
+    pub actor: Principal,
+    pub id: ItemId,
+    pub collection_id: CollectionId,
+    pub role: Role,
+    pub language: String,
+    pub generation: String,
+}
+
+impl LibraryEntry {
+    /// Cheap projection at inventory publication; no captures, assets or evidence.
+    pub fn pending(item: &Item) -> Self {
+        Self {
+            summary_state: LibrarySummaryState::Pending,
+            id: item.id,
+            collection_id: item.collection_id,
+            title: item.title.clone(),
+            subtitle: item.subtitle.clone(),
+            context: String::new(),
+            module: item.domain.module.clone(),
+            identity: item.identity.clone(),
+            wishlist: item.wishlist,
+            deleted: item.deleted,
+            can_edit: false,
+            artwork: None,
+            metadata_tentative: false,
+            import_in_progress: false,
+            album_playback: None,
+            digital_audio: false,
+            accuraterip: None,
+        }
+    }
 }
 
 impl From<PresentedItem> for LibraryEntry {
@@ -49,6 +102,7 @@ impl From<PresentedItem> for LibraryEntry {
                 alt_text: asset.alt_text.clone(),
             });
         Self {
+            summary_state: LibrarySummaryState::Ready,
             id: item.id,
             collection_id: item.collection_id,
             title: item.title,
@@ -80,27 +134,53 @@ impl From<PresentedItem> for LibraryEntry {
 }
 
 impl CollectionService {
-    pub fn library_entries(
-        &self,
-        actor: &Principal,
-        query: BrowseQuery,
-    ) -> Result<Page<LibraryEntry>> {
-        // A publication can invalidate a row while its cold value is being
-        // calculated. Retry observation, never publish against a newer token.
-        let mut retries = 0;
-        loop {
-            match self.library_entries_once(actor, query.clone()) {
-                Err(Error::Conflict) if retries < 2 => retries += 1,
-                result => return result,
-            }
-        }
+    fn library_namespace(&self) -> Result<String> {
+        Ok(Digest::sha256(
+            &serde_json::to_vec(&(
+                "library-row-v2",
+                env!("CARGO_PKG_VERSION"),
+                self.modules.descriptors(),
+            ))
+            .map_err(|error| Error::Storage(error.to_string()))?,
+        )
+        .hex)
     }
 
-    fn library_entries_once(
-        &self,
-        actor: &Principal,
-        query: BrowseQuery,
-    ) -> Result<Page<LibraryEntry>> {
+    /// A server worker calls this independently of browsing, one row at a time.
+    /// Source generations remain dirty until a matching calculation is published.
+    pub fn rebuild_next_library_entry(&self) -> Result<bool> {
+        let namespace = self.library_namespace()?;
+        let Some(build) = self.care.next_library_entry_build(&namespace)? else {
+            return Ok(false);
+        };
+        let result = (|| {
+            let role = self.authorize(&build.actor, build.collection_id, Action::Browse)?;
+            if role != build.role {
+                return Err(Error::Conflict);
+            }
+            let item = self.reader.item(build.id)?;
+            if item.collection_id != build.collection_id {
+                return Err(Error::Conflict);
+            }
+            let effective = self.effective_metadata_for_language(&item, &build.language)?;
+            let entry = LibraryEntry::from(self.presented(item, role, &build.actor, effective)?);
+            // A superseded token remains eligible for the next worker iteration.
+            self.care.cache_library_entry(
+                &namespace,
+                &build.language,
+                role,
+                &build.generation,
+                &entry,
+            )?;
+            Ok(())
+        })();
+        if result.is_err() {
+            self.care.defer_library_entry_build(&namespace, &build)?;
+        }
+        result.map(|()| true)
+    }
+
+    pub fn library_entries(&self, actor: &Principal, query: BrowseQuery) -> Result<LibraryPage> {
         if let Some(collection) = query.collection_id {
             self.authorize(
                 actor,
@@ -113,20 +193,13 @@ impl CollectionService {
             )?;
         }
         let language = self.metadata_language(actor.user_id)?;
-        let namespace = Digest::sha256(
-            &serde_json::to_vec(&(
-                "library-row-v1",
-                env!("CARGO_PKG_VERSION"),
-                self.modules.descriptors(),
-            ))
-            .map_err(|error| Error::Storage(error.to_string()))?,
-        )
-        .hex;
+        let namespace = self.library_namespace()?;
         let attention = query.filter == BrowseFilter::AlbumPlaybackNeedsAttention;
         let limit = usize::from(query.limit.unwrap_or(50).clamp(1, 200));
         let mut query = query;
         let mut items = Vec::new();
         let mut examined = 0;
+        let mut summary_state = LibrarySummaryState::Ready;
         let next_cursor = loop {
             query.limit = Some((limit - items.len()).min(200 - examined) as u16);
             let page = self.care.library_entry_sources(
@@ -151,27 +224,20 @@ impl CollectionService {
                 if role != source.role {
                     return Err(Error::Conflict);
                 }
-                let mut entry = if let Some(cached) = source.cached {
-                    cached
-                } else {
-                    let item = self.reader.item(source.id)?;
-                    if item.collection_id != source.collection_id {
-                        return Err(Error::Conflict);
-                    }
-                    let effective = self.effective_metadata_for_language(&item, &language)?;
-                    let entry = LibraryEntry::from(self.presented(item, role, actor, effective)?);
-                    if !self.care.cache_library_entry(
-                        &namespace,
-                        &language,
-                        role,
-                        &source.generation,
-                        &entry,
-                    )? {
-                        // Never label a calculation from mixed revisions current.
-                        return Err(Error::Conflict);
+                let mut entry = source.cached.unwrap_or_else(|| {
+                    let mut entry = source.pending;
+                    if source.retrying {
+                        entry.summary_state = LibrarySummaryState::Retrying;
                     }
                     entry
-                };
+                });
+                if entry.summary_state == LibrarySummaryState::Retrying {
+                    summary_state = LibrarySummaryState::Retrying;
+                } else if entry.summary_state == LibrarySummaryState::Pending
+                    && summary_state == LibrarySummaryState::Ready
+                {
+                    summary_state = LibrarySummaryState::Pending;
+                }
                 entry.import_in_progress = !entry.deleted
                     && entry.module.0 == "org.junk.music"
                     && self.provisional_imports.item_has_active_ingest(entry.id)?;
@@ -192,6 +258,10 @@ impl CollectionService {
             }
             query.cursor = page.next_cursor;
         };
-        Ok(Page { items, next_cursor })
+        Ok(LibraryPage {
+            items,
+            next_cursor,
+            summary_state,
+        })
     }
 }

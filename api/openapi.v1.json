@@ -7121,7 +7121,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_LibraryEntry"
+                  "$ref": "#/components/schemas/LibraryPage"
                 }
               }
             }
@@ -13921,6 +13921,7 @@
       "LibraryEntry": {
         "type": "object",
         "required": [
+          "summary_state",
           "id",
           "collection_id",
           "title",
@@ -13998,11 +13999,38 @@
           "subtitle": {
             "type": "string"
           },
+          "summary_state": {
+            "$ref": "#/components/schemas/LibrarySummaryState"
+          },
           "title": {
             "type": "string"
           },
           "wishlist": {
             "type": "boolean"
+          }
+        }
+      },
+      "LibraryPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "summary_state"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryEntry"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary_state": {
+            "$ref": "#/components/schemas/LibrarySummaryState"
           }
         }
       },
@@ -14054,6 +14082,14 @@
               }
             }
           }
+        ]
+      },
+      "LibrarySummaryState": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "pending",
+          "retrying"
         ]
       },
       "ListEntryAvailability": {
@@ -17577,111 +17613,6 @@
                 "updated_at": {
                   "type": "string",
                   "format": "date-time"
-                }
-              }
-            }
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "Page_LibraryEntry": {
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "id",
-                "collection_id",
-                "title",
-                "subtitle",
-                "context",
-                "module",
-                "identity",
-                "wishlist",
-                "deleted",
-                "can_edit",
-                "metadata_tentative",
-                "import_in_progress",
-                "digital_audio"
-              ],
-              "properties": {
-                "accuraterip": {
-                  "type": [
-                    "array",
-                    "null"
-                  ],
-                  "items": {
-                    "$ref": "#/components/schemas/PresentedAudioCheck"
-                  }
-                },
-                "album_playback": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AlbumPlaybackReadiness"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "artwork": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/LibraryArtwork"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "can_edit": {
-                  "type": "boolean"
-                },
-                "collection_id": {
-                  "$ref": "#/components/schemas/CollectionId"
-                },
-                "context": {
-                  "type": "string"
-                },
-                "deleted": {
-                  "type": "boolean"
-                },
-                "digital_audio": {
-                  "type": "boolean"
-                },
-                "id": {
-                  "$ref": "#/components/schemas/ItemId"
-                },
-                "identity": {
-                  "$ref": "#/components/schemas/IdentityState"
-                },
-                "import_in_progress": {
-                  "type": "boolean"
-                },
-                "metadata_tentative": {
-                  "type": "boolean"
-                },
-                "module": {
-                  "$ref": "#/components/schemas/ModuleId"
-                },
-                "subtitle": {
-                  "type": "string"
-                },
-                "title": {
-                  "type": "string"
-                },
-                "wishlist": {
-                  "type": "boolean"
                 }
               }
             }

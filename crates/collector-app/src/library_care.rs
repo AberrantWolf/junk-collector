@@ -15,6 +15,8 @@ pub struct UpdateMetadataPreferences {
 }
 
 pub trait LibraryCarePort: Send + Sync {
+    fn next_library_entry_build(&self, namespace: &str) -> Result<Option<LibraryEntryBuild>>;
+    fn defer_library_entry_build(&self, namespace: &str, build: &LibraryEntryBuild) -> Result<()>;
     fn library_entry_sources(
         &self,
         user: UserId,

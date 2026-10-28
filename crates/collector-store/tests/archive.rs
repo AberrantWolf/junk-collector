@@ -26594,6 +26594,7 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
         filter: BrowseFilter::AlbumPlaybackNeedsAttention,
         ..Default::default()
     };
+    rebuild_library_summaries(&service);
     // Cache the initial missing-audio result before publishing each format.
     assert_eq!(
         service
@@ -26602,6 +26603,34 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
             .items
             .len(),
         1
+    );
+    assert!(
+        service
+            .library_entries(
+                &actor,
+                BrowseQuery {
+                    filter: BrowseFilter::FilesAttached,
+                    ..attention_query.clone()
+                }
+            )
+            .unwrap()
+            .items
+            .iter()
+            .any(|entry| entry.id == album.id)
+    );
+    assert!(
+        !service
+            .library_entries(
+                &actor,
+                BrowseQuery {
+                    filter: BrowseFilter::Playable,
+                    ..attention_query.clone()
+                }
+            )
+            .unwrap()
+            .items
+            .iter()
+            .any(|entry| entry.id == album.id)
     );
     for position in 1..=2 {
         let mut request = derivative_command(&imported, position);
@@ -26623,6 +26652,21 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
                 Some(collector_app::AlbumPlaybackReadiness::Ready)
             ),
             ready
+        );
+        rebuild_library_summaries(&service);
+        assert!(
+            service
+                .library_entries(
+                    &actor,
+                    BrowseQuery {
+                        filter: BrowseFilter::Playable,
+                        ..attention_query.clone()
+                    }
+                )
+                .unwrap()
+                .items
+                .iter()
+                .any(|entry| entry.id == album.id)
         );
         assert_eq!(
             service
@@ -26671,6 +26715,7 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
         );
     }
     store.reindex().unwrap();
+    rebuild_library_summaries(&service);
     assert_eq!(
         service
             .item_presented(&actor, album.id)
@@ -27978,6 +28023,15 @@ fn disable_automatic_cd_checks(
         .unwrap();
 }
 
+fn rebuild_library_summaries(service: &CollectionService) {
+    for _ in 0..1000 {
+        if !service.rebuild_next_library_entry().unwrap() {
+            return;
+        }
+    }
+    panic!("Library summaries did not settle");
+}
+
 #[test]
 fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_reindex() {
     use collector_app::LibraryCarePort;
@@ -27990,6 +28044,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
         collection_id: Some(collection.id),
         ..Default::default()
     };
+    rebuild_library_summaries(&service);
     let rows = service.library_entries(&actor, query.clone()).unwrap();
     assert_eq!(rows.items.len(), 2);
     let raw = serde_json::to_value(&rows).unwrap();
@@ -28053,6 +28108,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
             .cache_library_entry(&namespace, "en", Role::Owner, &before.generation, &stale)
             .unwrap()
     );
+    rebuild_library_summaries(&service);
     let rows = service.library_entries(&actor, query.clone()).unwrap();
     assert_eq!(
         rows.items
@@ -28080,6 +28136,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
             &command(),
         )
         .unwrap();
+    rebuild_library_summaries(&service);
     assert_eq!(
         service
             .library_entries(&actor, query.clone())
@@ -28103,6 +28160,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
         administrator: false,
         device_id: None,
     };
+    rebuild_library_summaries(&service);
     let viewer_rows = service.library_entries(&viewer, query.clone()).unwrap();
     assert!(
         viewer_rows
@@ -28120,6 +28178,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
             &command(),
         )
         .unwrap();
+    rebuild_library_summaries(&service);
     service.library_entries(&actor, query.clone()).unwrap();
     assert!(
         store
@@ -28149,6 +28208,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
             .all(|source| source.cached.is_some()),
         "restart lost unchanged cached rows"
     );
+    rebuild_library_summaries(&service);
     assert_eq!(
         service
             .library_entries(&actor, query.clone())
@@ -28166,6 +28226,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
             .iter()
             .all(|source| source.cached.is_none())
     );
+    rebuild_library_summaries(&service);
     let rows = service.library_entries(&actor, query).unwrap();
     assert_eq!(
         rows.items

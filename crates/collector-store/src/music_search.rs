@@ -152,7 +152,7 @@ pub(super) fn project(
         )
         .map_err(storage)?;
     }
-    Ok(())
+    crate::library::project_filters(db, item.id)
 }
 pub(super) fn search(
     db: &Connection,

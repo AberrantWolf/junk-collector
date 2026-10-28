@@ -3900,8 +3900,14 @@ export interface components {
             metadata_tentative: boolean;
             module: components["schemas"]["ModuleId"];
             subtitle: string;
+            summary_state: components["schemas"]["LibrarySummaryState"];
             title: string;
             wishlist: boolean;
+        };
+        LibraryPage: {
+            items: components["schemas"]["LibraryEntry"][];
+            next_cursor?: string | null;
+            summary_state: components["schemas"]["LibrarySummaryState"];
         };
         LibrarySelection: {
             items: components["schemas"]["ItemId"][];
@@ -3913,6 +3919,8 @@ export interface components {
             /** @enum {string} */
             selection: "all_matching";
         };
+        /** @enum {string} */
+        LibrarySummaryState: "ready" | "pending" | "retrying";
         ListEntryAvailability: {
             /** @enum {string} */
             status: "entry";
@@ -4749,27 +4757,6 @@ export interface components {
                 total_units: number;
                 /** Format: date-time */
                 updated_at: string;
-            }[];
-            next_cursor?: string | null;
-        };
-        Page_LibraryEntry: {
-            items: {
-                accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
-                album_playback?: components["schemas"]["AlbumPlaybackReadiness"] | null;
-                artwork?: components["schemas"]["LibraryArtwork"] | null;
-                can_edit: boolean;
-                collection_id: components["schemas"]["CollectionId"];
-                context: string;
-                deleted: boolean;
-                digital_audio: boolean;
-                id: components["schemas"]["ItemId"];
-                identity: components["schemas"]["IdentityState"];
-                import_in_progress: boolean;
-                metadata_tentative: boolean;
-                module: components["schemas"]["ModuleId"];
-                subtitle: string;
-                title: string;
-                wishlist: boolean;
             }[];
             next_cursor?: string | null;
         };
@@ -11874,7 +11861,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_LibraryEntry"];
+                    "application/json": components["schemas"]["LibraryPage"];
                 };
             };
             /** @description Unauthorized */
