@@ -1,5 +1,15 @@
 # Implementation status
 
+## Compact Library row cache — source validation in progress, 2026-10-28
+
+The web Library now uses a compact application-owned row API and a persistent,
+rebuildable server cache. Current role/language/module policy scopes cached rows;
+transactional projection tokens invalidate changed summaries and fence concurrent
+publication. Import progress remains live. Opening detail or curation reads the
+full authorized Item separately. Initial storage/cache integration passes; full
+workspace, Clippy and browser acceptance is running. Beta.11 remains installed on
+the NAS. See [delivery and validation](validation/library-row-cache-2026-10-28.md).
+
 ## Beta.11 published and installed — 2026-10-28
 
 Beta.11 includes the one-second processing cancellation poll, manual metadata

@@ -26,6 +26,7 @@ tempfile.workspace = true
 tracing = "0.1"
 
 [dev-dependencies]
+rusqlite = { workspace = true, features = ["hooks"] }
 junk-libs-disc.workspace = true
 collector-modules.workspace = true
 collector-providers.workspace = true

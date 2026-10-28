@@ -47,7 +47,9 @@ mod cd_checks;
 pub use cd_checks::*;
 mod library_settings;
 pub use library_settings::*;
+mod library;
 mod library_care;
+pub use library::*;
 mod metadata_resolution;
 pub use library_care::*;
 pub use metadata_resolution::*;
@@ -2061,7 +2063,7 @@ impl PresentedCapture {
 
 /// Recorded checks for visible, currently associated originals. This is not an
 /// album-coverage claim: missing discs and unchecked originals remain distinct.
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PresentedAudioCheck {
     pub source_id: RepresentationId,
     pub status: Option<collector_modules::music::AudioVerificationStatus>,

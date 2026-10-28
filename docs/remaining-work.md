@@ -1,5 +1,19 @@
 # Remaining work — home-lab priorities
 
+## Active assignment: compact cached Library rows — 2026-10-28
+
+The user considers the idle four-second Library load unacceptable and requests
+server-side cached summaries without full-track reads for ordinary listing.
+Deliver a compact cached listing through application, storage, HTTP and web;
+retain fresh authorized detail reads when opening an album. Fence invalidation
+for metadata, artwork, assignments, preparation and audio results; keep import
+progress live. Validate reuse, immediate refresh after relevant mutations,
+role/language isolation, reindex/restart and the actual Library UI. Record cold
+and warm timing honestly; do not equate a settled-batch result with load testing.
+The cache is the [beta.12 release candidate](releases/v0.1.0-beta.12.md); beta.11
+remains installed until exact-source/native qualification and the recovery update.
+See [delivery boundaries and current validation](validation/library-row-cache-2026-10-28.md).
+
 ## Beta.11 published and installed — 2026-10-28
 
 Beta.11 includes the one-second processing cancellation poll, manual metadata

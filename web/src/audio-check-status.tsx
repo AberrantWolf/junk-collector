@@ -3,7 +3,7 @@ import type {components} from './generated/api';
 type Item=components['schemas']['PresentedItem'];
 const labels={verified:'Verified',incomplete_search:'Incomplete search',mismatched:'Mismatch',no_data:'No data',ambiguous_offsets:'Ambiguous offsets',unavailable:'Unavailable',unsupported:'Unsupported'};
 
-export default function AudioCheckStatus({item,onOpen}:{item:Item;onOpen?:()=>void}){
+export default function AudioCheckStatus({item,onOpen}:{item:Pick<Item,'title'|'digital_audio'|'accuraterip'>;onOpen?:()=>void}){
  if(item.digital_audio&&!item.accuraterip?.length)return <span className="audio-check-status" title="Saved digital purchase; CD verification does not apply">Digital original</span>;
  const checks=item.accuraterip||[];
  const verified=checks.filter(check=>check.status==='verified').length;

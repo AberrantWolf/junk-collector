@@ -84,6 +84,41 @@ pub(super) fn first_record_time(
 }
 
 pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Result<Page<Item>> {
+    let page = rows(db, user, query, None)?;
+    let mut items = page
+        .items
+        .into_iter()
+        .map(|row| {
+            serde_json::from_str(
+                &row.record
+                    .ok_or_else(|| Error::Storage("browse record missing".into()))?,
+            )
+            .map_err(storage)
+        })
+        .collect::<Result<Vec<Item>>>()?;
+    for item in &mut items {
+        hydrate_captures(db, item)?;
+    }
+    Ok(Page {
+        items,
+        next_cursor: page.next_cursor,
+    })
+}
+
+pub(crate) struct BrowseRow {
+    pub id: ItemId,
+    pub collection_id: CollectionId,
+    pub role: Role,
+    pub generation: String,
+    pub record: Option<String>,
+}
+
+pub(crate) fn rows(
+    db: &Connection,
+    user: UserId,
+    query: BrowseQuery,
+    cache: Option<(&str, &str)>,
+) -> Result<Page<BrowseRow>> {
     let limit = query.limit.unwrap_or(50).clamp(1, 200) as usize;
     let search = query.search.as_deref().unwrap_or("").trim();
     if search.len() > 256 {
@@ -158,8 +193,16 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
     } else {
         "1"
     };
+    let (selected, joins) = if cache.is_some() {
+        (
+            "cached.record,COALESCE(v.token,'')",
+            " LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries cached ON cached.item_id=i.id AND cached.token=v.token AND cached.namespace=?9 AND cached.language=?10 AND cached.role=g.role",
+        )
+    } else {
+        ("i.record,''", "")
+    };
     let sql = format!(
-        "SELECT i.record,{key},b.title_key FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND ({listening}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
+        "SELECT {selected},{key},b.title_key,i.id,i.collection_id,g.role FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1{joins} WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND ({listening}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
         i64::from(query.filter == BrowseFilter::Removed),
         if query.filter == BrowseFilter::Removed {
             "g.role>=1"
@@ -168,17 +211,28 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
         }
     );
     let mut stmt = db.prepare(&sql).map_err(storage)?;
+    use rusqlite::types::Value;
+    let mut values = vec![
+        Value::from(user.to_string()),
+        query
+            .collection_id
+            .map(|v| Value::from(v.to_string()))
+            .unwrap_or(Value::Null),
+        Value::from(cursor.as_ref().map(|v| v.key.clone()).unwrap_or_default()),
+        Value::from(cursor.as_ref().map(|v| v.title.clone()).unwrap_or_default()),
+        Value::from(cursor.as_ref().map(|v| v.id.clone()).unwrap_or_default()),
+        Value::from((limit + 1) as i64),
+        Value::from(terms),
+        Value::from(i64::from(cursor.is_some())),
+    ];
+    if let Some((namespace, language)) = cache {
+        values.extend([
+            Value::from(namespace.to_owned()),
+            Value::from(language.to_owned()),
+        ]);
+    }
     let mut rows = stmt
-        .query(params![
-            user.to_string(),
-            query.collection_id.map(|v| v.to_string()),
-            cursor.as_ref().map(|v| v.key.as_str()).unwrap_or(""),
-            cursor.as_ref().map(|v| v.title.as_str()).unwrap_or(""),
-            cursor.as_ref().map(|v| v.id.as_str()).unwrap_or(""),
-            (limit + 1) as i64,
-            terms,
-            cursor.is_some()
-        ])
+        .query(rusqlite::params_from_iter(values))
         .map_err(storage)?;
     let mut items = Vec::new();
     let mut next = None;
@@ -188,12 +242,25 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
             has_more = true;
             break;
         }
-        let item: Item =
-            serde_json::from_str(&row.get::<_, String>(0).map_err(storage)?).map_err(storage)?;
+        let item = BrowseRow {
+            id: row
+                .get::<_, String>(4)
+                .map_err(storage)?
+                .parse()
+                .map_err(storage)?,
+            collection_id: row
+                .get::<_, String>(5)
+                .map_err(storage)?
+                .parse()
+                .map_err(storage)?,
+            role: role_from_database(row.get(6).map_err(storage)?)?,
+            generation: row.get(1).map_err(storage)?,
+            record: row.get(0).map_err(storage)?,
+        };
         next = Some(Cursor {
             scope: scope.clone(),
-            key: row.get(1).map_err(storage)?,
-            title: row.get(2).map_err(storage)?,
+            key: row.get(2).map_err(storage)?,
+            title: row.get(3).map_err(storage)?,
             id: item.id.to_string(),
         });
         items.push(item);
@@ -207,8 +274,5 @@ pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Resul
     };
     drop(rows);
     drop(stmt);
-    for item in &mut items {
-        hydrate_captures(db, item)?;
-    }
     Ok(Page { items, next_cursor })
 }

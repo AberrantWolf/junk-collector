@@ -17,6 +17,32 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.metadata_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),revision INTEGER NOT NULL,language TEXT NOT NULL);").map_err(storage)
 }
 impl LibraryCarePort for Store {
+    fn library_entry_sources(
+        &self,
+        user: UserId,
+        query: BrowseQuery,
+        namespace: &str,
+        language: &str,
+    ) -> Result<Page<collector_app::LibraryEntrySource>> {
+        crate::library::sources(&*lock(&self.db)?, user, query, namespace, language)
+    }
+    fn cache_library_entry(
+        &self,
+        namespace: &str,
+        language: &str,
+        role: Role,
+        generation: &str,
+        entry: &collector_app::LibraryEntry,
+    ) -> Result<bool> {
+        crate::library::cache(
+            &*lock(&self.db)?,
+            namespace,
+            language,
+            role,
+            generation,
+            entry,
+        )
+    }
     fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<collector_app::JobRecord>> {
         let ids = {
             let db = lock(&self.db)?;

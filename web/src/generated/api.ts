@@ -2100,6 +2100,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["library_entries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library-care/metadata": {
         parameters: {
             query?: never;
@@ -3864,6 +3880,29 @@ export interface components {
             /** Format: int32 */
             legacy_position?: number | null;
         };
+        LibraryArtwork: {
+            alt_text: string;
+            id: components["schemas"]["AssetId"];
+            revision: components["schemas"]["Revision"];
+        };
+        LibraryEntry: {
+            accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
+            album_playback?: components["schemas"]["AlbumPlaybackReadiness"] | null;
+            artwork?: components["schemas"]["LibraryArtwork"] | null;
+            can_edit: boolean;
+            collection_id: components["schemas"]["CollectionId"];
+            context: string;
+            deleted: boolean;
+            digital_audio: boolean;
+            id: components["schemas"]["ItemId"];
+            identity: components["schemas"]["IdentityState"];
+            import_in_progress: boolean;
+            metadata_tentative: boolean;
+            module: components["schemas"]["ModuleId"];
+            subtitle: string;
+            title: string;
+            wishlist: boolean;
+        };
         LibrarySelection: {
             items: components["schemas"]["ItemId"][];
             /** @enum {string} */
@@ -4710,6 +4749,27 @@ export interface components {
                 total_units: number;
                 /** Format: date-time */
                 updated_at: string;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_LibraryEntry: {
+            items: {
+                accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
+                album_playback?: components["schemas"]["AlbumPlaybackReadiness"] | null;
+                artwork?: components["schemas"]["LibraryArtwork"] | null;
+                can_edit: boolean;
+                collection_id: components["schemas"]["CollectionId"];
+                context: string;
+                deleted: boolean;
+                digital_audio: boolean;
+                id: components["schemas"]["ItemId"];
+                identity: components["schemas"]["IdentityState"];
+                import_in_progress: boolean;
+                metadata_tentative: boolean;
+                module: components["schemas"]["ModuleId"];
+                subtitle: string;
+                title: string;
+                wishlist: boolean;
             }[];
             next_cursor?: string | null;
         };
@@ -11785,6 +11845,40 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    library_entries: {
+        parameters: {
+            query?: {
+                sort?: "title" | "recently_added" | "artist" | "platform";
+                filter?: "all" | "wishlist" | "files_attached" | "playable" | "needs_attention" | "album_playback_needs_attention" | "removed";
+                collection_id?: components["schemas"]["CollectionId"];
+                search?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_LibraryEntry"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

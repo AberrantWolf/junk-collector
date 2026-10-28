@@ -1,5 +1,26 @@
 # Architecture
 
+## Library row cache — active delivery, 2026-10-28
+
+Library browsing will use a compact application-owned row projection, separate
+from full Item/album detail. A row contains display text, authorized artwork,
+permissions, import progress, playback readiness and per-original AccurateRip
+status; it contains no track lists, conversion recipes or capture/file graphs.
+The existing detail and playback APIs retain their full authorized records.
+
+The storage adapter will persist rebuildable cached rows by item, role, metadata
+language and presentation-policy/module identity. Indexed browse selects only
+identities and cached rows. Each item retains at most twelve disposable variants.
+Application services authorize current access before
+using a cached result, and calculate a missing row through the existing policy.
+Per-item projection generations fence cache publication against concurrent edits.
+Catalog changes invalidate the affected item transactionally; collection-level
+identity/artwork changes may invalidate their collection. Import progress is read
+live from the existing indexed workflow query rather than cached with job state.
+Job heartbeats must not invalidate settled rows. Reindex clears derived caches;
+no originals or accepted evidence are changed. This section describes the active
+implementation boundary, not completed acceptance.
+
 ## Processing cancellation polling — 2026-10-28
 
 The application processing host coalesces durable cancellation/claim queries

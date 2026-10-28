@@ -18,6 +18,7 @@ mod group_publication;
 mod index_checkpoint;
 mod item_lifecycle;
 mod jobs;
+mod library;
 mod library_care;
 mod library_settings;
 mod migration;
@@ -666,7 +667,7 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
-            "DELETE FROM collection_lists; DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM music_search; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
+            "DELETE FROM library_entries; DELETE FROM library_entry_versions; DELETE FROM collection_lists; DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM music_search; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
         )
         .map_err(storage)?;
         for (collection, path) in collections {
@@ -2785,6 +2786,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     collection_lists::install(db)?;
     music_search::install(db)?;
     reference_index::install(db)?;
+    library::install(db)?;
     index_checkpoint::install(db)?;
     if catalog_version < 9 {
         db.execute("DELETE FROM catalog_checkpoint", [])

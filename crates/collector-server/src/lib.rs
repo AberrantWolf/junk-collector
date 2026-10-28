@@ -632,6 +632,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(collection_lists))
         .routes(routes!(collection_list_view))
         .routes(routes!(browse))
+        .routes(routes!(library_entries))
         .routes(routes!(music_search))
         .routes(routes!(client_collections))
         .routes(routes!(client_albums))
@@ -1620,6 +1621,18 @@ async fn music_search(
         blocking(move || state.service.music_search(&actor, collection, query)).await?,
     ))
 }
+#[utoipa::path(get, path = "/api/v1/library", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<collector_app::LibraryEntry>), (status = 401)))]
+async fn library_entries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<BrowseQuery>,
+) -> ApiResult<Json<Page<collector_app::LibraryEntry>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.library_entries(&actor, query)).await?,
+    ))
+}
+
 #[utoipa::path(get, path = "/api/v1/items", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<PresentedItem>), (status = 401)))]
 async fn browse(
     State(state): State<AppState>,

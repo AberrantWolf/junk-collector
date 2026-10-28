@@ -7045,6 +7045,93 @@
         }
       }
     },
+    "/api/v1/library": {
+      "get": {
+        "operationId": "library_entries",
+        "parameters": [
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "title",
+                "recently_added",
+                "artist",
+                "platform"
+              ]
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "wishlist",
+                "files_attached",
+                "playable",
+                "needs_attention",
+                "album_playback_needs_attention",
+                "removed"
+              ]
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_LibraryEntry"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/v1/library-care/metadata": {
       "get": {
         "operationId": "metadata_care",
@@ -13812,6 +13899,113 @@
           }
         }
       },
+      "LibraryArtwork": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "alt_text"
+        ],
+        "properties": {
+          "alt_text": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/AssetId"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
+      "LibraryEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection_id",
+          "title",
+          "subtitle",
+          "context",
+          "module",
+          "identity",
+          "wishlist",
+          "deleted",
+          "can_edit",
+          "metadata_tentative",
+          "import_in_progress",
+          "digital_audio"
+        ],
+        "properties": {
+          "accuraterip": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PresentedAudioCheck"
+            }
+          },
+          "album_playback": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AlbumPlaybackReadiness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artwork": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LibraryArtwork"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "can_edit": {
+            "type": "boolean"
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "context": {
+            "type": "string"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "digital_audio": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/IdentityState"
+          },
+          "import_in_progress": {
+            "type": "boolean"
+          },
+          "metadata_tentative": {
+            "type": "boolean"
+          },
+          "module": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "wishlist": {
+            "type": "boolean"
+          }
+        }
+      },
       "LibrarySelection": {
         "oneOf": [
           {
@@ -17383,6 +17577,111 @@
                 "updated_at": {
                   "type": "string",
                   "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_LibraryEntry": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "collection_id",
+                "title",
+                "subtitle",
+                "context",
+                "module",
+                "identity",
+                "wishlist",
+                "deleted",
+                "can_edit",
+                "metadata_tentative",
+                "import_in_progress",
+                "digital_audio"
+              ],
+              "properties": {
+                "accuraterip": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/PresentedAudioCheck"
+                  }
+                },
+                "album_playback": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AlbumPlaybackReadiness"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "artwork": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LibraryArtwork"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "can_edit": {
+                  "type": "boolean"
+                },
+                "collection_id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "context": {
+                  "type": "string"
+                },
+                "deleted": {
+                  "type": "boolean"
+                },
+                "digital_audio": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/ItemId"
+                },
+                "identity": {
+                  "$ref": "#/components/schemas/IdentityState"
+                },
+                "import_in_progress": {
+                  "type": "boolean"
+                },
+                "metadata_tentative": {
+                  "type": "boolean"
+                },
+                "module": {
+                  "$ref": "#/components/schemas/ModuleId"
+                },
+                "subtitle": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "wishlist": {
+                  "type": "boolean"
                 }
               }
             }

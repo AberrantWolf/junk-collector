@@ -26594,6 +26594,15 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
         filter: BrowseFilter::AlbumPlaybackNeedsAttention,
         ..Default::default()
     };
+    // Cache the initial missing-audio result before publishing each format.
+    assert_eq!(
+        service
+            .library_entries(&actor, attention_query.clone())
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
     for position in 1..=2 {
         let mut request = derivative_command(&imported, position);
         request.profile = ConversionProfile::Opus {
@@ -26617,7 +26626,7 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
         );
         assert_eq!(
             service
-                .browse_presented(&actor, attention_query.clone())
+                .library_entries(&actor, attention_query.clone())
                 .unwrap()
                 .items
                 .iter()
@@ -26671,7 +26680,7 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
     );
     assert!(
         !service
-            .browse_presented(&actor, attention_query)
+            .library_entries(&actor, attention_query)
             .unwrap()
             .items
             .iter()
@@ -27967,4 +27976,203 @@ fn disable_automatic_cd_checks(
             &command(),
         )
         .unwrap();
+}
+
+#[test]
+fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_reindex() {
+    use collector_app::LibraryCarePort;
+    let (root, store, actor, service, collection) = setup();
+    let first = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let mut other = item(collection.id);
+    other.title = "Unchanged peer".into();
+    let peer = save_inventory(&service, &actor, other, Revision(0)).unwrap();
+    let query = BrowseQuery {
+        collection_id: Some(collection.id),
+        ..Default::default()
+    };
+    let rows = service.library_entries(&actor, query.clone()).unwrap();
+    assert_eq!(rows.items.len(), 2);
+    let raw = serde_json::to_value(&rows).unwrap();
+    for row in raw["items"].as_array().unwrap() {
+        assert!(row.get("captures").is_none() && row.get("domain").is_none());
+    }
+    let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+    let namespace: String = db
+        .query_row("SELECT namespace FROM library_entries LIMIT 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let sources = store
+        .library_entry_sources(actor.user_id, query.clone(), &namespace, "en")
+        .unwrap();
+    assert!(sources.items.iter().all(|source| source.cached.is_some()));
+    let before = sources
+        .items
+        .into_iter()
+        .find(|source| source.id == first.id)
+        .unwrap();
+    let stale = before.cached.unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            first.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: Revision(0),
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "Manual library title".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let sources = store
+        .library_entry_sources(actor.user_id, query.clone(), &namespace, "en")
+        .unwrap();
+    assert!(
+        sources
+            .items
+            .iter()
+            .find(|source| source.id == first.id)
+            .unwrap()
+            .cached
+            .is_none()
+    );
+    assert!(
+        sources
+            .items
+            .iter()
+            .find(|source| source.id == peer.id)
+            .unwrap()
+            .cached
+            .is_some()
+    );
+    assert!(
+        !store
+            .cache_library_entry(&namespace, "en", Role::Owner, &before.generation, &stale)
+            .unwrap()
+    );
+    let rows = service.library_entries(&actor, query.clone()).unwrap();
+    assert_eq!(
+        rows.items
+            .iter()
+            .find(|row| row.id == first.id)
+            .unwrap()
+            .title,
+        "Manual library title"
+    );
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(2, 2, image::Rgb([12, 34, 56]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let asset = service
+        .create_asset(
+            &actor,
+            CreateAssetCommand {
+                collection_id: collection.id,
+                subject: AssetSubject::Item { item_id: first.id },
+                kind: AssetKind::Cover,
+                visibility: Visibility::Curators,
+                alt_text: "Private cover".into(),
+            },
+            &png.into_inner(),
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        service
+            .library_entries(&actor, query.clone())
+            .unwrap()
+            .items
+            .iter()
+            .find(|row| row.id == first.id)
+            .unwrap()
+            .artwork
+            .as_ref()
+            .unwrap()
+            .id,
+        asset.id
+    );
+    let viewer_id = store
+        .create_user("cached-library-viewer", "another long test password", false)
+        .unwrap();
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    let viewer_rows = service.library_entries(&viewer, query.clone()).unwrap();
+    assert!(
+        viewer_rows
+            .items
+            .iter()
+            .all(|row| !row.can_edit && row.artwork.is_none())
+    );
+    service
+        .update_metadata_preferences(
+            &actor,
+            collector_app::UpdateMetadataPreferences {
+                expected_revision: Revision(0),
+                language: LanguageTag::new("ja").unwrap(),
+            },
+            &command(),
+        )
+        .unwrap();
+    service.library_entries(&actor, query.clone()).unwrap();
+    assert!(
+        store
+            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja")
+            .unwrap()
+            .items
+            .iter()
+            .all(|source| source.cached.is_some())
+    );
+    AccessPort::set_grant(&*store, collection.id, viewer_id, Revision(1), None).unwrap();
+    assert!(matches!(
+        service.library_entries(&viewer, query.clone()),
+        Err(Error::Forbidden)
+    ));
+    drop(db);
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert!(
+        store
+            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja")
+            .unwrap()
+            .items
+            .iter()
+            .all(|source| source.cached.is_some()),
+        "restart lost unchanged cached rows"
+    );
+    assert_eq!(
+        service
+            .library_entries(&actor, query.clone())
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    store.reindex().unwrap();
+    assert!(
+        store
+            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja")
+            .unwrap()
+            .items
+            .iter()
+            .all(|source| source.cached.is_none())
+    );
+    let rows = service.library_entries(&actor, query).unwrap();
+    assert_eq!(
+        rows.items
+            .iter()
+            .find(|row| row.id == first.id)
+            .unwrap()
+            .title,
+        "Manual library title"
+    );
 }

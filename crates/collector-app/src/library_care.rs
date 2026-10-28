@@ -15,6 +15,21 @@ pub struct UpdateMetadataPreferences {
 }
 
 pub trait LibraryCarePort: Send + Sync {
+    fn library_entry_sources(
+        &self,
+        user: UserId,
+        query: BrowseQuery,
+        namespace: &str,
+        language: &str,
+    ) -> Result<Page<LibraryEntrySource>>;
+    fn cache_library_entry(
+        &self,
+        namespace: &str,
+        language: &str,
+        role: Role,
+        generation: &str,
+        entry: &LibraryEntry,
+    ) -> Result<bool>;
     fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<JobRecord>>;
     fn cd_settings(&self, collection: CollectionId) -> Result<CdLibrarySettings>;
     fn save_cd_settings(

@@ -38,7 +38,7 @@ try{
  });
  await page.reload();await page.locator('.collection-row').first().waitFor();await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
  assert.equal(await page.locator('.collection-row').count(),50);assert.match(await page.locator('.collection-row').first().innerText(),/Album 000/);
- const nextPageRequests=[];page.on('request',request=>{if(new URL(request.url()).pathname==='/api/v1/items')nextPageRequests.push(request.url());});
+ const nextPageRequests=[];page.on('request',request=>{if(new URL(request.url()).pathname==='/api/v1/library')nextPageRequests.push(request.url());});
  await page.getByRole('button',{name:'Load more',exact:true}).click();await page.locator(`[data-item-id="${seed.ids[61]}"]`).waitFor();assert.equal(await page.locator('.collection-row').count(),62);assert.equal(nextPageRequests.length,1,'loading another page refetched earlier pages');assert.ok(new URL(nextPageRequests[0]).searchParams.has('cursor'));
  const row=page.locator(`[data-item-id="${seed.ids[55]}"]`);await row.scrollIntoViewIfNeeded();const scroll=await page.evaluate(()=>scrollY);await row.click();
  await page.getByLabel('Album 055 details',{exact:true}).waitFor();assert.ok(page.url().includes(seed.ids[55]));
@@ -51,6 +51,18 @@ try{
   await clickAction(page,'Edit / attach files');const curator=page.getByRole('dialog');await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();await curator.getByRole('button',{name:'Open work & history for this entry',exact:true}).click();
   const work=page.getByRole('dialog',{name:'Work & history'});await work.waitFor();await work.getByRole('button',{name:'Show work for all entries',exact:true}).click();await work.getByLabel('Search work',{exact:true}).fill('Browse return work');await work.locator(`[data-work-open="import:${seed.importId}"]`).click();await work.getByRole('region',{name:'Selected work'}).waitFor();return work;
  }
+ const libraryTiming=await page.evaluate(async collection=>{
+  const runs=[];
+  for(let run=0;run<2;run++){
+   const start=performance.now();const response=await fetch('/api/v1/library?'+new URLSearchParams({collection_id:collection,limit:'200'}),{cache:'no-store'});
+   if(!response.ok)throw new Error('Library summary request failed: '+response.status);
+   const text=await response.text();const body=JSON.parse(text);
+   if(body.items.length!==62||body.items.some(item=>'captures' in item||'domain' in item||'effective_metadata' in item))throw new Error('Library leaked full item graphs or lost rows');
+   runs.push({ms:Math.round(performance.now()-start),bytes:new TextEncoder().encode(text).length,count:body.items.length});
+  }
+  return runs;
+ },seed.music);
+ console.log('Compact Library repeat loads:',JSON.stringify(libraryTiming));
  const work=await openWork();
  await page.goBack();await work.getByRole('button',{name:'Refresh work',exact:true}).waitFor();assert.equal(new URL(page.url()).searchParams.get('work'),'list');
  // Restore through popstate after the modal has actually unmounted, too.
@@ -76,7 +88,7 @@ try{
  await page.getByLabel('Show',{exact:true}).selectOption('wishlist');await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===31);await page.reload();await page.locator('.collection-row').first().waitFor();assert.equal(await page.getByLabel('Show',{exact:true}).inputValue(),'wishlist');
  // Simulate a sparse server page with a real scoped continuation: later matches
  // must appear without asking the user to scrub through healthy albums.
- await page.route('**/api/v1/items?*',async route=>{
+ await page.route('**/api/v1/library?*',async route=>{
   const response=await route.fetch();const page=await response.json();assert.ok(page.next_cursor);
   await route.fulfill({response,json:{...page,items:[]}});
  },{times:1});
@@ -108,7 +120,7 @@ try{
  // A directly opened detail has no earlier results entry to traverse back to.
  const directWork=await openWork();await directWork.getByRole('button',{name:'Close work history'}).click();await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item')&&!new URL(location.href).searchParams.has('work'));assert.equal(new URL(page.url()).searchParams.get('collection'),seed.music);assert.equal(await work.count(),0);
  await page.goto(origin+'/?collection='+seed.music);await page.locator('.collection-row').first().waitFor();
- await page.route('**/api/v1/items?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/items?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
+ await page.route('**/api/v1/library?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/library?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
  // Real unfinished uploads take precedence over playback attention. The list
  // must refresh after cancellation/completion without a manual reload.
  const beginImport=()=>page.evaluate(async ({collection,item})=>{

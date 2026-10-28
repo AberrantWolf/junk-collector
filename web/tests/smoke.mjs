@@ -1221,7 +1221,7 @@ try{
  await stampForm.getByLabel('Title',{exact:true}).fill('Synthetic stamp');await stampForm.getByLabel('Denomination',{exact:true}).fill('20');await stampForm.getByRole('button',{name:'Add entry',exact:true}).click();await stampForm.getByRole('alert').waitFor();assert.deepEqual(submittedStamp.edit.domain_edit,{module:'org.example.stamps',fields:{unit:'cents',denomination:20}});
  await stampForm.getByRole('button',{name:'Close curator'}).click();
  // Descriptor availability alone must not enable an unsupported stored Item.
- await fixturePage.route('**/api/v1/items?*',async route=>{const response=await route.fetch();const body=await response.json();body.items=body.items.slice(0,1).map(item=>({...item,title:'Unsupported schema fixture',domain:{...item.domain,schema_version:99},effective_permissions:{...item.effective_permissions,can_curate:false},content_permissions:{can_edit:false,status:'item_schema_unsupported',message:'Unsupported stored schema fixture.'}}));await route.fulfill({response,json:body});});
+ await fixturePage.route('**/api/v1/library?*',async route=>{const response=await route.fetch();const body=await response.json();body.items=body.items.slice(0,1).map(item=>({...item,title:'Unsupported schema fixture',can_edit:false}));await route.fulfill({response,json:body});});
  // Curation now refreshes the Item instead of trusting a possibly stale browse row;
  // keep this synthetic unsupported schema consistent on both read surfaces.
  await fixturePage.route('**/api/v1/items/*',async route=>{
