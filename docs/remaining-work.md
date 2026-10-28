@@ -1,18 +1,21 @@
 # Remaining work — home-lab priorities
 
-## Active assignment: compact cached Library rows — 2026-10-28
+## Beta.12 cached Library published and installed — 2026-10-28
 
-The user considers the idle four-second Library load unacceptable and requests
-server-side cached summaries without full-track reads for ordinary listing.
-Deliver a compact cached listing through application, storage, HTTP and web;
-retain fresh authorized detail reads when opening an album. Fence invalidation
-for metadata, artwork, assignments, preparation and audio results; keep import
-progress live. Validate reuse, immediate refresh after relevant mutations,
-role/language isolation, reindex/restart and the actual Library UI. Record cold
-and warm timing honestly; do not equate a settled-batch result with load testing.
-The cache is the [beta.12 release candidate](releases/v0.1.0-beta.12.md); beta.11
-remains installed until exact-source/native qualification and the recovery update.
-See [delivery boundaries and current validation](validation/library-row-cache-2026-10-28.md).
+Compact cached listing is delivered across application, storage, HTTP and web.
+Exact-source full checks, all 27 browser journeys, both native runtime checks and
+release-image browser acceptance pass. Beta.12 is published and installed after a
+complete stopped-server snapshot and a 7.88-second interruption. Config/TLS/identity,
+mounts and all 18 unrelated containers are retained; HTTPS and nine assets pass.
+No jobs were unfinished at this update, so it adds no active-recovery claim.
+
+Signed-in Library navigation and full refresh render all 40 entries with artwork
+and status. The cached request after refresh takes 8 ms; three HTTP-cache-bypassed
+repeats take 15/9/9 ms for 29,800 UTF-8 bytes. The first observed post-upgrade load
+still takes 4.86 seconds to calculate new rows. Cold rows use the existing resolver
+once, and this settled-batch acceptance is not an under-load benchmark. See
+[cache boundaries](validation/library-row-cache-2026-10-28.md) and
+[publication/deployment evidence](validation/container-beta12-publication-2026-10-28.md).
 
 ## Beta.11 published and installed — 2026-10-28
 

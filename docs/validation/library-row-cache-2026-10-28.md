@@ -60,8 +60,8 @@ An uncached or invalidated row still runs the detailed resolver once. A new poli
 version, first use of a language/role, reindex or conservative collection-wide
 invalidation can therefore incur cold computation. This delivery does not claim
 that a cold calculation itself is faster or that existing detail/native requests
-have become compact. No production cache deployment or new loaded-batch benchmark
-has yet been performed.
+have become compact. Beta.12 is now deployed; no new loaded-batch benchmark has
+been performed.
 
 ## Preliminary validation and corrected candidate
 
@@ -87,11 +87,29 @@ has yet been performed.
 - Review superseded candidate `82650ba`: its two qualification runs
   **40622449540** and **40622466544** were cancelled before publication to repair
   a preference race between cache-key construction and metadata resolution.
-  Complete exact-source CI and native-image qualification will use the corrected
+  Complete exact-source CI and native-image qualification use the corrected
   candidate; no old candidate image is accepted or deployed.
 - An initial focused unit-test invocation used an incomplete exact name and
   selected zero tests. It is not counted as acceptance; the full suite includes
   the qualified test.
 
-This is the [beta.12 candidate](../releases/v0.1.0-beta.12.md). Beta.11 remains
-the NAS release while exact-source validation proceeds.
+## Exact-source release qualification and deployment
+
+[Beta.12](../releases/v0.1.0-beta.12.md) source `2f169715d6a8083854b985b671b9bc2cb72f9545`
+passes [Checks 40624264312](https://github.com/AberrantWolf/junk-collector/actions/runs/40624264312):
+workspace tests, all-target Clippy, web/models and all 27 browser journeys, with
+full coverage since beta.11 and unchanged source. Native AMD64/ARM64 runtime
+smokes and AMD64 release-image browser acceptance pass in
+[validation 40624319196](https://github.com/AberrantWolf/junk-collector/actions/runs/40624319196),
+attempt 1. Publication reuses those validated bytes.
+
+Beta.12 is installed on the NAS after a complete stopped-server snapshot and a
+7.88-second interruption. Config/TLS/identity/mounts, all 18 unrelated containers,
+public HTTPS and nine served assets pass. No jobs were unfinished at the update.
+After browser access returned, signed-in Library navigation and full refresh
+render all 40 entries with artwork/status. The first observed post-upgrade request
+takes 4.86 seconds; cached HTTP-cache-bypassed repeats take 15/9/9 ms, and the
+Library resource after full refresh takes 8 ms. The response is 29,800 UTF-8 bytes
+without item/capture/track payloads. These are settled-batch production timings,
+not a controlled cold-cache or concurrent-workload benchmark. See
+[publication and acceptance](container-beta12-publication-2026-10-28.md).

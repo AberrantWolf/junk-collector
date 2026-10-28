@@ -1,6 +1,6 @@
 # Architecture
 
-## Library row cache — active delivery, 2026-10-28
+## Library row cache — 2026-10-28
 
 Library browsing uses a compact application-owned row projection, separate
 from full Item/album detail. A row contains display text, authorized artwork,
@@ -18,8 +18,10 @@ Catalog changes invalidate the affected item transactionally; collection-level
 identity/artwork changes may invalidate their collection. Import progress is read
 live from the existing indexed workflow query rather than cached with job state.
 Job heartbeats must not invalidate settled rows. Reindex clears derived caches;
-no originals or accepted evidence are changed. This section describes the active
-implementation boundary, not completed acceptance.
+no originals or accepted evidence are changed. Beta.12 is installed on the NAS;
+[qualification and deployment](validation/container-beta12-publication-2026-10-28.md)
+record exact-source tests, authenticated production rendering and initial/repeat
+request timing, including the cold-calculation limit.
 
 ## Processing cancellation polling — 2026-10-28
 

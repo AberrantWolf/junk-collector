@@ -1,14 +1,22 @@
 # Implementation status
 
-## Compact Library row cache — source validation in progress, 2026-10-28
+## Compact Library row cache — beta.12 installed, 2026-10-28
 
 The web Library now uses a compact application-owned row API and a persistent,
 rebuildable server cache. Current role/language/module policy scopes cached rows;
 transactional projection tokens invalidate changed summaries and fence concurrent
 publication. Import progress remains live. Opening detail or curation reads the
-full authorized Item separately. Initial storage/cache integration passes; full
-workspace, Clippy and browser acceptance is running. Beta.11 remains installed on
-the NAS. See [delivery and validation](validation/library-row-cache-2026-10-28.md).
+full authorized Item separately. Exact-source workspace tests/Clippy, all 27
+browser journeys, both native runtime checks and release-image browser acceptance
+pass. Beta.12 is published and installed on the NAS after a stopped-server snapshot
+and a 7.88-second interruption. Config/TLS/identity/mounts and all 18 unrelated
+containers are retained; HTTPS and all nine assets pass. No jobs were unfinished
+at this update. Signed-in Library navigation and full refresh render all 40 entries
+with artwork/status. The refreshed cached request takes 8 ms and three repeats
+take 15/9/9 ms for 29,800 UTF-8 bytes; the first observed post-upgrade request still
+takes 4.86 seconds to build new rows. These are settled-batch measurements.
+See [cache behavior](validation/library-row-cache-2026-10-28.md) and
+[publication/deployment evidence](validation/container-beta12-publication-2026-10-28.md).
 
 ## Beta.11 published and installed — 2026-10-28
 
