@@ -142,8 +142,13 @@ mod tests {
     use collector_app::{CollectionService, CommandContext, CreateCollectionCommand};
     use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 
-    #[test]
-    fn warm_library_needs_no_item_payload_capture_observation_or_recipe_reads() {
+    fn fixture() -> (
+        tempfile::TempDir,
+        Arc<Store>,
+        Principal,
+        CollectionService,
+        Item,
+    ) {
         let root = tempfile::tempdir().unwrap();
         let store =
             Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
@@ -154,7 +159,7 @@ mod tests {
             .login("owner", "a long test password", "fixture")
             .unwrap()
             .1;
-        let actor = &authenticated.principal;
+        let actor = authenticated.principal.clone();
         let service = CollectionService::new(
             store.clone(),
             Arc::new(collector_modules::Registry::builtins()),
@@ -194,8 +199,135 @@ mod tests {
             updated_at: Utc::now(),
         };
         let saved = Catalog::save(&*store, item, Revision(0)).unwrap();
+        (root, store, actor, service, saved)
+    }
+
+    #[test]
+    fn cache_language_is_frozen_before_resolving_metadata() {
+        use collector_app::{MetadataAuthorityRecord, ProcessingPort, UpdateMetadataPreferences};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (_root, store, actor, service, saved) = fixture();
+        let candidates = [("en", "English album"), ("ja", "日本語のアルバム")]
+            .into_iter()
+            .map(|(language, title)| MetadataCandidateObservation {
+                identity: MetadataCandidateIdentity {
+                    provider: ModuleId("org.example.library".into()),
+                    provider_record_id: "album".into(),
+                    provider_record_version: Some(language.into()),
+                },
+                title: MetadataText {
+                    value: title.into(),
+                    language: Some(LanguageTag::new(language).unwrap()),
+                },
+                subtitle: None,
+                artwork: None,
+                complete_identity: true,
+                strength: MatchStrength::Identifier,
+                provider_priority: 1,
+                observation: RawJson::from_value(serde_json::json!({})),
+            })
+            .collect::<Vec<_>>();
+        let authority = MetadataAuthority {
+            automatic_candidate: Some(candidates[0].identity.clone()),
+            automatic_language: Some(LanguageTag::new("en").unwrap()),
+            ..Default::default()
+        };
+        let display =
+            collector_app::resolve_metadata_display(&saved, &authority, &candidates, "en").unwrap();
+        store
+            .publish_metadata_authority(
+                TransactionId::new(),
+                MetadataAuthorityRecord {
+                    resolution_policy: 4,
+                    current_candidates: Some(
+                        candidates.iter().map(|c| c.identity.clone()).collect(),
+                    ),
+                    inventory: Some((&saved).into()),
+                    collection_id: saved.collection_id,
+                    item_id: saved.id,
+                    revision: Revision(1),
+                    authority,
+                    observations: vec![MetadataRefreshObservation {
+                        id: ObservationId::new(),
+                        outcome: MetadataRefreshOutcome::Candidates,
+                        candidates,
+                        raw_observation: RawJson::from_value(serde_json::json!({})),
+                        observed_at: Utc::now(),
+                    }],
+                    display: Some(display),
+                    updated_at: Utc::now(),
+                },
+                None,
+            )
+            .unwrap();
+        service
+            .update_metadata_preferences(
+                &actor,
+                UpdateMetadataPreferences {
+                    expected_revision: Revision(0),
+                    language: LanguageTag::new("ja").unwrap(),
+                },
+                &CommandContext::new("cache-japanese").unwrap(),
+            )
+            .unwrap();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let count = reads.clone();
+        // A mutable preference may change after its value becomes the cache key.
+        // Forbid resolving it again; an unrelated default-language shortcut must
+        // also fail the Japanese/English display assertions below.
+        lock(&store.db)
+            .unwrap()
+            .authorizer(Some(move |context: AuthContext<'_>| {
+                if let AuthAction::Read {
+                    table_name: "metadata_preferences",
+                    column_name: "language",
+                } = context.action
+                    && count.fetch_add(1, Ordering::SeqCst) > 0
+                {
+                    return Authorization::Deny;
+                }
+                Authorization::Allow
+            }));
         let query = BrowseQuery {
-            collection_id: Some(collection.id),
+            collection_id: Some(saved.collection_id),
+            ..Default::default()
+        };
+        let japanese = service.library_entries(&actor, query.clone()).unwrap();
+        assert_eq!(japanese.items[0].title, "日本語のアルバム");
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        lock(&store.db)
+            .unwrap()
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        for (revision, language, title) in
+            [(1, "en", "English album"), (2, "ja", "日本語のアルバム")]
+        {
+            service
+                .update_metadata_preferences(
+                    &actor,
+                    UpdateMetadataPreferences {
+                        expected_revision: Revision(revision),
+                        language: LanguageTag::new(language).unwrap(),
+                    },
+                    &CommandContext::new(format!("cache-language-{language}")).unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                service
+                    .library_entries(&actor, query.clone())
+                    .unwrap()
+                    .items[0]
+                    .title,
+                title
+            );
+        }
+    }
+
+    #[test]
+    fn warm_library_needs_no_item_payload_capture_observation_or_recipe_reads() {
+        let (root, store, actor, service, saved) = fixture();
+        let actor = &actor;
+        let query = BrowseQuery {
+            collection_id: Some(saved.collection_id),
             ..Default::default()
         };
         let cold = service.library_entries(actor, query.clone()).unwrap();

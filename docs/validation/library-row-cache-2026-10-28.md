@@ -38,6 +38,8 @@ retains at most twelve role/language variants per item, evicting older derived r
 without touching collection records. Current collection authorization is checked before a cached result is used. A concurrent
 role change cannot reuse a curator row for a viewer. Import progress always uses
 the existing indexed operational query; job heartbeats do not expire cached rows.
+A build resolves metadata from the captured key language, rather than re-reading
+a preference that can change during the calculation.
 
 Projection triggers change an item's opaque publication token in the same
 transaction as inventory, captures, metadata authority/candidates/refreshes,
@@ -61,22 +63,32 @@ that a cold calculation itself is faster or that existing detail/native requests
 have become compact. No production cache deployment or new loaded-batch benchmark
 has yet been performed.
 
-## Validation in progress
+## Preliminary validation and corrected candidate
 
 - Architecture/document links, Rust formatting, web type checking/build and API
   contract generation pass.
 - The new storage integration regression passes: cache reuse, compact response,
   per-item metadata invalidation, stale-publication refusal, private-artwork viewer
   isolation, language separation, revocation, restart persistence and reindex.
-- A preliminary full local run is exercising workspace tests, Clippy, models and
-  all 27 real-browser journeys outside the macOS seatbelt. It began before the
-  final disposable-variant bound, additive-upgrade decision and beta.12 version
-  bump, so it is not exact-source
-  release qualification. The release candidate will receive complete exact-source
-  CI and native container qualification before publication.
-  The full run includes a SQLite authorizer regression that forbids full item
-  payload, capture, observation and recipe reads during a warm Library request,
-  plus Opus-only preparation invalidation and the actual compact-list UI.
+- The preliminary full local selection passed workspace tests, all-target Clippy,
+  web/models and all **27** real-browser journeys. It began before the final
+  variant bound, additive-upgrade decision, version bump and language-binding
+  repair, so it is not exact-source release qualification. The archive suite
+  reports **285 passed, three ignored**; existing opt-in cases remain unqualified.
+- The real-browser Library fixture returns **62 cached rows**, **31,185 bytes**,
+  in **8 ms** on each of two repeat requests. It also passes paging/history,
+  metadata/artwork edits, live import progress and response recovery. These are
+  local disposable-fixture measurements, not NAS or cold-cache timings.
+- The corrected candidate's focused cache tests both pass: the SQLite read trap,
+  bounded eviction/rebuild, additive install with catalog reuse and frozen language
+  binding. The language case uses distinct English/Japanese candidates and denies
+  preference reads after the key has captured its value, then exercises both
+  cached language variants.
+- Review superseded candidate `82650ba`: its two qualification runs
+  **40622449540** and **40622466544** were cancelled before publication to repair
+  a preference race between cache-key construction and metadata resolution.
+  Complete exact-source CI and native-image qualification will use the corrected
+  candidate; no old candidate image is accepted or deployed.
 - An initial focused unit-test invocation used an incomplete exact name and
   selected zero tests. It is not counted as acceptance; the full suite includes
   the qualified test.

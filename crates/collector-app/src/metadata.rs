@@ -372,6 +372,14 @@ impl CollectionService {
         item: &Item,
         user: UserId,
     ) -> Result<ResolvedMetadataDisplay> {
+        self.effective_metadata_for_language(item, &self.metadata_language(user)?)
+    }
+
+    pub(crate) fn effective_metadata_for_language(
+        &self,
+        item: &Item,
+        language: &str,
+    ) -> Result<ResolvedMetadataDisplay> {
         let LoadedMetadataAuthority {
             mut authority,
             legacy,
@@ -385,14 +393,13 @@ impl CollectionService {
             &mut candidates,
             legacy.iter().flat_map(|value| &value.candidates),
         )?;
-        let language = self.metadata_language(user)?;
         let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
-        self.reassess_music_edition(item, &mut authority, &active, &language)?;
+        self.reassess_music_edition(item, &mut authority, &active, language)?;
         resolve_metadata_display(
             item,
             &authority,
             &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
-            &self.metadata_language(user)?,
+            language,
         )
     }
 

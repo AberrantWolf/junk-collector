@@ -158,7 +158,7 @@ impl CollectionService {
                     if item.collection_id != source.collection_id {
                         return Err(Error::Conflict);
                     }
-                    let effective = self.effective_metadata_for_user(&item, actor.user_id)?;
+                    let effective = self.effective_metadata_for_language(&item, &language)?;
                     let entry = LibraryEntry::from(self.presented(item, role, actor, effective)?);
                     if !self.care.cache_library_entry(
                         &namespace,
