@@ -1,13 +1,30 @@
 # Remaining work — home-lab priorities
 
-## Beta.11 release candidate — 2026-10-28
+## Beta.11 published and installed — 2026-10-28
 
-The authorized candidate includes the one-second processing cancellation poll,
-manual metadata cover uploads and focused AccurateRip batch result pages. See
-[release notes](releases/v0.1.0-beta.11.md). Exact-source source/container checks,
-publication and the NAS update are pending; beta.10 remains the installed release.
-Deployment acceptance will compare durable unfinished jobs and Library loading
-before and after the update, using a complete stopped-server recovery snapshot.
+Beta.11 includes the one-second processing cancellation poll, manual metadata
+cover uploads and focused AccurateRip batch results. Exact-source full checks,
+all 27 browser journeys and native container acceptance pass; publication reused
+those validated bytes. The NAS runs the pinned beta.11 image after a complete
+stopped-server recovery snapshot and a 66.25-second interruption. Config, TLS,
+identity, mounts and 18 unrelated containers are retained. All 12 unfinished jobs
+retain their identities and creation timestamps: six completed after restart and
+six are running, including the four previously queued jobs. Public HTTPS and all
+nine checked assets pass. The authenticated production Library comparison remains
+pending while the Mac containing the signed-in browser is locked. See
+[release notes](releases/v0.1.0-beta.11.md) and
+[qualification, recovery and acceptance](validation/container-beta11-publication-2026-10-28.md).
+
+
+## Active-work shutdown follow-up — observed 2026-10-28
+
+During the beta.11 update, media stopped cleanly but the old core reached Docker's
+60-second stop timeout while blocking audio work was active. Complete-state crash
+recovery retained and resumed the unfinished jobs. A bounded follow-up should make
+server shutdown quiesce active blocking processing, preserve unfinished jobs and
+exit within the configured stop grace period. Verify actual shutdown under audio
+load and subsequent restart; do not cancel the user's durable requests to stop
+workers. See [observed exit and recovery](validation/container-beta11-publication-2026-10-28.md).
 
 
 ## Library responsiveness during audio checks — 2026-10-28
@@ -20,7 +37,8 @@ redumper reads therefore no longer issue a shared-database query for every read.
 Source validation, final authorization/cancellation checks and storage publication
 fences remain direct durable checks. No archive records, results or worker settings
 change. See [diagnosis and validation](validation/library-audio-check-contention-2026-10-28.md).
-This is a local source repair; the live NAS has not been updated by this delivery.
+Included in beta.11 on the NAS; durable job recovery is verified. The production
+Library comparison remains pending as recorded above.
 
 
 ## Metadata cover uploads and focused rip-check results — 2026-10-28
@@ -36,7 +54,8 @@ AccurateRip batch member reads omit excluded entries before storage pagination,
 including completed/older batches. Summary counts and durable frozen membership
 remain intact; eligible pending and terminal results still appear. Other batch
 kinds retain their existing member view. See [delivery and validation](validation/metadata-cover-upload-and-rip-results-2026-10-28.md).
-Local source changes only; publication/deployment is separate.
+Included in beta.11 on the NAS. Production cover uploads were not part of
+deployment acceptance.
 
 ## Beta.10 published and installed — 2026-10-27
 

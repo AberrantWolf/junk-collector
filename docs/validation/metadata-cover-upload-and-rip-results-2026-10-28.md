@@ -79,3 +79,14 @@ fixture checks passed; their optional rootless-skopeo test was skipped by its
 availability guard. No release qualification is claimed.
 
 No commit, push, release, deployment or production-library mutation is included.
+
+
+## Subsequent release acceptance — 2026-10-28
+
+The final source was subsequently included in signed beta.11. Exact-source full
+checks, all 27 browser journeys and native container qualification pass; the
+validated image is published and installed on the NAS. Actual unfinished jobs
+survived the stopped-server snapshot/update and resumed. The authenticated
+production Library comparison is still pending while the signed-in Mac is locked.
+See [publication, recovery and acceptance](container-beta11-publication-2026-10-28.md).
+The earlier local-only scope and intermediate checks above remain historical.

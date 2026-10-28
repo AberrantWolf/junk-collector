@@ -80,3 +80,14 @@ the final one-second interval/clock sampling and subsequent test-only cleanup we
 validated by the focused reruns above, current workspace Clippy and browser checks.
 No exact-source full release qualification is claimed from that intermediate run.
 The ignored entries include owned-disc, scale and manual performance qualifications, which remain unrun, plus a subprocess-only fixture exercised by its parent media-isolation test. Ignored entries are not counted as passes.
+
+
+## Subsequent release acceptance — 2026-10-28
+
+The final source was subsequently included in signed beta.11. Exact-source full
+checks, all 27 browser journeys and native container qualification pass; the
+validated image is published and installed on the NAS. Actual unfinished jobs
+survived the stopped-server snapshot/update and resumed. The authenticated
+production Library comparison is still pending while the signed-in Mac is locked.
+See [publication, recovery and acceptance](container-beta11-publication-2026-10-28.md).
+The earlier local-only scope and intermediate checks above remain historical.
