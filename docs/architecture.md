@@ -1,5 +1,24 @@
 # Architecture
 
+## Digital album matching, 2026-10-29
+
+`junk-libs-music` owns streamed Chromaprint calculation, MusicBrainz entity
+interpretation through musicbrainz_rs, parameter-safe URLs, AcoustID decoding and
+bounded one-to-one release comparison. It has no HTTP execution, job persistence,
+application authorization or metadata authority. Collector's Music module maps
+package handles to source-bound fingerprint observations. Application services
+own the explicit durable discovery and reviewed application workflow, using the
+existing shared provider registry, snapshot publication and claim fences.
+No browsing, admission or polling reads original audio. Raw masters and existing
+manual values retain authority. Provider responses and fingerprints remain
+identity suggestions, not catalog verification. Trash Amp consumes the same
+mechanisms through its local catalog owner; its filesystem/cache/UI adapters
+remain separate. New MusicBrainz responses use interpretation schema 2; schema-1
+retained snapshots keep their original decoder so stored accepted evidence is
+not rewritten. Metadata-authority revisions also fence discovery and review, so
+later album selection edits cannot silently change the frozen computation.
+[Delivery evidence](validation/digital-album-matching-2026-10-29.md) records acceptance.
+
 ## Change-driven Library summaries — 2026-10-28
 
 Library reads select compact, authorized projections and never run the detailed

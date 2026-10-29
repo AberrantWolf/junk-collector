@@ -2979,6 +2979,10 @@ impl CollectionTypePort for Store {
                             collector_core::OperationId::new("org.junk.games.identify")
                                 .expect("static operation")
                         }
+                        collector_app::FrozenJobInput::DigitalMatching(_) => {
+                            OperationId::new("org.junk.music.digital-fingerprint")
+                                .expect("static operation")
+                        }
                         collector_app::FrozenJobInput::AccurateRip(_) => {
                             OperationId::new("org.junk.music.accuraterip-verification")
                                 .expect("static operation")

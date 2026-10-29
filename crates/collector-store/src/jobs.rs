@@ -671,6 +671,12 @@ impl Store {
                 return Err(Error::Conflict);
             }
         }
+        if spec.kind == "digital_album_matching" {
+            let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs WHERE user_id=? AND item_id=? AND kind='digital_album_matching' AND state IN ('queued','running','cancel_requested') AND id<>?)",params![spec.user_id.to_string(),spec.item_id.map(|id|id.to_string()),spec.id.to_string()],|r|r.get(0)).map_err(storage)?;
+            if active {
+                return Err(Error::Conflict);
+            }
+        }
         if spec.kind == "metadata_resolution" {
             let count: u32 = tx.query_row("SELECT count(*) FROM private.jobs WHERE user_id=? AND item_id=? AND kind='metadata_resolution' AND state IN ('queued','running','cancel_requested') AND id<>?",params![spec.user_id.to_string(),spec.item_id.map(|id| id.to_string()),spec.id.to_string()], |row| row.get(0)).map_err(storage)?;
             if count >= 16 {
@@ -955,7 +961,11 @@ impl Store {
         }
         let acquisition = match &spec.frozen_input {
             Some(FrozenJobInput::Acquisition(input)) => Some(input),
-            Some(FrozenJobInput::MetadataResolution(input)) => Some(&input.acquisition),
+            Some(FrozenJobInput::MetadataResolution(input))
+                if input.reviewed_digital_match.is_none() =>
+            {
+                Some(&input.acquisition)
+            }
             _ => None,
         };
         if spec.kind != "provider_acquisition"
@@ -1587,6 +1597,7 @@ impl Store {
                     | "import_publication"
                     | "catalog_acquisition"
                     | "processing_operation"
+                    | "digital_album_matching"
                     | "accuraterip_check"
                     | "music_derivative"
                     | "metadata_resolution"

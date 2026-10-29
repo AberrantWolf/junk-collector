@@ -166,7 +166,7 @@ fn caa_request(query: &CoverArtArchiveQuery, limit: u64) -> ProviderRequest {
 
 fn releases_json(title: &str) -> Vec<u8> {
     format!(
-        r#"{{"releases":[{{"id":"00000000-0000-4000-8000-000000000001","title":{title:?},"artist-credit":[{{"name":"Example Artist","artist":{{"id":"00000000-0000-4000-8000-000000000002","name":"Example Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"discs":[{{"id":"known-disc-id"}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000003"}},"unknown":null}}],"count":1}}"#
+        r#"{{"releases":[{{"id":"00000000-0000-4000-8000-000000000001","title":{title:?},"artist-credit":[{{"name":"Example Artist","artist":{{"id":"00000000-0000-4000-8000-000000000002","name":"Example Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"id":"00000000-0000-4000-8000-000000000004","track-count":0,"discs":[{{"id":"known-disc-id","offset-count":1,"sectors":12345,"offsets":[150]}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000003","title":"Example"}},"unknown":null}}],"count":1}}"#
     )
     .into_bytes()
 }
@@ -180,7 +180,7 @@ fn ambiguous_releases_json() -> Vec<u8> {
 #[test]
 fn musicbrainz_versions_candidate_changes_but_reuses_equivalent_responses() {
     let first = releases_json("Original title");
-    let reordered = br#"{"count":1,"releases":[{"unknown":null,"release-group":{"id":"00000000-0000-4000-8000-000000000003"},"media":[{"discs":[{"id":"known-disc-id"}]}],"text-representation":{"script":"Latn","language":"eng"},"artist-credit":[{"artist":{"name":"Example Artist","id":"00000000-0000-4000-8000-000000000002"},"name":"Example Artist"}],"title":"Original title","id":"00000000-0000-4000-8000-000000000001"}]}"#.to_vec();
+    let reordered = br#"{"count":1,"releases":[{"unknown":null,"release-group":{"id":"00000000-0000-4000-8000-000000000003","title":"Example"},"media":[{"id":"00000000-0000-4000-8000-000000000004","track-count":0,"discs":[{"id":"known-disc-id","offset-count":1,"sectors":12345,"offsets":[150]}]}],"text-representation":{"script":"Latn","language":"eng"},"artist-credit":[{"artist":{"name":"Example Artist","id":"00000000-0000-4000-8000-000000000002"},"name":"Example Artist"}],"title":"Original title","id":"00000000-0000-4000-8000-000000000001"}]}"#.to_vec();
     let changed = releases_json("Changed title");
     let server = serve(vec![
         reply("200 OK", first),

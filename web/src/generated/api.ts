@@ -1588,6 +1588,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/digital-album-matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["digital_album_matches"];
+        put?: never;
+        post: operations["find_digital_albums"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/evidence": {
         parameters: {
             query?: never;
@@ -2606,6 +2622,11 @@ export interface components {
             structure_observation_id: components["schemas"]["ObservationId"];
         };
         AcquireMetadataCommand: {
+            job_id: components["schemas"]["JobId"];
+            release_id: string;
+            /** @enum {string} */
+            source: "digital_album_choice";
+        } | {
             refresh?: boolean;
             release_id: string;
             /** @enum {string} */
@@ -3183,6 +3204,14 @@ export interface components {
             algorithm: components["schemas"]["HashAlgorithm"];
             hex: string;
         };
+        DigitalMatchingStatus: {
+            available: boolean;
+            jobs: components["schemas"]["DigitalMatchingView"][];
+        };
+        DigitalMatchingView: {
+            job: components["schemas"]["JobView"];
+            result: Record<string, never>;
+        };
         /** @description Acquisition facts belong to the purchased package, independently of physical copies. */
         DigitalPurchase: {
             cost?: components["schemas"]["Money"] | null;
@@ -3333,6 +3362,9 @@ export interface components {
             multi_user: boolean;
             passkeys: boolean;
             passkeys_unavailable_reason?: components["schemas"]["UnavailableReason"] | null;
+        };
+        FindDigitalAlbums: {
+            expected_revision: components["schemas"]["Revision"];
         };
         GameCatalogIdentification: {
             byte_domain: string;
@@ -10084,6 +10116,77 @@ export interface operations {
             };
             /** @description Payload Too Large */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    digital_album_matches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DigitalMatchingStatus"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    find_digital_albums: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindDigitalAlbums"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,0 +1,47 @@
+// Offline provider fixtures; real audio, application jobs, storage and browser UI.
+import {chromium,expect} from './support/browser.mjs';
+import {spawn,spawnSync,stopProcess} from './support/runtime.mjs';
+import {createServer} from 'node:http';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {randomBytes,createHash,X509Certificate} from 'node:crypto';
+const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-digital-matching-'));const origin='https://localhost:19893';const password=randomBytes(24).toString('hex');
+const release='00000000-0000-4000-8000-000000000090';const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+const fingerprints=new Map();const requests=[];const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
+const provider=createServer(async(req,res)=>{
+ try{let body='';for await(const b of req)body+=b;requests.push(`${req.method} ${req.url} ${body}`);const url=new URL(req.url,'http://fixture');let result;
+ if(url.pathname==='/v2/lookup'){const form=new URLSearchParams(body);assert.equal(form.get('client'),'fixture-key');const fp=form.get('fingerprint');if(!fingerprints.has(fp))fingerprints.set(fp,fingerprints.size+1);result={status:'ok',results:[{score:.99,recordings:[{id:id(fingerprints.get(fp))}]}]};}
+ else if(url.pathname.startsWith('/ws/2/release')){if(url.searchParams.has('recording'))result={'release-count':1,'release-offset':0,releases:[{id:release,title:'Matched album'}]};else result={id:release,title:'Matched album','artist-credit':[{name:'Matched artist',artist:{id:id(99),name:'Matched artist'}}],media:[{id:id(98),position:1,format:'Digital Media','track-count':2,tracks:[{id:id(97),position:1,number:'1',title:'Matched first',length:12000,recording:{id:id(1),title:'Matched first',length:12000}},{id:id(96),position:2,number:'2',title:'Matched second',length:12000,recording:{id:id(2),title:'Matched second',length:12000}}]}]};}
+ else if(url.pathname===`/release/${release}`)result={release:`https://musicbrainz.org/release/${release}`,images:[{id:1,front:true,back:false,approved:true,types:['Front'],comment:'Generated fixture',image:`https://coverartarchive.org/release/${release}/1`}]};
+ else {res.writeHead(200,{'Content-Type':'image/png','Content-Length':png.length});res.end(req.method==='HEAD'?undefined:png);return;}
+ const bytes=Buffer.from(JSON.stringify(result));res.writeHead(200,{'Content-Type':'application/json','Content-Length':bytes.length});res.end(bytes);
+ }catch(e){res.writeHead(500);res.end(String(e));}
+});await new Promise(r=>provider.listen(0,'127.0.0.1',r));const providerOrigin=`http://127.0.0.1:${provider.address().port}`;
+const config=path.join(scratch,'collector.toml');await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19891"\nprivate_bind = "127.0.0.1:19892"\nlan_bind = "127.0.0.1:19893"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[providers]\nmusicbrainz_user_agent = "MatchingTests/1 (test@example.invalid)"\nacoustid_api_key = "fixture-key"\n`);
+const binary=process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server');const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
+let logs='';const server=spawn(binary,['--config',config,'serve'],{env:{...process.env,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_ACOUSTID_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
+let browser,page;
+try{
+ for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19891/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
+ const spki=createHash('sha256').update(new X509Certificate(await readFile(path.join(scratch,'state/tls/cert.pem'))).publicKey.export({type:'spki',format:'der'})).digest('base64');
+ browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true,args:[`--ignore-certificate-errors-spki-list=${spki}`]});const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('Matching shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
+ const collection=await page.evaluate(async()=>{const result=await(await fetch('/api/v1/collection-search?limit=50')).json();return result.items.find(c=>c.name==='Matching shelf').id;});
+ await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','02.mp3'].map(name=>path.join(root,'crates/collector-store/tests/fixtures/digital-matching',name)));await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();await imports.getByLabel('Store',{exact:true}).fill('Private matching store');await imports.getByLabel('Order reference').fill('PRIVATE-MATCHING-ORDER');await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
+ await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');
+ await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);const matching=page.getByRole('region',{name:'Digital album matching'});await expect(matching.getByRole('button',{name:'Find matching albums',exact:true})).toBeEnabled();await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();await expect(matching.getByRole('button',{name:'Cancel album matching'})).toBeVisible();
+ // Reopening recovers the server-owned workflow without a second submission.
+ await page.goto(`${origin}/`);await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);
+ await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeEnabled({timeout:90000});await expect(matching).toContainText('2 of 2 files matched');await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
+ await matching.getByText('Review proposed track mapping',{exact:true}).click();await expect(matching).toContainText('01.flac → disc 1, track 1: Matched first');
+ const before=await page.evaluate(async id=>await(await fetch(`/api/v1/items/${id}`)).json(),item);assert.notEqual(before.title,'Matched album');assert.equal(fingerprints.size,2);assert.ok(requests.every(r=>!r.includes('PRIVATE-MATCHING-ORDER')&&!r.includes('Private matching store')));
+ await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'matching results overflow mobile');await mkdir(path.join(root,'web/test-results'),{recursive:true});await page.screenshot({path:path.join(root,'web/test-results/digital-matching-mobile.png'),fullPage:true});
+ await matching.getByRole('button',{name:'Use this album and track mapping'}).click();
+ await expect.poll(async()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title,item),{timeout:60000}).toBe('Matched album');
+ await page.goto(`${origin}/?collection=${collection}&item=${item}`);await page.getByRole('region',{name:'Album tracks'}).getByText('1. Matched first',{exact:true}).waitFor();await page.getByRole('region',{name:'Album tracks'}).getByText('2. Matched second',{exact:true}).waitFor();
+ assert.deepEqual(errors,[]);console.log('digital album matching: real audio → provider discovery → reopened review → mobile mapping → applied tracks passed');
+}catch(error){if(page)await page.screenshot({path:'/tmp/collector-digital-matching-failure.png',fullPage:true}).catch(()=>{});console.error(logs);throw error;}
+finally{if(browser)await browser.close();await stopProcess(server);provider.closeAllConnections();await new Promise(r=>provider.close(r));await rm(scratch,{recursive:true,force:true});}

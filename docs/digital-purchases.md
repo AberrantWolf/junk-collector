@@ -6,6 +6,12 @@ records independent vectors, real Chrome and actual Trash Amp GUI acceptance,
 including streaming, seeking, downloads and server-stopped offline reopen. HL-02
 is delivered for the supported matrix below.
 
+The [2026-10-29 matching delivery](validation/digital-album-matching-2026-10-29.md)
+adds explicit audio-based discovery, reviewed application and shared community
+MusicBrainz models. Its [dependency assessment](digital-album-matching-evaluation.md)
+records compatibility checks and upstream defects; see the matching workflow below
+for configuration and limits.
+
 ## Portable ownership and listening identity
 
 A digital package uses an ordinary Music Item and Capture, with optional
@@ -112,3 +118,23 @@ Git revisions. Collector pins junk-libs revision `2c8eaf8fd5a7f3e5f4873d3463b800
 published Collector and same junk-libs revisions. Cargo manifests and lockfiles
 record the resolved dependency identities. No sibling checkout is required.
 Publication and dependency verification do not alter a live installation.
+
+## Matching albums with missing tags
+
+Open the item's metadata workspace and choose **Find matching albums**. Configure
+both provider settings described in [configuration](configuration.md) first.
+Review any alternate-file selection and file visibility before starting. Restricted
+files are not disclosed; a queued background job validates recorded source bytes,
+decodes the selected audio and sends fingerprints/durations to AcoustID. MusicBrainz
+then supplies linked release candidates. The search is bounded (32 recording IDs,
+32 full releases, 100 release links per recording; eight cover previews), and a
+budget-limited result is explicitly incomplete.
+
+Reopen the panel to resume polling. Cancel or retry through the persisted job.
+Coverage and track mapping remain visible beside artwork; applying requires every
+selected file and every release track to have an unambiguous assignment without
+conflicting known durations. Application retains the chosen source snapshot,
+uses the existing metadata/artwork workflow and preserves originals and manual
+values. Later inventory, source or metadata-authority edits require a fresh search.
+Partial matches can inform manual MusicBrainz selection but cannot apply an entire
+track mapping automatically. These suggestions do not establish catalog verification.

@@ -29,10 +29,10 @@ const provider=createServer((request,response)=>{
  let body,type='application/json';
  if(url.pathname.startsWith('/ws/2/discid/')){
   const id=url.pathname.split('/').at(-1);if(!discs.includes(id))discs.push(id);
-  const matched={id:releaseId,title:'Bulk resolved album','text-representation':{language:'en'},'artist-credit':[{name:'Review ensemble'}],'release-group':{id:'55555555-5555-4555-8555-555555555555'},media:discs.map((id,index)=>({position:index+1,discs:[{id}],tracks:[{position:1,title:`Disc ${index+1} opening`}]}))};
+  const matched={id:releaseId,title:'Bulk resolved album','text-representation':{language:'eng'},'artist-credit':[{name:'Review ensemble',artist:{id:'44444444-4444-4444-8444-444444444444',name:'Review ensemble'}}],'release-group':{id:'55555555-5555-4555-8555-555555555555',title:'Fixture release group'},media:discs.map((id,index)=>({id:`77777777-7777-4777-8777-${String(index+1).padStart(12,'0')}`,position:index+1,'track-count':1,discs:[{id,'offset-count':1,offsets:[150],sectors:300}],tracks:[{id:`88888888-8888-4888-8888-${String(index+1).padStart(12,'0')}`,position:1,number:'1',title:`Disc ${index+1} opening`}]}))};
   // Progress acceptance needs reviewed grouping even when a safe subset of
   // distinct discs finishes before the duplicate-position entries do.
-  const alternatives=process.env.GROUPING_AMBIGUITY?[matched,{...matched,id:'22222222-2222-4222-8222-222222222222',title:'Another possible album','release-group':{id:'66666666-6666-4666-8666-666666666666'}}]:conflictingProgress?[matched,{...matched,id:'33333333-3333-4333-8333-333333333333',media:matched.media.map((medium,index)=>({...medium,discs:matched.media[matched.media.length-1-index].discs}))}]:[matched];
+  const alternatives=process.env.GROUPING_AMBIGUITY?[matched,{...matched,id:'22222222-2222-4222-8222-222222222222',title:'Another possible album','release-group':{id:'66666666-6666-4666-8666-666666666666',title:'Another possible release group'}}]:conflictingProgress?[matched,{...matched,id:'33333333-3333-4333-8333-333333333333',media:matched.media.map((medium,index)=>({...medium,discs:matched.media[matched.media.length-1-index].discs}))}]:[matched];
   body=Buffer.from(JSON.stringify({id,releases:alternatives}));
  }else if(url.pathname.match(/^\/release\/[^/]+$/)){body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${releaseId}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Offline fixture',edit:1}]}));
  }else if(url.pathname.match(/\/9001(?:-250)?$/)){body=png;type='image/png';}

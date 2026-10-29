@@ -48,6 +48,27 @@ impl CollectionService {
                     .collection_binding
                     .clone(),
                 Some(FrozenJobInput::Acquisition(input)) => input.collection_binding,
+                Some(FrozenJobInput::DigitalMatching(input)) => {
+                    let item = self.reader.item(input.item_id)?;
+                    if item.deleted
+                        || item.revision != input.inventory_revision
+                        || item.lifecycle.generation != input.generation
+                        || self
+                            .processing
+                            .metadata_authority(item.collection_id, item.id)?
+                            .map_or(Revision(0), |r| r.revision)
+                            != input.metadata_revision
+                    {
+                        failure = Some(Error::Conflict);
+                        continue;
+                    }
+                    input
+                        .sources
+                        .first()
+                        .ok_or(Error::Conflict)?
+                        .collection_binding
+                        .clone()
+                }
                 Some(FrozenJobInput::MetadataResolution(input)) => {
                     input.acquisition.collection_binding
                 }
@@ -82,6 +103,7 @@ pub fn reuses_equivalent_provider_responses(provider: &ModuleId) -> bool {
     matches!(
         provider.0.as_str(),
         "org.junk.providers.accuraterip"
+            | collector_modules::music::ACOUSTID_PROVIDER_ID
             | collector_modules::music::MUSICBRAINZ_PROVIDER_ID
             | collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID
     )

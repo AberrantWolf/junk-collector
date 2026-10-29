@@ -743,6 +743,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(metadata_review, update_metadata_authority))
         .routes(routes!(identify_game_entry))
         .routes(routes!(resolve_metadata, metadata_resolutions))
+        .routes(routes!(find_digital_albums, digital_album_matches))
         .routes(routes!(metadata_care))
         .routes(routes!(preparation_care))
         .routes(routes!(discover_bulk_intake).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
@@ -1759,6 +1760,35 @@ async fn metadata_care(
     Ok(Json(
         blocking(move || state.service.metadata_care(&actor, query)).await?,
     ))
+}
+
+#[utoipa::path(get,path="/api/v1/items/{id}/digital-album-matches",params(("id"=ItemId,Path)),responses((status=200,body=collector_app::DigitalMatchingStatus),(status=403)))]
+async fn digital_album_matches(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<Json<collector_app::DigitalMatchingStatus>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.digital_album_matches(&actor, id)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/items/{id}/digital-album-matches",params(("id"=ItemId,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::FindDigitalAlbums,responses((status=202,body=JobAccepted),(status=403),(status=409)))]
+async fn find_digital_albums(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<collector_app::FindDigitalAlbums>,
+) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    let job_id = blocking(move || {
+        state
+            .service
+            .find_digital_albums(&actor, id, command, &context)
+    })
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(JobAccepted { job_id })))
 }
 
 #[utoipa::path(get, path = "/api/v1/items/{id}/metadata/resolutions", params(("id" = ItemId, Path)), responses((status = 200, body = Vec<MetadataResolutionView>), (status = 401), (status = 403)))]

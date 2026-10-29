@@ -1,5 +1,31 @@
 # Implementation status
 
+## Digital album matching — delivered, 2026-10-30
+
+Collector now provides explicit audio-based discovery for original-file FLAC/MP3
+albums, with durable cancellable/retryable jobs, source-bound fingerprint reuse,
+AcoustID recording lookup, MusicBrainz release discovery and artwork previews.
+Review shows coverage, durations and one-to-one track assignments. Only complete,
+unambiguous mappings can be applied together through the existing metadata
+workflow. Raw masters and manual metadata retain authority; inventory/source or
+metadata-authority changes invalidate stale discoveries. No audio is read during
+browsing, admission or polling.
+
+`junk-libs-music` shares decoding/fingerprinting, community MusicBrainz models,
+parameter-safe URLs, AcoustID decoding and comparison with Trash Amp. Trash Amp
+supports explicit review/application for local folders and opens Collector's
+workflow for managed albums. New Collector provider responses use the community
+models; retained schema-1 evidence keeps its original interpretation.
+
+The [evaluation](digital-album-matching-evaluation.md),
+[probe](digital-album-matching-probe.md) and
+[delivery evidence](validation/digital-album-matching-2026-10-29.md) record the
+qualification and limits. Published chromaprint-next 0.1.0 is not used: a corrected
+exact revision is pinned. A configured AcoustID application key is required.
+Live AcoustID recognition, other codecs and manual partial/ambiguous mapping are
+not qualified by this delivery. Matches are identity suggestions, not catalog
+verification. No deployment is included.
+
 ## Change-driven Library summaries — beta.13 installed, 2026-10-28
 
 Library reads no longer build missing summaries. Inventory supplies immediate

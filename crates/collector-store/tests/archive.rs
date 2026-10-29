@@ -8721,7 +8721,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
         .unwrap();
     let release_id = "00000000-0000-4000-8000-000000000011";
     let mb_body = format!(
-        r#"{{"releases":[{{"id":"{release_id}","title":"Automatic provider title","artist-credit":[{{"name":"Provider Artist","artist":{{"id":"00000000-0000-4000-8000-000000000012","name":"Provider Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"discs":[{{"id":"{disc_id}"}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000013"}}}}],"count":1}}"#
+        r#"{{"releases":[{{"id":"{release_id}","title":"Automatic provider title","artist-credit":[{{"name":"Provider Artist","artist":{{"id":"00000000-0000-4000-8000-000000000012","name":"Provider Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"id":"00000000-0000-4000-8000-000000000099","track-count":1,"discs":[{{"id":"{disc_id}","offset-count":1,"sectors":1000,"offsets":[150]}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000013","title":"Group"}}}}],"count":1}}"#
     )
     .into_bytes();
     let mb_server =
@@ -11910,7 +11910,7 @@ fn metadata_provider_jobs_publish_art_before_refresh_and_preserve_manual_authori
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let release_id = "00000000-0000-4000-8000-000000000001";
     let mb_body = format!(
-        r#"{{"releases":[{{"id":"{release_id}","title":"Provider title","artist-credit":[{{"name":"Provider Artist","artist":{{"id":"00000000-0000-4000-8000-000000000002","name":"Provider Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"discs":[{{"id":"known-disc"}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000003"}},"raw-number":1e+02}}],"count":1}}"#
+        r#"{{"releases":[{{"id":"{release_id}","title":"Provider title","artist-credit":[{{"name":"Provider Artist","artist":{{"id":"00000000-0000-4000-8000-000000000002","name":"Provider Artist"}}}}],"text-representation":{{"language":"eng","script":"Latn"}},"media":[{{"id":"00000000-0000-4000-8000-000000000099","track-count":1,"discs":[{{"id":"known-disc","offset-count":1,"sectors":1000,"offsets":[150]}}]}}],"release-group":{{"id":"00000000-0000-4000-8000-000000000003","title":"Group"}},"raw-number":1e+02}}],"count":1}}"#
     )
     .into_bytes();
     let mb_server = metadata_fixture_server(vec![
@@ -17853,8 +17853,8 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
         .value;
     let group = "11111111-1111-4111-8111-111111111111";
     let body=serde_json::to_vec(&serde_json::json!({"count":2,"releases":[
-        {"id":"22222222-2222-4222-8222-222222222222","title":"Album","text-representation":{"language":"eng","script":"Latn"},"release-group":{"id":group},"media":[{"position":1,"discs":[{"id":disc_id}]}]},
-        {"id":"33333333-3333-4333-8333-333333333333","title":"アルバム","text-representation":{"language":"jpn","script":"Jpan"},"release-group":{"id":group},"media":[{"position":1,"discs":[{"id":disc_id}]}]}
+        {"id":"22222222-2222-4222-8222-222222222222","title":"Album","text-representation":{"language":"eng","script":"Latn"},"release-group":{"id":group,"title":"Group"},"media":[{"id":"00000000-0000-4000-8000-000000000099","track-count":1,"position":1,"discs":[{"id":disc_id,"offset-count":1,"sectors":1000,"offsets":[150]}]}]},
+        {"id":"33333333-3333-4333-8333-333333333333","title":"アルバム","text-representation":{"language":"jpn","script":"Jpan"},"release-group":{"id":group,"title":"Group"},"media":[{"id":"00000000-0000-4000-8000-000000000099","track-count":1,"position":1,"discs":[{"id":disc_id,"offset-count":1,"sectors":1000,"offsets":[150]}]}]}
     ]})).unwrap();
     let fixture = metadata_fixture_server(vec![("200 OK\r\nContent-Type: application/json", body)]);
     let provider = Arc::new(
@@ -28235,5 +28235,356 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
             .unwrap()
             .title,
         "Manual library title"
+    );
+}
+
+struct DigitalMatchingFixtureProvider {
+    fingerprints: std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl StreamingProviderPort for DigitalMatchingFixtureProvider {
+    fn acquire_stream(
+        &self,
+        request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        use collector_modules::music::*;
+        if execution.cancellation_requested()? {
+            return Err(Error::JobCancelled);
+        }
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let release = "00000000-0000-4000-8000-000000000090";
+        let recording = |n: usize| format!("00000000-0000-4000-8000-{n:012}");
+        let (body, observation) = if request.provider.0 == ACOUSTID_PROVIDER_ID {
+            let query: AcoustIdQuery = request.query.parse()?;
+            query.validate()?;
+            let mut fingerprints = self.fingerprints.lock().unwrap();
+            let next = fingerprints.len() + 1;
+            let n = *fingerprints
+                .entry(query.fingerprint.clone())
+                .or_insert(next);
+            (
+                serde_json::json!({"status":"ok","results":[{"score":0.99,"recordings":[{"id":recording(n)}]}]}),
+                serde_json::json!({"schema_version":1,"query":query}),
+            )
+        } else {
+            let query: MusicBrainzQuery = request.query.parse()?;
+            let (body, count) = match &query {
+                MusicBrainzQuery::RecordingReleases { .. } => (
+                    serde_json::json!({"releases":[{"id":release,"title":"Matched album"}],"release-count":1,"release-offset":0}),
+                    1,
+                ),
+                MusicBrainzQuery::ReleaseId { release_id, .. } if release_id == release => (
+                    serde_json::json!({"id":release,"title":"Matched album","artist-credit":[{"name":"Matched artist","artist":{"id":recording(99),"name":"Matched artist"}}],"media":[{"id":recording(98),"position":1,"format":"Digital Media","track-count":2,"tracks":[{"id":recording(97),"position":1,"number":"1","title":"Matched first","length":12000,"recording":{"id":recording(1),"title":"Matched first","length":12000}},{"id":recording(96),"position":2,"number":"2","title":"Matched second","length":12000,"recording":{"id":recording(2),"title":"Matched second","length":12000}}]}]}),
+                    1,
+                ),
+                _ => return Err(Error::Invalid("unexpected fixture query".into())),
+            };
+            (
+                body,
+                serde_json::json!({"schema_version":2,"http_status":200,"query":query,"outcome":"candidates","release_count":count}),
+            )
+        };
+        let bytes = serde_json::to_vec(&body).unwrap();
+        Ok(ProviderStreamResponse {
+            media_type: "application/json".into(),
+            bytes: ByteLength(bytes.len() as u64),
+            digest: Digest::sha256(&bytes),
+            parsed_observation: RawJson::from_value(observation),
+            reader: Box::new(std::io::Cursor::new(bytes)),
+        })
+    }
+}
+#[test]
+fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_rewriting_masters() {
+    use collector_app::{AcquireMetadataCommand, FindDigitalAlbums, ResolveMetadataCommand};
+    use collector_modules::music::*;
+    let (root, store, actor, base, collection) = setup();
+    let flac = include_bytes!("fixtures/digital-matching/01.flac");
+    let mp3 = include_bytes!("fixtures/digital-matching/02.mp3");
+    let detail = admit_digital_test_package(
+        &base,
+        &actor,
+        collection.id,
+        &["01.flac", "02.mp3"],
+        &[flac, mp3],
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let saved = store.item(item).unwrap();
+    let provider = Arc::new(DigitalMatchingFixtureProvider {
+        fingerprints: Default::default(),
+        calls: 0.into(),
+    });
+    let parser = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "MatchingTests/1 (test@example.invalid)",
+            "http://127.0.0.1:1",
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    drop(base);
+    let configure = |store: Arc<Store>| {
+        CollectionService::new(store, Arc::new(Registry::builtins()))
+            .with_streaming_provider(ModuleId(ACOUSTID_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+            .with_streaming_provider(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+            .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), parser.clone())
+            .unwrap()
+    };
+    let service = configure(store.clone());
+    let context = command();
+    let input = FindDigitalAlbums {
+        expected_revision: saved.revision,
+    };
+    let job = service
+        .find_digital_albums(&actor, item, input.clone(), &context)
+        .unwrap();
+    assert_eq!(
+        service
+            .find_digital_albums(&actor, item, input, &context)
+            .unwrap(),
+        job
+    );
+    assert!(matches!(
+        service.find_digital_albums(
+            &actor,
+            item,
+            FindDigitalAlbums {
+                expected_revision: saved.revision
+            },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+    service.run_next_job("matching-first-step").unwrap();
+    let created = service.job(&actor, job).unwrap().created_at;
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = configure(store.clone());
+    assert_eq!(service.job(&actor, job).unwrap().created_at, created);
+    provider_drain(&service);
+    let status = service.digital_album_matches(&actor, item).unwrap();
+    let view = status.jobs.iter().find(|v| v.job.id == job).unwrap();
+    assert_eq!(view.job.state, JobState::Completed, "{:?}", view.job.error);
+    let result: collector_app::DigitalMatchingResult =
+        serde_json::from_value(view.result.clone().unwrap()).unwrap();
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.matches[0].mappings.len(), 2);
+    assert!(!result.matches[0].ambiguous_mapping);
+    assert!(result.matches[0].complete_tracklist);
+    assert_eq!(
+        provider.fingerprints.lock().unwrap().len(),
+        2,
+        "distinct audio gets distinct lookups"
+    );
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()[0]
+            .title,
+        "01.flac",
+        "discovery cannot apply metadata"
+    );
+    let selection = service
+        .resolve_metadata(
+            &actor,
+            item,
+            ResolveMetadataCommand {
+                lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                    job_id: job,
+                    release_id: result.matches[0].release.id.clone(),
+                },
+                acquire_artwork: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, selection).unwrap().state,
+        JobState::Completed,
+        "{:?}",
+        service.job(&actor, selection).unwrap().error
+    );
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    assert_eq!(
+        rows.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
+        ["Matched first", "Matched second"]
+    );
+    let capture = store.item(item).unwrap().captures[0].clone();
+    for (index, expected) in [flac.as_slice(), mp3.as_slice()].into_iter().enumerate() {
+        assert_eq!(
+            resource_bytes(
+                service
+                    .representation(&actor, item, capture.representations[0].id, index)
+                    .unwrap()
+            ),
+            expected
+        );
+    }
+    let reused = service
+        .find_digital_albums(
+            &actor,
+            item,
+            FindDigitalAlbums {
+                expected_revision: saved.revision,
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, reused).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        service.digital_album_matches(&actor, item).unwrap().jobs[0]
+            .result
+            .as_ref()
+            .unwrap()["fingerprints"],
+        serde_json::to_value(&result.fingerprints).unwrap()
+    );
+    let pending_apply = service
+        .resolve_metadata(
+            &actor,
+            item,
+            ResolveMetadataCommand {
+                lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                    job_id: reused,
+                    release_id: result.matches[0].release.id.clone(),
+                },
+                acquire_artwork: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    let metadata = service.metadata_view(&actor, item).unwrap();
+    let mut overrides = metadata
+        .authority
+        .domain_overrides
+        .as_ref()
+        .unwrap()
+        .payload
+        .parse::<MusicMetadataOverrides>()
+        .unwrap();
+    overrides.track_overrides[0].album_selected = Some(false);
+    let changed = service
+        .update_metadata_authority(
+            &actor,
+            item,
+            collector_app::UpdateMetadataAuthorityCommand {
+                expected_revision: metadata.revision,
+                change: collector_app::MetadataAuthorityChange::SetDomainOverrides {
+                    overrides: ModuleData {
+                        module: saved.domain.module.clone(),
+                        schema_version: saved.domain.schema_version,
+                        payload: RawJson::from_value(serde_json::to_value(&overrides).unwrap()),
+                    },
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, pending_apply).unwrap().state,
+        JobState::Failed,
+        "a later selection edit fences queued application"
+    );
+    overrides.track_overrides[0].album_selected = Some(true);
+    service
+        .update_metadata_authority(
+            &actor,
+            item,
+            collector_app::UpdateMetadataAuthorityCommand {
+                expected_revision: changed.revision,
+                change: collector_app::MetadataAuthorityChange::SetDomainOverrides {
+                    overrides: ModuleData {
+                        module: saved.domain.module.clone(),
+                        schema_version: saved.domain.schema_version,
+                        payload: RawJson::from_value(serde_json::to_value(&overrides).unwrap()),
+                    },
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    // A later metadata edit invalidates even a complete frozen mapping.
+    let metadata = service.metadata_view(&actor, item).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            item,
+            collector_app::UpdateMetadataAuthorityCommand {
+                expected_revision: metadata.revision,
+                change: collector_app::MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Subtitle,
+                    value: "A later manual edit".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.resolve_metadata(
+            &actor,
+            item,
+            ResolveMetadataCommand {
+                lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                    job_id: reused,
+                    release_id: result.matches[0].release.id.clone()
+                },
+                acquire_artwork: false,
+            },
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+    // Cancelling an admitted discovery leaves all previously accepted metadata intact.
+    let cancelled = service
+        .find_digital_albums(
+            &actor,
+            item,
+            FindDigitalAlbums {
+                expected_revision: saved.revision,
+            },
+            &command(),
+        )
+        .unwrap();
+    service.cancel_job(&actor, cancelled, &command()).unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, cancelled).unwrap().state,
+        JobState::Cancelled
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()[1]
+            .title,
+        "Matched second"
+    );
+    drop(service);
+    drop(store);
+    let reopened =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(reopened, Arc::new(Registry::builtins()));
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()[0]
+            .title,
+        "Matched first"
     );
 }

@@ -1,8 +1,10 @@
 use crate::disc_audio::{ConversionPcmSource, ConversionPcmTrack};
 use collector_core::PackageFileName;
 pub mod catalog;
+pub mod digital_matching;
 pub mod files;
 use catalog::{DbarOutcome, DbarSnapshotObservation, ParsedDbarSnapshot};
+pub use digital_matching::*;
 use std::io::{Read, SeekFrom};
 
 use collector_core::{
@@ -1859,6 +1861,10 @@ impl CollectionModule for Music {
         input: &RawJson,
     ) -> ModuleResult<crate::scan_inputs::ScanInputs> {
         let mut plan = crate::scan_inputs::ScanInputs::new(input)?;
+        if operation.as_str() == DIGITAL_FINGERPRINT_OPERATION {
+            plan.normalize::<DigitalFingerprintSelection>()?;
+            return Ok(plan);
+        }
         if operation.as_str() == "org.junk.music.import-analysis"
             && files::is_file_package(
                 &inventory
@@ -2137,6 +2143,10 @@ impl CollectionModule for Music {
         descriptor.capabilities.extend([
             capability(CD_STRUCTURE_OPERATION, "Inspect CD structure"),
             capability(
+                DIGITAL_FINGERPRINT_OPERATION,
+                "Analyze digital audio fingerprints",
+            ),
+            capability(
                 ACCURATERIP_VERIFICATION_OPERATION,
                 "Verify audio with AccurateRip",
             ),
@@ -2198,6 +2208,31 @@ impl CollectionModule for Music {
         capability: &CapabilityId,
         result: &RawJson,
     ) -> ModuleResult<()> {
+        if capability.as_str() == DIGITAL_FINGERPRINT_OPERATION {
+            let output: DigitalFingerprintOutput = result
+                .parse()
+                .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+            if output.tracks.is_empty() || output.tracks.len() > junk_libs_music::MAX_TRACKS {
+                return Err(ModuleError::Invalid("invalid fingerprint coverage".into()));
+            }
+            let mut files = std::collections::BTreeSet::new();
+            let mut indices = std::collections::BTreeSet::new();
+            for track in output.tracks {
+                if !files.insert(track.file_id)
+                    || !indices.insert(track.file_index)
+                    || track.file_index >= 10000
+                {
+                    return Err(ModuleError::Invalid(
+                        "invalid fingerprint file identity".into(),
+                    ));
+                }
+                track
+                    .audio
+                    .validate()
+                    .map_err(|e| ModuleError::Invalid(e.to_string()))?;
+            }
+            return Ok(());
+        }
         if capability.as_str() == "org.junk.music.import-analysis" {
             let output: MusicImportAnalysisOutput = result
                 .parse()
@@ -2292,6 +2327,9 @@ impl CollectionModule for Music {
         request: OperationRequest,
         host: &dyn crate::ModuleHost,
     ) -> ModuleResult<OperationOutput> {
+        if request.capability.as_str() == DIGITAL_FINGERPRINT_OPERATION {
+            return digital_matching::operate(request, host);
+        }
         let access = operation_access(&request)?;
         let inventory = host.package_inventory(access)?;
         let result = match request.capability.as_str() {

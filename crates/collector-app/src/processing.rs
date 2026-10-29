@@ -389,6 +389,7 @@ pub enum FrozenJobInput {
     Derivative(crate::FrozenDerivativeJob),
     DerivativeBatch(crate::FrozenDerivativeBatchJob),
     MetadataResolution(crate::FrozenMetadataResolution),
+    DigitalMatching(crate::FrozenDigitalMatching),
     ExistingMetadata(crate::FrozenExistingMetadata),
 }
 impl FrozenJobInput {
@@ -399,6 +400,7 @@ impl FrozenJobInput {
             Self::GameIdentification(job) => job.validate(),
             Self::GameCatalogScan(job) => job.validate(),
             Self::MetadataResolution(job) => job.validate(),
+            Self::DigitalMatching(job) => job.validate(),
             Self::ExistingMetadata(job) => job.validate(),
             Self::Derivative(job) => job.validate(),
             Self::DerivativeBatch(job) => job.validate(),

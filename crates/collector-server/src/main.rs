@@ -191,6 +191,7 @@ struct ProviderConfig {
     /// When absent, metadata acquisition is honestly unavailable and preservation
     /// remains operational.
     musicbrainz_user_agent: Option<String>,
+    acoustid_api_key: Option<String>,
 }
 
 fn default_domain_version() -> u32 {
@@ -826,6 +827,9 @@ async fn main() -> Result<()> {
         probe_optional_encoder(EncoderKind::Opus, config.encoders.opus.as_ref());
         if let Some(user_agent) = &config.providers.musicbrainz_user_agent {
             MusicBrainzProvider::new(user_agent)?;
+            if let Some(key) = config.providers.acoustid_api_key.as_deref() {
+                collector_providers::AcoustIdProvider::new(user_agent, key)?;
+            }
             CoverArtArchiveProvider::new(user_agent)?;
         }
         println!(
@@ -1022,6 +1026,23 @@ async fn main() -> Result<()> {
                     };
                 #[cfg(not(debug_assertions))]
                 let musicbrainz = Arc::new(MusicBrainzProvider::new(user_agent)?);
+                if let Some(key) = config.providers.acoustid_api_key.as_deref() {
+                    #[cfg(debug_assertions)]
+                    let acoustid =
+                        if let Ok(origin) = std::env::var("JUNK_COLLECTOR_TEST_ACOUSTID_ORIGIN") {
+                            collector_providers::AcoustIdProvider::with_test_origin(
+                                user_agent, key, &origin,
+                            )?
+                        } else {
+                            collector_providers::AcoustIdProvider::new(user_agent, key)?
+                        };
+                    #[cfg(not(debug_assertions))]
+                    let acoustid = collector_providers::AcoustIdProvider::new(user_agent, key)?;
+                    state.service = state.service.clone().with_streaming_provider(
+                        ModuleId(collector_modules::music::ACOUSTID_PROVIDER_ID.into()),
+                        Arc::new(collector_app::BoundedProviderAdapter(Arc::new(acoustid))),
+                    )?;
+                }
                 let musicbrainz_id =
                     ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into());
                 state.service = state

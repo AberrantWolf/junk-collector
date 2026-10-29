@@ -189,6 +189,19 @@ impl MusicBrainzProvider {
     fn request_url(&self, query: &MusicBrainzQuery) -> Result<Url> {
         query.validate()?;
         let (path, parameters) = match query {
+            MusicBrainzQuery::RecordingReleases {
+                recording_id,
+                offset,
+                ..
+            } => (
+                "/ws/2/release".into(),
+                vec![
+                    ("fmt", "json".into()),
+                    ("recording", recording_id.clone()),
+                    ("limit", "100".into()),
+                    ("offset", offset.to_string()),
+                ],
+            ),
             MusicBrainzQuery::ReleaseId { release_id, .. } => (
                 format!("/ws/2/release/{release_id}"),
                 vec![
@@ -452,7 +465,11 @@ impl MusicBrainzProvider {
         let releases = if snapshot.http_status == 404 {
             Vec::new()
         } else {
-            normalize_musicbrainz_body(&snapshot.query, &response.bytes)?
+            normalize_musicbrainz_body_version(
+                &snapshot.query,
+                &response.bytes,
+                snapshot.schema_version,
+            )?
         };
         let artwork = artwork.iter().cloned().collect::<BTreeMap<_, _>>();
         musicbrainz_metadata_candidates(&response.digest, &snapshot, &releases, &artwork)
@@ -503,7 +520,11 @@ impl CatalogParserPort for MusicBrainzProvider {
         let entries = if observation.http_status == 404 {
             Vec::new()
         } else {
-            normalize_musicbrainz_body(&observation.query, &bytes)?
+            normalize_musicbrainz_body_version(
+                &observation.query,
+                &bytes,
+                observation.schema_version,
+            )?
         };
         if entries.len() != usize::from(observation.release_count) {
             return Err(Error::Invalid(
@@ -976,7 +997,7 @@ fn freeze_musicbrainz(
     let releases = if status == StatusCode::NOT_FOUND {
         Vec::new()
     } else {
-        normalize_musicbrainz_body(&query, &bytes)?
+        normalize_musicbrainz_body_version(&query, &bytes, MUSICBRAINZ_SNAPSHOT_SCHEMA_VERSION)?
     };
     let count = u16::try_from(releases.len())
         .map_err(|_| Error::Unavailable("too many MusicBrainz releases".into()))?;
@@ -1150,6 +1171,70 @@ struct Disc {
 #[derive(Deserialize)]
 struct ReleaseGroup {
     id: String,
+}
+
+// Schema 1 retains its original interpretation for actual archived snapshots.
+// New responses use community entity schemas through the shared adapter.
+fn normalize_musicbrainz_body_version(
+    query: &MusicBrainzQuery,
+    bytes: &[u8],
+    version: u32,
+) -> Result<Vec<RawJson>> {
+    if version == 1 {
+        return normalize_musicbrainz_body(query, bytes);
+    }
+    let page = junk_libs_music::provider::parse_releases(
+        bytes,
+        matches!(query, MusicBrainzQuery::ReleaseId { .. }),
+    )
+    .map_err(|e| Error::Unavailable(e.to_string()))?;
+    page.releases
+        .into_iter()
+        .map(|r| {
+            let media: Vec<_> = r
+                .media
+                .into_iter()
+                .enumerate()
+                .map(
+                    |(index, m)| collector_modules::music::MusicBrainzMediumObservation {
+                        position: m.position.unwrap_or((index + 1) as u16),
+                        disc_ids: m.disc_ids,
+                        tracks: m
+                            .tracks
+                            .into_iter()
+                            .filter(|t| !t.title.trim().is_empty())
+                            .map(|t| collector_modules::music::MusicBrainzTrackObservation {
+                                position: t.position,
+                                title: t.title,
+                            })
+                            .collect(),
+                    },
+                )
+                .collect();
+            let mut disc_ids: Vec<_> = media.iter().flat_map(|m| m.disc_ids.clone()).collect();
+            disc_ids.sort();
+            disc_ids.dedup();
+            let mut artist_ids = r.artist_ids;
+            artist_ids.sort();
+            artist_ids.dedup();
+            let value = MusicBrainzReleaseObservation {
+                release_id: r.id,
+                title: r.title,
+                disambiguation: r.disambiguation.filter(|s| !s.is_empty()),
+                language: r.language,
+                script: r.script,
+                artist_credit: (!r.artist.is_empty()).then_some(r.artist),
+                artist_ids,
+                release_group_id: r.release_group_id,
+                disc_ids,
+                media,
+            };
+            value.validate()?;
+            Ok(RawJson::from_value(
+                serde_json::to_value(value).map_err(|e| Error::Invalid(e.to_string()))?,
+            ))
+        })
+        .collect()
 }
 
 fn normalize_musicbrainz_body(query: &MusicBrainzQuery, bytes: &[u8]) -> Result<Vec<RawJson>> {
@@ -1608,6 +1693,124 @@ fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
         date.duration_since(SystemTime::now())
             .unwrap_or(Duration::ZERO),
     )
+}
+
+/// AcoustID uses the same pinned HTTP mechanism; workflow/album policy remains
+/// in the application. The key stays in server configuration, never snapshots.
+pub struct AcoustIdProvider {
+    transport: MusicBrainzProvider,
+    key: String,
+}
+impl AcoustIdProvider {
+    pub fn new(user_agent: &str, key: &str) -> Result<Self> {
+        Self::build(user_agent, key, "https://api.acoustid.org", false)
+    }
+    #[doc(hidden)]
+    pub fn with_test_origin(user_agent: &str, key: &str, origin: &str) -> Result<Self> {
+        Self::build(user_agent, key, origin, true)
+    }
+    fn build(user_agent: &str, key: &str, origin: &str, test: bool) -> Result<Self> {
+        if key.is_empty()
+            || key.len() > 128
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        {
+            return Err(Error::Invalid("invalid AcoustID application key".into()));
+        }
+        let transport = MusicBrainzProvider::build(
+            user_agent,
+            Url::parse(origin).map_err(|e| Error::Invalid(e.to_string()))?,
+            DEFAULT_TIMEOUT,
+            Duration::from_millis(if test { 1 } else { 350 }),
+            SUCCESS_CACHE_TTL,
+            NEGATIVE_CACHE_TTL,
+            test,
+        )?;
+        Ok(Self {
+            transport,
+            key: key.into(),
+        })
+    }
+}
+impl ProviderPort for AcoustIdProvider {
+    fn acquire(
+        &self,
+        request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderResponse> {
+        use collector_modules::music::{
+            ACOUSTID_ACQUIRE_OPERATION, ACOUSTID_PROVIDER_ID, AcoustIdQuery,
+        };
+        request.validate()?;
+        if request.provider.0 != ACOUSTID_PROVIDER_ID
+            || request.operation.as_str() != ACOUSTID_ACQUIRE_OPERATION
+            || request.maximum_response_bytes > 1024 * 1024
+        {
+            return Err(Error::Invalid("unsupported AcoustID request".into()));
+        }
+        let query: AcoustIdQuery = request.query.parse()?;
+        query.validate()?;
+        let url = self
+            .transport
+            .origin
+            .join("/v2/lookup")
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        self.transport.policy.validate_destination(&url)?;
+        checkpoint(execution)?;
+        let mut admission = self.transport.wait_for_rate_limit(execution)?;
+        let response = self
+            .transport
+            .client
+            .as_ref()
+            .expect("client")
+            .post(url)
+            .form(&[
+                ("client", self.key.as_str()),
+                ("duration", &query.duration.to_string()),
+                ("fingerprint", query.fingerprint.as_str()),
+                ("meta", "recordings"),
+                ("format", "json"),
+            ])
+            .send();
+        *admission = Some(Instant::now() + self.transport.minimum_interval);
+        drop(admission);
+        let response =
+            response.map_err(|e| Error::Unavailable(format!("AcoustID request: {e}")))?;
+        let status = response.status();
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            let delay = retry_after(response.headers()).unwrap_or(Duration::from_secs(60));
+            *self
+                .transport
+                .next_request
+                .lock()
+                .map_err(|_| Error::Unavailable("AcoustID limiter".into()))? =
+                Instant::now().checked_add(delay);
+        }
+        if status != StatusCode::OK {
+            return Err(Error::Unavailable(format!(
+                "AcoustID HTTP {status}; lookup stopped"
+            )));
+        }
+        let bytes = read_bounded(
+            response,
+            request.maximum_response_bytes,
+            execution,
+            "AcoustID",
+        )?;
+        junk_libs_music::provider::parse_acoustid(&bytes)
+            .map_err(|e| Error::Unavailable(e.to_string()))?;
+        checkpoint(execution)?;
+        Ok(ProviderResponse {
+            media_type: "application/json".into(),
+            digest: Digest::sha256(&bytes),
+            bytes,
+            parsed_observation: RawJson::from_value(
+                serde_json::json!({"schema_version":1,"query":query}),
+            ),
+            limitations: vec![],
+        })
+    }
 }
 
 #[cfg(test)]

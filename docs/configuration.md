@@ -153,6 +153,13 @@ Preparation stores separate audio files in the archive; it does not replace the 
 
 ### Online metadata and artwork
 
+`[providers].acoustid_api_key` enables explicit digital album matching when
+`musicbrainz_user_agent` is also configured. Use an AcoustID application key;
+restart the server after changing provider configuration. The matching panel
+explains the disclosure before submission: fingerprints and durations go to
+AcoustID; original audio, paths and private purchase data are not sent. Matching
+is available to curators through the configured curation listener/API exposure.
+
 `[providers].musicbrainz_user_agent` enables MusicBrainz and Cover Art Archive acquisition. Set it to a versioned application name with a real contact address, for example `"JunkCollector/0.1.0 (your-real-address@example.org)"`.
 
 Guided imports can automatically gather available metadata and artwork. In an item's editor, you can also request metadata, inspect alternatives, set manual overrides, and choose cover art. Cover Art Archive choices show small previews before you archive an image. Manual overrides survive provider refreshes.

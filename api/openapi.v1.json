@@ -5140,6 +5140,86 @@
         }
       }
     },
+    "/api/v1/items/{id}/digital-album-matches": {
+      "get": {
+        "operationId": "digital_album_matches",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigitalMatchingStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "find_digital_albums",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindDigitalAlbums"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/evidence": {
       "get": {
         "operationId": "evidence",
@@ -8582,6 +8662,28 @@
           {
             "type": "object",
             "required": [
+              "job_id",
+              "release_id",
+              "source"
+            ],
+            "properties": {
+              "job_id": {
+                "$ref": "#/components/schemas/JobId"
+              },
+              "release_id": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "digital_album_choice"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "release_id",
               "source"
             ],
@@ -11020,6 +11122,39 @@
           }
         }
       },
+      "DigitalMatchingStatus": {
+        "type": "object",
+        "required": [
+          "available",
+          "jobs"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DigitalMatchingView"
+            }
+          }
+        }
+      },
+      "DigitalMatchingView": {
+        "type": "object",
+        "required": [
+          "job",
+          "result"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobView"
+          },
+          "result": {
+            "type": "object"
+          }
+        }
+      },
       "DigitalPurchase": {
         "type": "object",
         "description": "Acquisition facts belong to the purchased package, independently of physical copies.",
@@ -11614,6 +11749,18 @@
             ]
           }
         }
+      },
+      "FindDigitalAlbums": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
       },
       "GameCatalogIdentification": {
         "type": "object",

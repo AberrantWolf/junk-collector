@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+junk-libs-music = { workspace = true, features = ["musicbrainz"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 collector-core.workspace = true
 collector-app.workspace = true

@@ -61,6 +61,25 @@ impl LibraryCarePort for Store {
             entry,
         )
     }
+    fn digital_matching_jobs(
+        &self,
+        user: UserId,
+        item: ItemId,
+    ) -> Result<Vec<collector_app::JobRecord>> {
+        let ids = {
+            let db = lock(&self.db)?;
+            let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='digital_album_matching' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 100").map_err(storage)?;
+            stmt.query_map(params![user.to_string(), item.to_string()], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(storage)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?
+        };
+        ids.into_iter()
+            .map(|id| self.job_record(id.parse().map_err(storage)?, user))
+            .collect()
+    }
     fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<collector_app::JobRecord>> {
         let ids = {
             let db = lock(&self.db)?;

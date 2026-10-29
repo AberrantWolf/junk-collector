@@ -15,6 +15,8 @@ pub struct ResolveMetadataCommand {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenMetadataResolution {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_digital_match: Option<crate::ReviewedDigitalMatch>,
     pub acquisition: FrozenAcquisitionJob,
     pub item_id: ItemId,
     pub inventory_revision: Revision,
@@ -202,6 +204,22 @@ impl CollectionService {
                 "this lookup requires a music collection".into(),
             ));
         }
+        let (command, reviewed_digital_match) = match command.lookup.clone() {
+            AcquireMetadataCommand::DigitalAlbumChoice { job_id, release_id } => {
+                let reviewed = self.review_digital_match(user, item, job_id, &release_id)?;
+                (
+                    ResolveMetadataCommand {
+                        lookup: AcquireMetadataCommand::MusicBrainzRelease {
+                            release_id,
+                            refresh: false,
+                        },
+                        acquire_artwork: command.acquire_artwork,
+                    },
+                    Some(reviewed),
+                )
+            }
+            _ => (command, None),
+        };
         let explicit_image = matches!(
             &command.lookup,
             AcquireMetadataCommand::CoverArtImage { .. }
@@ -218,6 +236,7 @@ impl CollectionService {
             Default::default()
         };
         let (provider, operation, query, bound, artwork_candidate) = match command.lookup {
+            AcquireMetadataCommand::DigitalAlbumChoice { .. } => return Err(Error::Conflict),
             AcquireMetadataCommand::MusicBrainzRelease {
                 release_id,
                 refresh,
@@ -289,6 +308,7 @@ impl CollectionService {
             }
         }
         let frozen = FrozenMetadataResolution {
+            reviewed_digital_match,
             acquisition: FrozenAcquisitionJob {
                 request: ProviderRequest {
                     collection_id: item.collection_id,
@@ -386,6 +406,9 @@ impl CollectionService {
                 return Err(Error::Conflict);
             }
         }
+        if let Some(reviewed) = &frozen.reviewed_digital_match {
+            self.validate_reviewed_digital_selection(&item, claim.user_id, reviewed)?;
+        }
         Ok(item)
     }
 
@@ -398,7 +421,11 @@ impl CollectionService {
         };
         frozen.validate()?;
         let item = self.resolution_item(claim, frozen)?;
-        let snapshot_id = self.acquire_snapshot_for_job(claim, &frozen.acquisition)?;
+        let snapshot_id = if let Some(reviewed) = &frozen.reviewed_digital_match {
+            reviewed.snapshot_id
+        } else {
+            self.acquire_snapshot_for_job(claim, &frozen.acquisition)?
+        };
         let mut result = MetadataResolutionResult {
             response_status: self.jobs.acquisition_response_status(claim)?,
             item_id: item.id,
@@ -411,6 +438,9 @@ impl CollectionService {
             let record =
                 self.refresh_resolution_metadata(claim, frozen, snapshot_id, vec![], "text")?;
             result.outcome = record.observations.last().map(|value| value.outcome);
+            if let Some(reviewed) = &frozen.reviewed_digital_match {
+                self.apply_reviewed_digital_metadata(claim, frozen, reviewed)?;
+            }
             if frozen.acquire_artwork
                 && result.outcome == Some(MetadataRefreshOutcome::Candidates)
                 && record.authority.artwork_choice.is_none()

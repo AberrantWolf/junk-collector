@@ -32,6 +32,7 @@ pub trait LibraryCarePort: Send + Sync {
         generation: &str,
         entry: &LibraryEntry,
     ) -> Result<bool>;
+    fn digital_matching_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<JobRecord>>;
     fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<JobRecord>>;
     fn cd_settings(&self, collection: CollectionId) -> Result<CdLibrarySettings>;
     fn save_cd_settings(

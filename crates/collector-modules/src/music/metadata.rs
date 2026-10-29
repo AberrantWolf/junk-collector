@@ -11,13 +11,19 @@ pub const MUSICBRAINZ_ACQUIRE_OPERATION: &str = "org.junk.providers.musicbrainz.
 pub const COVER_ART_ARCHIVE_PROVIDER_ID: &str = "org.junk.providers.cover-art-archive";
 pub const COVER_ART_ARCHIVE_ACQUIRE_OPERATION: &str =
     "org.junk.providers.cover-art-archive.acquire";
-pub const MUSICBRAINZ_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const MUSICBRAINZ_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 pub const COVER_ART_ARCHIVE_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 pub const MUSICBRAINZ_PROVIDER_PRIORITY: u16 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MusicBrainzQuery {
+    RecordingReleases {
+        recording_id: String,
+        offset: u32,
+        #[serde(default)]
+        refresh: bool,
+    },
     ReleaseId {
         release_id: String,
         #[serde(default)]
@@ -38,6 +44,17 @@ pub enum MusicBrainzQuery {
 impl MusicBrainzQuery {
     pub fn validate(&self) -> Result<()> {
         match self {
+            Self::RecordingReleases {
+                recording_id,
+                offset,
+                ..
+            } => {
+                validate_mbid(recording_id)?;
+                if *offset > 10000 {
+                    return Err(Error::Invalid("browse offset exceeds bound".into()));
+                }
+                Ok(())
+            }
             Self::ReleaseId { release_id, .. } => validate_mbid(release_id),
             Self::DiscId { disc_id, .. } => {
                 if disc_id.is_empty()
@@ -64,7 +81,8 @@ impl MusicBrainzQuery {
 
     pub fn refresh(&self) -> bool {
         match self {
-            Self::ReleaseId { refresh, .. }
+            Self::RecordingReleases { refresh, .. }
+            | Self::ReleaseId { refresh, .. }
             | Self::DiscId { refresh, .. }
             | Self::Search { refresh, .. } => *refresh,
         }
@@ -93,7 +111,7 @@ impl MusicBrainzSnapshotObservation {
         self.query.validate()?;
         if !matches!(self.http_status, 200 | 404)
             || (self.http_status == 404 && self.outcome != MetadataProviderOutcome::NoMatch)
-            || self.schema_version != MUSICBRAINZ_SNAPSHOT_SCHEMA_VERSION
+            || !matches!(self.schema_version, 1 | 2)
             || (matches!(self.outcome, MetadataProviderOutcome::Candidates)
                 != (self.release_count > 0))
             || self.release_count > 128
@@ -320,7 +338,9 @@ pub fn musicbrainz_metadata_candidates(
             }
             (true, MatchStrength::DiscLayout)
         }
-        MusicBrainzQuery::Search { .. } => (false, MatchStrength::Name),
+        MusicBrainzQuery::Search { .. } | MusicBrainzQuery::RecordingReleases { .. } => {
+            (false, MatchStrength::Name)
+        }
     };
     let requested_release = match &snapshot.query {
         MusicBrainzQuery::ReleaseId { release_id, .. } => Some(release_id),

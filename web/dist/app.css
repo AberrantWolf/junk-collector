@@ -630,6 +630,12 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 .candidate.in-use{border:2px solid var(--green);border-left-width:6px;border-radius:6px;background:var(--accent);padding:16px;margin-block:12px;opacity:1}.candidate.in-use>div:first-child>strong{font-size:19px}.candidate .candidate-use-badge{justify-self:start;background:var(--green);color:#fff;border-radius:4px;padding:6px 10px;font-size:13px;font-weight:700;line-height:1.4}.effective-metadata>.metadata-use-status{display:flex;align-items:flex-start;flex-direction:column;gap:7px;max-width:24rem}.effective-metadata .metadata-use-label{font-size:14px;font-weight:700;color:var(--ink)}.effective-metadata .metadata-override-badge{background:#fff4db;color:#6f4a16;border:1px solid #bd914c;border-radius:4px;padding:5px 8px;font-size:12px;font-weight:650}
 
 .effective-metadata .metadata-use-release-name{font-size:14px;font-weight:650;color:var(--ink)}
+.digital-album-matching .candidate { display:flex; align-items:flex-start; gap:1rem; }
+.digital-match-cover { width:5rem; flex:0 0 5rem; }
+.digital-match-cover img { width:100%; height:auto; object-fit:contain; }
+.digital-match-cover span { display:grid; place-items:center; min-height:5rem; background:var(--panel-muted,#eee); font-size:2rem; }
+.digital-album-matching .candidate > div:last-child { min-width:0; overflow-wrap:anywhere; }
+@media(max-width:480px) { .digital-match-cover { width:3rem; flex-basis:3rem; } }
 
 .modal > .close, .detail > .close {
  position: sticky;

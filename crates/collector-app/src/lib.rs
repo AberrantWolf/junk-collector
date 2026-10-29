@@ -2,6 +2,8 @@
 mod disc_audio;
 mod local_playback;
 pub use disc_audio::game_audio_search_projection;
+mod digital_matching;
+pub use digital_matching::*;
 mod file_music;
 pub use file_music::{
     UpdateDigitalPurchase, file_music_search_projection, import_preservation_format,
@@ -1060,6 +1062,7 @@ impl From<JobRecord> for JobView {
                     | "import_publication"
                     | "catalog_acquisition"
                     | "processing_operation"
+                    | "digital_album_matching"
                     | "accuraterip_check"
                     | "music_derivative"
                     | "music_derivative_batch"
@@ -1074,7 +1077,10 @@ impl From<JobRecord> for JobView {
         let result = safe_job_result(&record.kind, record.result.as_ref());
         let progress_kind = if matches!(
             record.kind.as_str(),
-            "processing_operation" | "accuraterip_check" | "inbox_cleanup"
+            "processing_operation"
+                | "accuraterip_check"
+                | "digital_album_matching"
+                | "inbox_cleanup"
         ) && matches!(
             record.state,
             JobState::Queued | JobState::Running | JobState::CancelRequested
@@ -5641,6 +5647,7 @@ impl CollectionService {
                 Ok(serde_json::json!({"snapshot_id":snapshot_id,"response_status":response_status}))
             })(),
             "metadata_resolution" => self.run_metadata_resolution(&claim),
+            "digital_album_matching" => self.run_digital_matching(&claim),
             "bulk_intake" => self.run_bulk_intake(&claim),
             "bulk_library" => self.run_bulk_library(&claim),
             "game_identification" => self.run_game_identification(&claim),

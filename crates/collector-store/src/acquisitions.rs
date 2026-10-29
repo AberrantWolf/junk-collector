@@ -38,7 +38,11 @@ impl Store {
                 }
                 let frozen = match input {
                     FrozenJobInput::Acquisition(input) => input,
-                    FrozenJobInput::MetadataResolution(input) => input.acquisition,
+                    FrozenJobInput::MetadataResolution(input)
+                        if input.reviewed_digital_match.is_none() =>
+                    {
+                        input.acquisition
+                    }
                     _ => continue,
                 };
                 Self::link_acquisition(tx, job.parse().map_err(storage)?, &frozen, created, false)?;

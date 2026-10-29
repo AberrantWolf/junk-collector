@@ -1,5 +1,20 @@
 # Remaining work — home-lab priorities
 
+## Digital album matching — delivered, 2026-10-30
+
+The user-authorized delivery adds shared `junk-libs-music`, Collector's durable
+reviewed matching workflow, Trash Amp access to that workflow, and local-folder
+matching in Trash Amp. See [current status](implementation-status.md) and
+[delivery evidence](validation/digital-album-matching-2026-10-29.md).
+
+Remaining product limits: real AcoustID service recognition needs a configured
+application key and representative user-approved audio; partial/ambiguous matches
+remain suggestions requiring the existing manual metadata tools. This delivery
+supports mono/stereo FLAC and MP3, up to 256 files. Broader codec coverage and
+exhaustive release enumeration are not implemented. No release/deployment is
+requested. The earlier [research evaluation](digital-album-matching-evaluation.md)
+and [probe](digital-album-matching-probe.md) remain dated evidence.
+
 ## Beta.13 change-driven summaries published and installed — 2026-10-28
 
 Library reads use ready summaries or immediate basic pending rows. A separate
@@ -1632,6 +1647,12 @@ CUE splitting and broader DSP. The delivered FLAC/MP3 source/availability pipeli
 is the starting point; each selected addition needs a bounded complete workflow
 and independent format/client evidence. No hidden dependencies on these for the
 home-lab server.
+
+The [2026-10-29 matching assessment](digital-album-matching-evaluation.md) also
+recommends a bounded FLAC/MP3 **Find matching albums** delivery for absent/sparse
+tags, including community MusicBrainz model adoption, fingerprint computation,
+recording/release discovery, album ranking, review/apply and artwork. It remains
+unimplemented; acceptance and dependency gates are recorded in the assessment.
 
 ### HL-14 — Advanced hardening and large-deployment qualification
 

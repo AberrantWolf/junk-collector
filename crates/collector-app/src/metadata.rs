@@ -292,6 +292,10 @@ pub struct MetadataReviewView {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AcquireMetadataCommand {
+    DigitalAlbumChoice {
+        job_id: JobId,
+        release_id: String,
+    },
     MusicBrainzRelease {
         release_id: String,
         #[serde(default)]
@@ -1574,6 +1578,9 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<JobId> {
         match command {
+            AcquireMetadataCommand::DigitalAlbumChoice { .. } => Err(Error::Invalid(
+                "Use the metadata resolution workflow for a digital album choice".into(),
+            )),
             AcquireMetadataCommand::MusicBrainzRelease {
                 release_id,
                 refresh,
@@ -3464,6 +3471,113 @@ pub fn music_membership_album_keys(
                 .and_then(|release| release.release_group_id)
         })
         .collect())
+}
+
+impl CollectionService {
+    pub(crate) fn apply_reviewed_digital_metadata(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenMetadataResolution,
+        reviewed: &crate::ReviewedDigitalMatch,
+    ) -> Result<()> {
+        let item = self.resolution_item(claim, frozen)?;
+        let LoadedMetadataAuthority {
+            revision,
+            mut authority,
+            legacy: observations,
+            current,
+        } = self.authority_or_inventory(&item)?;
+        let candidates = self
+            .processing
+            .metadata_candidates(item.collection_id, item.id)?;
+        let candidate = candidates
+            .iter()
+            .filter(|c| {
+                c.identity.provider.0 == collector_modules::music::MUSICBRAINZ_PROVIDER_ID
+                    && c.identity.provider_record_id == reviewed.release_id
+            })
+            .find(|c| current.as_ref().is_none_or(|ids| ids.contains(&c.identity)))
+            .ok_or(Error::Conflict)?;
+        let mut overrides = authority
+            .domain_overrides
+            .as_ref()
+            .map(|v| {
+                v.payload
+                    .parse::<collector_modules::music::MusicMetadataOverrides>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let before = serde_json::to_value((&authority, &overrides))
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let manual = item
+            .domain
+            .payload
+            .parse::<collector_modules::music::MusicItemData>()?;
+        for proposed in &reviewed.tracks {
+            if let Some(old) = overrides.track_overrides.iter_mut().find(|v| {
+                v.source_representation_id == proposed.source_representation_id
+                    && v.track_position == proposed.track_position
+            }) {
+                // Existing manual values always retain authority.
+                if old.title.is_none()
+                    && crate::manual_music_track_title(&manual.tracks, proposed.track_position)
+                        .is_none()
+                {
+                    old.title = proposed.title.clone();
+                }
+                if old.disc_position.is_none() {
+                    old.disc_position = proposed.disc_position;
+                }
+                if old.display_position.is_none() {
+                    old.display_position = proposed.display_position;
+                }
+            } else {
+                let mut proposed = proposed.clone();
+                if crate::manual_music_track_title(&manual.tracks, proposed.track_position)
+                    .is_some()
+                {
+                    proposed.title = None;
+                }
+                overrides.track_overrides.push(proposed);
+            }
+        }
+        authority.selected_candidate = Some(candidate.identity.clone());
+        authority.domain_overrides = Some(ModuleData {
+            module: item.domain.module.clone(),
+            schema_version: item.domain.schema_version,
+            payload: RawJson::from_value(
+                serde_json::to_value(&overrides).map_err(|e| Error::Invalid(e.to_string()))?,
+            ),
+        });
+        if before
+            == serde_json::to_value((&authority, &overrides))
+                .map_err(|e| Error::Storage(e.to_string()))?
+        {
+            return Ok(());
+        }
+        self.validate_listening_track_edits(&item, &authority, &[])?;
+        let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
+        self.processing.publish_metadata_for_job(
+            claim,
+            MetadataAuthorityRecord {
+                resolution_policy: 4,
+                inventory: Some((&item).into()),
+                collection_id: item.collection_id,
+                item_id: item.id,
+                revision: Revision(revision.0.checked_add(1).ok_or(Error::Conflict)?),
+                display: Some(resolve_metadata_display(
+                    &item,
+                    &authority,
+                    &active,
+                    frozen.language.as_str(),
+                )?),
+                authority,
+                observations,
+                current_candidates: current,
+                updated_at: self.authentication.now(),
+            },
+        )
+    }
 }
 
 #[cfg(test)]
