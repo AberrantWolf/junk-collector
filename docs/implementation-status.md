@@ -1,3 +1,16 @@
+# Remote archive preparation — 2026-10-30
+
+Implemented identity-bound storage admission, explicit enrollment/fresh setup,
+Linux anchored archive mutations, runtime unavailable latching, error-aware
+publication/recovery presence checks, independent deployment bind paths, remote
+mount policy for core/media/CLI and host boot/restart templates. The complete
+archive stays together; private state (including imports) stays local. See
+[deployment and paired recovery](../deploy/container/remote-archive.md) and
+[validation/remaining qualification](validation/remote-archive-safety-2026-10-30.md).
+No live deployment, export/permission, router or tunnel changes were performed.
+Actual Fi/NAS NFS/container lifecycle and paired restoration qualification remain
+required before migration approval; source implementation is not migration acceptance.
+
 # Implementation status
 
 The [shared music review](validation/digital-album-matching-review-2026-10-30.md)

@@ -52,7 +52,7 @@ impl Store {
         original: &Path,
     ) -> Result<PathBuf> {
         let reference = original.with_file_name("reference.v1.json");
-        if !reference.exists() {
+        if !reference.try_exists().map_err(storage)? {
             return Ok(original.to_owned());
         }
         let data = read_bounded_json(&reference, 16 * 1024)?;
@@ -76,7 +76,11 @@ impl Store {
         let target = snapshots
             .join(mapping.canonical.to_string())
             .join("payload/source.bin");
-        if target.with_file_name("reference.v1.json").exists() {
+        if target
+            .with_file_name("reference.v1.json")
+            .try_exists()
+            .map_err(storage)?
+        {
             return Err(Error::Storage(
                 "chained snapshot references are unsupported".into(),
             ));
@@ -190,7 +194,11 @@ impl Store {
                     continue;
                 }
                 let original = self.original_snapshot_payload(&record)?;
-                if original.with_file_name("reference.v1.json").exists() {
+                if original
+                    .with_file_name("reference.v1.json")
+                    .try_exists()
+                    .map_err(storage)?
+                {
                     continue;
                 }
                 if !Self::known_snapshot_layout(&original)? {
@@ -373,7 +381,7 @@ impl Store {
                     return Err(Error::JobCancelled);
                 }
                 let path = root.join(&id).join("payload/reference.v1.json");
-                if !path.exists() {
+                if !path.try_exists().map_err(storage)? {
                     continue;
                 }
                 let reference: PayloadReference =
@@ -389,7 +397,8 @@ impl Store {
                     || root
                         .join(mapping.canonical.to_string())
                         .join("payload/reference.v1.json")
-                        .exists()
+                        .try_exists()
+                        .map_err(storage)?
                 {
                     return Err(Error::Conflict);
                 }
@@ -427,7 +436,7 @@ impl Store {
         let journal_root = self.state.join("snapshot-conversions");
         let journal = journal_root.join(format!("{}.json", Digest::sha256(&plan_bytes).hex));
         let encoded=serde_json::to_vec(&serde_json::json!({"plan":plan,"backup_sha256":String::from_utf8(read_bounded_json(&backup.join("complete.sha256"),128)?).map_err(storage)?})).map_err(storage)?;
-        if journal.exists() {
+        if journal.try_exists().map_err(storage)? {
             if read_bounded_json(&journal, 16 * 1024 * 1024)? != encoded {
                 return Err(Error::Conflict);
             }
@@ -487,7 +496,10 @@ impl Store {
                 return Err(Error::Conflict);
             }
             let target = self.original_snapshot_payload(&canonical)?;
-            if target.with_file_name("reference.v1.json").exists()
+            if target
+                .with_file_name("reference.v1.json")
+                .try_exists()
+                .map_err(storage)?
                 || crate::files::hash_file(&target)? != (mapping.bytes, mapping.digest.clone())
             {
                 return Err(Error::Conflict);
@@ -496,7 +508,7 @@ impl Store {
             let sidecar = original.with_file_name("reference.v1.json");
             let bytes = payload_reference_bytes(mapping)?;
             let staged = sidecar.with_extension("tmp");
-            if staged.exists() {
+            if staged.try_exists().map_err(storage)? {
                 // A crash may leave this conversion's complete staging file. Unknown
                 // or partial contents require operator restoration, not deletion.
                 if read_bounded_json(&staged, 16 * 1024)? != bytes {
@@ -508,7 +520,7 @@ impl Store {
             if !Self::known_snapshot_layout(&original)? || !Self::known_snapshot_layout(&target)? {
                 return Err(Error::Conflict);
             }
-            if sidecar.exists() {
+            if sidecar.try_exists().map_err(storage)? {
                 if read_bounded_json(&sidecar, 16 * 1024)? != bytes {
                     return Err(Error::Conflict);
                 }
@@ -517,7 +529,7 @@ impl Store {
                     return Err(Error::Conflict);
                 }
                 let staged = sidecar.with_extension("tmp");
-                if staged.exists() {
+                if staged.try_exists().map_err(storage)? {
                     fs::remove_file(&staged).map_err(storage)?;
                 }
                 write_new(&staged, &bytes)?;
@@ -527,7 +539,7 @@ impl Store {
             self.publication_fault
                 .check(PublicationFaultPoint::BytesStaged)?;
             self.resolve_snapshot_payload(&record, &original)?;
-            if original.exists() {
+            if original.try_exists().map_err(storage)? {
                 fs::remove_file(&original).map_err(storage)?;
                 sync_directory(original.parent().ok_or(Error::Conflict)?)?;
             }

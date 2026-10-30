@@ -62,7 +62,7 @@ pub(crate) fn hash_file_checked(
 }
 
 fn write_new_or_verify(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path.exists() {
+    if path.try_exists().map_err(storage)? {
         if fs::read(path).map_err(storage)? == bytes {
             return Ok(());
         }
@@ -88,7 +88,7 @@ impl Store {
             else {
                 continue;
             };
-            if !path.join("upload.json").exists() {
+            if !path.join("upload.json").try_exists().map_err(storage)? {
                 continue;
             }
             let mut upload = self.upload_record(id)?;
@@ -102,7 +102,7 @@ impl Store {
             self.persist_upload(&upload)?;
         }
         let staging = self.state.join("asset-publication");
-        if staging.exists() {
+        if staging.try_exists().map_err(storage)? {
             for entry in fs::read_dir(&staging).map_err(storage)? {
                 let path = entry.map_err(storage)?.path();
                 let Some(id) = path
@@ -652,7 +652,7 @@ impl Store {
         for (index, file) in upload.files.iter().enumerate() {
             self.ensure_job_continues(id, claim_token)?;
             let source = self.upload_directory(id).join(format!("{index}.part"));
-            if file.bytes.0 == 0 && !source.exists() {
+            if file.bytes.0 == 0 && !source.try_exists().map_err(storage)? {
                 write_new(&source, b"")?;
             }
             let (length, digest) = hash_file(&source)?;
@@ -852,7 +852,7 @@ impl Store {
 
         let payload_destination = self.archive.join(&payload_relative);
         fs::create_dir_all(payload_destination.parent().unwrap()).map_err(storage)?;
-        if payload_destination.exists() {
+        if payload_destination.try_exists().map_err(storage)? {
             for file in &capture.representations[0].files {
                 if hash_file(&payload_destination.join(&file.name))?
                     != (file.bytes, file.digest.clone())
@@ -883,7 +883,7 @@ impl Store {
             }
             let revision_destination = self.archive.join(&revision_relative);
             fs::create_dir_all(revision_destination.parent().unwrap()).map_err(storage)?;
-            if revision_destination.exists() {
+            if revision_destination.try_exists().map_err(storage)? {
                 if fs::read(revision_destination.join("record.v3.json")).map_err(storage)?
                     != record_bytes
                     || fs::read(revision_destination.join("manifest.v3.toml")).map_err(storage)?
@@ -1505,7 +1505,7 @@ impl Store {
                 .state
                 .join("asset-publication")
                 .join(record.asset.id.to_string());
-            if staging.exists() {
+            if staging.try_exists().map_err(storage)? {
                 fs::remove_dir_all(&staging).map_err(storage)?;
                 sync_directory(
                     staging

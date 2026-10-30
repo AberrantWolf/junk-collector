@@ -1,3 +1,18 @@
+# Remote archive guard — 2026-10-30
+
+The store adapter owns archive identity, local-state binding and filesystem checks.
+Normal executable startup opens an enrolled installation only; setup initializes
+fresh storage explicitly, and stopped-server enrollment adopts existing archives.
+Every catalog/writer lock checks the bound archive before exposing or changing
+state. Availability failures latch the process closed until restart. Linux store
+paths are anchored to an open directory descriptor, so replacing/unmounting the
+configured pathname cannot redirect writes into its underlying directory.
+Remote mode requires the configured NFS source and rejects remote private state.
+The isolated media service retains its directory capability and read-only mount.
+One operational writer is enforced by deployment fencing; filesystem locks are
+additional same-host protection, not a distributed leader-election protocol.
+See [split deployment and recovery](../deploy/container/remote-archive.md).
+
 # Architecture
 
 ## Digital album matching, 2026-10-29

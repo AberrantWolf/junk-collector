@@ -22,8 +22,31 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 struct Cli {
     #[arg(long, default_value = "collector.toml")]
     config: PathBuf,
+    /// Require this NFS source for archive access, including explicit import/restore.
+    #[arg(long, global = true, env = "COLLECTOR_NFS_SOURCE")]
+    nfs_source: Option<String>,
     #[command(subcommand)]
     command: Command,
+}
+impl Cli {
+    fn archive_mount(
+        &self,
+        configured: Option<collector_store::ArchiveMount>,
+    ) -> Result<Option<collector_store::ArchiveMount>> {
+        if let Some(source) = &self.nfs_source {
+            anyhow::ensure!(
+                configured
+                    .as_ref()
+                    .is_none_or(|mount| mount.nfs_source == *source),
+                "NFS source conflicts with archive_mount configuration"
+            );
+            Ok(Some(collector_store::ArchiveMount {
+                nfs_source: source.clone(),
+            }))
+        } else {
+            Ok(configured)
+        }
+    }
 }
 #[derive(Subcommand)]
 enum Command {
@@ -32,6 +55,8 @@ enum Command {
         #[arg(long, default_value = "owner")]
         username: String,
     },
+    /// Bind an existing archive to this local state while every writer is stopped.
+    EnrollArchive,
     /// Check configuration without opening or locking the archive.
     Doctor,
     Serve,
@@ -141,6 +166,7 @@ enum Command {
 struct Config {
     archive: PathBuf,
     state: PathBuf,
+    archive_mount: Option<collector_store::ArchiveMount>,
     public_bind: SocketAddr,
     private_bind: SocketAddr,
     private_tls_bind: Option<SocketAddr>,
@@ -201,6 +227,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             archive: ".collector/archive".into(),
+            archive_mount: None,
             state: ".collector/state".into(),
             public_bind: "127.0.0.1:9841".parse().unwrap(),
             private_bind: "127.0.0.1:9842".parse().unwrap(),
@@ -459,6 +486,7 @@ fn tls(config: &Config, create: bool) -> Result<Pairing> {
 struct StoragePaths {
     state: PathBuf,
     archive: PathBuf,
+    archive_mount: Option<collector_store::ArchiveMount>,
 }
 impl Default for StoragePaths {
     fn default() -> Self {
@@ -466,6 +494,7 @@ impl Default for StoragePaths {
         Self {
             state: config.state,
             archive: config.archive,
+            archive_mount: config.archive_mount,
         }
     }
 }
@@ -500,6 +529,9 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if let Command::ImportArchive { export, archive } = &cli.command {
+        if let Some(mount) = cli.archive_mount(None)? {
+            collector_store::validate_remote_archive_target(archive, None, &mount)?;
+        }
         collector_store::import_archive(export, archive)?;
         println!("Archive import complete: {}", archive.display());
         println!(
@@ -507,6 +539,18 @@ async fn main() -> Result<()> {
         );
         println!(
             "No accounts, grants, TLS, server identity or pending jobs were copied. Collection records and original files may contain private information."
+        );
+        return Ok(());
+    }
+    if matches!(cli.command, Command::EnrollArchive) {
+        let paths = storage_paths(&cli.config)?;
+        Store::enroll_archive(
+            &paths.archive,
+            &paths.state,
+            cli.archive_mount(paths.archive_mount)?,
+        )?;
+        println!(
+            "Archive enrolled. Identity and local-state binding recorded; NFS durability is not qualified by enrollment."
         );
         return Ok(());
     }
@@ -518,7 +562,11 @@ async fn main() -> Result<()> {
                 && paths.state.join("private.sqlite").is_file(),
             "export requires an existing installation and configuration; check paths before retrying"
         );
-        let store = Store::open(&paths.archive, &paths.state)?;
+        let store = Store::open_existing(
+            &paths.archive,
+            &paths.state,
+            cli.archive_mount(paths.archive_mount.clone())?,
+        )?;
         store.export_archive(destination)?;
         println!(
             "Verified portable archive export: {}",
@@ -540,7 +588,11 @@ async fn main() -> Result<()> {
                 && paths.state.join("private.sqlite").is_file(),
             "ownership recovery requires an existing installation and account state; run setup first"
         );
-        let store = Arc::new(Store::open(&paths.archive, &paths.state)?);
+        let store = Arc::new(Store::open_existing(
+            &paths.archive,
+            &paths.state,
+            cli.archive_mount(paths.archive_mount.clone())?,
+        )?);
         let service = collector_app::LocalOwnershipRecoveryService::new(store);
         match &cli.command {
             Command::UnownedCollections { cursor, limit } => {
@@ -577,7 +629,11 @@ async fn main() -> Result<()> {
                 && paths.state.join("private.sqlite").is_file(),
             "backup requires an existing installation and configuration; check paths before retrying"
         );
-        let store = Store::open(&paths.archive, &paths.state)?;
+        let store = Store::open_existing(
+            &paths.archive,
+            &paths.state,
+            cli.archive_mount(paths.archive_mount.clone())?,
+        )?;
         store.backup(destination, &cli.config)?;
         println!("Verified backup: {}", destination.display());
         println!(
@@ -631,6 +687,14 @@ async fn main() -> Result<()> {
         value["archive"] =
             toml::Value::String(archive.to_str().context("non-UTF8 archive path")?.into());
         value["state"] = toml::Value::String(state.to_str().context("non-UTF8 state path")?.into());
+        let retained_mount = value
+            .get("archive_mount")
+            .map(|value| value.clone().try_into::<collector_store::ArchiveMount>())
+            .transpose()?;
+        if let Some(mount) = cli.archive_mount(retained_mount)? {
+            collector_store::validate_remote_archive_target(&archive, Some(&state), &mount)?;
+            value["archive_mount"] = toml::Value::try_from(mount)?;
+        }
         let configuration = toml::to_string_pretty(&value)?;
         let output = std::path::absolute(&cli.config)?;
         collector_store::restore_backup(
@@ -749,6 +813,7 @@ async fn main() -> Result<()> {
     } else {
         Config::default()
     };
+    config.archive_mount = cli.archive_mount(config.archive_mount.clone())?;
     config.jobs.validate()?;
     if let Some(remote) = &config.remote_media {
         remote.validate()?;
@@ -840,10 +905,14 @@ async fn main() -> Result<()> {
     if !cli.config.exists() && !matches!(cli.command, Command::Setup { .. }) {
         bail!("Configuration missing. Run setup first.");
     }
-    let store =
-        Arc::new(Store::open(&config.archive, &config.state)?.with_job_settings(config.jobs)?);
+    let store = if matches!(cli.command, Command::Setup { .. }) {
+        Store::initialize(&config.archive, &config.state, config.archive_mount.clone())?
+    } else {
+        Store::open_existing(&config.archive, &config.state, config.archive_mount.clone())?
+    };
+    let store = Arc::new(store.with_job_settings(config.jobs)?);
     match cli.command {
-        Command::Doctor => unreachable!(),
+        Command::Doctor | Command::EnrollArchive => unreachable!(),
         Command::Setup { username } => {
             if store.user_count()? == 0 {
                 println!(

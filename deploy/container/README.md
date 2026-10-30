@@ -1,5 +1,8 @@
 # Container installation and updates
 
+For a local-state/NFS-archive split, use the [Fi remote archive runbook](remote-archive.md).
+Its paired recovery point replaces the single-root snapshot assumption.
+
 **For Linux Docker hosts and compatible Synology NAS devices.** Requires Compose v2.
 FLAC and Opus tools are included. The server runs as UID/GID 10001; data stays outside the image.
 
@@ -254,6 +257,10 @@ For an update, open Collector in Portainer's **Containers** view and choose **St
 Make the selected consistent recovery point with the old CLI, then pull the selected
 public image through **Images**. Record its digest. Change the Collector image in
 the retained stack definition and the CLI `.env` together, keeping its mounts/groups.
+When first adopting archive-identity guards, keep the old server stopped, verify
+its retained roots/recovery point and run the new image's offline `enroll-archive`
+against those exact roots before redeployment. Do not run setup or enroll an empty
+replacement path. The [split runbook](remote-archive.md) describes the guard.
 
 For a stack that also contains a connector or another service, keep the other
 services' resolved images and configuration unchanged, and update the stack with
@@ -311,6 +318,9 @@ or build/load a new local image using that tag; then:
 # Published images only:
 docker compose pull collector cli initialize
 
+# One-time adoption for pre-guard installations; repeat is a matching-pair no-op.
+# Run only after verifying the intended roots and retaining the complete old point.
+docker compose run --rm cli enroll-archive
 docker compose run --rm cli doctor
 docker compose up -d collector
 docker compose logs --tail 40 collector

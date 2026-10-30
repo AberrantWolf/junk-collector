@@ -18,7 +18,9 @@ impl Store {
         let _writer = lock(&self.writer)?;
         let _gate = lock(&self.job_publication_gate)?;
         let destination = prospective_path(&std::path::absolute(destination).map_err(storage)?)?;
-        if destination.starts_with(&self.archive) || destination.starts_with(&self.state) {
+        if destination.starts_with(self.archive.canonicalize().map_err(storage)?)
+            || destination.starts_with(&self.state)
+        {
             return Err(Error::Invalid(
                 "export must be outside storage roots".into(),
             ));

@@ -1,5 +1,8 @@
 # Recover a previous container installation
 
+For a local-state/NFS-archive split, use the [Fi remote archive runbook](remote-archive.md).
+Its paired recovery point replaces the single-root snapshot assumption.
+
 For Btrfs local points or GNU tar increments, use the separate
 [snapshot/incremental recovery procedure](snapshot-recovery.md). The commands below
 consume Collector's sealed full-backup format.
@@ -59,3 +62,8 @@ that prevent serving partial data; retry using a newly empty destination, not an
 overlay. After success check fresh login, collection access, original download
 and playback as applicable. Retain the source/backup until acceptance is complete.
 Only one copy of a restored server identity may run.
+
+The point's old image may predate `enroll-archive`; restore and accept it using
+its own commands. When subsequently adopting an image with archive guards, follow
+the one-time enrollment step in the [upgrade procedure](README.md#update) against
+the verified restored pair, before starting that newer image.

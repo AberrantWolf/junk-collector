@@ -283,3 +283,14 @@ Certificate names and advertised endpoints do not create DNS or mDNS records.
 A `.local` name must resolve independently. Changing configured names does not
 replace an existing certificate; plan certificate renewal/trust updates explicitly.
 The optional direct listeners are separate from the proxy's certificate lifecycle.
+
+## Remote archive admission
+
+`[archive_mount]` with `nfs_source = "HOST:/EXPORT"` requires the exact Linux
+NFSv4.1/4.2 source, a hard read/write mount and no nested archive mounts. Archive
+identity and local-state binding are required by ordinary executable startup;
+`enroll-archive` is the explicit stopped-server adoption command for existing
+installations, while `setup` initializes new storage. Do not remove a binding
+to bypass a refusal. `--nfs-source SOURCE` (or `COLLECTOR_NFS_SOURCE`) applies the
+same source requirement to offline tools, including explicit import/restore
+destinations. See [the split deployment and recovery procedure](../deploy/container/remote-archive.md).

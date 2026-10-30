@@ -16,7 +16,7 @@ KINDS = ('auto', 'docs', 'ui-copy', 'cli-copy', 'style', 'ui', 'rust', 'infra')
 BROWSER = ('smoke', 'integration', 'browse', 'audio-checks', 'accuraterip-snapshots', 'actions',
            'cd-library', 'scans', 'work', 'fx04', 'fx05', 'fx06', 'fx04-review', 'local-playback', 'lists',
            'accounts', 'pair', 'navigation', 'certificate', 'numeric-ip', 'game-catalog',
-           'digital-matching', 'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media')
+           'digital-matching', 'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media', 'storage')
 FIXTURE = {'audio-checks', 'accuraterip-snapshots', 'actions', 'lists'}
 SENSITIVE = ('crates/collector-core/', 'crates/collector-api-types/', 'crates/collector-store/',
              'crates/collector-client/', '.github/', 'scripts/', 'deploy/')

@@ -1,0 +1,32 @@
+# Fi remote-archive profile. Always include compose.media.yaml and compose.inbox.yaml.
+# Host systemd owns lifecycle; Docker must not bypass the mount preflight at boot.
+services:
+  collector:
+    environment:
+      COLLECTOR_NFS_SOURCE: ${COLLECTOR_ARCHIVE_SOURCE:?Set the intended NFS source}
+    restart: "no"
+    # First boot must publish the authority key/socket before media reads its key.
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/collector-authority/socket && test -r /run/collector-authority/service-key"]
+      interval: 5s
+      timeout: 2s
+      start_period: 10m
+      retries: 3
+    group_add: ["${COLLECTOR_ARCHIVE_GID:?Set the NAS archive writer GID}"]
+  cli:
+    environment:
+      COLLECTOR_NFS_SOURCE: ${COLLECTOR_ARCHIVE_SOURCE}
+    group_add: ["${COLLECTOR_ARCHIVE_GID}"]
+  initialize:
+    # Never mkdir/chown an NFS archive or the underlying mountpoint.
+    entrypoint: ["/bin/false"]
+  media:
+    depends_on:
+      collector:
+        condition: service_healthy
+    environment:
+      COLLECTOR_ARCHIVE_ID: ${COLLECTOR_ARCHIVE_ID:?Set the enrolled archive UUID}
+    restart: "no"
+    group_add: ["${COLLECTOR_ARCHIVE_GID}"]
+  media-https:
+    restart: "no"

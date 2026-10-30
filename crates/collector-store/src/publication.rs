@@ -191,7 +191,7 @@ impl<'a> PublicationJournalStore<'a> {
 
     pub(crate) fn phase(&self, transaction_id: TransactionId) -> Result<Option<PublicationPhase>> {
         let path = self.journal_path(transaction_id);
-        if !path.exists() {
+        if !path.try_exists().map_err(storage)? {
             return Ok(None);
         }
         Ok(Some(self.read(&path)?.phase))
@@ -200,7 +200,7 @@ impl<'a> PublicationJournalStore<'a> {
     pub(crate) fn write_new(&self, journal: &PublicationJournal) -> Result<()> {
         journal.validate()?;
         let path = self.journal_path(journal.transaction_id);
-        if path.exists() {
+        if path.try_exists().map_err(storage)? {
             let existing = self.read(&path)?;
             return if existing == *journal {
                 Ok(())
@@ -270,10 +270,12 @@ impl<'a> PublicationJournalStore<'a> {
             for artifact in &journal.artifacts {
                 let staged = self.resolve(&artifact.staged_path)?;
                 let published = self.resolve(&artifact.published_path)?;
-                if staged.exists() && journal.phase >= PublicationPhase::BytesStaged {
+                if staged.try_exists().map_err(storage)?
+                    && journal.phase >= PublicationPhase::BytesStaged
+                {
                     verify_file(&staged, &artifact.sha256)?;
                 }
-                if published.exists() {
+                if published.try_exists().map_err(storage)? {
                     verify_file(&published, &artifact.sha256)?;
                     if matches!(
                         artifact.kind,
@@ -283,8 +285,8 @@ impl<'a> PublicationJournalStore<'a> {
                     }
                 }
                 if journal.phase >= PublicationPhase::BytesStaged
-                    && !staged.exists()
-                    && !published.exists()
+                    && !staged.try_exists().map_err(storage)?
+                    && !published.try_exists().map_err(storage)?
                 {
                     return Err(Error::Storage(format!(
                         "known publication transaction {} is missing a recorded artifact",
@@ -331,7 +333,10 @@ impl<'a> PublicationJournalStore<'a> {
             if matches!(
                 artifact.kind,
                 ArtifactKind::Revision | ArtifactKind::GroupCommit
-            ) && self.resolve(&artifact.published_path)?.exists()
+            ) && self
+                .resolve(&artifact.published_path)?
+                .try_exists()
+                .map_err(storage)?
             {
                 return Err(Error::Storage(
                     "cannot abort committed revision bytes".into(),
@@ -340,7 +345,7 @@ impl<'a> PublicationJournalStore<'a> {
         }
         for artifact in &journal.artifacts {
             let published = self.resolve(&artifact.published_path)?;
-            if published.exists() {
+            if published.try_exists().map_err(storage)? {
                 if matches!(
                     artifact.kind,
                     ArtifactKind::Revision | ArtifactKind::GroupCommit
@@ -361,7 +366,7 @@ impl<'a> PublicationJournalStore<'a> {
             .archive
             .join(".staging")
             .join(transaction_id.to_string());
-        if stage.exists() {
+        if stage.try_exists().map_err(storage)? {
             fs::remove_dir_all(stage).map_err(storage)?;
             sync_directory(&self.archive.join(".staging"))?;
         }
@@ -372,7 +377,12 @@ impl<'a> PublicationJournalStore<'a> {
     fn remove_empty_parents(&self, start: &Path) -> Result<()> {
         let mut current = Some(start);
         while let Some(directory) = current {
-            if directory == self.archive || directory.join("collection.toml").exists() {
+            if directory == self.archive
+                || directory
+                    .join("collection.toml")
+                    .try_exists()
+                    .map_err(storage)?
+            {
                 break;
             }
             if fs::read_dir(directory).map_err(storage)?.next().is_some() {
@@ -393,7 +403,7 @@ impl<'a> PublicationJournalStore<'a> {
             .archive
             .join(".staging")
             .join(transaction_id.to_string());
-        if stage.exists() {
+        if stage.try_exists().map_err(storage)? {
             fs::remove_dir_all(&stage).map_err(storage)?;
             sync_directory(&self.archive.join(".staging"))?;
         }

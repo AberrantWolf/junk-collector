@@ -58,7 +58,9 @@ impl Store {
             .ok_or(Error::Conflict)?
             .canonicalize()
             .map_err(storage)?;
-        if parent.starts_with(&self.archive) || parent.starts_with(&self.state) {
+        if parent.starts_with(self.archive.canonicalize().map_err(storage)?)
+            || parent.starts_with(&self.state)
+        {
             return Err(Error::Invalid(
                 "backup must be outside storage roots".into(),
             ));
@@ -93,7 +95,13 @@ impl Store {
         private_directory(destination)?;
         let mut inventory = BackupInventory {
             version: 1,
-            archive_root: self.archive.to_str().ok_or(Error::Conflict)?.into(),
+            archive_root: self
+                .archive
+                .canonicalize()
+                .map_err(storage)?
+                .to_str()
+                .ok_or(Error::Conflict)?
+                .into(),
             state_root: self.state.to_str().ok_or(Error::Conflict)?.into(),
             files: vec![],
             directories: vec![],

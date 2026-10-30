@@ -1,0 +1,23 @@
+# Install only during an approved migration, after editing paths for that host.
+[Unit]
+Description=Junk Collector with guarded remote archive
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/junk-collector/archive /srv/junk-collector/inbox
+BindsTo=srv-junk\x2dcollector-archive.mount srv-junk\x2dcollector-inbox.mount
+After=srv-junk\x2dcollector-archive.mount srv-junk\x2dcollector-inbox.mount
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/junk-collector/deploy/container
+EnvironmentFile=/etc/junk-collector/remote.env
+ExecStartPre=/usr/bin/python3 /opt/junk-collector/deploy/container/remote-preflight.py
+ExecStart=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml up --abort-on-container-exit --exit-code-from collector collector media media-https
+ExecStop=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml stop
+TimeoutStopSec=120
+# Failure requires an operator to verify/recover mounts, then restart this unit.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

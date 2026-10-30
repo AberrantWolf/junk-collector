@@ -6,6 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from test_remote_archive import AdmissionTests, ProbeTests
+
 helper = Path(__file__).resolve().parents[1] / "deploy/container/freeze-tar-time.py"
 spec = importlib.util.spec_from_file_location("freeze_tar_time", helper)
 module = importlib.util.module_from_spec(spec)

@@ -74,7 +74,7 @@ fn sync_parents(path: &Path, archive: &Path) -> Result<()> {
 
 pub(crate) fn visible_revision(path: &Path) -> Result<bool> {
     let marker_path = path.join("group.json");
-    if !marker_path.exists() {
+    if !marker_path.try_exists().map_err(storage)? {
         return Ok(true);
     }
     let marker: MemberMarker =
@@ -85,7 +85,7 @@ pub(crate) fn visible_revision(path: &Path) -> Result<bool> {
         .find(|ancestor| ancestor.join(".transactions").is_dir())
         .ok_or_else(|| Error::Storage("group member has no archive root".into()))?;
     let commit = archive.join(&marker.manifest);
-    if !commit.exists() {
+    if !commit.try_exists().map_err(storage)? {
         return Ok(false);
     }
     let manifest: GroupManifest =
@@ -260,7 +260,7 @@ pub(crate) fn publish(
     {
         let target = store.archive.join(&artifact.published_path);
         fs::create_dir_all(target.parent().ok_or(Error::Conflict)?).map_err(storage)?;
-        if target.exists() {
+        if target.try_exists().map_err(storage)? {
             return Err(Error::Conflict);
         }
         fs::rename(store.archive.join(&artifact.staged_path), &target).map_err(storage)?;

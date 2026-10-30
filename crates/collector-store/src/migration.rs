@@ -36,7 +36,7 @@ struct RawCandidate {
 pub(crate) fn migrate_schema_one(archive: &Path) -> Result<()> {
     let checkpoint = archive.join(".archive-migrations").join("schema-1-to-2");
     let completed = checkpoint.join("complete");
-    if completed.exists() {
+    if completed.try_exists().map_err(storage)? {
         return Ok(());
     }
     fs::create_dir_all(checkpoint.join("records")).map_err(storage)?;
@@ -59,19 +59,19 @@ pub(crate) fn migrate_schema_one(archive: &Path) -> Result<()> {
         )
         .map_err(storage)?;
         let items_dir = collection_dir.join("items");
-        if !items_dir.exists() {
+        if !items_dir.try_exists().map_err(storage)? {
             continue;
         }
         for item_dir in directories(&items_dir)? {
             let revisions_dir = item_dir.join("revisions");
-            if !revisions_dir.exists() {
+            if !revisions_dir.try_exists().map_err(storage)? {
                 continue;
             }
             let mut versions = directories(&revisions_dir)?;
             versions.sort();
             for version in versions {
                 let manifest_path = version.join("manifest.toml");
-                if !manifest_path.exists() {
+                if !manifest_path.try_exists().map_err(storage)? {
                     continue;
                 }
                 let manifest: Manifest =
@@ -254,7 +254,7 @@ pub(crate) fn migrate_schema_one(archive: &Path) -> Result<()> {
                     manifest.item_id, manifest.revision.0
                 ));
                 let manifest_bytes = toml::to_string_pretty(&migrated_manifest).map_err(storage)?;
-                if checkpoint_path.exists() {
+                if checkpoint_path.try_exists().map_err(storage)? {
                     // Once checkpointed, every output must still match. Never repair tampering.
                     for (path, expected) in [
                         (version.join("record.v2.json"), canonical.as_slice()),
@@ -288,7 +288,7 @@ pub(crate) fn migrate_schema_one(archive: &Path) -> Result<()> {
     sync_directory(&checkpoint.join("records"))?;
     for collection_dir in directories(&archive.join("collections"))? {
         let path = collection_dir.join("collection.toml");
-        if !path.exists() {
+        if !path.try_exists().map_err(storage)? {
             continue;
         }
         let collection: Collection =
@@ -513,10 +513,16 @@ pub(crate) fn emit_typed_record<T: Serialize>(
         .ok_or_else(|| Error::Storage("collection has no archive parent".into()))?;
     // Older migration attempts wrote directly into the final directory. Retain
     // unfinished records for diagnosis, then republish atomically from the source.
-    if directory.exists() && !directory.join("manifest.toml").exists() {
+    if directory.try_exists().map_err(storage)?
+        && !directory
+            .join("manifest.toml")
+            .try_exists()
+            .map_err(storage)?
+    {
         if archive
             .join(".archive-migrations/schema-1-to-2/complete")
-            .exists()
+            .try_exists()
+            .map_err(storage)?
         {
             return Err(Error::Storage(
                 "committed typed revision is missing its manifest".into(),
@@ -590,7 +596,7 @@ fn claim_owner<K: Ord + Copy>(
     Ok(())
 }
 pub(crate) fn write_immutable(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path.exists() {
+    if path.try_exists().map_err(storage)? {
         if fs::read(path).map_err(storage)? == bytes {
             return Ok(());
         }

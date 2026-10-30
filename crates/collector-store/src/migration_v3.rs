@@ -52,12 +52,12 @@ pub(crate) fn read_evidence(
     collection_id: CollectionId,
 ) -> Result<Vec<EvidenceRecordV3>> {
     let root = collection.join("evidence");
-    if !root.exists() {
+    if !root.try_exists().map_err(storage)? {
         return Ok(vec![]);
     }
     let mut records = Vec::new();
     for directory in directories(&root)? {
-        if directory.join("revisions").exists() {
+        if directory.join("revisions").try_exists().map_err(storage)? {
             let mut revisions = directories(&directory.join("revisions"))?;
             revisions.sort();
             let revision = revisions.last().ok_or_else(|| {
@@ -104,13 +104,13 @@ pub(crate) fn read_assets(
     collection_id: CollectionId,
 ) -> Result<Vec<AssetRecordV3>> {
     let root = collection.join("assets");
-    if !root.exists() {
+    if !root.try_exists().map_err(storage)? {
         return Ok(vec![]);
     }
     let mut records = Vec::new();
     for entity in directories(&root)? {
         let revisions_root = entity.join("revisions");
-        if !revisions_root.exists() {
+        if !revisions_root.try_exists().map_err(storage)? {
             continue;
         }
         let mut revisions = directories(&revisions_root)?;
@@ -153,13 +153,13 @@ pub(crate) fn read_captures(
     collection_id: CollectionId,
 ) -> Result<Vec<CaptureRecordV3>> {
     let root = collection.join("captures");
-    if !root.exists() {
+    if !root.try_exists().map_err(storage)? {
         return Ok(vec![]);
     }
     let mut records = Vec::new();
     for entity in directories(&root)? {
         let revisions_root = entity.join("revisions");
-        if !revisions_root.exists() {
+        if !revisions_root.try_exists().map_err(storage)? {
             continue;
         }
         let mut revisions = directories(&revisions_root)?;
@@ -167,7 +167,11 @@ pub(crate) fn read_captures(
         let Some(revision) = revisions.last() else {
             continue;
         };
-        if !revision.join("manifest.v3.toml").exists() {
+        if !revision
+            .join("manifest.v3.toml")
+            .try_exists()
+            .map_err(storage)?
+        {
             #[derive(Deserialize)]
             struct V2Manifest {
                 schema_version: u32,
@@ -194,7 +198,7 @@ pub(crate) fn read_captures(
             }
             let mut legacy_root = None;
             for prior in revisions.iter().rev().skip(1) {
-                if prior.join("record.v3.json").exists() {
+                if prior.join("record.v3.json").try_exists().map_err(storage)? {
                     let prior_bytes = fs::read(prior.join("record.v3.json")).map_err(storage)?;
                     let prior: RevisionEnvelopeV3<CaptureRecordV3> =
                         serde_json::from_slice(&prior_bytes).map_err(storage)?;
@@ -266,7 +270,7 @@ fn archive_root(collection: &Path) -> Result<&Path> {
 pub(crate) fn migrate_schema_two(archive: &Path) -> Result<()> {
     let checkpoint = archive.join(".archive-migrations/schema-2-to-3");
     let complete = checkpoint.join("complete");
-    if complete.exists() {
+    if complete.try_exists().map_err(storage)? {
         verify_completed_migration(archive, &checkpoint)?;
         return Ok(());
     }
@@ -281,23 +285,31 @@ pub(crate) fn migrate_schema_two(archive: &Path) -> Result<()> {
         .map_err(storage)?;
         migrate_capture_records(archive, &collection_dir, collection.id)?;
         let items_dir = collection_dir.join("items");
-        if !items_dir.exists() {
+        if !items_dir.try_exists().map_err(storage)? {
             continue;
         }
         for item_dir in directories(&items_dir)? {
             let revisions_dir = item_dir.join("revisions");
-            if !revisions_dir.exists() {
+            if !revisions_dir.try_exists().map_err(storage)? {
                 continue;
             }
             let mut revisions = directories(&revisions_dir)?;
             revisions.sort();
             for revision_dir in revisions {
-                let manifest_path = if revision_dir.join("manifest.v2.toml").exists() {
+                let manifest_path = if revision_dir
+                    .join("manifest.v2.toml")
+                    .try_exists()
+                    .map_err(storage)?
+                {
                     revision_dir.join("manifest.v2.toml")
                 } else {
                     revision_dir.join("manifest.toml")
                 };
-                let record_path = if revision_dir.join("record.v2.json").exists() {
+                let record_path = if revision_dir
+                    .join("record.v2.json")
+                    .try_exists()
+                    .map_err(storage)?
+                {
                     revision_dir.join("record.v2.json")
                 } else {
                     revision_dir.join("record.json")
@@ -423,12 +435,12 @@ fn migrate_capture_records(
     collection_id: CollectionId,
 ) -> Result<()> {
     let root = collection.join("captures");
-    if !root.exists() {
+    if !root.try_exists().map_err(storage)? {
         return Ok(());
     }
     for entity in directories(&root)? {
         let revisions_root = entity.join("revisions");
-        if !revisions_root.exists() {
+        if !revisions_root.try_exists().map_err(storage)? {
             continue;
         }
         for revision in directories(&revisions_root)? {
@@ -487,8 +499,8 @@ fn migrate_capture_records(
                 .map_err(storage)?;
             if legacy_root.is_none()
                 && let Some(item_id) = capture.association.item_id
-                && find_item_directory(collection, item_id)
-                    .is_some_and(|item| item.join("files").exists())
+                && let Some(item) = find_item_directory(collection, item_id)?
+                && item.join("files").try_exists().map_err(storage)?
             {
                 legacy_root = Some(LegacyCaptureRootV3 {
                     item_id,
@@ -513,15 +525,16 @@ fn migrate_capture_records(
     Ok(())
 }
 
-fn find_item_directory(collection: &Path, id: ItemId) -> Option<PathBuf> {
-    directories(&collection.join("items"))
-        .ok()?
-        .into_iter()
-        .find(|path| {
-            path.file_name()
-                .and_then(|value| value.to_str())
-                .is_some_and(|value| value.ends_with(&id.to_string()))
-        })
+fn find_item_directory(collection: &Path, id: ItemId) -> Result<Option<PathBuf>> {
+    let items = collection.join("items");
+    if !items.try_exists().map_err(storage)? {
+        return Ok(None);
+    }
+    Ok(directories(&items)?.into_iter().find(|path| {
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.ends_with(&id.to_string()))
+    }))
 }
 
 fn write_item_sidecar(
@@ -640,7 +653,7 @@ fn asset_payloads(archive: &Path, item_dir: &Path, asset: &Asset) -> Result<Vec<
 }
 
 fn checked_output(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path.exists() {
+    if path.try_exists().map_err(storage)? {
         if fs::read(path).map_err(storage)? == bytes {
             return Ok(());
         }
@@ -691,7 +704,7 @@ fn verify_completed_migration(archive: &Path, checkpoint: &Path) -> Result<()> {
         let mut found = None;
         for collection in directories(&archive.join("collections"))? {
             let items = collection.join("items");
-            if !items.exists() {
+            if !items.try_exists().map_err(storage)? {
                 continue;
             }
             for item in directories(&items)? {

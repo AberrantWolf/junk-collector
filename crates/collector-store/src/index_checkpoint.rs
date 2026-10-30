@@ -143,7 +143,7 @@ fn inventory(archive: &Path) -> Result<BTreeMap<String, String>> {
     let mut files = BTreeMap::new();
     visit(archive, &archive.join("collections"), &mut files)?;
     let migrations = archive.join(".archive-migrations");
-    if migrations.exists() {
+    if migrations.try_exists().map_err(storage)? {
         visit(archive, &migrations, &mut files)?;
     }
     Ok(files)
@@ -152,7 +152,7 @@ fn inventory(archive: &Path) -> Result<BTreeMap<String, String>> {
 fn seal(db: &Connection, archive: &Path) -> Result<()> {
     db.execute("INSERT INTO catalog_checkpoint SELECT 1,?1,?2,epoch FROM catalog_index_state WHERE singleton=1
                 ON CONFLICT(singleton) DO UPDATE SET format=excluded.format,archive=excluded.archive,epoch=excluded.epoch",
-        params![FORMAT, archive.to_string_lossy()]).map_err(storage)?;
+        params![FORMAT, archive.canonicalize().map_err(storage)?.to_string_lossy()]).map_err(storage)?;
     Ok(())
 }
 
@@ -160,7 +160,7 @@ pub(crate) fn reusable(db: &Connection, archive: &Path) -> Result<(bool, usize)>
     let valid: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM catalog_checkpoint c JOIN catalog_index_state s USING(singleton)
          WHERE c.format=?1 AND c.archive=?2 AND c.epoch=s.epoch)",
-        params![FORMAT, archive.to_string_lossy()], |row| row.get(0),
+        params![FORMAT, archive.canonicalize().map_err(storage)?.to_string_lossy()], |row| row.get(0),
     ).map_err(storage)?;
     if !valid {
         return Ok((false, 0));
@@ -291,7 +291,7 @@ pub(crate) fn open_catalog(state: &Path) -> Result<Connection> {
     let suffix = TransactionId::new();
     for name in ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm"] {
         let source = state.join(name);
-        if source.exists() {
+        if source.try_exists().map_err(storage)? {
             fs::rename(source, state.join(format!("{name}.{reason}-{suffix}"))).map_err(storage)?;
         }
     }

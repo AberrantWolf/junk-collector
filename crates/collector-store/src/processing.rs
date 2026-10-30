@@ -636,7 +636,7 @@ impl Store {
 }
 
 fn latest_v4(root: &Path) -> Result<Vec<PathBuf>> {
-    if !root.exists() {
+    if !root.try_exists().map_err(storage)? {
         return Ok(Vec::new());
     }
     let mut result = Vec::new();
@@ -652,7 +652,7 @@ fn latest_v4(root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn all_v4(root: &Path) -> Result<Vec<PathBuf>> {
-    if !root.exists() {
+    if !root.try_exists().map_err(storage)? {
         return Ok(Vec::new());
     }
     let mut result = Vec::new();

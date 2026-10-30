@@ -1092,6 +1092,7 @@ fn startup_retains_and_reports_unknown_staging() {
     let root = tempfile::tempdir().unwrap();
     let archive = root.path().join("archive");
     let state = root.path().join("state");
+    drop(Store::initialize(&archive, &state, None).unwrap());
     std::fs::create_dir_all(archive.join(".staging/operator-copy")).unwrap();
     std::fs::write(
         archive.join(".staging/operator-copy/unrecognized.bin"),
@@ -1115,6 +1116,7 @@ fn corrupt_known_publication_blocks_store_open() {
     let root = tempfile::tempdir().unwrap();
     let archive = root.path().join("archive");
     let state = root.path().join("state");
+    drop(Store::initialize(&archive, &state, None).unwrap());
     let transaction = TransactionId::new();
     std::fs::create_dir_all(archive.join(".transactions")).unwrap();
     std::fs::create_dir_all(archive.join(".staging").join(transaction.to_string())).unwrap();
@@ -1186,7 +1188,7 @@ fn rewrite_record(path: &Path, update: impl FnOnce(&mut serde_json::Value)) {
     std::fs::write(manifest, updated).unwrap();
 }
 #[test]
-fn failed_metadata_save_releases_absent_marker_before_a_new_save_and_backup() {
+fn unavailable_journal_root_blocks_metadata_admission_and_restart_preserves_authority() {
     let (root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let change = |value: &str| UpdateMetadataAuthorityCommand {
@@ -1200,14 +1202,24 @@ fn failed_metadata_save_releases_absent_marker_before_a_new_save_and_backup() {
     let transactions = root.path().join("archive/.transactions");
     let retained = root.path().join("retained-transactions");
     std::fs::rename(&transactions, &retained).unwrap();
-    std::fs::write(&transactions, b"fixture blocks journal creation").unwrap();
+    std::fs::write(&transactions, b"fixture blocks journal storage").unwrap();
     let failed = command();
     assert!(matches!(
         service.update_metadata_authority(&actor, saved.id, change("Failed save"), &failed),
-        Err(Error::Storage(_))
+        Err(Error::Unavailable(_))
     ));
     std::fs::remove_file(&transactions).unwrap();
     std::fs::rename(retained, &transactions).unwrap();
+    assert!(matches!(
+        Catalog::item(store.as_ref(), saved.id),
+        Err(Error::Unavailable(_))
+    ));
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_existing(root.path().join("archive"), root.path().join("state"), None).unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
     let expected = service
         .update_metadata_authority(&actor, saved.id, change("Recovered save"), &command())
         .unwrap();
@@ -2187,7 +2199,8 @@ fn committed_wave1_schema2_and_private_v2_fixture_are_upgrade_inputs() {
     drop(private);
     let before = tree_hashes(&archive);
 
-    let store = Store::open(&archive, &state).unwrap();
+    Store::enroll_archive(&archive, &state, None).unwrap();
+    let store = Store::open_existing(&archive, &state, None).unwrap();
     for (path, digest) in before {
         assert_eq!(
             Digest::sha256(&std::fs::read(archive.join(path)).unwrap()),
@@ -2311,11 +2324,13 @@ fn private_lock_prevents_two_servers_using_the_same_auth_state() {
     let state = root.path().join("state");
     let first = Store::open(root.path().join("archive-one"), &state).unwrap();
     assert!(matches!(
-        Store::open(root.path().join("archive-two"), &state),
+        Store::open(root.path().join("archive-one"), &state),
         Err(Error::Unavailable(message)) if message.contains("private state")
     ));
     drop(first);
-    Store::open(root.path().join("archive-two"), &state).unwrap();
+    Store::open(root.path().join("archive-one"), &state).unwrap();
+    // Dropping the lock never authorizes attaching private state to another archive.
+    assert!(Store::open(root.path().join("archive-two"), &state).is_err());
 }
 
 #[test]
@@ -3302,7 +3317,10 @@ fn private_migration_pins_the_existing_first_row_default_once() {
     let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
     private.execute_batch("CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, administrator INTEGER NOT NULL); CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO users VALUES ('018f0000-0000-7000-8000-000000000090','first','preserved-hash',1); INSERT INTO users VALUES ('018f0000-0000-7000-8000-000000000091','second','preserved-hash-2',0);").unwrap();
     drop(private);
-    let store = Store::open(root.path().join("archive"), &state).unwrap();
+    let archive = root.path().join("archive");
+    std::fs::create_dir_all(archive.join("collections")).unwrap();
+    Store::enroll_archive(&archive, &state, None).unwrap();
+    let store = Store::open_existing(&archive, &state, None).unwrap();
     assert_eq!(store.default_username().unwrap(), "first");
     store
         .create_user("third", "a sufficiently long password", false)
@@ -28587,4 +28605,129 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
             .title,
         "Matched first"
     );
+}
+
+struct LoseArchiveIdentityOnce {
+    archive: PathBuf,
+    point: collector_store::PublicationFaultPoint,
+    lost: AtomicBool,
+}
+impl collector_store::PublicationFaultInjector for LoseArchiveIdentityOnce {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == self.point && !self.lost.swap(true, Ordering::SeqCst) {
+            std::fs::rename(
+                self.archive.join(".archive-identity"),
+                self.archive.join("fixture-disconnected-identity"),
+            )
+            .unwrap();
+        }
+        // The real storage guard must detect the loss; this hook returns success.
+        Ok(())
+    }
+}
+
+#[test]
+fn archive_loss_at_each_import_publication_phase_retains_source_authority_and_retries() {
+    let bytes = b"retained source while archive unavailable";
+    for point in publication_points() {
+        let (root, store, actor, service, collection) = setup();
+        let (saved, upload) = ready_upload(&store, &actor, &service, collection.id, bytes);
+        drop(service);
+        drop(store);
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let store = Store::open_with_publication_fault(
+            &archive,
+            &state,
+            Arc::new(LoseArchiveIdentityOnce {
+                archive: archive.clone(),
+                point,
+                lost: AtomicBool::new(false),
+            }),
+        )
+        .unwrap();
+        assert!(
+            ImportPort::commit_upload(&store, upload.id).is_err(),
+            "{point:?}"
+        );
+        let source = state
+            .join("uploads")
+            .join(upload.id.to_string())
+            .join("0.part");
+        assert_eq!(std::fs::read(&source).unwrap(), bytes);
+        std::fs::rename(
+            archive.join("fixture-disconnected-identity"),
+            archive.join(".archive-identity"),
+        )
+        .unwrap();
+        assert!(matches!(
+            Catalog::item(&store, saved.id),
+            Err(Error::Unavailable(_))
+        ));
+        drop(store);
+        let recovered = Store::open_existing(&archive, &state, None).unwrap();
+        let committed = ImportPort::commit_upload(&recovered, upload.id).unwrap();
+        assert_eq!(committed.title, saved.title);
+        assert_eq!(committed.captures[0].id, upload.capture_id);
+        assert_eq!(Catalog::evidence(&recovered, saved.id).unwrap().len(), 1);
+        assert_eq!(
+            resource_bytes(
+                ContentPort::representation(&recovered, saved.id, upload.representation_id, 0)
+                    .unwrap()
+            ),
+            bytes
+        );
+        assert_eq!(std::fs::read(source).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn archive_loss_after_encoding_retains_master_and_durable_request_for_restart() {
+    let clock = Arc::new(TestClock::new(1_900_000_000));
+    let (root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
+    let imported = derivative_import(&service, &actor, collection.id);
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let encoder = Arc::new(DerivativeFixtureEncoder::new());
+    let marker = archive.join(".archive-identity");
+    let retained_marker = archive.join("fixture-disconnected-identity");
+    let from = marker.clone();
+    let to = retained_marker.clone();
+    *encoder.after_encode.lock().unwrap() = Some(Box::new(move || {
+        std::fs::rename(&from, &to).unwrap();
+    }));
+    let service = service.with_audio_converter(encoder.clone());
+    let master_before = Catalog::capture(store.as_ref(), imported.capture_id)
+        .unwrap()
+        .representations[0]
+        .clone();
+    let job = service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    assert!(service.run_next_job("disconnected-encoder").is_err());
+    assert_eq!(encoder.calls.load(Ordering::SeqCst), 1);
+    drop(service);
+    drop(store);
+    // Startup cannot clean scratch or reconcile the Job against absent authority.
+    assert!(Store::open_existing(&archive, &state, None).is_err());
+    std::fs::rename(retained_marker, marker).unwrap();
+    clock.advance(120);
+    let store = Arc::new(Store::open_with_clock(&archive, &state, clock).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .with_audio_converter(encoder.clone());
+    assert_ne!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    assert!(service.run_next_job("reconnected-encoder").unwrap());
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    assert_eq!(capture.representations.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&capture.representations[0]).unwrap(),
+        serde_json::to_value(master_before).unwrap()
+    );
+    store.reindex().unwrap();
 }

@@ -19,9 +19,19 @@ services:
     restart: unless-stopped
     stop_grace_period: 60s
     volumes:
-      - ${COLLECTOR_DATA:?Set COLLECTOR_DATA to an absolute local directory}/config:/data/config:ro
-      - ${COLLECTOR_DATA}/archive:/data/archive
-      - ${COLLECTOR_DATA}/state:/data/state
+      - type: bind
+        source: ${COLLECTOR_CONFIG:-${COLLECTOR_DATA:?Set COLLECTOR_DATA}/config}
+        target: /data/config
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${COLLECTOR_ARCHIVE:-${COLLECTOR_DATA}/archive}
+        target: /data/archive
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${COLLECTOR_STATE:-${COLLECTOR_DATA}/state}
+        target: /data/state
+        bind: {create_host_path: false}
     command: ["serve"]
 
   cli:
@@ -29,7 +39,22 @@ services:
     profiles: ["tools"]
     network_mode: none
     volumes:
-      - ${COLLECTOR_DATA}:/data
+      - type: bind
+        source: ${COLLECTOR_CONFIG:-${COLLECTOR_DATA}/config}
+        target: /data/config
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${COLLECTOR_ARCHIVE:-${COLLECTOR_DATA}/archive}
+        target: /data/archive
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${COLLECTOR_STATE:-${COLLECTOR_DATA}/state}
+        target: /data/state
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${COLLECTOR_BACKUPS:-${COLLECTOR_DATA}/backups}
+        target: /data/backups
+        bind: {create_host_path: false}
     command: ["doctor"]
 
   initialize:

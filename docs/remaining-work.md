@@ -1,5 +1,17 @@
 # Remaining work — home-lab priorities
 
+## Remote archive preparation for Fi — 2026-10-30
+
+The requested safeguards and guarded deployment templates are prepared in a separate
+worktree. See [delivery and validation](validation/remote-archive-safety-2026-10-30.md)
+and the [deployment, reconnect and paired recovery runbook](../deploy/container/remote-archive.md).
+The next gate is isolated Linux/container and actual-stack NFS qualification,
+measured SSD headroom, effective single-writer/boot fences and a demonstrated
+paired restore including pending imports. Preserve all private state; no deletion
+policy for `state/imports` is established. No live migration is authorized by this
+preparation. Use the runbook's exact approval criteria before proposing cutover.
+The active-work shutdown follow-up below remains open.
+
 ## Digital album matching — delivered, 2026-10-30
 
 The [clean shared review](validation/digital-album-matching-review-2026-10-30.md)

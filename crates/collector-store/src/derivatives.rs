@@ -329,7 +329,7 @@ impl Store {
             let source = spool.path().join(index.to_string());
             write_new(&source, &data)?;
             // Every artifact is new. Never overwrite an independently retained record.
-            if self.archive.join(&path).exists() {
+            if self.archive.join(&path).try_exists().map_err(storage)? {
                 return Err(Error::Conflict);
             }
             payloads.push(V3PayloadPublication {
@@ -338,11 +338,15 @@ impl Store {
                 sha256: Digest::sha256(&data).hex,
             });
         }
-        if payloads
-            .iter()
-            .any(|payload| self.archive.join(&payload.published_path).exists())
-        {
-            return Err(Error::Conflict);
+        for payload in &payloads {
+            if self
+                .archive
+                .join(&payload.published_path)
+                .try_exists()
+                .map_err(storage)?
+            {
+                return Err(Error::Conflict);
+            }
         }
         let legacy_root = {
             let db = lock(&self.db)?;
@@ -488,7 +492,7 @@ impl Store {
 impl Store {
     pub(crate) fn cleanup_derivative_scratch(&self) -> Result<()> {
         let root = self.state.join("derivative-scratch");
-        if !root.exists() {
+        if !root.try_exists().map_err(storage)? {
             return Ok(());
         }
         for entry in fs::read_dir(&root).map_err(storage)? {

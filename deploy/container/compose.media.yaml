@@ -31,7 +31,11 @@ services:
       nofile: {soft: 512, hard: 512}
     tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=16m"]
     volumes:
-      - ${COLLECTOR_DATA}/archive:/media:ro
+      - type: bind
+        source: ${COLLECTOR_ARCHIVE:-${COLLECTOR_DATA}/archive}
+        target: /media
+        read_only: true
+        bind: {create_host_path: false}
       - media-authority:/run/collector-authority:ro
       - media-http:/run/collector-media
     depends_on: [collector]

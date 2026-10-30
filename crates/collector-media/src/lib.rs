@@ -118,9 +118,24 @@ impl FileHandle {
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
     }
 }
+fn read_archive_identity(root: &cap_std::fs::Dir) -> std::io::Result<String> {
+    let metadata = root.symlink_metadata(".archive-identity")?;
+    if !metadata.is_file() || metadata.len() != 37 {
+        return Err(std::io::Error::other(
+            "missing or malformed archive identity",
+        ));
+    }
+    let mut value = String::new();
+    root.open(".archive-identity")?
+        .take(38)
+        .read_to_string(&mut value)?;
+    Ok(value)
+}
+
 #[derive(Clone)]
 pub struct MediaState {
     root: Arc<cap_std::fs::Dir>,
+    archive_identity: Option<String>,
     authority: Authority,
     origins: Arc<Vec<String>>,
     files: Arc<Mutex<HashMap<String, Arc<FileHandle>>>>,
@@ -143,6 +158,7 @@ impl MediaState {
                 archive,
                 cap_std::ambient_authority(),
             )?),
+            archive_identity: None,
             authority: Authority {
                 client: reqwest::Client::builder()
                     .no_proxy()
@@ -158,7 +174,30 @@ impl MediaState {
             admissions: Arc::new(tokio::sync::Semaphore::new(8)),
         })
     }
+    /// Configure the intended remote archive without mounting state or configuration.
+    pub fn with_archive_identity(mut self, expected: String) -> anyhow::Result<Self> {
+        let expected = format!("{}\n", uuid::Uuid::parse_str(&expected)?);
+        anyhow::ensure!(
+            read_archive_identity(&self.root)? == expected,
+            "media archive identity mismatch"
+        );
+        self.archive_identity = Some(expected);
+        Ok(self)
+    }
+
     async fn file(&self, metadata: &MediaFile) -> Result<Option<Arc<FileHandle>>, StatusCode> {
+        if let Some(expected) = &self.archive_identity {
+            let root = self.root.clone();
+            let expected = expected.clone();
+            let matches = tokio::task::spawn_blocking(move || {
+                read_archive_identity(&root).is_ok_and(|actual| actual == expected)
+            })
+            .await
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+            if !matches {
+                return Err(StatusCode::SERVICE_UNAVAILABLE);
+            }
+        }
         if metadata.inline.is_some() {
             return if metadata.relative_path.is_none()
                 && metadata.inline.as_ref().is_some_and(|s| {
@@ -718,6 +757,50 @@ fn read_only_mounts(archive: &Path, mountinfo: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn expected_archive_identity_fences_cached_media_without_private_state() {
+        let root = tempfile::tempdir().unwrap();
+        let expected = uuid::Uuid::now_v7().to_string();
+        std::fs::write(
+            root.path().join(".archive-identity"),
+            format!("{expected}\n"),
+        )
+        .unwrap();
+        std::fs::write(root.path().join("track"), b"original").unwrap();
+        let state = MediaState::new(
+            root.path(),
+            &root.path().join("socket"),
+            "0".repeat(64),
+            vec![],
+        )
+        .unwrap()
+        .with_archive_identity(expected)
+        .unwrap();
+        let info = MediaFile {
+            relative_path: Some("track".into()),
+            inline: None,
+            length: 8,
+            digest: Digest::sha256(b"original"),
+            media_type: "audio/flac".into(),
+            verify_on_transfer: false,
+        };
+        assert!(state.file(&info).await.is_ok());
+        std::fs::remove_file(root.path().join(".archive-identity")).unwrap();
+        assert!(matches!(
+            state.file(&info).await,
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        ));
+        std::fs::write(
+            root.path().join(".archive-identity"),
+            format!("{}\n", uuid::Uuid::now_v7()),
+        )
+        .unwrap();
+        assert!(matches!(
+            state.file(&info).await,
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        ));
+    }
+
     #[test]
     fn ranges_are_exact_and_fail_closed() {
         assert_eq!(range(Some("bytes=-1"), 1), Ok(Some((0, 0))));

@@ -27,12 +27,15 @@ async fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("socket directory missing"))?
             .join("service-key"),
     )?;
-    let state = collector_media::MediaState::new(
+    let mut state = collector_media::MediaState::new(
         &args.archive,
         &args.authority_socket,
         key,
         args.allowed_origin,
     )?;
+    if let Ok(expected) = std::env::var("COLLECTOR_ARCHIVE_ID") {
+        state = state.with_archive_identity(expected)?;
+    }
     let router = collector_media::router(state);
     if let Some(socket) = args.http_socket {
         use std::os::unix::fs::{FileTypeExt, PermissionsExt};

@@ -243,7 +243,7 @@ pub(super) fn recover(db: &mut Connection, archive: &Path, state: &Path) -> Resu
             _ => return Err(Error::Storage("unknown command recovery root".into())),
         };
         let path = root.join(path);
-        if path.exists() {
+        if path.try_exists().map_err(storage)? {
             let bytes = fs::read(&path).map_err(storage)?;
             let actual_digest = Digest::sha256(&bytes).hex;
             if actual_digest != digest {

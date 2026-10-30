@@ -32,6 +32,7 @@ mod processing;
 mod provisional_imports;
 mod publication;
 mod reference_index;
+mod storage_guard;
 mod work_history;
 use chrono::Utc;
 use collector_app::{
@@ -55,22 +56,45 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex as StdMutex, MutexGuard},
 };
+pub use storage_guard::{ArchiveMount, validate_remote_archive_target};
 
 pub(crate) const PRIVATE_SCHEMA: u32 = 21;
 
 pub(crate) fn storage(e: impl std::fmt::Display) -> Error {
     Error::Storage(e.to_string())
 }
+// All Store mutex admission shares the archive guard. Private-only account
+// recovery uses its separate existing-state opener and remains available offline.
+pub(crate) struct Mutex<T> {
+    inner: StdMutex<T>,
+    guard: Arc<storage_guard::ArchiveGuard>,
+}
+impl<T> Mutex<T> {
+    fn guarded(value: T, guard: &Arc<storage_guard::ArchiveGuard>) -> Self {
+        Self {
+            inner: StdMutex::new(value),
+            guard: guard.clone(),
+        }
+    }
+    fn lock(&self) -> Result<MutexGuard<'_, T>> {
+        self.guard.check()?;
+        let value = self
+            .inner
+            .lock()
+            .map_err(|_| Error::Unavailable("storage lock poisoned; restart required".into()))?;
+        self.guard.check()?;
+        Ok(value)
+    }
+}
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
-    mutex
-        .lock()
-        .map_err(|_| Error::Unavailable("storage lock poisoned; restart required".into()))
+    mutex.lock()
 }
 #[derive(Clone)]
 pub struct Store {
     pub(crate) archive: PathBuf,
+    archive_guard: Arc<storage_guard::ArchiveGuard>,
     pub(crate) state: PathBuf,
     pub(crate) db: Arc<Mutex<Connection>>,
     pub(crate) writer: Arc<Mutex<()>>,
@@ -187,6 +211,80 @@ impl Store {
         Ok(self)
     }
 
+    /// Open an enrolled installation without creating directories or identities.
+    pub fn open_existing(
+        archive: impl AsRef<Path>,
+        state: impl AsRef<Path>,
+        mount: Option<ArchiveMount>,
+    ) -> Result<Self> {
+        if !state
+            .as_ref()
+            .join("private.sqlite")
+            .try_exists()
+            .map_err(storage)?
+        {
+            return Err(Error::Unavailable("private state missing; restore the complete paired recovery point or use setup for an explicit fresh installation".into()));
+        }
+        Self::open_guarded(
+            archive.as_ref(),
+            state.as_ref(),
+            Arc::new(NoPublicationFault),
+            Arc::new(SystemClock::default()),
+            mount,
+        )
+    }
+
+    /// Explicit fresh setup (or idempotent reopen of an already bound installation).
+    pub fn initialize(
+        archive: impl AsRef<Path>,
+        state: impl AsRef<Path>,
+        mount: Option<ArchiveMount>,
+    ) -> Result<Self> {
+        let private_exists = state
+            .as_ref()
+            .join("private.sqlite")
+            .try_exists()
+            .map_err(storage)?;
+        if !private_exists
+            && state
+                .as_ref()
+                .join("archive-binding")
+                .try_exists()
+                .map_err(storage)?
+        {
+            return Err(Error::Unavailable("private database missing from an enrolled installation; restore complete private state before setup".into()));
+        }
+        let archive_only = !private_exists
+            && archive
+                .as_ref()
+                .join("collections")
+                .try_exists()
+                .map_err(storage)?;
+        storage_guard::enroll(
+            archive.as_ref(),
+            state.as_ref(),
+            mount.as_ref(),
+            archive_only,
+        )?;
+        Self::open_guarded(
+            archive.as_ref(),
+            state.as_ref(),
+            Arc::new(NoPublicationFault),
+            Arc::new(SystemClock::default()),
+            mount,
+        )
+    }
+
+    /// Explicit stopped-server adoption of an existing archive, never automatic.
+    pub fn enroll_archive(
+        archive: impl AsRef<Path>,
+        state: impl AsRef<Path>,
+        mount: Option<ArchiveMount>,
+    ) -> Result<()> {
+        storage_guard::enroll(archive.as_ref(), state.as_ref(), mount.as_ref(), true)
+    }
+
+    /// Initialization-capable embedded opener. Executable startup uses open_existing.
     pub fn open(archive: impl AsRef<Path>, state: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_dependencies(
             archive,
@@ -225,10 +323,49 @@ impl Store {
         publication_fault: Arc<dyn PublicationFaultInjector>,
         clock: Arc<dyn Clock>,
     ) -> Result<Self> {
+        if state
+            .as_ref()
+            .join("archive-binding")
+            .try_exists()
+            .map_err(storage)?
+            && !state
+                .as_ref()
+                .join("private.sqlite")
+                .try_exists()
+                .map_err(storage)?
+        {
+            return Err(Error::Unavailable("private database missing from an enrolled installation; restore complete private state".into()));
+        }
+        let archive_only = !state
+            .as_ref()
+            .join("private.sqlite")
+            .try_exists()
+            .map_err(storage)?
+            && archive
+                .as_ref()
+                .join("collections")
+                .try_exists()
+                .map_err(storage)?;
+        storage_guard::enroll(archive.as_ref(), state.as_ref(), None, archive_only)?;
+        Self::open_guarded(
+            archive.as_ref(),
+            state.as_ref(),
+            publication_fault,
+            clock,
+            None,
+        )
+    }
+
+    fn open_guarded(
+        archive: &Path,
+        state: &Path,
+        publication_fault: Arc<dyn PublicationFaultInjector>,
+        clock: Arc<dyn Clock>,
+        mount: Option<ArchiveMount>,
+    ) -> Result<Self> {
+        let archive_guard = storage_guard::ArchiveGuard::open(archive, state, mount)?;
         let startup = std::time::Instant::now();
         tracing::info!("opening archive and private state");
-        fs::create_dir_all(archive.as_ref()).map_err(storage)?;
-        fs::create_dir_all(state.as_ref()).map_err(storage)?;
         let archive = fs::canonicalize(archive).map_err(storage)?;
         let state = fs::canonicalize(state).map_err(storage)?;
         if state.starts_with(&archive) || archive.starts_with(&state) {
@@ -248,6 +385,8 @@ impl Store {
             .try_lock_exclusive()
             .map_err(|_| Error::Unavailable("private state is already in use".into()))?;
         let private_lock = ProcessLock(private_lock);
+        archive_guard.check()?;
+        let archive = archive_guard.path();
         let archive_lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -304,16 +443,23 @@ impl Store {
         let mut store = Self {
             archive,
             state,
-            db: Arc::new(Mutex::new(db)),
-            writer: Arc::new(Mutex::new(())),
-            uploads: Arc::new(Mutex::new(())),
-            job_publication_gate: Arc::new(Mutex::new(())),
-            job_dispatch: Arc::new(Mutex::new(collector_app::JobDispatchPolicy::default())),
+            db: Arc::new(Mutex::guarded(db, &archive_guard)),
+            writer: Arc::new(Mutex::guarded((), &archive_guard)),
+            uploads: Arc::new(Mutex::guarded((), &archive_guard)),
+            job_publication_gate: Arc::new(Mutex::guarded((), &archive_guard)),
+            job_dispatch: Arc::new(Mutex::guarded(
+                collector_app::JobDispatchPolicy::default(),
+                &archive_guard,
+            )),
+            archive_guard: archive_guard.clone(),
             recovery_report,
             catalog_reused: false,
             receipt: None,
             command_result: None,
-            publication_fault,
+            publication_fault: Arc::new(storage_guard::GuardedPublicationFault {
+                inner: publication_fault,
+                guard: archive_guard.clone(),
+            }),
             clock,
             _archive_lock: Arc::new(archive_lock),
             _private_lock: Arc::new(private_lock),
@@ -353,6 +499,7 @@ impl Store {
             elapsed_ms = startup.elapsed().as_millis(),
             "startup store ready"
         );
+        store.archive_guard.check()?;
         Ok(store)
     }
     /// Whether startup reused the already maintained projection after metadata checks.
@@ -405,7 +552,7 @@ impl Store {
         let mut evidence_v3 = Vec::new();
         for dir in directories(&self.archive.join("collections"))? {
             let path = dir.join("collection.toml");
-            if !path.exists() {
+            if !path.try_exists().map_err(storage)? {
                 continue;
             }
             let mut collection: Collection =
@@ -449,18 +596,22 @@ impl Store {
             )?);
 
             let items_dir = dir.join("items");
-            if !items_dir.exists() {
+            if !items_dir.try_exists().map_err(storage)? {
                 continue;
             }
             for item_dir in directories(&items_dir)? {
                 let versions_dir = item_dir.join("revisions");
-                if !versions_dir.exists() {
+                if !versions_dir.try_exists().map_err(storage)? {
                     continue;
                 }
                 let mut versions = directories(&versions_dir)?;
                 versions.sort();
                 if let Some(version) = versions.last() {
-                    if version.join("manifest.v3.toml").exists() {
+                    if version
+                        .join("manifest.v3.toml")
+                        .try_exists()
+                        .map_err(storage)?
+                    {
                         let (item, references) = migration_v3::read_item(version, collection.id)?;
                         let referenced = references
                             .iter()
@@ -506,11 +657,12 @@ impl Store {
                         continue;
                     }
                     let migrated_manifest = version.join("manifest.v2.toml");
-                    let (manifest_path, record_path) = if migrated_manifest.exists() {
-                        (migrated_manifest, version.join("record.v2.json"))
-                    } else {
-                        (version.join("manifest.toml"), version.join("record.json"))
-                    };
+                    let (manifest_path, record_path) =
+                        if migrated_manifest.try_exists().map_err(storage)? {
+                            (migrated_manifest, version.join("record.v2.json"))
+                        } else {
+                            (version.join("manifest.toml"), version.join("record.json"))
+                        };
                     let manifest: Manifest =
                         toml::from_str(&fs::read_to_string(manifest_path).map_err(storage)?)
                             .map_err(storage)?;
@@ -764,6 +916,7 @@ impl Store {
         }
         self.record_command(&tx, &())?;
         index_checkpoint::rebuilt(&tx, &self.archive)?;
+        self.archive_guard.check()?;
         tx.commit().map_err(storage)?;
         Ok(())
     }
@@ -1109,7 +1262,7 @@ impl Store {
                 .state
                 .join("asset-publication")
                 .join(asset_id.to_string());
-            if staging.exists() {
+            if staging.try_exists().map_err(storage)? {
                 fs::remove_dir_all(&staging).map_err(storage)?;
                 sync_directory(
                     staging
@@ -2866,12 +3019,12 @@ fn reconcile_collection_creations(db: &mut Connection, archive: &Path) -> Result
         }
         let directory = archive.join(&recovery.relative_path);
         let record_path = directory.join("collection.toml");
-        if !record_path.exists() {
+        if !record_path.try_exists().map_err(storage)? {
             let temporary = directory.join("collection.toml.tmp");
-            if temporary.exists() {
+            if temporary.try_exists().map_err(storage)? {
                 fs::remove_file(temporary).map_err(storage)?;
             }
-            if directory.exists() {
+            if directory.try_exists().map_err(storage)? {
                 if fs::read_dir(&directory).map_err(storage)?.next().is_some() {
                     return Err(Error::Storage(
                         "incomplete collection recovery contains unknown archive data".into(),
@@ -3292,7 +3445,7 @@ impl Catalog for Store {
             .check(PublicationFaultPoint::Prepared)?;
         let collection = recovery.collection;
         let dir = self.archive.join(&recovery.relative_path);
-        if !dir.exists() {
+        if !dir.try_exists().map_err(storage)? {
             fs::create_dir(&dir).map_err(storage)?;
         }
         let collection_bytes = toml::to_string_pretty(&collection).map_err(storage)?;
@@ -3302,7 +3455,7 @@ impl Catalog for Store {
             &Digest::sha256(collection_bytes.as_bytes()).hex,
             &collection,
         )?;
-        if dir.join("collection.toml").exists() {
+        if dir.join("collection.toml").try_exists().map_err(storage)? {
             if fs::read(dir.join("collection.toml")).map_err(storage)?
                 != collection_bytes.as_bytes()
             {
@@ -3312,7 +3465,7 @@ impl Catalog for Store {
             }
         } else {
             let temp = dir.join("collection.toml.tmp");
-            if temp.exists() {
+            if temp.try_exists().map_err(storage)? {
                 fs::remove_file(&temp).map_err(storage)?;
             }
             write_new(&temp, collection_bytes.as_bytes())?;
@@ -4030,7 +4183,7 @@ fn staged_asset_payloads(
     asset: &Asset,
 ) -> Result<Vec<V3PayloadPublication>> {
     let staging = state.join("asset-publication").join(asset.id.to_string());
-    if !staging.exists() {
+    if !staging.try_exists().map_err(storage)? {
         return Ok(vec![]);
     }
     let mut payloads = Vec::new();
@@ -4315,7 +4468,7 @@ fn publish_typed_revision<T: Serialize>(
         .join("revisions");
     fs::create_dir_all(&revisions).map_err(storage)?;
     let destination = revisions.join(format!("{:020}", revision.0));
-    if destination.exists() {
+    if destination.try_exists().map_err(storage)? {
         if fs::read(destination.join("record.json")).map_err(storage)? != bytes
             || fs::read(destination.join("manifest.toml")).map_err(storage)? != manifest_bytes
         {
@@ -4514,7 +4667,7 @@ fn publish_v3_revision_controlled<T: Serialize>(
             .parent()
             .ok_or_else(|| Error::Storage("Asset payload has no parent".into()))?;
         fs::create_dir_all(parent).map_err(storage)?;
-        if published.exists() {
+        if published.try_exists().map_err(storage)? {
             if hash_publication_file(&published, checkpoint)?.hex != payload.sha256 {
                 return Err(Error::Storage(
                     "published Asset payload conflicts with retry".into(),
@@ -4527,7 +4680,7 @@ fn publish_v3_revision_controlled<T: Serialize>(
         sync_directory(parent)?;
     }
     let payload_stage = stage.join("payloads");
-    if payload_stage.exists() {
+    if payload_stage.try_exists().map_err(storage)? {
         fs::remove_dir(&payload_stage).map_err(storage)?;
         sync_directory(&stage)?;
     }
@@ -4550,7 +4703,7 @@ fn publish_v3_revision_controlled<T: Serialize>(
         .parent()
         .ok_or_else(|| Error::Storage("revision destination has no parent".into()))?;
     fs::create_dir_all(revisions).map_err(storage)?;
-    if destination.exists() {
+    if destination.try_exists().map_err(storage)? {
         if fs::read(destination.join("record.v3.json")).map_err(storage)? != record_bytes
             || fs::read(destination.join("manifest.v3.toml")).map_err(storage)? != manifest_bytes
         {
@@ -4670,19 +4823,23 @@ fn read_latest_records<T: serde::de::DeserializeOwned + TypedArchiveEntity>(
     root: &Path,
     collection: CollectionId,
 ) -> Result<Vec<T>> {
-    if !root.exists() {
+    if !root.try_exists().map_err(storage)? {
         return Ok(Vec::new());
     }
     let mut result = Vec::new();
     for entity in directories(root)? {
         let revisions = entity.join("revisions");
-        if !revisions.exists() {
+        if !revisions.try_exists().map_err(storage)? {
             continue;
         }
         let mut versions = directories(&revisions)?;
         versions.sort();
         if let Some(version) = versions.last() {
-            if version.join("manifest.v3.toml").exists() {
+            if version
+                .join("manifest.v3.toml")
+                .try_exists()
+                .map_err(storage)?
+            {
                 let manifest: V3TypedManifest = toml::from_str(
                     &fs::read_to_string(version.join("manifest.v3.toml")).map_err(storage)?,
                 )

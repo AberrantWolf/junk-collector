@@ -1,5 +1,8 @@
 # Local recovery snapshots and optional incremental exports
 
+For a local-state/NFS-archive split, use the [Fi remote archive runbook](remote-archive.md).
+Its paired recovery point replaces the single-root snapshot assumption.
+
 This is an optional Btrfs operations path over the existing stopped-server recovery
 contract. It is separate from Collector's sealed full-backup format: do not pass a
 tar increment to `validate-backup` or `restore --backup`. The full-copy
