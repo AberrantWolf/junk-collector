@@ -1,13 +1,27 @@
 # Remaining work — home-lab priorities
 
-## Beta.14 release and current-NAS update — in progress, 2026-10-30
+## Beta.14 published and installed on the current NAS — 2026-10-30
 
-The user requested publication and an update of the existing FatChocobo stack
-before migration. Candidate [release notes](releases/v0.1.0-beta.14.md) cover digital
-matching, archive enrollment and recovery. Exact-source release qualification,
-validated-image publication, a complete stopped-server recovery point, offline
-legacy archive enrollment and current-NAS acceptance are the delivery gates.
-This update retains the NAS layout and does not authorize the Fi cutover.
+Beta.14 is published on `preview` and runs on FatChocobo core/media at the verified
+immutable digest. Full exact-source checks (558 Rust tests passed, 5 ignored), all
+29 browser journeys, both native runtime/media qualifications and release-image
+browser acceptance pass. Publication reuses the sealed images without compiling.
+
+A complete stopped-server read-only Btrfs snapshot retains all archive, state,
+config and 76 GB of imports. Snapshot database checks and explicit offline legacy
+enrollment pass. Config/TLS/ServerId, runtime isolation/mounts, account/grant/job
+counts, all 18 unrelated processes, public HTTPS and 12 current assets pass. Both
+services have zero restarts; all 79 Library summaries are ready. No jobs were
+unfinished. The stopped-checkpoint-to-readiness interval was 105.7 seconds. See
+[publication, recovery point and NAS acceptance](validation/container-beta14-publication-2026-10-30.md).
+This retains the current NAS layout and does not approve Fi migration.
+
+Release-tool follow-up: investigate source-receipt recovery falling back to
+redundant checks as a concurrent exact-source run completed. Subsequent local
+recovery and a whole-run retry consumed the verified receipt without source changes.
+A run/listing/artifact visibility race is the likely cause; its precise transition
+is not yet reproduced. Retain all provenance requirements and add a focused
+regression before changing this behavior.
 
 ## Remote archive preparation and safety review for Fi — 2026-10-30
 
@@ -15,7 +29,7 @@ The requested safeguards and guarded deployment templates have passed repeated
 safety review and are integrated into main. See the
 [review fixes, rollback test and integration evidence](validation/remote-archive-review-2026-10-30.md). See [delivery and validation](validation/remote-archive-safety-2026-10-30.md)
 and the [deployment, reconnect and paired recovery runbook](../deploy/container/remote-archive.md).
-The next gate is isolated Linux/container and actual-stack NFS qualification,
+The next gate is actual Fi remote-mode/container and NFS qualification,
 measured SSD headroom, effective single-writer/boot fences and a demonstrated
 paired restore including pending imports. Preserve all private state; no deletion
 policy for `state/imports` is established. No live migration is authorized by this

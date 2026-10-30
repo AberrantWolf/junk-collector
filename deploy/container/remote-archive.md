@@ -82,7 +82,10 @@ Enrollment creates only identity/binding and required operational directories;
 it does not open/migrate SQLite or validate all media. Record the UUID and back
 up both files. Repeating enrollment against a matching pair is safe. A missing
 mount, mismatched binding or incomplete restore is a refusal. Never remove the
-binding to bypass a refusal. No enrollment has been run against production here.
+binding to bypass a refusal. The initial preparation ran no production enrollment.
+The later [beta.14 update](../../docs/validation/container-beta14-publication-2026-10-30.md)
+enrolled the retained local NAS installation after a complete stopped-server snapshot;
+that is separate from Fi/NFS qualification and migration approval.
 
 ## Filesystem contract and interruption behavior
 

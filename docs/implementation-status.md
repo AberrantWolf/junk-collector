@@ -1,3 +1,17 @@
+## Beta.14 published and current NAS upgraded — 2026-10-30
+
+Digital matching and archive safeguards now ship in beta.14. Exact-source full
+checks, all 29 browser journeys, both native runtime/media qualifications and
+release-image acceptance pass. The published installation bundle includes guarded
+remote deployment support. FatChocobo core/media use the verified immutable image
+after a complete stopped-server recovery snapshot and explicit legacy enrollment.
+Config/TLS/ServerId, accounts/grants/jobs, isolation/mounts, all 18 unrelated
+containers, public HTTPS and 12 current assets are retained/verified. Both services
+have zero restarts; all 79 Library summaries are ready. No jobs were unfinished.
+See [publication and NAS recovery/acceptance](validation/container-beta14-publication-2026-10-30.md).
+The existing NAS storage layout remains; actual Fi/NFS and paired restoration
+qualification are still required before migration.
+
 ## Remote archive review corrections — 2026-10-30
 
 Atomic no-replace identity publication and durable explicit-bootstrap recovery
