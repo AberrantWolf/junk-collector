@@ -17,6 +17,9 @@ remain separate. New MusicBrainz responses use interpretation schema 2; schema-1
 retained snapshots keep their original decoder so stored accepted evidence is
 not rewritten. Metadata-authority revisions also fence discovery and review, so
 later album selection edits cannot silently change the frozen computation.
+Status exposes input staleness from recorded revisions and source fingerprints;
+retry checks the same inputs before queueing. Reviewed application returns its
+committed authority record so automatic artwork follows the newly chosen release.
 [Delivery evidence](validation/digital-album-matching-2026-10-29.md) records acceptance.
 
 ## Change-driven Library summaries — 2026-10-28

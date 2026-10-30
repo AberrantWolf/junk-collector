@@ -435,11 +435,11 @@ impl CollectionService {
             artwork_error: None,
         };
         if frozen.acquisition.request.provider.0 == MUSICBRAINZ_PROVIDER_ID {
-            let record =
+            let mut record =
                 self.refresh_resolution_metadata(claim, frozen, snapshot_id, vec![], "text")?;
             result.outcome = record.observations.last().map(|value| value.outcome);
             if let Some(reviewed) = &frozen.reviewed_digital_match {
-                self.apply_reviewed_digital_metadata(claim, frozen, reviewed)?;
+                record = self.apply_reviewed_digital_metadata(claim, frozen, reviewed)?;
             }
             if frozen.acquire_artwork
                 && result.outcome == Some(MetadataRefreshOutcome::Candidates)

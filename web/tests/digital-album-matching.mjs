@@ -22,7 +22,7 @@ const provider=createServer(async(req,res)=>{
 const config=path.join(scratch,'collector.toml');await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19891"\nprivate_bind = "127.0.0.1:19892"\nlan_bind = "127.0.0.1:19893"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[providers]\nmusicbrainz_user_agent = "MatchingTests/1 (test@example.invalid)"\nacoustid_api_key = "fixture-key"\n`);
 const binary=process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server');const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{env:{...process.env,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_ACOUSTID_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
-let browser,page;
+let browser,page,releaseDiscoveryResponse;
 try{
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19891/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
  const spki=createHash('sha256').update(new X509Certificate(await readFile(path.join(scratch,'state/tls/cert.pem'))).publicKey.export({type:'spki',format:'der'})).digest('base64');
@@ -32,8 +32,22 @@ try{
  const collection=await page.evaluate(async()=>{const result=await(await fetch('/api/v1/collection-search?limit=50')).json();return result.items.find(c=>c.name==='Matching shelf').id;});
  await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','02.mp3'].map(name=>path.join(root,'crates/collector-store/tests/fixtures/digital-matching',name)));await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();await imports.getByLabel('Store',{exact:true}).fill('Private matching store');await imports.getByLabel('Order reference').fill('PRIVATE-MATCHING-ORDER');await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');
- await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);const matching=page.getByRole('region',{name:'Digital album matching'});await expect(matching.getByRole('button',{name:'Find matching albums',exact:true})).toBeEnabled();await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();await expect(matching.getByRole('button',{name:'Cancel album matching'})).toBeVisible();
+ await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);const matching=page.getByRole('region',{name:'Digital album matching'});await expect(matching.getByRole('button',{name:'Find matching albums',exact:true})).toBeEnabled();// Hold an accepted response while inventory refresh supersedes its request scope.
+ let acceptPost,releasePost;let refreshed=false,scopeReloaded=0;const accepted=new Promise(resolve=>acceptPost=resolve);const postGate=new Promise(resolve=>{releasePost=resolve;releaseDiscoveryResponse=resolve;});
+ const matchUrl=`**/api/v1/items/${item}/digital-album-matches`;
+ await page.route(matchUrl,async route=>{if(route.request().method()!=='POST'){if(refreshed)scopeReloaded++;await route.continue();return;}const response=await route.fetch();acceptPost();await postGate;await route.fulfill({response}).catch(()=>{});});
+ await matching.evaluate(region=>{window.matchingAlerts=[];new MutationObserver(()=>{for(const alert of region.querySelectorAll('[role=alert]'))window.matchingAlerts.push(alert.textContent);}).observe(region,{subtree:true,childList:true,characterData:true});});
+ await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();await accepted;
+ const itemUrl=`**/api/v1/items/${item}`;
+ await page.route(itemUrl,async route=>{const response=await route.fetch();const data=await response.json();data.revision+=1;refreshed=true;await route.fulfill({json:data});});
+ await page.getByRole('button',{name:'Refresh panel',exact:true}).click();await expect.poll(()=>refreshed,{timeout:15000}).toBe(true);await expect.poll(()=>scopeReloaded,{timeout:15000}).toBeGreaterThan(0);
+ await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeVisible({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect(matching).toContainText('Find matching albums again');
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'stale matching notice overflows mobile');await page.screenshot({path:'/tmp/collector-stale-matching-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1000});
+ assert.deepEqual(await page.evaluate(()=>window.matchingAlerts),[],'obsolete discovery request surfaced an error after refresh');
+ releasePost();await page.unroute(matchUrl);await page.unroute(itemUrl);
+
  // Reopening recovers the server-owned workflow without a second submission.
+ const lostReceipt=await page.evaluate(id=>Object.keys(localStorage).find(key=>key.startsWith('collector.digital-match.')&&key.endsWith(`.${id}`)),item);assert.ok(lostReceipt,'superseded admission must retain its receipt');
  await page.goto(`${origin}/`);await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeEnabled({timeout:90000});await expect(matching).toContainText('2 of 2 files matched');await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
  await matching.getByText('Review proposed track mapping',{exact:true}).click();await expect(matching).toContainText('01.flac → disc 1, track 1: Matched first');
@@ -41,7 +55,13 @@ try{
  await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'matching results overflow mobile');await mkdir(path.join(root,'web/test-results'),{recursive:true});await page.screenshot({path:path.join(root,'web/test-results/digital-matching-mobile.png'),fullPage:true});
  await matching.getByRole('button',{name:'Use this album and track mapping'}).click();
  await expect.poll(async()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title,item),{timeout:60000}).toBe('Matched album');
+ await expect(matching).toContainText('Find matching albums again',{timeout:15000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
+ // A fresh search must acknowledge the lost response and admit a new job in one click.
+ await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();
+ await expect.poll(async()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/digital-album-matches`)).json()).jobs.length,item),{timeout:15000}).toBe(2);
+ await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeEnabled({timeout:60000});
+ assert.equal(await page.evaluate(key=>localStorage.getItem(key),lostReceipt),null);
  await page.goto(`${origin}/?collection=${collection}&item=${item}`);await page.getByRole('region',{name:'Album tracks'}).getByText('1. Matched first',{exact:true}).waitFor();await page.getByRole('region',{name:'Album tracks'}).getByText('2. Matched second',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);console.log('digital album matching: real audio → provider discovery → reopened review → mobile mapping → applied tracks passed');
 }catch(error){if(page)await page.screenshot({path:'/tmp/collector-digital-matching-failure.png',fullPage:true}).catch(()=>{});console.error(logs);throw error;}
-finally{if(browser)await browser.close();await stopProcess(server);provider.closeAllConnections();await new Promise(r=>provider.close(r));await rm(scratch,{recursive:true,force:true});}
+finally{releaseDiscoveryResponse?.();if(browser)await browser.close();await stopProcess(server);provider.closeAllConnections();await new Promise(r=>provider.close(r));await rm(scratch,{recursive:true,force:true});}

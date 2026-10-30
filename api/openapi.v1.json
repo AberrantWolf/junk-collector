@@ -11143,6 +11143,7 @@
       "DigitalMatchingView": {
         "type": "object",
         "required": [
+          "stale",
           "job",
           "result"
         ],
@@ -11152,6 +11153,9 @@
           },
           "result": {
             "type": "object"
+          },
+          "stale": {
+            "type": "boolean"
           }
         }
       },

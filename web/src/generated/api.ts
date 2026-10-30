@@ -3211,6 +3211,7 @@ export interface components {
         DigitalMatchingView: {
             job: components["schemas"]["JobView"];
             result: Record<string, never>;
+            stale: boolean;
         };
         /** @description Acquisition facts belong to the purchased package, independently of physical copies. */
         DigitalPurchase: {
