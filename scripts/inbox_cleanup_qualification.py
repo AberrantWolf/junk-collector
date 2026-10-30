@@ -30,7 +30,7 @@ def qualify(cookie, imported, request, verify_originals,
     assert refused["state"] == "failed" and refused["removed_bytes"] == 0, refused
     assert "writable" in refused["error"].lower(), refused
     for name, content in originals.items():
-        assert read_file("/data/inbox-fixture/Reference disc/" + name) == content
+        assert read_file("/inbox/Reference disc/" + name) == content
     verify_originals(cookie, item, originals)
     print("Read-only inbox cleanup refused; source files and archive originals retained", flush=True)
     env["COLLECTOR_INBOX_READ_ONLY"] = "false"
