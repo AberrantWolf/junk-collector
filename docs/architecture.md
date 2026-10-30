@@ -2,7 +2,7 @@
 
 The store adapter owns archive identity, local-state binding and filesystem checks.
 Normal executable startup opens an enrolled installation only; setup initializes
-fresh storage explicitly, and stopped-server enrollment adopts existing archives.
+fresh storage explicitly with an identity-bound durable bootstrap intent, and stopped-server enrollment adopts existing archives.
 Every catalog/writer lock checks the bound archive before exposing or changing
 state. Availability failures latch the process closed until restart. Linux store
 paths are anchored to an open directory descriptor, so replacing/unmounting the

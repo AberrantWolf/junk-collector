@@ -1,9 +1,10 @@
 # Remaining work — home-lab priorities
 
-## Remote archive preparation for Fi — 2026-10-30
+## Remote archive preparation and safety review for Fi — 2026-10-30
 
-The requested safeguards and guarded deployment templates are prepared in a separate
-worktree. See [delivery and validation](validation/remote-archive-safety-2026-10-30.md)
+The requested safeguards and guarded deployment templates have passed repeated
+safety review and are integrated into main. See the
+[review fixes, rollback test and integration evidence](validation/remote-archive-review-2026-10-30.md). See [delivery and validation](validation/remote-archive-safety-2026-10-30.md)
 and the [deployment, reconnect and paired recovery runbook](../deploy/container/remote-archive.md).
 The next gate is isolated Linux/container and actual-stack NFS qualification,
 measured SSD headroom, effective single-writer/boot fences and a demonstrated

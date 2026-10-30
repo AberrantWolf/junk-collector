@@ -5,6 +5,47 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const IDENTITY: &str = ".archive-identity";
 const BINDING: &str = "archive-binding";
+const INITIALIZING: &str = "archive-initializing";
+
+// Never expose a truncated identity after a crash. Named temporary files are
+// private and published without replacing any existing identity.
+fn publish_identity(path: &Path, value: &str) -> Result<()> {
+    if path.try_exists().map_err(unavailable)? {
+        if identity(path)? != value {
+            return Err(unavailable("existing identity conflicts"));
+        }
+        return sync_directory(path.parent().ok_or(Error::Conflict)?);
+    }
+    let parent = path.parent().ok_or(Error::Conflict)?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".collector-identity-")
+        .tempfile_in(parent)
+        .map_err(storage)?;
+    temporary.write_all(value.as_bytes()).map_err(storage)?;
+    temporary.as_file().sync_all().map_err(storage)?;
+    temporary.persist_noclobber(path).map_err(storage)?;
+    sync_directory(parent)
+}
+
+pub(crate) fn initialization_pending(state: &Path) -> Result<bool> {
+    if !state.join(INITIALIZING).try_exists().map_err(unavailable)? {
+        return Ok(false);
+    }
+    if identity(&state.join(INITIALIZING))? != identity(&state.join(BINDING))? {
+        return Err(unavailable(
+            "initialization intent does not match bound archive",
+        ));
+    }
+    Ok(true)
+}
+
+pub(crate) fn finish_initialization(state: &Path) -> Result<()> {
+    if initialization_pending(state)? {
+        fs::remove_file(state.join(INITIALIZING)).map_err(storage)?;
+        sync_directory(state)?;
+    }
+    Ok(())
+}
 
 /// Exact source reported by Linux mountinfo, e.g. `nas:/volume1/archive`.
 /// Presence requires Linux, an NFS filesystem and local private state.
@@ -139,7 +180,29 @@ pub(crate) fn enroll(
     let binding = state.join(BINDING);
     if binding.try_exists().map_err(unavailable)? {
         ArchiveGuard::open(archive, state, mount.cloned())?.check()?;
-        return Ok(());
+        sync_directory(archive)?;
+        return sync_directory(state);
+    }
+    if !state
+        .join("private.sqlite")
+        .try_exists()
+        .map_err(unavailable)?
+        && state.try_exists().map_err(unavailable)?
+    {
+        // Only a demonstrably new local state tree can become a fresh profile.
+        // In particular, lost pre-guard SQLite beside retained imports is not fresh.
+        for entry in fs::read_dir(state).map_err(unavailable)? {
+            let name = entry.map_err(unavailable)?.file_name();
+            let name = name.to_str().ok_or(Error::Conflict)?;
+            if name != ".private.lock"
+                && name != INITIALIZING
+                && !name.starts_with(".collector-identity-")
+            {
+                return Err(unavailable(
+                    "private state contains retained data but no database; restore the complete state",
+                ));
+            }
+        }
     }
     if !adopt {
         // Existing private state is never treated as fresh, even if the NAS is empty.
@@ -155,9 +218,12 @@ pub(crate) fn enroll(
         if archive.try_exists().map_err(unavailable)? {
             for entry in fs::read_dir(archive).map_err(unavailable)? {
                 let name = entry.map_err(unavailable)?.file_name();
-                if ![IDENTITY, ".writer.lock"]
-                    .iter()
-                    .any(|allowed| name == *allowed)
+                if !name
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(".collector-identity-"))
+                    && ![IDENTITY, ".writer.lock"]
+                        .iter()
+                        .any(|allowed| name == *allowed)
                 {
                     return Err(unavailable(
                         "nonempty archive needs explicit enroll-archive",
@@ -229,17 +295,23 @@ pub(crate) fn enroll(
         identity(&marker)?
     } else {
         let value = format!("{}\n", uuid::Uuid::now_v7());
-        write_new(&marker, value.as_bytes())?;
-        sync_directory(archive)?;
+        publish_identity(&marker, &value)?;
         value
     };
+    sync_directory(archive)?;
     if binding.try_exists().map_err(unavailable)? {
         if identity(&binding)? != value {
             return Err(unavailable("concurrent enrollment differs"));
         }
     } else {
-        write_new(&binding, value.as_bytes())?;
-        sync_directory(state)?;
+        if !state
+            .join("private.sqlite")
+            .try_exists()
+            .map_err(unavailable)?
+        {
+            publish_identity(&state.join(INITIALIZING), &value)?;
+        }
+        publish_identity(&binding, &value)?;
     }
     Ok(())
 }
@@ -267,11 +339,10 @@ pub(crate) fn check_filesystems(
                 return Err(unavailable("nested private-state mounts are unsupported"));
             }
         }
-        if matches!(
-            filesystem.kind.as_str(),
-            "nfs" | "nfs4" | "cifs" | "smb3" | "fuse.sshfs"
-        ) {
-            return Err(unavailable("private state/SQLite must be on local disk"));
+        if !private_filesystem_allowed(&filesystem.kind, mount.is_some()) {
+            return Err(unavailable(
+                "private state/SQLite must be on a supported local disk filesystem",
+            ));
         }
     }
     if let Some(mount) = mount {
@@ -279,6 +350,16 @@ pub(crate) fn check_filesystems(
     }
     validate_private_layout(state)?;
     Ok(())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn private_filesystem_allowed(kind: &str, remote_archive: bool) -> bool {
+    if remote_archive {
+        // Fail closed on unknown/FUSE/network/ephemeral backends in split mode.
+        matches!(kind, "ext4" | "btrfs" | "xfs" | "f2fs" | "zfs")
+    } else {
+        !matches!(kind, "nfs" | "nfs4" | "cifs" | "smb3" | "fuse.sshfs")
+    }
 }
 
 fn validate_private_layout(state: &Path) -> Result<()> {
@@ -306,6 +387,15 @@ fn validate_private_layout(state: &Path) -> Result<()> {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(unavailable(error)),
         };
+        if name == "private.sqlite"
+            && metadata.is_file()
+            && metadata.len() == 0
+            && !initialization_pending(state)?
+        {
+            return Err(unavailable(
+                "private database is empty in an established installation; restore complete private state",
+            ));
+        }
         if (directory && !metadata.is_dir()) || (!directory && !metadata.is_file()) {
             return Err(unavailable(
                 "private databases/scratch must not be aliases or special files",
@@ -474,6 +564,74 @@ pub fn validate_remote_archive_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_setup_recovers_interrupted_bootstrap_but_never_missing_established_state() {
+        for binding_published in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let archive = root.path().join("archive");
+            let state = root.path().join("state");
+            enroll(&archive, &state, None, false).unwrap();
+            if !binding_published {
+                fs::remove_file(state.join(BINDING)).unwrap();
+            }
+            fs::write(
+                state.join(".collector-identity-interrupted"),
+                b"partial unpublished bytes",
+            )
+            .unwrap();
+            assert!(Store::open_existing(&archive, &state, None).is_err());
+            let store = Store::initialize(&archive, &state, None).unwrap();
+            store
+                .create_user("owner", "a sufficiently long password", true)
+                .unwrap();
+            assert_eq!(store.default_username().unwrap(), "owner");
+            assert!(!state.join(INITIALIZING).exists());
+            drop(store);
+            fs::rename(state.join("private.sqlite"), state.join("retained.sqlite")).unwrap();
+            assert!(Store::initialize(&archive, &state, None).is_err());
+            assert!(!state.join("private.sqlite").exists());
+        }
+    }
+
+    #[test]
+    fn atomic_identities_never_replace_authority_and_lost_unbound_state_is_not_fresh() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("identity");
+        let value = format!("{}\n", uuid::Uuid::now_v7());
+        publish_identity(&file, &value).unwrap();
+        assert!(publish_identity(&file, &format!("{}\n", uuid::Uuid::now_v7())).is_err());
+        assert_eq!(identity(&file).unwrap(), value);
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        fs::create_dir_all(state.join("imports")).unwrap();
+        fs::write(state.join("imports/retained"), b"unfinished original").unwrap();
+        assert!(Store::initialize(&archive, &state, None).is_err());
+        assert_eq!(
+            fs::read(state.join("imports/retained")).unwrap(),
+            b"unfinished original"
+        );
+        assert!(!state.join(BINDING).exists());
+        assert!(!state.join("private.sqlite").exists());
+        assert!(!archive.exists(), "refusal must precede archive creation");
+    }
+
+    #[test]
+    fn split_mode_rejects_unknown_network_and_ephemeral_private_filesystems() {
+        for kind in [
+            "nfs4",
+            "fuse.s3fs",
+            "fuse.sshfs",
+            "overlay",
+            "tmpfs",
+            "unknown",
+        ] {
+            assert!(!private_filesystem_allowed(kind, true), "{kind}");
+        }
+        for kind in ["ext4", "btrfs", "xfs"] {
+            assert!(private_filesystem_allowed(kind, true));
+        }
+    }
+
     #[test]
     fn nfs_admission_checks_source_type_and_nested_mounts() {
         let source = ArchiveMount {

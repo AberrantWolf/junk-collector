@@ -1,3 +1,13 @@
+## Remote archive review corrections — 2026-10-30
+
+Atomic no-replace identity publication and durable explicit-bootstrap recovery
+close marker truncation and pre-SQLite interruption gaps. Lost unbound private
+state cannot be treated as fresh setup. Paired rollback now explicitly drains
+writeback and addresses restored point-in-time security state. These fixes retain
+the documented actual NFS/Linux/container qualification gate. Repeated review,
+paired rollback testing and integration are recorded in the
+[review evidence](validation/remote-archive-review-2026-10-30.md).
+
 # Remote archive preparation — 2026-10-30
 
 Implemented identity-bound storage admission, explicit enrollment/fresh setup,

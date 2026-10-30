@@ -51,6 +51,8 @@ empty directory. Normal executable commands now require an enrolled installation
 
 - `.archive-identity` in the archive and `archive-binding` in local state must match.
   These UUID files are recovery data, not proof of payload integrity or a secret.
+  They are synced and atomically published without replacement; unpublished
+  identity temporaries do not become archive authority.
 - Required archive directories must exist without aliases, and share the root's
   filesystem. Remote mode checks the actual Linux mount table, expected source,
   hard NFSv4.1/4.2 and absence of nested archive mounts before recovery/mutation.
@@ -62,7 +64,10 @@ empty directory. Normal executable commands now require an enrolled installation
   An already admitted operation cannot be redirected into an unmounted directory.
   `/proc/self/fd` must be available inside the container. Remote mode is Linux-only.
 - Missing enrolled private SQLite is a recovery error; normal startup does not
-  create a new identity/database. Local account recovery remains independent of
+  create a new identity/database. Explicit setup can resume an interrupted fresh
+  bootstrap only when its durable initialization intent matches the archive
+  binding; the intent is retired before accounts can be created. Unbound retained
+  imports/scratch without their database are refused as non-fresh state. Local account recovery remains independent of
   archive availability.
 - Publication/recovery presence checks propagate I/O errors. An inaccessible
   artifact is not interpreted as an absent artifact eligible for cleanup.
@@ -82,7 +87,8 @@ binding to bypass a refusal. No enrollment has been run against production here.
 ## Filesystem contract and interruption behavior
 
 Require Linux NFSv4.1 or 4.2 with `hard`, ordinary coherent directory lookups,
-exclusive file creation, same-filesystem file/directory rename, file `fsync` and
+exclusive file creation, no-replace hard links for identity publication,
+same-filesystem file/directory rename, file `fsync` and
 directory `fsync` that report failures. The server must honor stable writes/COMMIT
 and durable metadata, including after server restart. Use the NAS's supported
 synchronous/stable export behavior; do not enable asynchronous acknowledgement to
@@ -205,18 +211,27 @@ media copy/hash is required for a routine point:
    calls are not a checkpoint. Use the same point ID on both machines. Record image
    digests, source revision, ServerId, archive UUID, paths, source/export/mount options,
    numeric groups, schema/tool versions and pending work IDs/timestamps.
-2. While all writers stay stopped, take a read-only NAS snapshot covering the
+2. Verify the intended mounts, then drain pending writeback with `sync -f` on
+   the archive mount and local state/config filesystems on the fixture/approved
+   deployment host; abort the checkpoint on any error or blocked call. This reads
+   no media for hashing. While all writers stay stopped, take a read-only NAS snapshot covering the
    **entire archive** and a read-only Fi snapshot covering **all** local state/config.
    They need not be simultaneous when the writer remains stopped between them.
    Include `state/imports`, uploads, scratch, WAL/database files as one stopped
    tree, TLS keys, Caddy data/config, Compose/env and host lifecycle/mount settings.
    Record any other authoritative external path explicitly. Socket files themselves
    are ephemeral; copy the authority volume's persistent service key into the
-   same private local point, retaining its numeric ownership and mode. Keep these
+   pair's private recovery directory alongside the snapshots, retaining its
+   numeric ownership and mode, and sync that copy before sealing the pair. Keep these
    private. An inbox is separate; retain unfinished source packages under its own
    snapshot/retention policy.
 3. On Fi Btrfs, verify the actual local data subvolume and absence of excluded
-   nested subvolumes/mounts, then use a read-only snapshot outside it. On ext4/XFS
+   nested subvolumes/mounts, then use a read-only snapshot outside it. Enumerate
+   every resolved host bind: overriding `COLLECTOR_STATE`, `COLLECTOR_CONFIG` or
+   Caddy paths can place private data outside `COLLECTOR_DATA`. Capture each such
+   filesystem/tree as another member of the same stopped-writer point and list
+   all members in the pair record; a snapshot of `COLLECTOR_DATA` alone is not
+   sufficient in that layout. On ext4/XFS
    without a coordinated snapshot tool, copy the **complete stopped local tree**
    with ownership/ACLs to a new private point and sync it. This may copy 76 GB locally;
    it does not copy 105 GB of NAS media. Check free space and copy exit status.
@@ -246,7 +261,11 @@ retain a new current pair and restore **both** old members plus old config/image
 The latter deliberately loses post-point changes in the active view; reconcile or
 export wanted new records before approving that rollback. Do not merge databases,
 rsync old files over live roots or assume append-only originals make mixed points
-safe. This change does not supply an automatic merge/downgrade tool.
+safe. Restoring private state also restores point-in-time passwords, grants and
+revocations: reapply known post-point security changes and revoke restored
+sessions/device credentials as appropriate in the isolated restored instance
+before reopening public ingress. This change does not supply an automatic
+merge/downgrade tool.
 
 Verify restoration before switching ingress: sign in with retained credentials,
 check ServerId/TLS/passkeys/grants, inventory counts and representative accepted

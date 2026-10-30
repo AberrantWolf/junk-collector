@@ -54,6 +54,18 @@ def qualify(root, source):
             pass
         else:
             raise ValueError("exclusive create replaced an existing file")
+        # Identity publication may use a no-replace hard-link fallback on NFS.
+        linked = staged / "identity-link"
+        os.link(staged / "payload", linked)
+        try:
+            os.link(staged / "payload", linked)
+        except FileExistsError:
+            pass
+        else:
+            raise ValueError("no-replace link overwrote an existing identity")
+        if linked.read_bytes() != payload:
+            raise ValueError("hard-link identity publication readback failed")
+        linked.unlink()
         sync_dir(staged)
         sync_dir(probe)
         published = probe / "published"

@@ -251,6 +251,7 @@ impl Store {
                 .join("archive-binding")
                 .try_exists()
                 .map_err(storage)?
+            && !storage_guard::initialization_pending(state.as_ref())?
         {
             return Err(Error::Unavailable("private database missing from an enrolled installation; restore complete private state before setup".into()));
         }
@@ -333,6 +334,7 @@ impl Store {
                 .join("private.sqlite")
                 .try_exists()
                 .map_err(storage)?
+            && !storage_guard::initialization_pending(state.as_ref())?
         {
             return Err(Error::Unavailable("private database missing from an enrolled installation; restore complete private state".into()));
         }
@@ -500,6 +502,7 @@ impl Store {
             "startup store ready"
         );
         store.archive_guard.check()?;
+        storage_guard::finish_initialization(&store.state)?;
         Ok(store)
     }
     /// Whether startup reused the already maintained projection after metadata checks.

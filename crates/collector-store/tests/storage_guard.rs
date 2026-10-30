@@ -144,3 +144,126 @@ fn private_sqlite_and_import_roots_cannot_be_redirected_through_symlinks() {
         assert!(Store::open_existing(&archive, &state, None).is_err());
     }
 }
+
+#[test]
+fn paired_stopped_copy_restores_pending_work_after_new_writes_without_losing_current_pair() {
+    use collector_app::JobPort;
+    fn copy_owned_fixture(from: &std::path::Path, to: &std::path::Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_owned_fixture(&entry.path(), &target);
+            } else {
+                assert!(entry.file_type().unwrap().is_file());
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let a = root.path().join("archive");
+    let s = root.path().join("state");
+    let store = Store::initialize(&a, &s, None).unwrap();
+    let user = store
+        .create_user("owner", "a retained recovery password", true)
+        .unwrap();
+    let server = store.server_id().unwrap();
+    let id = JobId::new();
+    store
+        .enqueue_job(JobSpec {
+            id,
+            user_id: user,
+            collection_id: None,
+            item_id: None,
+            kind: "test.processing".into(),
+            phase: "queued".into(),
+            total_units: 1,
+            request: serde_json::json!({"retained":"request"}),
+            frozen_input: None,
+        })
+        .unwrap();
+    let timestamp = store.job_record(id, user).unwrap().created_at;
+    fs::create_dir_all(s.join("imports/retained-source")).unwrap();
+    fs::write(
+        s.join("imports/retained-source/original"),
+        b"pending source",
+    )
+    .unwrap();
+    fs::write(a.join("unknown-module-note"), b"retained opaque data").unwrap();
+    drop(store); // Every owner stopped across both point members.
+    let point = root.path().join("point");
+    copy_owned_fixture(&a, &point.join("archive"));
+    copy_owned_fixture(&s, &point.join("state"));
+    let later = Store::open_existing(&a, &s, None).unwrap();
+    let claim = later.claim_job("after-point", 60).unwrap().unwrap();
+    later
+        .complete_job(id, &claim.claim_token, serde_json::json!({}))
+        .unwrap();
+    later
+        .create_user("later", "a later recovery password", false)
+        .unwrap();
+    fs::write(a.join("post-point-record"), b"preserve for roll forward").unwrap();
+    drop(later);
+    // Keep the complete newer pair; restore the older pair only into fresh roots.
+    let restored_a = root.path().join("restored-archive");
+    let restored_s = root.path().join("restored-state");
+    copy_owned_fixture(&point.join("archive"), &restored_a);
+    copy_owned_fixture(&point.join("state"), &restored_s);
+    let restored = Store::open_existing(&restored_a, &restored_s, None).unwrap();
+    assert_eq!(restored.server_id().unwrap(), server);
+    restored
+        .login("owner", "a retained recovery password", "paired restore")
+        .unwrap();
+    assert_eq!(restored.user_count().unwrap(), 1);
+    let job = restored.job_record(id, user).unwrap();
+    assert_eq!(job.state, JobState::Queued);
+    assert_eq!(job.created_at, timestamp);
+    assert_eq!(
+        fs::read(restored_s.join("imports/retained-source/original")).unwrap(),
+        b"pending source"
+    );
+    assert_eq!(
+        fs::read(restored_a.join("unknown-module-note")).unwrap(),
+        b"retained opaque data"
+    );
+    assert!(!restored_a.join("post-point-record").exists());
+    let resumed = restored.claim_job("restored-work", 60).unwrap().unwrap();
+    assert_eq!(resumed.id, id);
+    restored
+        .complete_job(id, &resumed.claim_token, serde_json::json!({}))
+        .unwrap();
+    drop(restored);
+    let current = Store::open_existing(&a, &s, None).unwrap();
+    assert_eq!(current.user_count().unwrap(), 2);
+    assert_eq!(
+        current.job_record(id, user).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        fs::read(a.join("post-point-record")).unwrap(),
+        b"preserve for roll forward"
+    );
+}
+
+#[test]
+fn truncated_private_database_is_never_reinitialized_as_fresh_state() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Store::initialize(&archive, &state, None).unwrap();
+    store
+        .create_user("owner", "a retained recovery password", true)
+        .unwrap();
+    drop(store);
+    fs::rename(
+        state.join("private.sqlite"),
+        state.join("retained-private.sqlite"),
+    )
+    .unwrap();
+    fs::write(state.join("private.sqlite"), b"").unwrap();
+    assert!(Store::open_existing(&archive, &state, None).is_err());
+    assert!(Store::initialize(&archive, &state, None).is_err());
+    assert!(Store::enroll_archive(&archive, &state, None).is_err());
+    assert_eq!(fs::metadata(state.join("private.sqlite")).unwrap().len(), 0);
+}
