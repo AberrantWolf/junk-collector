@@ -28257,6 +28257,8 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
 }
 
 struct DigitalMatchingFixtureProvider {
+    fail_lookup: std::sync::atomic::AtomicBool,
+    covers: std::sync::Mutex<Vec<String>>,
     fingerprints: std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
     calls: std::sync::atomic::AtomicUsize,
 }
@@ -28273,9 +28275,24 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let release = "00000000-0000-4000-8000-000000000090";
         let recording = |n: usize| format!("00000000-0000-4000-8000-{n:012}");
-        let (body, observation) = if request.provider.0 == ACOUSTID_PROVIDER_ID {
+        let (body, observation) = if request.provider.0 == COVER_ART_ARCHIVE_PROVIDER_ID {
+            let query: CoverArtArchiveQuery = request.query.parse()?;
+            let CoverArtArchiveQuery::Listing { release_id } = &query else {
+                return Err(Error::Conflict);
+            };
+            self.covers.lock().unwrap().push(release_id.clone());
+            (
+                serde_json::json!({"release":format!("https://musicbrainz.org/release/{release_id}"),"images":[]}),
+                serde_json::json!({"schema_version":1,"http_status":200,"query":query,"outcome":"no_match","image_count":0,"media_type":null}),
+            )
+        } else if request.provider.0 == ACOUSTID_PROVIDER_ID {
             let query: AcoustIdQuery = request.query.parse()?;
             query.validate()?;
+            if self.fail_lookup.swap(false, Ordering::SeqCst) {
+                return Err(Error::Unavailable(
+                    "transient fingerprint fixture refusal".into(),
+                ));
+            }
             let mut fingerprints = self.fingerprints.lock().unwrap();
             let next = fingerprints.len() + 1;
             let n = *fingerprints
@@ -28292,6 +28309,14 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
                     serde_json::json!({"releases":[{"id":release,"title":"Matched album"}],"release-count":1,"release-offset":0}),
                     1,
                 ),
+                MusicBrainzQuery::ReleaseId { release_id, .. }
+                    if release_id.ends_with("000000000091") =>
+                {
+                    (
+                        serde_json::json!({"id":release_id,"title":"Previous album","media":[]}),
+                        1,
+                    )
+                }
                 MusicBrainzQuery::ReleaseId { release_id, .. } if release_id == release => (
                     serde_json::json!({"id":release,"title":"Matched album","artist-credit":[{"name":"Matched artist","artist":{"id":recording(99),"name":"Matched artist"}}],"media":[{"id":recording(98),"position":1,"format":"Digital Media","track-count":2,"tracks":[{"id":recording(97),"position":1,"number":"1","title":"Matched first","length":12000,"recording":{"id":recording(1),"title":"Matched first","length":12000}},{"id":recording(96),"position":2,"number":"2","title":"Matched second","length":12000,"recording":{"id":recording(2),"title":"Matched second","length":12000}}]}]}),
                     1,
@@ -28330,6 +28355,8 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
     let item = detail.summary.target_item_id.unwrap();
     let saved = store.item(item).unwrap();
     let provider = Arc::new(DigitalMatchingFixtureProvider {
+        fail_lookup: true.into(),
+        covers: Default::default(),
         fingerprints: Default::default(),
         calls: 0.into(),
     });
@@ -28345,16 +28372,80 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
         .unwrap(),
     );
     drop(base);
+    let cover_parser = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "MatchingTests/1 (test@example.invalid)",
+            "http://127.0.0.1:1",
+            &["http://127.0.0.1:1"],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
     let configure = |store: Arc<Store>| {
         CollectionService::new(store, Arc::new(Registry::builtins()))
             .with_streaming_provider(ModuleId(ACOUSTID_PROVIDER_ID.into()), provider.clone())
             .unwrap()
             .with_streaming_provider(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), provider.clone())
             .unwrap()
+            .with_streaming_provider(
+                ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                provider.clone(),
+            )
+            .unwrap()
+            .with_catalog_parser(
+                ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()),
+                cover_parser.clone(),
+            )
+            .unwrap()
             .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), parser.clone())
             .unwrap()
     };
     let service = configure(store.clone());
+    let prior = service
+        .resolve_metadata(
+            &actor,
+            item,
+            ResolveMetadataCommand {
+                lookup: AcquireMetadataCommand::MusicBrainzRelease {
+                    release_id: "00000000-0000-4000-8000-000000000091".into(),
+                    refresh: false,
+                },
+                acquire_artwork: false,
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, prior).unwrap().state,
+        JobState::Completed
+    );
+    let metadata = service.metadata_view(&actor, item).unwrap();
+    let previous = metadata
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate
+                .identity
+                .provider_record_id
+                .ends_with("000000000091")
+        })
+        .unwrap()
+        .identity
+        .clone();
+    service
+        .update_metadata_authority(
+            &actor,
+            item,
+            collector_app::UpdateMetadataAuthorityCommand {
+                expected_revision: metadata.revision,
+                change: collector_app::MetadataAuthorityChange::SelectCandidate {
+                    candidate: previous,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
     let context = command();
     let input = FindDigitalAlbums {
         expected_revision: saved.revision,
@@ -28388,9 +28479,25 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
     let service = configure(store.clone());
     assert_eq!(service.job(&actor, job).unwrap().created_at, created);
     provider_drain(&service);
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Failed);
+    assert!(
+        service
+            .digital_album_matches(&actor, item)
+            .unwrap()
+            .jobs
+            .iter()
+            .find(|view| view.job.id == job)
+            .unwrap()
+            .job
+            .retryable
+    );
+    assert_eq!(service.retry_job(&actor, job, &command()).unwrap(), job);
+    provider_drain(&service);
+    assert_eq!(service.job(&actor, job).unwrap().created_at, created);
     let status = service.digital_album_matches(&actor, item).unwrap();
     let view = status.jobs.iter().find(|v| v.job.id == job).unwrap();
     assert_eq!(view.job.state, JobState::Completed, "{:?}", view.job.error);
+    assert!(!view.stale);
     let result: collector_app::DigitalMatchingResult =
         serde_json::from_value(view.result.clone().unwrap()).unwrap();
     assert_eq!(result.matches.len(), 1);
@@ -28419,7 +28526,7 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
                     job_id: job,
                     release_id: result.matches[0].release.id.clone(),
                 },
-                acquire_artwork: false,
+                acquire_artwork: true,
             },
             &command(),
         )
@@ -28430,6 +28537,24 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
         JobState::Completed,
         "{:?}",
         service.job(&actor, selection).unwrap().error
+    );
+    assert!(
+        service
+            .digital_album_matches(&actor, item)
+            .unwrap()
+            .jobs
+            .iter()
+            .find(|view| view.job.id == job)
+            .unwrap()
+            .stale
+    );
+    let covers = provider.covers.lock().unwrap().clone();
+    assert!(!covers.is_empty());
+    assert!(
+        covers
+            .iter()
+            .all(|id| id == "00000000-0000-4000-8000-000000000090"),
+        "artwork must follow the newly reviewed release: {covers:?}"
     );
     let rows = service
         .recorded_music_track_availability(&actor, item)
@@ -28537,6 +28662,16 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
         )
         .unwrap();
     // A later metadata edit invalidates even a complete frozen mapping.
+    let stale_discovery = service
+        .find_digital_albums(
+            &actor,
+            item,
+            FindDigitalAlbums {
+                expected_revision: saved.revision,
+            },
+            &command(),
+        )
+        .unwrap();
     let metadata = service.metadata_view(&actor, item).unwrap();
     service
         .update_metadata_authority(
@@ -28566,6 +28701,25 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
             },
             &command()
         ),
+        Err(Error::Conflict)
+    ));
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, stale_discovery).unwrap().state,
+        JobState::Failed
+    );
+    assert!(
+        service
+            .digital_album_matches(&actor, item)
+            .unwrap()
+            .jobs
+            .iter()
+            .find(|view| view.job.id == stale_discovery)
+            .unwrap()
+            .stale
+    );
+    assert!(matches!(
+        service.retry_job(&actor, stale_discovery, &command()),
         Err(Error::Conflict)
     ));
     // Cancelling an admitted discovery leaves all previously accepted metadata intact.

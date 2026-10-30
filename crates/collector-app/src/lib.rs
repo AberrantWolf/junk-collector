@@ -5847,6 +5847,7 @@ impl CollectionService {
                 | "accuraterip_check"
                 | "music_derivative"
                 | "music_derivative_batch"
+                | "digital_album_matching"
                 | "metadata_resolution"
                 | "bulk_intake"
                 | "metadata_existing"
@@ -5864,6 +5865,18 @@ impl CollectionService {
             }
             match job.kind.as_str() {
                 "preservation_import" => effects.retry_upload(id),
+                "digital_album_matching" => {
+                    let Some(FrozenJobInput::DigitalMatching(frozen)) =
+                        self.jobs.frozen_job_input(id, actor.user_id)?
+                    else {
+                        return Err(Error::Conflict);
+                    };
+                    let item = self.reader.item(frozen.item_id)?;
+                    if !self.digital_matching_inputs_current(&item, &frozen)? {
+                        return Err(Error::Conflict);
+                    }
+                    effects.retry_failed_job(id, actor.user_id)
+                }
                 "integrity_verification"
                 | "import_staging"
                 | "import_analysis"

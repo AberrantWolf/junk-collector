@@ -19,6 +19,10 @@ and the consumer dependency update.
 
 ## Digital album matching — delivered, 2026-10-30
 
+The [application review](validation/digital-album-matching-app-review-2026-10-30.md)
+fixes artwork selection, stale review/retry handling, asynchronous UI ownership,
+and Trash Amp enrichment/restoration races.
+
 Collector now provides explicit audio-based discovery for original-file FLAC/MP3
 albums, with durable cancellable/retryable jobs, source-bound fingerprint reuse,
 AcoustID recording lookup, MusicBrainz release discovery and artwork previews.

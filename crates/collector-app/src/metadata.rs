@@ -3479,7 +3479,7 @@ impl CollectionService {
         claim: &JobClaim,
         frozen: &FrozenMetadataResolution,
         reviewed: &crate::ReviewedDigitalMatch,
-    ) -> Result<()> {
+    ) -> Result<MetadataAuthorityRecord> {
         let item = self.resolution_item(claim, frozen)?;
         let LoadedMetadataAuthority {
             revision,
@@ -3549,34 +3549,37 @@ impl CollectionService {
                 serde_json::to_value(&overrides).map_err(|e| Error::Invalid(e.to_string()))?,
             ),
         });
-        if before
-            == serde_json::to_value((&authority, &overrides))
-                .map_err(|e| Error::Storage(e.to_string()))?
-        {
-            return Ok(());
-        }
+        let changed = before
+            != serde_json::to_value((&authority, &overrides))
+                .map_err(|e| Error::Storage(e.to_string()))?;
         self.validate_listening_track_edits(&item, &authority, &[])?;
         let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
-        self.processing.publish_metadata_for_job(
-            claim,
-            MetadataAuthorityRecord {
-                resolution_policy: 4,
-                inventory: Some((&item).into()),
-                collection_id: item.collection_id,
-                item_id: item.id,
-                revision: Revision(revision.0.checked_add(1).ok_or(Error::Conflict)?),
-                display: Some(resolve_metadata_display(
-                    &item,
-                    &authority,
-                    &active,
-                    frozen.language.as_str(),
-                )?),
-                authority,
-                observations,
-                current_candidates: current,
-                updated_at: self.authentication.now(),
+        let record = MetadataAuthorityRecord {
+            resolution_policy: 4,
+            inventory: Some((&item).into()),
+            collection_id: item.collection_id,
+            item_id: item.id,
+            revision: if changed {
+                Revision(revision.0.checked_add(1).ok_or(Error::Conflict)?)
+            } else {
+                revision
             },
-        )
+            display: Some(resolve_metadata_display(
+                &item,
+                &authority,
+                &active,
+                frozen.language.as_str(),
+            )?),
+            authority,
+            observations,
+            current_candidates: current,
+            updated_at: self.authentication.now(),
+        };
+        if changed {
+            self.processing
+                .publish_metadata_for_job(claim, record.clone())?;
+        }
+        Ok(record)
     }
 }
 

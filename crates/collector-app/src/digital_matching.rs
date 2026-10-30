@@ -76,6 +76,7 @@ pub struct DigitalMatchingResult {
 }
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct DigitalMatchingView {
+    pub stale: bool,
     pub job: JobView,
     #[schema(value_type=Object)]
     pub result: Option<serde_json::Value>,
@@ -93,18 +94,26 @@ impl CollectionService {
     ) -> Result<DigitalMatchingStatus> {
         let item = self.reader.item(id)?;
         self.authorize(actor, item.collection_id, Action::Curate)?;
-        let jobs = self
-            .care
-            .digital_matching_jobs(actor.user_id, id)?
-            .into_iter()
-            .map(|j| DigitalMatchingView {
-                result: j
-                    .result
-                    .as_ref()
-                    .map(|v| v.get("completion").unwrap_or(v).clone()),
-                job: j.into(),
-            })
-            .collect();
+        let jobs =
+            self.care
+                .digital_matching_jobs(actor.user_id, id)?
+                .into_iter()
+                .map(|j| {
+                    let stale = match self.jobs.frozen_job_input(j.id, actor.user_id)? {
+                        Some(FrozenJobInput::DigitalMatching(f)) => {
+                            !self.digital_matching_inputs_current(&item, &f)?
+                        }
+                        _ => true,
+                    };
+                    Ok(DigitalMatchingView {
+                        stale,
+                        result: j.result.as_ref().map(|v| {
+                            present_digital_matching_result(v.get("completion").unwrap_or(v))
+                        }),
+                        job: j.into(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
         Ok(DigitalMatchingStatus {
             available: self.streaming_providers.contains_key(ACOUSTID_PROVIDER_ID)
                 && self
@@ -112,6 +121,38 @@ impl CollectionService {
                     .contains_key(MUSICBRAINZ_PROVIDER_ID),
             jobs,
         })
+    }
+    pub(crate) fn digital_matching_inputs_current(
+        &self,
+        item: &Item,
+        frozen: &FrozenDigitalMatching,
+    ) -> Result<bool> {
+        frozen.validate()?;
+        if item.id != frozen.item_id
+            || item.deleted
+            || item.revision != frozen.inventory_revision
+            || item.lifecycle.generation != frozen.generation
+        {
+            return Ok(false);
+        }
+        if self
+            .processing
+            .metadata_authority(item.collection_id, item.id)?
+            .map_or(Revision(0), |record| record.revision)
+            != frozen.metadata_revision
+        {
+            return Ok(false);
+        }
+        for source in &frozen.sources {
+            if self
+                .processing
+                .recorded_source(item.collection_id, source.source)?
+                != source.source_fingerprint
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
     pub fn find_digital_albums(
         &self,
@@ -641,6 +682,28 @@ impl CollectionService {
     }
 }
 
+// Preserve historical payload fields while revalidating the selectable completeness
+// claim through the same shared model used at application time.
+fn present_digital_matching_result(value: &serde_json::Value) -> serde_json::Value {
+    let mut presented = value.clone();
+    if let Some(matches) = presented
+        .get_mut("matches")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for candidate in matches {
+            let complete = serde_json::from_value::<AlbumMatch>(candidate.clone())
+                .is_ok_and(|parsed| parsed.complete_tracklist);
+            if let Some(fields) = candidate.as_object_mut() {
+                fields.insert(
+                    "complete_tracklist".into(),
+                    serde_json::Value::Bool(complete),
+                );
+            }
+        }
+    }
+    presented
+}
+
 // Include source labels, mappings and optional artwork in the completion budget.
 // Leave room for the Job's completion wrapper within its existing 1-MiB bound.
 fn bounded_digital_result(
@@ -806,6 +869,19 @@ impl CollectionService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn history_presentation_disables_stale_completeness_without_discarding_payload_fields() {
+        let stored = serde_json::json!({"future":{"keep":true},"matches":[{"release":{"id":"00000000-0000-4000-8000-000000000001","title":"Album","artist":"Artist","artist_ids":[],"media":[{"position":1,"format":"Digital Media","track_count":2,"disc_ids":[],"tracks":[{"position":1,"title":"One","artist":""},{"position":3,"title":"Three","artist":""}]}]},"mappings":[],"local_tracks":2,"release_tracks":2,"complete_tracklist":true,"ambiguous_mapping":false,"duration_conflicts":0,"unmatched":[],"future_match":"retained"}]});
+        let shown = present_digital_matching_result(&stored);
+        assert_eq!(shown["matches"][0]["complete_tracklist"], false);
+        assert_eq!(stored["matches"][0]["complete_tracklist"], true);
+        assert_eq!(shown["future"], stored["future"]);
+        assert_eq!(shown["matches"][0]["future_match"], "retained");
+        assert_eq!(
+            shown["matches"][0]["release"],
+            stored["matches"][0]["release"]
+        );
+    }
     #[test]
     fn completion_budget_counts_source_names_as_well_as_release_tracks() {
         let release_id = "00000000-0000-4000-8000-000000000001";
