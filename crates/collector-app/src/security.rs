@@ -2,6 +2,16 @@
 //! Adapters load these facts and apply returned effects in the same transaction.
 use collector_core::{Error, Result, Revision, Role};
 
+/// Mail intake must not persist data for a disabled or missing account.
+/// The store evaluates this policy against facts held stable through commit.
+pub fn mail_ingestion(account_enabled: bool) -> Result<()> {
+    if account_enabled {
+        Ok(())
+    } else {
+        Err(Error::Forbidden)
+    }
+}
+
 pub struct AccountAuthority {
     pub revision: Revision,
     pub enabled: bool,

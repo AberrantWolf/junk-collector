@@ -435,3 +435,174 @@ fn inbox_filters_before_paging_so_old_reviews_cannot_hide_new_receipts() {
         .unwrap();
     assert_eq!(next.items.len(), 10);
 }
+
+struct BlockingMail {
+    profile: MailProfile,
+    batch: MailBatch,
+    started: Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+    cursors: Mutex<Vec<String>>,
+}
+impl MailProviderPort for BlockingMail {
+    fn profiles(&self) -> Vec<MailProfile> {
+        vec![self.profile.clone()]
+    }
+    fn fetch(&self, _: &str, cursor: &str) -> Result<MailBatch> {
+        self.cursors.lock().unwrap().push(cursor.to_owned());
+        if let Some(started) = self.started.lock().unwrap().take() {
+            started.send(()).unwrap();
+            self.release
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+        }
+        Ok(self.batch.clone())
+    }
+}
+
+#[test]
+fn disabling_owner_during_fetch_discards_batch_and_fences_late_commit() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    store
+        .create_user("admin", "a long admin password", true)
+        .unwrap();
+    let admin = store
+        .login("admin", "a long admin password", "setup")
+        .unwrap()
+        .1;
+    let user = store
+        .create_user("mail-user", "a long mail user password", false)
+        .unwrap();
+    let base = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let collection = base
+        .create_collection(
+            &admin,
+            CreateCollectionCommand {
+                name: "Games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &context(),
+        )
+        .unwrap();
+    Catalog::grant(&*store, collection.id, user, Role::Curator).unwrap();
+    let actor = Principal {
+        user_id: user,
+        administrator: false,
+        device_id: None,
+    };
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let provider = Arc::new(BlockingMail {
+        profile: MailProfile {
+            id: "proton-mail-user".into(),
+            owner: user,
+            label: "Private".into(),
+            provider: "proton_bridge".into(),
+        },
+        batch: MailBatch {
+            cursor: "after-fetch".into(),
+            purchases: vec![purchase("d", PurchaseStatus::Ordered)],
+        },
+        started: Mutex::new(Some(started_tx)),
+        release: Mutex::new(release_rx),
+        cursors: Mutex::new(vec![]),
+    });
+    let service = base.with_mail_intake(store.clone(), provider.clone());
+    let connection = service
+        .configure_mail(
+            &actor,
+            &provider.profile.id,
+            ConfigureMail {
+                collection_id: collection.id,
+                enabled: true,
+                expected_revision: Revision(0),
+            },
+            &context(),
+        )
+        .unwrap();
+    let worker_service = service.clone();
+    let worker = std::thread::spawn(move || worker_service.sync_purchase_mail());
+    started_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    let current = AdministrationPort::account(&*store, user).unwrap();
+    let disabled = service
+        .update_account(
+            &admin,
+            AccountUpdate {
+                user,
+                expected_revision: current.revision,
+                display_name: "Mail user".into(),
+                enabled: false,
+                administrator: false,
+            },
+            &context(),
+        )
+        .unwrap();
+    // Account disablement deliberately retains grants: grant checks cannot replace enablement checks.
+    assert_eq!(
+        Catalog::role(&*store, user, collection.id).unwrap(),
+        Role::Curator
+    );
+    release_tx.send(()).unwrap();
+    worker.join().unwrap().unwrap();
+    let retained = PurchaseInboxPort::mail_connection(&*store, &provider.profile.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.cursor, connection.cursor);
+    assert!(retained.last_checked.is_none());
+    assert!(
+        PurchaseInboxPort::purchase_inbox(&*store, user, collection.id, "", PurchaseInboxView::All)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    // Model disablement after an application precheck: the transaction must independently refuse admission.
+    assert!(matches!(
+        store.commit_mail_batch(&connection, provider.batch.clone()),
+        Err(Error::Forbidden)
+    ));
+    assert_eq!(
+        PurchaseInboxPort::mail_connection(&*store, &provider.profile.id)
+            .unwrap()
+            .unwrap()
+            .cursor,
+        connection.cursor
+    );
+    service
+        .update_account(
+            &admin,
+            AccountUpdate {
+                user,
+                expected_revision: disabled.revision,
+                display_name: "Mail user".into(),
+                enabled: true,
+                administrator: false,
+            },
+            &context(),
+        )
+        .unwrap();
+    service.sync_purchase_mail().unwrap();
+    assert_eq!(
+        *provider.cursors.lock().unwrap(),
+        vec![String::new(), String::new()]
+    );
+    assert_eq!(
+        PurchaseInboxPort::mail_connection(&*store, &provider.profile.id)
+            .unwrap()
+            .unwrap()
+            .cursor,
+        "after-fetch"
+    );
+    assert_eq!(
+        service
+            .purchase_inbox(&actor, collection.id, "", PurchaseInboxView::Pending)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+}

@@ -86,3 +86,26 @@ plugin installation, automatic acceptance, quantities, reliable partial refunds
 and automatic cross-language identity resolution are not implemented.
 No release/publication, production migration or credentials in chat are required
 for this branch delivery.
+
+## Account-disable review follow-up — 2026-10-31
+
+The clean review found that disabling an account during a mail fetch did not
+prevent the returned batch committing: ordinary collection grants are retained
+when an account is disabled. A deterministic channel-controlled provider
+reproduced the defect before the fix (cursor advanced from empty to `after-fetch`).
+
+Sync now rechecks account enablement immediately after fetching, before handling
+its result. Store independently evaluates the same application-owned enabled-user
+policy inside an immediate SQLite transaction before changing any suggestions or
+cursor, closing the gap between the application precheck and the commit. A losing
+commit is treated as skipped intake, allowing other profiles to continue.
+
+All four focused email tests pass. The new case disables a non-default Curator
+while fetching is blocked, verifies its grant remains, checks the inbox/cursor
+were untouched, directly exercises the transactional guard, then re-enables the
+account and confirms the same history resumes successfully. No real mailbox or
+credentials are used. The full workspace run passed: **561 tests passed, 0 failed,
+5 normally ignored**. Workspace/all-target Clippy, formatting, architecture/link
+checks, web type checking and all eight parser/IMAP tests also passed. The preceding
+API/UI/browser baseline remains applicable: this change adds no routes,
+DTO/schema fields, UI or deployment changes.

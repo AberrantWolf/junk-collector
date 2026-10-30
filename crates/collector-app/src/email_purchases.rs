@@ -87,15 +87,13 @@ pub trait PurchaseInboxPort: Send + Sync {
     ) -> Result<PurchaseInbox>;
     fn purchase_suggestion(&self, id: &str) -> Result<PurchaseSuggestion>;
     /// CAS fences disabling/reconfiguring a connection while a fetch is in flight.
+    /// Account enablement must also be checked in the transaction that commits the batch.
     fn commit_mail_batch(&self, connection: &MailConnection, batch: MailBatch) -> Result<()>;
     fn mail_problem(&self, connection: &MailConnection) -> Result<()>;
 }
 impl CollectionService {
     fn mail_enabled_user(&self, actor: &Principal) -> Result<()> {
-        if !self.administration.account(actor.user_id)?.enabled {
-            return Err(Error::Forbidden);
-        }
-        Ok(())
+        security::mail_ingestion(self.administration.account(actor.user_id)?.enabled)
     }
 
     pub fn with_purchase_inbox(mut self, inbox: Arc<dyn PurchaseInboxPort>) -> Self {
@@ -308,7 +306,11 @@ impl CollectionService {
             {
                 continue;
             }
-            match provider.fetch(&profile.id, &connection.cursor) {
+            let fetched = provider.fetch(&profile.id, &connection.cursor);
+            if self.mail_enabled_user(&actor).is_err() {
+                continue;
+            }
+            match fetched {
                 Ok(batch) => {
                     let valid = batch.purchases.len() <= 100
                         && batch.cursor.len() <= 65536
@@ -324,7 +326,7 @@ impl CollectionService {
                     // Check authorization again after the blocking fetch.
                     self.content_write_eligibility(&actor, connection.collection_id)?;
                     match inbox.commit_mail_batch(&connection, batch) {
-                        Ok(()) | Err(Error::Conflict) => {}
+                        Ok(()) | Err(Error::Conflict) | Err(Error::Forbidden) => {}
                         Err(e) => return Err(e),
                     }
                 }

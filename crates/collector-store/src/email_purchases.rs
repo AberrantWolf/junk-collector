@@ -132,7 +132,18 @@ impl PurchaseInboxPort for Store {
     }
     fn commit_mail_batch(&self, c: &MailConnection, batch: MailBatch) -> Result<()> {
         let mut db = lock(&self.db)?;
-        let tx = db.transaction().map_err(storage)?;
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(storage)?;
+        let account_enabled: Option<bool> = tx
+            .query_row(
+                "SELECT enabled FROM private.users WHERE id=?",
+                [c.profile.owner.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        collector_app::security::mail_ingestion(account_enabled.unwrap_or(false))?;
         let mut current = connection(&tx, &c.profile.id)?.ok_or(Error::Conflict)?;
         if !current.enabled
             || current.revision != c.revision

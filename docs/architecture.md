@@ -1,3 +1,12 @@
+## Email account-disable review correction — 2026-10-31
+
+Mail sync now rechecks its owner's enabled state after fetching. Batch admission
+also loads that state and evaluates application security policy inside the same
+immediate SQLite transaction that writes suggestions and the cursor. A disabled
+owner's in-flight batch is discarded; re-enabling resumes from the retained
+cursor. The deterministic regression covers both the blocking-fetch race and
+independent commit refusal. See the [review follow-up](validation/email-purchases-2026-10-30.md#account-disable-review-follow-up--2026-10-31).
+
 ## Email purchase intake — branch implementation, 2026-10-30
 
 The requested branch `codex/email-purchases` adds optional user-owned Proton
