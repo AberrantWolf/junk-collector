@@ -2,6 +2,9 @@
 
 ## Digital album matching — delivered, 2026-10-30
 
+The [clean shared review](validation/digital-album-matching-review-2026-10-30.md)
+closes follow-up correctness findings and updates both application pins.
+
 The user-authorized delivery adds shared `junk-libs-music`, Collector's durable
 reviewed matching workflow, Trash Amp access to that workflow, and local-folder
 matching in Trash Amp. See [current status](implementation-status.md) and

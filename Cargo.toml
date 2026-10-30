@@ -9,7 +9,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
-junk-libs-music = { git = "https://github.com/AberrantWolf/junk-libs", rev = "3a0042936cd29fd794518a47ca121ff172f34046" }
+junk-libs-music = { git = "https://github.com/AberrantWolf/junk-libs", rev = "0becbd0c382df3d494244c7ccc20de05cba580cf" }
 collector-api-types = { path = "crates/collector-api-types" }
 collector-core = { path = "crates/collector-core" }
 collector-modules = { path = "crates/collector-modules" }

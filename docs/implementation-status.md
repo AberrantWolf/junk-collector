@@ -1,5 +1,9 @@
 # Implementation status
 
+The [shared music review](validation/digital-album-matching-review-2026-10-30.md)
+records follow-up completeness, coordinate, provider and fingerprint safeguards
+and the consumer dependency update.
+
 ## Digital album matching — delivered, 2026-10-30
 
 Collector now provides explicit audio-based discovery for original-file FLAC/MP3
