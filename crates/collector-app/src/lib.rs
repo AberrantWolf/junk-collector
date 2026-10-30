@@ -1,4 +1,6 @@
 //! Shared use cases. Every adapter and frontend crosses this authorization boundary.
+mod email_purchases;
+pub use email_purchases::*;
 mod disc_audio;
 mod local_playback;
 pub use disc_audio::game_audio_search_projection;
@@ -361,6 +363,21 @@ pub enum ItemEffectSource {
 }
 
 pub trait ContentPort: Send + Sync {
+    fn save_mail_connection(&self, _connection: &MailConnection) -> Result<MailConnection> {
+        Err(Error::Unavailable("Email intake unavailable".into()))
+    }
+    fn dismiss_purchase_suggestion(&self, _suggestion: &PurchaseSuggestion) -> Result<()> {
+        Err(Error::Unavailable("Email intake unavailable".into()))
+    }
+    fn accept_purchase_suggestion(
+        &self,
+        _suggestion: &PurchaseSuggestion,
+        _item: Item,
+        _expected: Revision,
+    ) -> Result<Item> {
+        Err(Error::Unavailable("Email intake unavailable".into()))
+    }
+
     fn remote_media_file(
         &self,
         target: &collector_api_types::PlaybackTarget,
@@ -1655,6 +1672,8 @@ pub struct CollectionService {
     artwork_source: Option<Arc<dyn ArtworkSourcePort>>,
     catalog_uploads: Option<Arc<dyn UploadedCatalogPort>>,
     backup_history: Option<Arc<dyn BackupHistoryPort>>,
+    purchase_inbox: Option<Arc<dyn PurchaseInboxPort>>,
+    mail_provider: Option<Arc<dyn MailProviderPort>>,
     catalog_inspector: Option<Arc<dyn CatalogUploadInspectionPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
@@ -2079,6 +2098,8 @@ pub struct PresentedAudioCheck {
 /// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub purchase_orders: Vec<PurchaseOrder>,
     pub import_in_progress: bool,
     pub album_playback: Option<collector_api_types::AlbumPlaybackReadiness>,
     pub supports_listening: bool,
@@ -2412,6 +2433,8 @@ impl CollectionService {
             artwork_source: None,
             catalog_uploads: None,
             backup_history: None,
+            purchase_inbox: None,
+            mail_provider: None,
             catalog_inspector: None,
             streaming_providers: Arc::new(Default::default()),
             catalog_parsers: Arc::new(Default::default()),
@@ -2851,6 +2874,7 @@ impl CollectionService {
         let inventory_title = item.title;
         let inventory_subtitle = item.subtitle;
         Ok(PresentedItem {
+            purchase_orders: item.purchase_orders,
             import_in_progress,
             album_playback,
             supports_listening,
@@ -3003,42 +3027,54 @@ impl CollectionService {
     ) -> Result<Item> {
         let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
         self.validate_owned_domain(&eligibility, &command.domain)?;
-        let (lifecycle, specimens, captures, assets, metadata, deleted, revision, updated_at) =
-            match self.reader.item(id) {
-                Ok(previous) => {
-                    if previous.collection_id != command.collection_id {
-                        return Err(Error::Invalid(
-                            "moving items across collections is not supported".into(),
-                        ));
-                    }
-                    if previous.deleted {
-                        return Err(Error::Conflict);
-                    }
-                    self.validate_owned_domain(&eligibility, &previous.domain)?;
-                    (
-                        previous.lifecycle,
-                        previous.specimens,
-                        previous.captures,
-                        previous.assets,
-                        previous.metadata,
-                        previous.deleted,
-                        previous.revision,
-                        previous.updated_at,
-                    )
+        let (
+            lifecycle,
+            specimens,
+            captures,
+            assets,
+            metadata,
+            deleted,
+            revision,
+            updated_at,
+            purchase_orders,
+        ) = match self.reader.item(id) {
+            Ok(previous) => {
+                if previous.collection_id != command.collection_id {
+                    return Err(Error::Invalid(
+                        "moving items across collections is not supported".into(),
+                    ));
                 }
-                Err(Error::NotFound) => (
-                    ItemLifecycle::default(),
-                    vec![],
-                    vec![],
-                    vec![],
-                    MetadataState::default(),
-                    false,
-                    Revision(0),
-                    Utc::now(),
-                ),
-                Err(error) => return Err(error),
-            };
+                if previous.deleted {
+                    return Err(Error::Conflict);
+                }
+                self.validate_owned_domain(&eligibility, &previous.domain)?;
+                (
+                    previous.lifecycle,
+                    previous.specimens,
+                    previous.captures,
+                    previous.assets,
+                    previous.metadata,
+                    previous.deleted,
+                    previous.revision,
+                    previous.updated_at,
+                    previous.purchase_orders,
+                )
+            }
+            Err(Error::NotFound) => (
+                ItemLifecycle::default(),
+                vec![],
+                vec![],
+                vec![],
+                MetadataState::default(),
+                false,
+                Revision(0),
+                Utc::now(),
+                vec![],
+            ),
+            Err(error) => return Err(error),
+        };
         let item = Item {
+            purchase_orders,
             lifecycle,
             id,
             collection_id: command.collection_id,

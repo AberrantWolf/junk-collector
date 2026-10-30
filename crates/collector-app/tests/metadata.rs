@@ -3,6 +3,7 @@ use collector_core::*;
 
 fn item() -> Item {
     Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: CollectionId::new(),

@@ -4,6 +4,9 @@ pub use lists::*;
 mod metadata;
 mod processing;
 
+mod purchases;
+pub use purchases::*;
+
 use chrono::{DateTime, NaiveDate, Utc};
 pub use metadata::*;
 pub use processing::*;
@@ -564,6 +567,8 @@ pub struct ItemReimport {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Item {
     #[serde(default)]
+    pub purchase_orders: Vec<PurchaseOrder>,
+    #[serde(default)]
     pub lifecycle: ItemLifecycle,
     pub id: ItemId,
     pub collection_id: CollectionId,
@@ -586,6 +591,12 @@ pub struct Item {
 impl Item {
     pub fn validate(&self) -> Result<()> {
         self.domain.module.validate()?;
+        if self.purchase_orders.len() > 1000 {
+            return Err(Error::Invalid("Too many purchase records".into()));
+        }
+        for order in &self.purchase_orders {
+            order.validate()?;
+        }
         if self.title.trim().is_empty() || self.title.len() > 4096 || self.subtitle.len() > 4096 {
             return Err(Error::Invalid(
                 "title is required and text must be at most 4096 bytes".into(),
@@ -727,6 +738,7 @@ impl Item {
             self.assets.retain(|a| a.visibility == Visibility::Shared);
             // Provider observations and manual overrides can contain private source data.
             self.metadata = MetadataState::default();
+            self.purchase_orders.clear();
         }
     }
 }
@@ -1574,6 +1586,7 @@ mod tests {
             migration_provenance: None,
         };
         let item = Item {
+            purchase_orders: vec![],
             lifecycle: Default::default(),
             id: item_id,
             collection_id: collection,

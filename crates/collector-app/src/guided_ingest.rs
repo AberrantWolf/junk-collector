@@ -724,6 +724,7 @@ impl CollectionService {
                     record.view.collection_id,
                 )?;
                 let mut item = Item {
+                    purchase_orders: vec![],
                     lifecycle: Default::default(),
                     id: intent.target_item_id,
                     collection_id: record.view.collection_id,

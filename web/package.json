@@ -31,6 +31,7 @@
     "test:numeric-ip": "node tests/numeric-ip.mjs",
     "test:game-catalog": "node tests/game-catalog-upload.mjs",
     "test:digital-matching": "node tests/digital-album-matching.mjs",
+    "test:email-purchases": "node tests/email-purchases.mjs",
     "test:purchases": "node tests/digital-purchases.mjs",
     "test:intake-review": "node tests/intake-review.mjs",
     "test:game-audio": "node tests/game-audio.mjs",

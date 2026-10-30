@@ -16,7 +16,7 @@ KINDS = ('auto', 'docs', 'ui-copy', 'cli-copy', 'style', 'ui', 'rust', 'infra')
 BROWSER = ('smoke', 'integration', 'browse', 'audio-checks', 'accuraterip-snapshots', 'actions',
            'cd-library', 'scans', 'work', 'fx04', 'fx05', 'fx06', 'fx04-review', 'local-playback', 'lists',
            'accounts', 'pair', 'navigation', 'certificate', 'numeric-ip', 'game-catalog',
-           'digital-matching', 'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media', 'storage')
+           'email-purchases', 'digital-matching', 'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media', 'storage')
 FIXTURE = {'audio-checks', 'accuraterip-snapshots', 'actions', 'lists'}
 SENSITIVE = ('crates/collector-core/', 'crates/collector-api-types/', 'crates/collector-store/',
              'crates/collector-client/', '.github/', 'scripts/', 'deploy/')
@@ -101,6 +101,7 @@ def select(paths, kind='auto', level='local', base_known=True, journeys=(), exte
         add('container-tools', ['python3', '-B', 'scripts/check_container_tools.py'])
         add('release-policy', ['python3', '-B', 'scripts/check_container_release.py'])
         add('container-validation', ['python3', '-B', 'scripts/check_container_validation.py'])
+        add('purchase-mail', ['python3', '-B', 'scripts/test_purchase_mail.py'])
         add('workspace-tests', ['cargo', 'test', '--workspace', '--locked'])
         add('workspace-clippy', ['cargo', 'clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings'])
     elif kind == 'rust':

@@ -1,0 +1,31 @@
+# Optional override for the existing HOST-network Collector deployment.
+# Build both candidate Collector and Bridge images before loading in Portainer.
+services:
+  collector:
+    environment:
+      COLLECTOR_MAIL_PROFILES: /run/collector-mail/profiles.json
+    volumes:
+      - type: bind
+        source: ${COLLECTOR_MAIL_PROFILES:?Set the absolute private mail profiles file}
+        target: /run/collector-mail/profiles.json
+        read_only: true
+        bind: {create_host_path: false}
+  proton-bridge:
+    image: ${PROTON_BRIDGE_IMAGE:-junk-collector-proton-bridge:3.18.0}
+    platform: linux/amd64
+    user: "10001:10001"
+    # Collector's standard stack already uses host networking. Bridge binds only
+    # 127.0.0.1; no port forwarding or bind-address patch is used.
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 60s
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m
+    volumes:
+      - type: bind
+        source: ${PROTON_BRIDGE_HOME:?Set the absolute persistent Bridge home directory}
+        target: /home/bridge
+        bind: {create_host_path: false}

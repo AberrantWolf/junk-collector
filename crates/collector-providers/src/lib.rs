@@ -11,6 +11,8 @@ pub use conversion::*;
 mod metadata;
 pub use metadata::*;
 
+pub mod mail;
+
 use collector_app::{
     CatalogParserPort, ParsedCatalogSnapshot, ProcessingExecutionContext, ProviderRequest,
     ProviderStreamResponse, SnapshotRecord, StreamingProviderPort,

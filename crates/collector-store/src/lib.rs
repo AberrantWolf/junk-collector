@@ -5,6 +5,7 @@ mod archive_export;
 mod archive_v3;
 mod auth;
 mod backup;
+mod email_purchases;
 pub use archive_export::{import_archive, validate_archive_export};
 pub use backup::read_backup_history;
 mod browse;
@@ -60,7 +61,7 @@ use std::{
 };
 pub use storage_guard::{ArchiveMount, validate_remote_archive_target};
 
-pub(crate) const PRIVATE_SCHEMA: u32 = 21;
+pub(crate) const PRIVATE_SCHEMA: u32 = 22;
 
 pub(crate) fn storage(e: impl std::fmt::Display) -> Error {
     Error::Storage(e.to_string())
@@ -1310,6 +1311,27 @@ impl Store {
 }
 
 impl ContentPort for Store {
+    fn save_mail_connection(
+        &self,
+        connection: &collector_app::MailConnection,
+    ) -> Result<collector_app::MailConnection> {
+        self.save_mail_connection_record(connection)
+    }
+    fn dismiss_purchase_suggestion(
+        &self,
+        suggestion: &collector_app::PurchaseSuggestion,
+    ) -> Result<()> {
+        self.dismiss_purchase_record(suggestion)
+    }
+    fn accept_purchase_suggestion(
+        &self,
+        suggestion: &collector_app::PurchaseSuggestion,
+        item: Item,
+        expected: Revision,
+    ) -> Result<Item> {
+        self.accept_purchase_record(suggestion, item, expected)
+    }
+
     fn remote_media_file(
         &self,
         target: &collector_app::PlaybackTarget,
@@ -2297,6 +2319,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.game_direct_members(request_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,job_id TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS private.game_scan_members(parent TEXT NOT NULL,item_id TEXT NOT NULL,representation_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(parent,item_id,representation_id));
             CREATE TABLE IF NOT EXISTS private.active_game_catalogs(collection_id TEXT NOT NULL,system TEXT NOT NULL,catalog TEXT NOT NULL,byte_domain TEXT NOT NULL,snapshot_id TEXT NOT NULL,activated_at INTEGER NOT NULL,PRIMARY KEY(collection_id,system,catalog,byte_domain));").map_err(storage)?;
+    email_purchases::install(db)?;
     if private_version < 2 {
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch("

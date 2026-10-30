@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ItemRecordV3 {
     #[serde(default)]
+    pub purchase_orders: Vec<PurchaseOrder>,
+    #[serde(default)]
     pub lifecycle: ItemLifecycle,
     pub id: ItemId,
     pub collection_id: CollectionId,
@@ -40,6 +42,7 @@ impl From<&Item> for ItemRecordV3 {
             translations: item.translations.clone(),
             identifiers: item.identifiers.clone(),
             specimens: item.specimens.clone(),
+            purchase_orders: item.purchase_orders.clone(),
             wishlist: item.wishlist,
             metadata: item.metadata.clone(),
             deleted: item.deleted,
@@ -51,6 +54,7 @@ impl From<&Item> for ItemRecordV3 {
 impl ItemRecordV3 {
     pub(crate) fn into_item(self, captures: Vec<Capture>, assets: Vec<Asset>) -> Item {
         Item {
+            purchase_orders: self.purchase_orders,
             lifecycle: self.lifecycle,
             id: self.id,
             collection_id: self.collection_id,
@@ -213,6 +217,7 @@ mod tests {
 
     fn item() -> Item {
         Item {
+            purchase_orders: vec![],
             lifecycle: Default::default(),
             id: ItemId::new(),
             collection_id: CollectionId::new(),

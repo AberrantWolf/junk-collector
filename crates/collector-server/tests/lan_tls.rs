@@ -109,6 +109,7 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
         )
         .unwrap();
     let item = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,

@@ -1,6 +1,7 @@
+import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
 import assert from 'node:assert/strict';
-const result=await build({entryPoints:[new URL('../src/presentation-labels.ts',import.meta.url).pathname],bundle:true,write:false,format:'esm'});
+const result=await build({entryPoints:[fileURLToPath(new URL('../src/presentation-labels.ts',import.meta.url))],bundle:true,write:false,format:'esm'});
 const {presentationLabel}=await import('data:text/javascript;base64,'+Buffer.from(result.outputFiles[0].text).toString('base64'));
 const outcomes=['verified','incomplete_search','mismatched','no_data','ambiguous_offsets','unavailable','unsupported'];
 assert.equal(new Set(outcomes.map(value=>presentationLabel(value))).size,outcomes.length,'distinct audio results must not collapse into the same label');

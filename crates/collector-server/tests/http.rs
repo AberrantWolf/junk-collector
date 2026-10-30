@@ -1039,6 +1039,7 @@ async fn legacy_upload_routes_delegate_to_imports_and_use_a_distinct_publication
         )
         .unwrap();
     let item = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
@@ -2058,6 +2059,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
     )
     .unwrap();
     let item = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
@@ -2102,6 +2104,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
             &actor,
             other_item_id,
             Item {
+                purchase_orders: vec![],
                 lifecycle: Default::default(),
                 id: other_item_id,
                 collection_id: other_collection.id,
@@ -2920,6 +2923,7 @@ async fn unavailable_module_is_preserved_and_presented_as_non_executable() {
         )
         .unwrap();
     let item = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
@@ -3037,6 +3041,7 @@ async fn integrity_endpoint_enqueues_a_durable_job_instead_of_doing_request_work
         )
         .unwrap();
     let item = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
@@ -3267,6 +3272,7 @@ async fn viewer_item_dto_omits_private_fields_and_admin_without_grant_is_denied(
         .unwrap();
     let item_id = ItemId::new();
     let item = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: item_id,
         collection_id: collection.id,
@@ -3637,6 +3643,7 @@ async fn asset_routes_filter_metadata_and_bytes_before_role_aware_artwork_select
     let item = Catalog::save(
         &*state.store,
         Item {
+            purchase_orders: vec![],
             lifecycle: Default::default(),
             id: ItemId::new(),
             collection_id: collection.id,
@@ -4145,6 +4152,7 @@ async fn focused_inventory_routes_require_curator_role_and_revisioned_idempotent
         .grant(collection.id, viewer, Role::Viewer)
         .unwrap();
     let stored = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,
@@ -4384,6 +4392,7 @@ async fn wave1_item_envelope_preserves_server_owned_state_and_rejects_changes() 
         )
         .unwrap();
     let stored = Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection.id,

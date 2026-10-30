@@ -5,6 +5,8 @@ use collector_api_types::{
 use collector_app::{
     WorkEntry, WorkHistoryCommand, WorkJobView, WorkJobsQuery, WorkQuery, WorkTarget,
 };
+mod email_purchases;
+use email_purchases::*;
 pub mod local_playback;
 pub mod passkeys;
 pub mod remote_media;
@@ -90,7 +92,8 @@ impl AppState {
     pub fn new_with_registry(store: Arc<Store>, pairing: Pairing, modules: Arc<Registry>) -> Self {
         let service = CollectionService::new(store.clone(), modules)
             .with_catalog_uploads(store.clone())
-            .with_backup_history(store.clone());
+            .with_backup_history(store.clone())
+            .with_purchase_inbox(store.clone());
         Self {
             store,
             service,
@@ -126,8 +129,25 @@ impl Drop for JobRuntime {
 
 pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> {
     state.service.job_settings()?.validate()?;
+
     let worker_instance = ServerId::new().to_string();
     let mut workers = Vec::new();
+    if state.service.mail_intake_configured() {
+        let mail = state.service.clone();
+        workers.push(tokio::spawn(async move {
+            loop {
+                let service = mail.clone();
+                if !matches!(
+                    tokio::task::spawn_blocking(move || service.sync_purchase_mail()).await,
+                    Ok(Ok(()))
+                ) {
+                    tracing::warn!("Email purchase sync needs attention");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+        }));
+    }
+
     let recovery_state = state.clone();
     workers.push(tokio::spawn(async move {
         loop {
@@ -572,6 +592,7 @@ pub fn router(state: AppState) -> Router {
         let (curation_api, _) = curation_api_router().split_for_parts();
         router = router
             .route("/curate", get(index))
+            .route("/purchase-inbox", get(index))
             .route("/curation.js", get(curation_js))
             .route("/library-care/metadata", get(index))
             .route("/library-metadata.js", get(library_metadata_js))
@@ -581,6 +602,7 @@ pub fn router(state: AppState) -> Router {
             .route("/library-preparation.js", get(library_preparation_js))
             .route("/library-activity.js", get(library_activity_js))
             .route("/library-imports.js", get(library_imports_js))
+            .route("/purchase-inbox.js", get(purchase_inbox_js))
             .route("/collection-access.js", get(collection_access_js))
             .route("/work-history.js", get(work_history_js))
             .merge(curation_api.route_layer(middleware::from_fn_with_state(
@@ -721,6 +743,12 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(
             routes!(stage_provisional_import_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
+        .routes(routes!(mail_profiles))
+        .routes(routes!(mail_connections))
+        .routes(routes!(configure_mail).layer(DefaultBodyLimit::max(16 * 1024)))
+        .routes(routes!(purchase_inbox))
+        .routes(routes!(review_purchase).layer(DefaultBodyLimit::max(16 * 1024)))
+        .routes(routes!(dismiss_purchase))
         .routes(routes!(collection_inboxes))
         .routes(routes!(inbox_packages))
         .routes(routes!(stage_inbox_import))
@@ -809,10 +837,23 @@ pub fn openapi() -> OpenApi {
         .merge(curation_api_router())
         .merge(administration_api_router())
         .into_openapi();
+    // This enum appears only in a query parameter, so register its component explicitly.
+    document
+        .components
+        .get_or_insert_with(Default::default)
+        .schemas
+        .insert(
+            "PurchaseInboxView".into(),
+            <collector_app::PurchaseInboxView as utoipa::PartialSchema>::schema(),
+        );
     document.info.title = "Junk Collector API".into();
     document.info.version = "1.0.0".into();
     for (path, item) in &mut document.paths.paths {
-        let limit = if path.ends_with("/catalog-upload/inspect") {
+        let limit = if path == "/api/v1/mail/connections/{id}"
+            || path == "/api/v1/purchase-suggestions/{id}/accept"
+        {
+            16 * 1024
+        } else if path.ends_with("/catalog-upload/inspect") {
             512 * 1024 * 1024 + 1024 * 1024
         } else if path.ends_with("/catalog-upload") {
             collector_app::MAX_DAT_UPLOAD_BYTES

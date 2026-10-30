@@ -1164,6 +1164,13 @@ async fn main() -> Result<()> {
             state.passkeys = passkeys
                 .take()
                 .expect("serve validates passkey configuration before opening storage");
+            if let Some(path) = std::env::var_os("COLLECTOR_MAIL_PROFILES") {
+                let provider=Arc::new(collector_providers::mail::ProtonMailProvider::load(std::path::Path::new(&path)).map_err(|_|anyhow::anyhow!("Mail profile configuration invalid; verify local file permissions and settings"))?);
+                state.service = state
+                    .service
+                    .clone()
+                    .with_mail_intake(store.clone(), provider);
+            }
             let _job_runtime = collector_server::start_job_workers(state.clone())?;
             let _local_runtime = match config
                 .local_playback_bind

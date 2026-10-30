@@ -1466,6 +1466,7 @@ fn setup_with_clock(
 }
 fn item(collection: CollectionId) -> Item {
     Item {
+        purchase_orders: vec![],
         lifecycle: Default::default(),
         id: ItemId::new(),
         collection_id: collection,

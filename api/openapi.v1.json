@@ -3104,6 +3104,52 @@
         }
       }
     },
+    "/api/v1/collections/{id}/purchase-inbox": {
+      "get": {
+        "operationId": "purchase_inbox",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PurchaseInboxView"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseInbox"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
     "/api/v1/devices/{id}": {
       "delete": {
         "operationId": "revoke",
@@ -7351,6 +7397,96 @@
         }
       }
     },
+    "/api/v1/mail/connections": {
+      "get": {
+        "operationId": "mail_connections",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailConnection"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v1/mail/connections/{id}": {
+      "put": {
+        "operationId": "configure_mail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureMail"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 16384
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailConnection"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/mail/profiles": {
+      "get": {
+        "operationId": "mail_profiles",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailProfile"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/v1/me": {
       "get": {
         "operationId": "me",
@@ -7763,6 +7899,76 @@
           },
           "401": {
             "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v1/purchase-suggestions/{id}/accept": {
+      "post": {
+        "operationId": "review_purchase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewPurchase"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 16384
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/purchase-suggestions/{id}/dismiss": {
+      "post": {
+        "operationId": "dismiss_purchase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
           }
         }
       }
@@ -10864,6 +11070,26 @@
           "incomplete"
         ]
       },
+      "ConfigureMail": {
+        "type": "object",
+        "required": [
+          "collection_id",
+          "enabled",
+          "expected_revision"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
       "ConfirmAlbumGroup": {
         "type": "object",
         "required": [
@@ -13585,6 +13811,12 @@
           "metadata": {
             "$ref": "#/components/schemas/MetadataState"
           },
+          "purchase_orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrder"
+            }
+          },
           "revision": {
             "$ref": "#/components/schemas/Revision"
           },
@@ -14545,6 +14777,69 @@
             "type": "string"
           },
           "username": {
+            "type": "string"
+          }
+        }
+      },
+      "MailConnection": {
+        "type": "object",
+        "required": [
+          "profile",
+          "collection_id",
+          "enabled",
+          "revision",
+          "cursor"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "last_checked": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile": {
+            "$ref": "#/components/schemas/MailProfile"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
+      "MailProfile": {
+        "type": "object",
+        "required": [
+          "id",
+          "owner",
+          "label",
+          "provider"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "provider": {
             "type": "string"
           }
         }
@@ -18151,6 +18446,12 @@
                     }
                   ]
                 },
+                "purchase_orders": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PurchaseOrder"
+                  }
+                },
                 "reimport_import_id": {
                   "oneOf": [
                     {
@@ -19295,6 +19596,12 @@
               }
             ]
           },
+          "purchase_orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrder"
+            }
+          },
           "reimport_import_id": {
             "oneOf": [
               {
@@ -19684,6 +19991,155 @@
         },
         "additionalProperties": false
       },
+      "PurchaseInbox": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseSuggestion"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PurchaseInboxView": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "dismissed",
+          "all"
+        ]
+      },
+      "PurchaseOrder": {
+        "type": "object",
+        "required": [
+          "id",
+          "retailer",
+          "order_reference",
+          "title",
+          "platform",
+          "edition",
+          "format",
+          "status",
+          "observed_at",
+          "intentional_duplicate",
+          "source_keys"
+        ],
+        "properties": {
+          "edition": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "intentional_duplicate": {
+            "type": "boolean"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "order_reference": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "retailer": {
+            "type": "string"
+          },
+          "source_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Opaque hashes only; never mailbox identifiers, email addresses or raw mail."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PurchaseStatus"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "PurchaseStatus": {
+        "type": "string",
+        "enum": [
+          "preordered",
+          "ordered",
+          "purchased",
+          "shipped",
+          "delivered",
+          "cancelled",
+          "refunded",
+          "unknown"
+        ]
+      },
+      "PurchaseSuggestion": {
+        "type": "object",
+        "required": [
+          "id",
+          "connection_id",
+          "owner",
+          "collection_id",
+          "purchase",
+          "reason",
+          "dismissed"
+        ],
+        "properties": {
+          "accepted_item": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "dismissed": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          "owner": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "purchase": {
+            "$ref": "#/components/schemas/PurchaseOrder"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "RecoverAccount": {
         "type": "object",
         "required": [
@@ -20069,6 +20525,42 @@
           },
           "identity": {
             "$ref": "#/components/schemas/ImportIdentityDecision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReviewPurchase": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "expected_revision",
+          "title",
+          "intentional_duplicate",
+          "purchase"
+        ],
+        "properties": {
+          "existing_order_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set only when explicitly updating an existing order (including cancellations)."
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "intentional_duplicate": {
+            "type": "boolean"
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "purchase": {
+            "$ref": "#/components/schemas/PurchaseOrder"
+          },
+          "title": {
+            "type": "string",
+            "description": "User-reviewed title for a new collection entry; existing metadata is retained."
           }
         },
         "additionalProperties": false

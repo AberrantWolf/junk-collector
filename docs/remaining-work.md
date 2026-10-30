@@ -1,3 +1,20 @@
+## Email purchase intake — branch implementation, 2026-10-30
+
+The requested branch `codex/email-purchases` adds optional user-owned Proton
+Bridge intake, transport-independent retailer receipt parsers and an explicit
+purchase review inbox. Application policy owns review/authorization; provider
+adapters own bounded read-only IMAP/MIME work; Store owns private connection,
+source-key/cursor persistence and portable accepted Item order records. No mail
+credentials or raw messages enter the archive, API or browser. Existing metadata,
+physical inventory and archived files retain their meaning. Gmail and dynamic
+provider installation are not implemented. See [behavior and boundaries](email-purchases.md)
+and [setup/qualification limits](../deploy/proton-bridge/README.md).
+
+This is a separate, unpublished branch. Actual account authentication and NAS
+container restart/IMAP qualification remain local setup steps; no production
+update or migration is included. Source and browser checks pass; validation results are recorded in the
+[branch delivery record](validation/email-purchases-2026-10-30.md).
+
 # Remaining work — home-lab priorities
 
 ## Beta.14 published and installed on the current NAS — 2026-10-30

@@ -932,6 +932,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{id}/purchase-inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["purchase_inbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/devices/{id}": {
         parameters: {
             query?: never;
@@ -2164,6 +2180,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mail/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["mail_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mail/connections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["configure_mail"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mail/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["mail_profiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -2334,6 +2398,38 @@ export interface paths {
         get: operations["routes"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-suggestions/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["review_purchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-suggestions/{id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["dismiss_purchase"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3134,6 +3230,11 @@ export interface components {
         ComponentKind: "cartridge" | "optical_disc" | "tape" | "memory_card" | "case" | "booklet" | "insert" | "other_data" | "other_physical";
         /** @enum {string} */
         Condition: "unknown" | "sealed" | "excellent" | "good" | "fair" | "poor" | "incomplete";
+        ConfigureMail: {
+            collection_id: components["schemas"]["CollectionId"];
+            enabled: boolean;
+            expected_revision: components["schemas"]["Revision"];
+        };
         ConfirmAlbumGroup: {
             preview: components["schemas"]["PreviewAlbumGroup"];
             token: string;
@@ -3795,6 +3896,7 @@ export interface components {
             identity_link: components["schemas"]["ItemIdentityLink"];
             lifecycle?: components["schemas"]["ItemLifecycle"];
             metadata: components["schemas"]["MetadataState"];
+            purchase_orders?: components["schemas"]["PurchaseOrder"][];
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["Specimen"][];
             subtitle: string;
@@ -4030,6 +4132,22 @@ export interface components {
             device_name?: string;
             password: string;
             username: string;
+        };
+        MailConnection: {
+            collection_id: components["schemas"]["CollectionId"];
+            cursor: string;
+            enabled: boolean;
+            /** Format: date-time */
+            last_checked?: string | null;
+            problem?: string | null;
+            profile: components["schemas"]["MailProfile"];
+            revision: components["schemas"]["Revision"];
+        };
+        MailProfile: {
+            id: string;
+            label: string;
+            owner: components["schemas"]["UserId"];
+            provider: string;
         };
         /** @enum {string} */
         MatchStrength: "name" | "identifier" | "disc_layout" | "complete_hashes";
@@ -4869,6 +4987,7 @@ export interface components {
                 merged_into?: components["schemas"]["ItemId"] | null;
                 presentation: components["schemas"]["ModulePresentation"];
                 primary_artwork?: components["schemas"]["AssetId"] | null;
+                purchase_orders?: components["schemas"]["PurchaseOrder"][];
                 reimport_import_id?: components["schemas"]["ImportId"] | null;
                 revision: components["schemas"]["Revision"];
                 specimens: components["schemas"]["PresentedSpecimen"][];
@@ -5129,6 +5248,7 @@ export interface components {
             merged_into?: components["schemas"]["ItemId"] | null;
             presentation: components["schemas"]["ModulePresentation"];
             primary_artwork?: components["schemas"]["AssetId"] | null;
+            purchase_orders?: components["schemas"]["PurchaseOrder"][];
             reimport_import_id?: components["schemas"]["ImportId"] | null;
             revision: components["schemas"]["Revision"];
             specimens: components["schemas"]["PresentedSpecimen"][];
@@ -5219,6 +5339,40 @@ export interface components {
         PublishProviderArtworkCommand: {
             snapshot_id: components["schemas"]["SnapshotId"];
         };
+        PurchaseInbox: {
+            items: components["schemas"]["PurchaseSuggestion"][];
+            next_cursor?: string | null;
+        };
+        /** @enum {string} */
+        PurchaseInboxView: "pending" | "accepted" | "dismissed" | "all";
+        PurchaseOrder: {
+            edition: string;
+            format: string;
+            id: string;
+            intentional_duplicate: boolean;
+            /** Format: date-time */
+            observed_at: string;
+            order_reference: string;
+            platform: string;
+            retailer: string;
+            /** @description Opaque hashes only; never mailbox identifiers, email addresses or raw mail. */
+            source_keys: string[];
+            status: components["schemas"]["PurchaseStatus"];
+            title: string;
+        };
+        /** @enum {string} */
+        PurchaseStatus: "preordered" | "ordered" | "purchased" | "shipped" | "delivered" | "cancelled" | "refunded" | "unknown";
+        PurchaseSuggestion: {
+            accepted_item?: components["schemas"]["ItemId"] | null;
+            collection_id: components["schemas"]["CollectionId"];
+            connection_id: string;
+            dismissed: boolean;
+            id: string;
+            matches?: components["schemas"]["ItemId"][];
+            owner: components["schemas"]["UserId"];
+            purchase: components["schemas"]["PurchaseOrder"];
+            reason: string;
+        };
         RecoverAccount: {
             code: string;
             device_name?: string;
@@ -5308,6 +5462,16 @@ export interface components {
             /** Format: int64 */
             expected_revision: number;
             identity: components["schemas"]["ImportIdentityDecision"];
+        };
+        ReviewPurchase: {
+            /** @description Set only when explicitly updating an existing order (including cancellations). */
+            existing_order_id?: string | null;
+            expected_revision: components["schemas"]["Revision"];
+            intentional_duplicate: boolean;
+            item_id: components["schemas"]["ItemId"];
+            purchase: components["schemas"]["PurchaseOrder"];
+            /** @description User-reviewed title for a new collection entry; existing metadata is retained. */
+            title: string;
         };
         /** Format: int64 */
         Revision: number;
@@ -8334,6 +8498,38 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    purchase_inbox: {
+        parameters: {
+            query?: {
+                after?: string;
+                view?: components["schemas"]["PurchaseInboxView"];
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["CollectionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseInbox"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12051,6 +12247,100 @@ export interface operations {
             };
         };
     };
+    mail_connections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailConnection"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    configure_mail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfigureMail"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailConnection"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    mail_profiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailProfile"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     me: {
         parameters: {
             query?: never;
@@ -12520,6 +12810,80 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    review_purchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewPurchase"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Item"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    dismiss_purchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

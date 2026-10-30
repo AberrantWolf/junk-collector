@@ -27,7 +27,7 @@ USER collector
 ENTRYPOINT ["collector-media"]
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 flac opus-tools && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home collector
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 flac opus-tools python3 && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home collector
 COPY --from=builder /build/target/release/collector-server /usr/local/bin/junk-collector
 COPY --from=builder /build/target/release/collector-media /usr/local/bin/collector-media
 COPY --chmod=755 deploy/container/initialize.sh /usr/local/bin/collector-initialize

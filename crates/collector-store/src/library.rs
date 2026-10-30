@@ -296,6 +296,7 @@ mod tests {
             )
             .unwrap();
         let item = Item {
+            purchase_orders: vec![],
             lifecycle: Default::default(),
             id: ItemId::new(),
             collection_id: collection.id,
