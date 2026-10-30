@@ -1,5 +1,14 @@
 # Remaining work — home-lab priorities
 
+## Beta.14 release and current-NAS update — in progress, 2026-10-30
+
+The user requested publication and an update of the existing FatChocobo stack
+before migration. Candidate [release notes](releases/v0.1.0-beta.14.md) cover digital
+matching, archive enrollment and recovery. Exact-source release qualification,
+validated-image publication, a complete stopped-server recovery point, offline
+legacy archive enrollment and current-NAS acceptance are the delivery gates.
+This update retains the NAS layout and does not authorize the Fi cutover.
+
 ## Remote archive preparation and safety review for Fi — 2026-10-30
 
 The requested safeguards and guarded deployment templates have passed repeated
@@ -29,8 +38,8 @@ Remaining product limits: real AcoustID service recognition needs a configured
 application key and representative user-approved audio; partial/ambiguous matches
 remain suggestions requiring the existing manual metadata tools. This delivery
 supports mono/stereo FLAC and MP3, up to 256 files. Broader codec coverage and
-exhaustive release enumeration are not implemented. No release/deployment is
-requested. The earlier [research evaluation](digital-album-matching-evaluation.md)
+exhaustive release enumeration are not implemented. Collector publication and
+NAS update are now requested as beta.14; Trash Amp deployment is outside that delivery. The earlier [research evaluation](digital-album-matching-evaluation.md)
 and [probe](digital-album-matching-probe.md) remain dated evidence.
 
 ## Beta.13 change-driven summaries published and installed — 2026-10-28
