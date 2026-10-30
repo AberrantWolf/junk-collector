@@ -159,13 +159,15 @@ def bundle(root, expected, record, destination):
         raise ValueError("Bundle requires the exact checked manifest digest")
     destination.mkdir(parents=True, exist_ok=False)
     names = ("compose.yaml", "compose.inbox.yaml", "compose.media.yaml", "Caddyfile.media", "media.md", "initialize-media.sh", ".env.example", "collector.proxy.toml.example",
-             "README.md", "recovery.md", "snapshot-recovery.md", "freeze-tar-time.py")
+             "README.md", "recovery.md", "snapshot-recovery.md", "freeze-tar-time.py",
+             "compose.remote.yaml", "remote.env.example", "remote-preflight.py",
+             "junk-collector-remote.service", "remote-archive.md")
     for name in names:
         shutil.copyfile(root / "deploy/container" / name, destination / name)
     pinned = record["reference"] if expected["channel"] else "junk-collector:local"
     env = destination / ".env.example"
     env.write_text(env.read_text().replace("COLLECTOR_IMAGE=junk-collector:local", "COLLECTOR_IMAGE=" + pinned))
-    for name in ("README.md", "snapshot-recovery.md"):
+    for name in (name for name in names if name.endswith(".md")):
         path = destination / name
         text = path.read_text()
         if name == "README.md" and expected["channel"]:

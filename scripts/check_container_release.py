@@ -94,8 +94,17 @@ class ReleaseTests(unittest.TestCase):
             self.assertNotIn("Registry images have not yet been published", text)
             self.assertNotIn("Registry publication has not yet", text)
             self.assertNotIn("../../docs/", text)
-            for name in ("compose.inbox.yaml", "snapshot-recovery.md", "freeze-tar-time.py", "release-image.json"):
+            for name in ("compose.inbox.yaml", "snapshot-recovery.md", "freeze-tar-time.py", "release-image.json",
+                         "compose.remote.yaml", "remote.env.example", "remote-preflight.py",
+                         "junk-collector-remote.service", "remote-archive.md"):
                 self.assertTrue((destination/name).is_file())
+            # The migration runbook must ship with its executable/template dependencies.
+            for name in ("compose.remote.yaml", "remote.env.example", "remote-preflight.py", "junk-collector-remote.service"):
+                self.assertEqual((destination/name).read_bytes(), (ROOT/"deploy/container"/name).read_bytes())
+            for document in destination.glob("*.md"):
+                self.assertNotIn("../../docs/", document.read_text(), document.name)
+            self.assertIn(expected["source"]+"/blob/"+expected["revision"]+"/docs/validation/remote-archive-safety-2026-10-30.md",
+                          (destination/"remote-archive.md").read_text())
             self.assertEqual(json.loads((destination/"release-image.json").read_text()), record)
             record["anonymous_docker_pulls"] = False
             with self.assertRaises(ValueError):
