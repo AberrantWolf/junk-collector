@@ -363,7 +363,22 @@ pub enum ItemEffectSource {
 }
 
 pub trait ContentPort: Send + Sync {
-    fn save_mail_connection(&self, _connection: &MailConnection) -> Result<MailConnection> {
+    fn save_mail_connection(
+        &self,
+        _connection: &MailConnection,
+        _rescan: bool,
+    ) -> Result<MailConnection> {
+        Err(Error::Unavailable("Email intake unavailable".into()))
+    }
+    fn reopen_purchase_suggestion(
+        &self,
+        _suggestion: &PurchaseSuggestion,
+        _item: Item,
+        _expected: Revision,
+    ) -> Result<Item> {
+        Err(Error::Unavailable("Email intake unavailable".into()))
+    }
+    fn restore_purchase_suggestion(&self, _suggestion: &PurchaseSuggestion) -> Result<()> {
         Err(Error::Unavailable("Email intake unavailable".into()))
     }
     fn dismiss_purchase_suggestion(&self, _suggestion: &PurchaseSuggestion) -> Result<()> {

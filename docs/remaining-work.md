@@ -1,3 +1,35 @@
+## Active: deploy reviewed inbox recovery to Fi — 2026-10-31
+
+User authorizes deploying the reviewed folder editing/inbox recovery candidate,
+preserving the existing Bridge connection, private profile/credentials, scan cursors,
+suggestions and accepted purchase history. Build one release-mode deployment image
+from committed source, qualify those exact bytes with disposable state, retain a
+complete stopped-writer Fi/NAS recovery pair, then update the retained stack.
+Keep Bridge's image/home and unrelated services unchanged. Record before/cutoff/
+after state without printing credentials or messages, verify persisted history and
+working runtime/assets, and update delivery/status/evidence together.
+
+## Inbox connector recovery and review corrections — delivered, 2026-10-31
+
+All five clean-review deficiencies are addressed across the connector, application,
+private persistence, APIs and UI: isolated malformed receipts, credential/pin repair,
+older-source linking, explicit restore/reopen/correction, and typed scan health with
+private source locators. Full selected source checks and all 30 browser journeys
+pass; post-review focused checks pass. The independent clean-context reviewer
+verified its follow-up corrections and the final stale-dismissal guard, with no
+remaining actionable findings. See [delivery, review and validation](validation/inbox-recovery-2026-10-31.md).
+No deployment was performed; source/review preparation is complete.
+
+## Connected Bridge folder editing — delivered, 2026-10-31
+
+The requested UI addition is complete: **Edit scanned folders** in Purchase inbox
+saves owner-scoped folder choices without credential re-entry or restart, retaining
+scan state and suggestions and fencing stale work. Workspace tests, strict Clippy,
+web/API/model checks, offline mail tests and all 30 browser journeys pass; see
+[delivery evidence](validation/mail-folder-editing-2026-10-31.md). Source delivery
+only; no deployment is requested or performed. Independent active follow-ups remain
+below.
+
 ## Active: Trash Amp iPhone cellular follow-up — 2026-10-31
 
 The operator reports cached/offline refresh and stalled playback away from home;

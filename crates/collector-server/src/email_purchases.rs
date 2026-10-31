@@ -1,7 +1,7 @@
 use super::*;
 use collector_app::{
     ConfigureMail, ConnectBridge, MailConnection, MailProfile, MailSetupStatus, PurchaseInbox,
-    PurchaseInboxView, ReviewPurchase,
+    PurchaseInboxView, ReopenPurchase, RepairBridge, ReviewPurchase,
 };
 #[utoipa::path(get,path="/api/v1/mail/setup",responses((status=200,body=MailSetupStatus),(status=401),(status=403)))]
 pub(super) async fn mail_setup(
@@ -52,7 +52,7 @@ pub(super) async fn mail_connections(
         blocking(move || state.service.mail_connections(&actor)).await?,
     ))
 }
-#[utoipa::path(put,path="/api/v1/mail/connections/{id}",params(("id"=String,Path)),request_body=ConfigureMail,responses((status=200,body=MailConnection),(status=403),(status=409)))]
+#[utoipa::path(put,path="/api/v1/mail/connections/{id}",params(("id"=String,Path)),request_body=ConfigureMail,responses((status=200,body=MailConnection),(status=400),(status=403),(status=409)))]
 pub(super) async fn configure_mail(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -100,15 +100,21 @@ pub(super) async fn review_purchase(
         .await?,
     ))
 }
-#[utoipa::path(post,path="/api/v1/purchase-suggestions/{id}/dismiss",params(("id"=String,Path)),responses((status=200),(status=403),(status=409)))]
+#[utoipa::path(post,path="/api/v1/purchase-suggestions/{id}/dismiss",params(("id"=String,Path)),request_body=Revision,responses((status=200),(status=403),(status=409)))]
 pub(super) async fn dismiss_purchase(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Json(expected): Json<collector_core::Revision>,
 ) -> ApiResult<Json<()>> {
     let actor = principal(&state, &headers)?;
     let context = command_context(&headers)?;
-    blocking(move || state.service.dismiss_purchase(&actor, &id, &context)).await?;
+    blocking(move || {
+        state
+            .service
+            .dismiss_purchase(&actor, &id, expected, &context)
+    })
+    .await?;
     Ok(Json(()))
 }
 pub(super) async fn purchase_inbox_js() -> impl IntoResponse {
@@ -116,4 +122,58 @@ pub(super) async fn purchase_inbox_js() -> impl IntoResponse {
         [("content-type", "text/javascript; charset=utf-8")],
         include_str!("../../../web/dist/purchase-inbox.js"),
     )
+}
+
+#[utoipa::path(post,path="/api/v1/mail/profiles/{id}/repair",params(("id"=String,Path)),request_body=RepairBridge,responses((status=200,body=MailProfile),(status=400),(status=403),(status=409),(status=503)))]
+pub(super) async fn repair_bridge(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(command): Json<RepairBridge>,
+) -> ApiResult<Json<MailProfile>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .repair_mail_bridge(&actor, &id, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/purchase-suggestions/{id}/reopen",params(("id"=String,Path)),request_body=ReopenPurchase,responses((status=200,body=Item),(status=403),(status=409)))]
+pub(super) async fn reopen_purchase(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(command): Json<ReopenPurchase>,
+) -> ApiResult<Json<Item>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .reopen_purchase(&actor, &id, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/purchase-suggestions/{id}/restore",params(("id"=String,Path)),request_body=Revision,responses((status=200),(status=403),(status=409)))]
+pub(super) async fn restore_purchase(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(expected): Json<collector_core::Revision>,
+) -> ApiResult<Json<()>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    blocking(move || {
+        state
+            .service
+            .restore_purchase(&actor, &id, expected, &context)
+    })
+    .await?;
+    Ok(Json(()))
 }

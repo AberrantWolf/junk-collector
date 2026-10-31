@@ -14,6 +14,7 @@ import ssl
 import sys
 import unicodedata
 from email.parser import BytesParser
+from email.message import EmailMessage
 
 MAX_MAIL = 2 * 1024 * 1024
 RETAILERS = {
@@ -35,7 +36,8 @@ ORDER = re.compile(r'(?:注文番号|ご注文番号|受注番号|注文受付�
 
 
 def clean(text):
-    return ' '.join(unicodedata.normalize('NFKC', text).split()).encode('utf-8')[:1024].decode('utf-8', errors='ignore')
+    value = ' '.join(unicodedata.normalize('NFKC', text).split())
+    return ''.join(c for c in value if unicodedata.category(c) != 'Cc').encode('utf-8')[:1024].decode('utf-8', errors='ignore')
 
 
 class TextHTML(html.parser.HTMLParser):
@@ -103,18 +105,42 @@ def status_for(subject):
     return 'unknown'
 
 
+class MimeLimitError(ValueError):
+    pass
+
+
 def extract(raw, namespace, received_at=None):
     if len(raw) > MAX_MAIL:
         raise ValueError('mail size limit')
-    message = BytesParser(policy=email.policy.default).parsebytes(raw)
+    try:
+        return _extract(raw, namespace, received_at)
+    except (ValueError, UnicodeError, LookupError, email.errors.MessageError, RecursionError) as failure:
+        message = BytesParser(policy=email.policy.default).parsebytes(raw, headersonly=True)
+        message._collector_raw_digest = hashlib.sha256(raw).hexdigest()
+        message._collector_raw_identity_only = True
+        retailer = retailer_for(message)
+        if not retailer or not RECEIPT.search(str(message.get('Subject', ''))):
+            return []
+        return [unparsed(message, retailer, namespace, received_at, 'too_many_parts' if isinstance(failure, MimeLimitError) else 'unsupported_content')]
+
+
+def _extract(raw, namespace, received_at=None):
+    count = 0
+    def bounded_message(*, policy):
+        nonlocal count
+        count += 1
+        if count > 100:
+            raise MimeLimitError('MIME part limit')
+        return EmailMessage(policy=policy)
+    policy = email.policy.default.clone(message_factory=bounded_message)
+    message = BytesParser(policy=policy).parsebytes(raw)
+    message._collector_raw_digest = hashlib.sha256(raw).hexdigest()
     retailer = retailer_for(message)
     subject = clean(str(message.get('Subject', '')))
     if not retailer or not RECEIPT.search(subject):
         return []
     plain, html_titles = [], []
-    for index, part in enumerate(message.walk()):
-        if index > 100:
-            raise ValueError('MIME part limit')
+    for part in message.walk():
         if part.get_content_disposition() == 'attachment' or part.get_content_maintype() != 'text':
             continue
         if part.get_content_type() not in ('text/plain', 'text/html'):
@@ -125,7 +151,7 @@ def extract(raw, namespace, received_at=None):
             text = data.decode(charset, errors='strict')
         except (UnicodeError, LookupError):
             # Fail visibly; lossy title decoding must not silently become an identity.
-            return [unparsed(message, retailer, namespace, received_at)]
+            return [unparsed(message, retailer, namespace, received_at, 'unsupported_content')]
         if part.get_content_type() == 'text/html':
             parser = TextHTML()
             parser.feed(text)
@@ -167,11 +193,30 @@ def extract(raw, namespace, received_at=None):
     return result
 
 
-def make_purchase(message, retailer, namespace, title, reference, received_at):
+def message_identity(message):
+    identity = str(message.get('Message-ID', ''))
+    if identity:
+        return identity
+    # Preserve supported messages' existing canonical identity. Rejected MIME
+    # trees are represented by a header-only object and the exact raw digest.
+    if getattr(message, '_collector_raw_identity_only', False):
+        return message._collector_raw_digest
+    return hashlib.sha256(message.as_bytes()).hexdigest()
+
+
+def make_purchase(message, retailer, namespace, title, reference, received_at, safe_date=False):
     # A profile-scoped message+line hash survives folder duplicates and UIDVALIDITY resets.
-    identity = str(message.get('Message-ID', '')) or hashlib.sha256(message.as_bytes()).hexdigest()
+    identity = message_identity(message)
     source = hashlib.sha256((namespace + '\0' + identity + '\0' + title).encode()).hexdigest()
-    when = email.utils.parsedate_to_datetime(str(message.get('Date', ''))) if message.get('Date') else received_at
+    try:
+        date_value = next((v for k, v in message.raw_items() if k.lower() == 'date'), None)
+        when = email.utils.parsedate_to_datetime(date_value) if date_value is not None else received_at
+        if when is not None and when.tzinfo is not None:
+            when = when.astimezone(dt.timezone.utc)
+    except (ValueError, TypeError, OverflowError):
+        if not safe_date:
+            return unparsed(message, retailer, namespace, received_at, 'malformed_date')
+        when = received_at
     if when is None or when.tzinfo is None:
         when = received_at or dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
     return dict(id=source, retailer=retailer, order_reference=reference, title=title, platform='', edition='',
@@ -180,9 +225,11 @@ def make_purchase(message, retailer, namespace, title, reference, received_at):
                 intentional_duplicate=False, source_keys=[source])
 
 
-def unparsed(message, retailer, namespace, received_at):
-    value = make_purchase(message, retailer, namespace, 'Unparsed receipt — review original email', '', received_at)
+def unparsed(message, retailer, namespace, received_at, issue='unrecognized_layout'):
+    reference = ORDER.search(clean(str(message.get('Subject', ''))))
+    value = make_purchase(message, retailer, namespace, 'Unparsed receipt — review original email', reference.group(1) if reference else '', received_at, safe_date=True)
     value['status'] = 'unknown'
+    value['_issue'] = issue
     return value
 
 
@@ -204,14 +251,33 @@ def imap_folder(name):
     return ''.join(output)
 
 
-def checked(result):
-    kind, data = result
-    if kind != 'OK':
-        raise ValueError('IMAP command failed')
+class MailError(ValueError):
+    def __init__(self, kind, folder=None):
+        self.kind, self.folder = kind, folder
+        super().__init__('Mail operation failed')
+
+
+def checked(result, kind='invalid_response', folder=None):
+    status, data = result
+    if status != 'OK':
+        raise MailError(kind, folder)
     return data
 
 
-def fetch_batch(profile, cursor, probe=False):
+def bounded_header(header, field, maximum):
+    original = next((v for k, v in header.raw_items() if k.lower() == 'date'), '') if field == 'Date' else str(header.get(field, ''))
+    value = ' '.join(original.split())
+    value = ''.join(c for c in value if not unicodedata.category(c).startswith('C'))
+    return value.encode('utf-8')[:maximum].decode('utf-8', errors='ignore')
+
+
+def folder_progress(folder, validity, last, end):
+    return dict(folder=folder, uid_validity=validity, scanned_through=last,
+                available_through=end, caught_up=last==end,
+                checked_at=dt.datetime.now(dt.timezone.utc).isoformat())
+
+
+def fetch_batch(profile, cursor, probe=False, auth_only=False):
     if any(not isinstance(profile.get(field), str) or any(ord(c) < 32 or ord(c) == 127 for c in profile[field]) for field in ('username', 'password')):
         raise ValueError('invalid local credentials')
     if profile.get('host', '127.0.0.1') != '127.0.0.1':
@@ -230,15 +296,20 @@ def fetch_batch(profile, cursor, probe=False):
         actual = hashlib.sha256(client.sock.getpeercert(binary_form=True)).hexdigest()
         import hmac
         if not hmac.compare_digest(actual, profile['certificate_sha256'].lower()):
-            raise ValueError('Bridge certificate changed')
-        checked(client.login(profile['username'], profile['password']))
-        purchases = []
+            raise MailError('certificate')
+        try:
+            checked(client.login(profile['username'], profile['password']), 'authentication')
+        except imaplib.IMAP4.error:
+            raise MailError('authentication') from None
+        if auth_only:
+            return dict(cursor='', purchases=[])
+        purchases, details, progress = [], [], []
         for folder in folders:
             if any(c in folder for c in '\r\n\x00') or len(folder) > 256:
                 raise ValueError('invalid folder')
             quoted = '"' + imap_folder(folder).replace('\\', '\\\\').replace('"', '\\"') + '"'
-            checked(client.select(quoted, readonly=True))  # EXAMINE, never SELECT writable.
-            status = checked(client.status(quoted, '(UIDVALIDITY UIDNEXT)'))[0]
+            checked(client.select(quoted, readonly=True), 'folder', folder)  # EXAMINE, never SELECT writable.
+            status = checked(client.status(quoted, '(UIDVALIDITY UIDNEXT)'), 'folder', folder)[0]
             validity = int(re.search(rb'UIDVALIDITY (\d+)', status).group(1))
             uidnext = int(re.search(rb'UIDNEXT (\d+)', status).group(1))
             if probe:
@@ -249,31 +320,44 @@ def fetch_batch(profile, cursor, probe=False):
             if end > last:
                 uids = checked(client.uid('search', None, 'UID', f'{last+1}:{end}'))[0].split()
                 for uid in uids:
-                    data = checked(client.uid('fetch', uid, '(RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID DATE)])'))
+                    data = checked(client.uid('fetch', uid, '(RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID DATE)])'))
                     parts = [x for x in data if isinstance(x, tuple)]
                     if not parts:
                         raise ValueError('missing header')
                     header = BytesParser(policy=email.policy.default).parsebytes(parts[0][1])
+                    internal = re.search(rb'INTERNALDATE "([^"]+)"', parts[0][0])
+                    received_at = None
+                    if internal:
+                        received_at = email.utils.parsedate_to_datetime(internal.group(1).decode('ascii').replace('-', ' '))
                     if retailer_for(header) and RECEIPT.search(str(header.get('Subject', ''))):
                         size = int(re.search(rb'RFC822.SIZE (\d+)', parts[0][0]).group(1))
                         if size > MAX_MAIL:
-                            extracted = [unparsed(header, retailer_for(header), profile['id'], None)]
+                            extracted = [unparsed(header, retailer_for(header), profile['id'], received_at, 'too_large')]
                         else:
                             full = checked(client.uid('fetch', uid, f'(BODY.PEEK[]<0.{MAX_MAIL+1}>)'))
                             literal = [x[1] for x in full if isinstance(x, tuple)]
                             if len(literal) != 1 or len(literal[0]) != size:
                                 raise ValueError('incomplete message')
-                            extracted = extract(literal[0], profile['id'])
+                            extracted = extract(literal[0], profile['id'], received_at)
                         if len(purchases) + len(extracted) > 100:
                             state[folder] = dict(validity=validity, uid=int(uid)-1)
-                            return dict(cursor=json.dumps(state), purchases=purchases)
+                            progress.append(folder_progress(folder, validity, int(uid)-1, uidnext-1))
+                            return dict(cursor=json.dumps(state), purchases=purchases, details=details, progress=progress)
+                        for purchase in extracted:
+                            issue = purchase.pop('_issue', None)
+                            details.append(dict(key=purchase['id'], issue=issue, source=dict(
+                                folder=folder, uid_validity=validity, uid=int(uid),
+                                message_id=bounded_header(header, 'Message-ID', 512),
+                                subject=bounded_header(header, 'Subject', 512),
+                                date=bounded_header(header, 'Date', 128))))
                         purchases.extend(extracted)
                 state[folder] = dict(validity=validity, uid=end)
             else:
                 state[folder] = dict(validity=validity, uid=last)
+            progress.append(folder_progress(folder, validity, min(state[folder]['uid'], uidnext-1), uidnext-1))
             if len(purchases) >= 80:
                 break
-        return dict(cursor=json.dumps(state), purchases=purchases)
+        return dict(cursor=json.dumps(state), purchases=purchases, details=details, progress=progress)
     finally:
         try:
             client.logout()
@@ -284,9 +368,13 @@ def fetch_batch(profile, cursor, probe=False):
 if __name__ == '__main__':
     try:
         request = json.load(sys.stdin)
-        result = fetch_batch(request['profile'], request['cursor'], request.get('operation') == 'probe')
+        result = fetch_batch(request['profile'], request['cursor'], request.get('operation') == 'probe', request.get('operation') == 'authenticate')
         sys.stdout.write(json.dumps(result, ensure_ascii=False))
-    except Exception:
+    except Exception as failure:
+        # Only fixed typed categories and the submitted folder cross this boundary.
+        kind = failure.kind if isinstance(failure, MailError) else ('transport' if isinstance(failure, (OSError, imaplib.IMAP4.abort)) else 'invalid_response')
+        folder = failure.folder if isinstance(failure, MailError) else None
+        sys.stdout.write(json.dumps(dict(cursor='', purchases=[], failure=dict(kind=kind, folder=folder))))
         # No exception repr: libraries can include credentials, headers or mail bodies.
         sys.stderr.write('Mail adapter failed; inspect local configuration.\n')
-        sys.exit(1)
+        sys.exit(0)

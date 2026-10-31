@@ -7,6 +7,10 @@ pub struct MailProfile {
     pub owner: UserId,
     pub label: String,
     pub provider: String,
+    #[serde(default)]
+    pub configuration_revision: Revision,
+    #[serde(default)]
+    pub folders: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MailConnection {
@@ -14,9 +18,16 @@ pub struct MailConnection {
     pub collection_id: CollectionId,
     pub enabled: bool,
     pub revision: Revision,
+    /// None uses the provisioned profile folders, preserving existing installations.
+    #[serde(default)]
+    pub folders: Option<Vec<String>>,
     pub cursor: String,
     pub last_checked: Option<DateTime<Utc>>,
     pub problem: Option<String>,
+    #[serde(default)]
+    pub failure: Option<MailFailure>,
+    #[serde(default)]
+    pub progress: Vec<MailFolderProgress>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PurchaseSuggestion {
@@ -27,6 +38,12 @@ pub struct PurchaseSuggestion {
     pub purchase: PurchaseOrder,
     pub reason: String,
     pub dismissed: bool,
+    #[serde(default)]
+    pub revision: Revision,
+    #[serde(default)]
+    pub source: Option<MailSource>,
+    #[serde(default)]
+    pub issue: Option<MailParseIssue>,
     #[serde(default)]
     pub matches: Vec<ItemId>,
     #[serde(default)]
@@ -40,6 +57,10 @@ pub struct PurchaseInbox {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigureMail {
+    #[serde(default)]
+    pub rescan: bool,
+    /// Omit to retain the current folders.
+    pub folders: Option<Vec<String>>,
     pub collection_id: CollectionId,
     pub enabled: bool,
     pub expected_revision: Revision,
@@ -47,6 +68,8 @@ pub struct ConfigureMail {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewPurchase {
+    #[serde(default)]
+    pub suggestion_revision: Revision,
     pub item_id: ItemId,
     pub expected_revision: Revision,
     /// User-reviewed title for a new collection entry; existing metadata is retained.
@@ -58,13 +81,91 @@ pub struct ReviewPurchase {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MailBatch {
+    #[serde(default)]
+    pub details: Vec<MailReceiptDetails>,
+    #[serde(default)]
+    pub progress: Vec<MailFolderProgress>,
+    #[serde(default)]
+    pub failure: Option<MailFailure>,
     pub cursor: String,
     pub purchases: Vec<PurchaseOrder>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MailSource {
+    pub folder: String,
+    pub uid_validity: u64,
+    pub uid: u64,
+    pub message_id: String,
+    pub subject: String,
+    pub date: String,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MailParseIssue {
+    MalformedDate,
+    UnsupportedContent,
+    TooLarge,
+    TooManyParts,
+    UnrecognizedLayout,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MailReceiptDetails {
+    pub key: String,
+    pub source: MailSource,
+    pub issue: Option<MailParseIssue>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MailFolderProgress {
+    pub checked_at: DateTime<Utc>,
+    pub folder: String,
+    pub uid_validity: u64,
+    pub scanned_through: u64,
+    pub available_through: u64,
+    pub caught_up: bool,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MailFailureKind {
+    Authentication,
+    Certificate,
+    Folder,
+    Transport,
+    InvalidResponse,
+    Adapter,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MailFailure {
+    pub kind: MailFailureKind,
+    pub folder: Option<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReopenPurchase {
+    pub suggestion_revision: Revision,
+    pub accepted_item: ItemId,
+    pub expected_item_revision: Revision,
+}
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RepairBridge {
+    pub username: String,
+    pub password: String,
+    pub certificate_sha256: String,
+    pub expected_revision: Revision,
+}
+
 /// Installed mail adapters expose bounded batches and opaque durable cursors.
 pub trait MailProviderPort: Send + Sync {
     fn profiles(&self) -> Vec<MailProfile>;
-    fn fetch(&self, profile: &str, cursor: &str) -> Result<MailBatch>;
+    /// Serialize publication with credential replacement, without exposing secrets.
+    fn with_configuration(
+        &self,
+        profile: &str,
+        revision: Revision,
+        commit: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()>;
+    fn fetch(&self, profile: &str, cursor: &str, folders: Option<&[String]>) -> Result<MailBatch>;
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +205,13 @@ pub struct ConnectBridge {
     pub folders: Vec<String>,
 }
 pub trait MailSetupPort: Send + Sync {
+    fn repair_bridge(
+        &self,
+        owner: UserId,
+        profile: &str,
+        command: &RepairBridge,
+        request_key: &str,
+    ) -> Result<MailProfile>;
     fn setup_status(&self) -> Result<MailSetupStatus>;
     fn connect_bridge(
         &self,
@@ -135,7 +243,7 @@ pub trait PurchaseInboxPort: Send + Sync {
     /// CAS fences disabling/reconfiguring a connection while a fetch is in flight.
     /// Account enablement must also be checked in the transaction that commits the batch.
     fn commit_mail_batch(&self, connection: &MailConnection, batch: MailBatch) -> Result<()>;
-    fn mail_problem(&self, connection: &MailConnection) -> Result<()>;
+    fn mail_problem(&self, connection: &MailConnection, failure: &MailFailure) -> Result<()>;
 }
 impl CollectionService {
     pub fn with_mail_setup(mut self, port: Arc<dyn MailSetupPort>) -> Self {
@@ -170,12 +278,7 @@ impl CollectionService {
             || command.password.is_empty()
             || command.password.len() > 1024
             || command.password.chars().any(char::is_control)
-            || command.folders.is_empty()
-            || command.folders.len() > 16
-            || command
-                .folders
-                .iter()
-                .any(|f| f.is_empty() || f.len() > 256 || f.chars().any(char::is_control))
+            || validate_mail_folders(&command.folders).is_err()
         {
             return Err(Error::Invalid(
                 "Enter local Bridge IMAP credentials and 1–16 valid folder names.".into(),
@@ -187,6 +290,88 @@ impl CollectionService {
                 Error::Unavailable("Bridge setup is not installed on this server.".into())
             })?
             .connect_bridge(actor.user_id, &command, context.key())
+    }
+    pub fn repair_mail_bridge(
+        &self,
+        actor: &Principal,
+        profile: &str,
+        command: RepairBridge,
+        context: &CommandContext,
+    ) -> Result<MailProfile> {
+        self.mail_enabled_user(actor)?;
+        self.require_administrator(actor)?;
+        if command.username.is_empty()
+            || command.username.len() > 320
+            || command.username.chars().any(char::is_control)
+            || command.password.is_empty()
+            || command.password.len() > 1024
+            || command.password.chars().any(char::is_control)
+            || command.certificate_sha256.len() != 64
+            || !command
+                .certificate_sha256
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(Error::Invalid(
+                "Enter local Bridge credentials and confirm its current certificate fingerprint."
+                    .into(),
+            ));
+        }
+        self.mail_setup
+            .as_ref()
+            .ok_or_else(|| Error::Unavailable("Bridge setup unavailable".into()))?
+            .repair_bridge(actor.user_id, profile, &command, context.key())
+    }
+    pub fn reopen_purchase(
+        &self,
+        actor: &Principal,
+        id: &str,
+        command: ReopenPurchase,
+        context: &CommandContext,
+    ) -> Result<Item> {
+        let suggestion = self.owned_purchase(actor, id)?;
+        self.content_write_eligibility(actor, suggestion.collection_id)?;
+        self.execute_command(actor, context, "mail.reopen", &(id, &command), |effects| {
+            if suggestion.revision != command.suggestion_revision
+                || suggestion.accepted_item != Some(command.accepted_item)
+            {
+                return Err(Error::Conflict);
+            }
+            let mut item = self.reader.item(command.accepted_item)?;
+            if item.deleted
+                || item.collection_id != suggestion.collection_id
+                || item.revision != command.expected_item_revision
+            {
+                return Err(Error::Conflict);
+            }
+            let index = item
+                .purchase_orders
+                .iter()
+                .position(|o| o.source_keys.contains(&suggestion.id))
+                .ok_or(Error::Conflict)?;
+            item.purchase_orders.remove(index);
+            item.validate()?;
+            effects.reopen_purchase_suggestion(&suggestion, item, command.expected_item_revision)
+        })
+    }
+    pub fn restore_purchase(
+        &self,
+        actor: &Principal,
+        id: &str,
+        expected: Revision,
+        context: &CommandContext,
+    ) -> Result<()> {
+        let suggestion = self.owned_purchase(actor, id)?;
+        self.content_write_eligibility(actor, suggestion.collection_id)?;
+        self.execute_command(actor, context, "mail.restore", &(id, expected), |effects| {
+            if suggestion.revision != expected
+                || !suggestion.dismissed
+                || suggestion.accepted_item.is_some()
+            {
+                return Err(Error::Conflict);
+            }
+            effects.restore_purchase_suggestion(&suggestion)
+        })
     }
     fn mail_enabled_user(&self, actor: &Principal) -> Result<()> {
         security::mail_ingestion(self.administration.account(actor.user_id)?.enabled)
@@ -250,8 +435,11 @@ impl CollectionService {
             .into_iter()
             .find(|p| p.id == profile)
             .ok_or(Error::NotFound)?;
-        if command.enabled {
+        if command.enabled || command.folders.is_some() || command.rescan {
             self.content_write_eligibility(actor, command.collection_id)?;
+        }
+        if let Some(folders) = &command.folders {
+            validate_mail_folders(folders)?;
         }
         let (inbox, _) = self.mail_ports()?;
         let current = inbox.mail_connection(&profile.id)?;
@@ -261,6 +449,10 @@ impl CollectionService {
             return Err(Error::Conflict);
         }
         let connection = MailConnection {
+            folders: command
+                .folders
+                .clone()
+                .or_else(|| current.as_ref().and_then(|c| c.folders.clone())),
             profile,
             collection_id: command.collection_id,
             enabled: command.enabled,
@@ -271,13 +463,18 @@ impl CollectionService {
                 .unwrap_or_default(),
             last_checked: current.as_ref().and_then(|c| c.last_checked),
             problem: None,
+            failure: None,
+            progress: current
+                .as_ref()
+                .map(|c| c.progress.clone())
+                .unwrap_or_default(),
         };
         self.execute_command(
             actor,
             context,
             "mail.configure",
             &(&connection.profile.id, &command),
-            |effects| effects.save_mail_connection(&connection),
+            |effects| effects.save_mail_connection(&connection, command.rescan),
         )
     }
     pub fn purchase_inbox(
@@ -307,13 +504,17 @@ impl CollectionService {
         &self,
         actor: &Principal,
         id: &str,
+        expected: Revision,
         context: &CommandContext,
     ) -> Result<()> {
         let suggestion = self.owned_purchase(actor, id)?;
-        if suggestion.accepted_item.is_some() {
-            return Err(Error::Conflict);
-        }
-        self.execute_command(actor, context, "mail.dismiss", &id, |effects| {
+        self.execute_command(actor, context, "mail.dismiss", &(id, expected), |effects| {
+            if suggestion.accepted_item.is_some()
+                || suggestion.dismissed
+                || suggestion.revision != expected
+            {
+                return Err(Error::Conflict);
+            }
             effects.dismiss_purchase_suggestion(&suggestion)
         })
     }
@@ -344,7 +545,7 @@ impl CollectionService {
         }
         // Freeze the caller's entire decision before resolving mutable item state.
         self.execute_command(actor,context,"mail.review",&(id,&command),|effects| {
-            if suggestion.dismissed || suggestion.accepted_item.is_some() { return Err(Error::Conflict); }
+            if suggestion.revision != command.suggestion_revision || suggestion.dismissed || suggestion.accepted_item.is_some() { return Err(Error::Conflict); }
             let mut item=match self.reader.item(command.item_id) {
                 Ok(item)=>{
                     if item.collection_id!=suggestion.collection_id || item.deleted { return Err(Error::Conflict); }
@@ -361,8 +562,9 @@ impl CollectionService {
             purchase.intentional_duplicate=command.intentional_duplicate;
             if let Some(existing)=&command.existing_order_id {
                 let order=item.purchase_orders.iter_mut().find(|o|&o.id==existing).ok_or(Error::NotFound)?;
-                if order.retailer!=purchase.retailer || order.order_reference!=purchase.order_reference || order.observed_at>purchase.observed_at { return Err(Error::Conflict); }
+                if order.retailer!=purchase.retailer || order.order_reference!=purchase.order_reference { return Err(Error::Conflict); }
                 if !order.source_keys.contains(&suggestion.id) { order.source_keys.push(suggestion.id.clone()); }
+                if order.observed_at <= purchase.observed_at {
                 order.title=purchase.title;
                 order.platform=purchase.platform;
                 order.edition=purchase.edition;
@@ -370,6 +572,7 @@ impl CollectionService {
                 order.status=purchase.status;
                 order.observed_at=purchase.observed_at;
                 order.intentional_duplicate=command.intentional_duplicate;
+                }
             } else {
                 if item.purchase_orders.iter().any(|o|o.source_keys.contains(&suggestion.id)) { return Err(Error::Conflict); }
                 item.purchase_orders.push(purchase);
@@ -382,12 +585,13 @@ impl CollectionService {
     pub fn sync_purchase_mail(&self) -> Result<()> {
         let (inbox, provider) = self.mail_ports()?;
         for profile in provider.profiles() {
-            let Some(connection) = inbox.mail_connection(&profile.id)? else {
+            let Some(mut connection) = inbox.mail_connection(&profile.id)? else {
                 continue;
             };
             if !connection.enabled || connection.profile.owner != profile.owner {
                 continue;
             }
+            connection.profile = profile.clone();
             let actor = Principal {
                 user_id: profile.owner,
                 administrator: false,
@@ -402,31 +606,114 @@ impl CollectionService {
             {
                 continue;
             }
-            let fetched = provider.fetch(&profile.id, &connection.cursor);
+            let fetched = provider.fetch(
+                &profile.id,
+                &connection.cursor,
+                connection.folders.as_deref(),
+            );
             if self.mail_enabled_user(&actor).is_err() {
                 continue;
             }
+            let publish_failure = |failure: &MailFailure| -> Result<()> {
+                match provider.with_configuration(
+                    &profile.id,
+                    profile.configuration_revision,
+                    &mut || inbox.mail_problem(&connection, failure),
+                ) {
+                    Ok(()) | Err(Error::Conflict) => Ok(()),
+                    Err(e) => Err(e),
+                }
+            };
             match fetched {
                 Ok(batch) => {
+                    if let Some(failure) = &batch.failure {
+                        let sanitized = if failure
+                            .folder
+                            .as_ref()
+                            .is_none_or(|f| f.len() <= 256 && !f.chars().any(char::is_control))
+                        {
+                            failure.clone()
+                        } else {
+                            MailFailure {
+                                kind: MailFailureKind::InvalidResponse,
+                                folder: None,
+                            }
+                        };
+                        publish_failure(&sanitized)?;
+                        continue;
+                    }
                     let valid = batch.purchases.len() <= 100
                         && batch.cursor.len() <= 65536
+                        && batch.details.len() <= 100
+                        && batch.progress.len() <= 16
+                        && batch.details.iter().all(|d| {
+                            batch.purchases.iter().any(|p| p.id == d.key)
+                                && !d.source.folder.is_empty()
+                                && d.source.folder.len() <= 256
+                                && d.source.uid > 0
+                                && batch.progress.iter().any(|p| {
+                                    p.folder == d.source.folder
+                                        && p.uid_validity == d.source.uid_validity
+                                        && d.source.uid <= p.scanned_through
+                                })
+                                && d.source.message_id.len() <= 512
+                                && d.source.subject.len() <= 512
+                                && d.source.date.len() <= 128
+                                && [
+                                    &d.source.folder,
+                                    &d.source.message_id,
+                                    &d.source.subject,
+                                    &d.source.date,
+                                ]
+                                .iter()
+                                .all(|v| !v.chars().any(char::is_control))
+                        })
+                        && batch.progress.iter().all(|p| {
+                            connection
+                                .folders
+                                .as_ref()
+                                .unwrap_or(&profile.folders)
+                                .contains(&p.folder)
+                                && p.uid_validity > 0
+                                && !p.folder.is_empty()
+                                && p.folder.len() <= 256
+                                && !p.folder.chars().any(char::is_control)
+                                && p.scanned_through <= p.available_through
+                                && p.caught_up == (p.scanned_through == p.available_through)
+                        })
                         && batch.purchases.iter().all(|purchase| {
                             purchase.validate().is_ok()
                                 && purchase.source_keys.len() == 1
                                 && purchase.id == purchase.source_keys[0]
                         });
                     if !valid {
-                        inbox.mail_problem(&connection)?;
+                        publish_failure(&MailFailure {
+                            kind: MailFailureKind::InvalidResponse,
+                            folder: None,
+                        })?;
                         continue;
                     }
                     // Check authorization again after the blocking fetch.
                     self.content_write_eligibility(&actor, connection.collection_id)?;
-                    match inbox.commit_mail_batch(&connection, batch) {
+                    let mut pending = Some(batch);
+                    match provider.with_configuration(
+                        &profile.id,
+                        profile.configuration_revision,
+                        &mut || {
+                            inbox.commit_mail_batch(
+                                &connection,
+                                pending.take().ok_or(Error::Conflict)?,
+                            )
+                        },
+                    ) {
                         Ok(()) | Err(Error::Conflict) | Err(Error::Forbidden) => {}
                         Err(e) => return Err(e),
                     }
                 }
-                Err(_) => inbox.mail_problem(&connection)?, // Never retain adapter errors containing credentials/mail.
+                Err(_) => publish_failure(&MailFailure {
+                    kind: MailFailureKind::Adapter,
+                    folder: None,
+                })?, // Never retain adapter errors containing credentials/mail.
             }
         }
         Ok(())
@@ -447,4 +734,16 @@ pub fn purchase_search_keys(title: &str, orders: &[PurchaseOrder]) -> Vec<String
         .chain(orders.iter().map(|p| p.title.as_str()))
         .map(normalized_purchase_title)
         .collect()
+}
+
+fn validate_mail_folders(folders: &[String]) -> Result<()> {
+    if folders.is_empty()
+        || folders.len() > 16
+        || folders.iter().any(|f| {
+            f.is_empty() || f.len() > 256 || f.trim().is_empty() || f.chars().any(char::is_control)
+        })
+    {
+        return Err(Error::Invalid("Enter 1–16 exact IMAP folder names, each at most 256 bytes and without control characters.".into()));
+    }
+    Ok(())
 }

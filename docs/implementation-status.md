@@ -1,3 +1,34 @@
+## Inbox recovery and review corrections — delivered, 2026-10-31
+
+All five review findings are addressed. Malformed receipts become isolated reviewable
+issues; credential/pin revalidation retains account identity/history; older receipts
+attach without overwriting newer order state; dismissed/accepted purchases can be
+explicitly restored/reopened for correction or reassignment; typed failures,
+per-folder progress and owner-private locators make scan state actionable.
+
+Full selected source checks (571 workspace tests passed, five existing ignores) and
+all 30 browser journeys pass. Final focused checks cover 21 offline mail cases,
+nine Store email tests and six credential/setup tests, plus strict Clippy, web/build/
+API and desktop/mobile rendering. The independent clean-context reviewer verified
+its follow-up fixes and final stale-dismissal guard, with no remaining actionable
+findings. See [delivery and validation](validation/inbox-recovery-2026-10-31.md).
+Source delivery only; this has not been deployed.
+
+## Connected Bridge folder editing — delivered, 2026-10-31
+
+Purchase inbox now exposes **Edit scanned folders** for an owned connected Bridge.
+Save 1–16 exact folder names without re-entering credentials or restarting the
+server. Enabled/paused state, suggestions and saved folder positions are retained;
+new folders begin history. Private connection revisions fence old scan results and
+stale settings; existing provisioned folder defaults remain effective until edited.
+The editor supports cancel, preserves drafts during polling and shows save failures.
+Folder access is checked on the next enabled scan, with visible failures.
+
+Workspace tests (566 passed, five existing ignores), strict Clippy, web/API/model
+checks, 17 offline mail tests and all 30 browser journeys pass. Desktop/mobile
+rendering was inspected. See [delivery and validation](validation/mail-folder-editing-2026-10-31.md).
+Source delivery only; this change has not been deployed.
+
 ## Trash Amp iPhone follow-up — 2026-10-31
 
 Fi remains healthy and the operator reports working iPhone web playback. Native

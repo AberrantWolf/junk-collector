@@ -7,6 +7,9 @@ struct Setup {
     owners: Mutex<Vec<UserId>>,
 }
 impl MailSetupPort for Setup {
+    fn repair_bridge(&self, _: UserId, _: &str, _: &RepairBridge, _: &str) -> Result<MailProfile> {
+        Err(Error::NotFound)
+    }
     fn setup_status(&self) -> Result<MailSetupStatus> {
         Ok(MailSetupStatus {
             can_connect: false,
@@ -28,6 +31,8 @@ impl MailSetupPort for Setup {
             owner,
             label: "Private mail".into(),
             provider: "proton_bridge".into(),
+            configuration_revision: Revision(0),
+            folders: vec!["INBOX".into()],
         })
     }
 }
@@ -104,10 +109,18 @@ struct Mail {
     batch: Mutex<MailBatch>,
 }
 impl MailProviderPort for Mail {
+    fn with_configuration(
+        &self,
+        _: &str,
+        _: Revision,
+        commit: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        commit()
+    }
     fn profiles(&self) -> Vec<MailProfile> {
         vec![self.profile.clone()]
     }
-    fn fetch(&self, _: &str, _: &str) -> Result<MailBatch> {
+    fn fetch(&self, _: &str, _: &str, _: Option<&[String]>) -> Result<MailBatch> {
         Ok(self.batch.lock().unwrap().clone())
     }
 }
@@ -163,14 +176,21 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
             owner: user,
             label: "Private Proton".into(),
             provider: "proton_bridge".into(),
+            configuration_revision: Revision(0),
+            folders: vec!["INBOX".into()],
         },
         batch: Mutex::new(MailBatch {
+            details: vec![],
+            progress: vec![],
+            failure: None,
             cursor: "first".into(),
             purchases: vec![purchase("a", PurchaseStatus::Preordered)],
         }),
     });
     let service = base.with_mail_intake(store.clone(), provider.clone());
     let configure = ConfigureMail {
+        rescan: false,
+        folders: None,
         collection_id: collection.id,
         enabled: true,
         expected_revision: Revision(0),
@@ -187,6 +207,7 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
     let s = &inbox.items[0];
     let id = ItemId::new();
     let command = ReviewPurchase {
+        suggestion_revision: Revision(0),
         item_id: id,
         expected_revision: Revision(0),
         title: "The Legend of Zelda".into(),
@@ -235,7 +256,7 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
     };
     assert!(service.mail_profiles(&outsider).unwrap().is_empty());
     assert!(matches!(
-        service.dismiss_purchase(&outsider, &s.id, &context()),
+        service.dismiss_purchase(&outsider, &s.id, Revision(0), &context()),
         Err(Error::NotFound)
     ));
     assert!(
@@ -249,6 +270,9 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
     let mut update = purchase("b", PurchaseStatus::Cancelled);
     update.observed_at = "2026-10-31T10:00:00Z".parse().unwrap();
     *provider.batch.lock().unwrap() = MailBatch {
+        details: vec![],
+        progress: vec![],
+        failure: None,
         cursor: "second".into(),
         purchases: vec![update.clone()],
     };
@@ -266,6 +290,7 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
             &actor,
             &cancel.id,
             ReviewPurchase {
+                suggestion_revision: Revision(0),
                 item_id: id,
                 expected_revision: saved.revision,
                 title: "Do not overwrite manual title".into(),
@@ -287,6 +312,9 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
     let mut invalid = purchase("c", PurchaseStatus::Ordered);
     invalid.title = "invalid\0title".into();
     *provider.batch.lock().unwrap() = MailBatch {
+        details: vec![],
+        progress: vec![],
+        failure: None,
         cursor: "must-not-commit".into(),
         purchases: vec![invalid],
     };
@@ -301,6 +329,8 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
             &actor,
             "proton-owner",
             ConfigureMail {
+                rescan: false,
+                folders: None,
                 collection_id: collection.id,
                 enabled: false,
                 expected_revision: current.revision,
@@ -312,6 +342,9 @@ fn mail_review_is_private_durable_idempotent_and_does_not_invent_possession() {
         store.commit_mail_batch(
             &current,
             MailBatch {
+                details: vec![],
+                progress: vec![],
+                failure: None,
                 cursor: "stale".into(),
                 purchases: vec![]
             }
@@ -380,8 +413,13 @@ fn interrupted_review_recovers_the_order_and_its_command_as_one_effect() {
                 owner: user,
                 label: "Private".into(),
                 provider: "proton_bridge".into(),
+                configuration_revision: Revision(0),
+                folders: vec!["INBOX".into()],
             },
             batch: Mutex::new(MailBatch {
+                details: vec![],
+                progress: vec![],
+                failure: None,
                 cursor: "complete".into(),
                 purchases: vec![purchase("a", PurchaseStatus::Preordered)],
             }),
@@ -392,6 +430,8 @@ fn interrupted_review_recovers_the_order_and_its_command_as_one_effect() {
                 &actor,
                 "proton-owner",
                 ConfigureMail {
+                    rescan: false,
+                    folders: None,
                     collection_id: collection.id,
                     enabled: true,
                     expected_revision: Revision(0),
@@ -413,6 +453,7 @@ fn interrupted_review_recovers_the_order_and_its_command_as_one_effect() {
             .items
             .remove(0);
         let command = ReviewPurchase {
+            suggestion_revision: Revision(0),
             item_id: ItemId::new(),
             expected_revision: Revision(0),
             title: "Reviewed game".into(),
@@ -487,8 +528,13 @@ fn inbox_filters_before_paging_so_old_reviews_cannot_hide_new_receipts() {
             owner: user,
             label: "Private".into(),
             provider: "proton_bridge".into(),
+            configuration_revision: Revision(0),
+            folders: vec!["INBOX".into()],
         },
         batch: Mutex::new(MailBatch {
+            details: vec![],
+            progress: vec![],
+            failure: None,
             cursor: "done".into(),
             purchases,
         }),
@@ -499,6 +545,8 @@ fn inbox_filters_before_paging_so_old_reviews_cannot_hide_new_receipts() {
             &actor,
             "proton",
             ConfigureMail {
+                rescan: false,
+                folders: None,
                 collection_id: collection.id,
                 enabled: true,
                 expected_revision: Revision(0),
@@ -509,7 +557,7 @@ fn inbox_filters_before_paging_so_old_reviews_cannot_hide_new_receipts() {
     service.sync_purchase_mail().unwrap();
     for i in 0..60 {
         service
-            .dismiss_purchase(&actor, &format!("{i:064x}"), &context())
+            .dismiss_purchase(&actor, &format!("{i:064x}"), Revision(0), &context())
             .unwrap();
     }
     let pending = service
@@ -540,10 +588,18 @@ struct BlockingMail {
     cursors: Mutex<Vec<String>>,
 }
 impl MailProviderPort for BlockingMail {
+    fn with_configuration(
+        &self,
+        _: &str,
+        _: Revision,
+        commit: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        commit()
+    }
     fn profiles(&self) -> Vec<MailProfile> {
         vec![self.profile.clone()]
     }
-    fn fetch(&self, _: &str, cursor: &str) -> Result<MailBatch> {
+    fn fetch(&self, _: &str, cursor: &str, _: Option<&[String]>) -> Result<MailBatch> {
         self.cursors.lock().unwrap().push(cursor.to_owned());
         if let Some(started) = self.started.lock().unwrap().take() {
             started.send(()).unwrap();
@@ -597,8 +653,13 @@ fn disabling_owner_during_fetch_discards_batch_and_fences_late_commit() {
             owner: user,
             label: "Private".into(),
             provider: "proton_bridge".into(),
+            configuration_revision: Revision(0),
+            folders: vec!["INBOX".into()],
         },
         batch: MailBatch {
+            details: vec![],
+            progress: vec![],
+            failure: None,
             cursor: "after-fetch".into(),
             purchases: vec![purchase("d", PurchaseStatus::Ordered)],
         },
@@ -612,6 +673,8 @@ fn disabling_owner_during_fetch_discards_batch_and_fences_late_commit() {
             &actor,
             &provider.profile.id,
             ConfigureMail {
+                rescan: false,
+                folders: None,
                 collection_id: collection.id,
                 enabled: true,
                 expected_revision: Revision(0),
@@ -701,4 +764,659 @@ fn disabling_owner_during_fetch_discards_batch_and_fences_late_commit() {
             .len(),
         1
     );
+}
+
+struct FolderMail {
+    mail: Mail,
+    requests: Mutex<Vec<Option<Vec<String>>>>,
+}
+impl MailProviderPort for FolderMail {
+    fn with_configuration(
+        &self,
+        _: &str,
+        _: Revision,
+        commit: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        commit()
+    }
+    fn profiles(&self) -> Vec<MailProfile> {
+        self.mail.profiles()
+    }
+    fn fetch(&self, id: &str, cursor: &str, folders: Option<&[String]>) -> Result<MailBatch> {
+        self.requests
+            .lock()
+            .unwrap()
+            .push(folders.map(<[String]>::to_vec));
+        self.mail.fetch(id, cursor, folders)
+    }
+}
+
+#[test]
+fn folder_edits_are_owned_revision_fenced_replayable_and_preserve_history() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Arc::new(Store::open(&archive, &state).unwrap());
+    let owner = store
+        .create_user("owner", "long folder test password", true)
+        .unwrap();
+    let auth = store
+        .login("owner", "long folder test password", "setup")
+        .unwrap()
+        .1;
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let collection = service
+        .create_collection(
+            &auth,
+            CreateCollectionCommand {
+                name: "Games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &context(),
+        )
+        .unwrap();
+    let provider = Arc::new(FolderMail {
+        mail: Mail {
+            profile: MailProfile {
+                id: "folders".into(),
+                owner,
+                label: "Mail".into(),
+                provider: "proton_bridge".into(),
+                configuration_revision: Revision(0),
+                folders: vec!["INBOX".into()],
+            },
+            batch: Mutex::new(MailBatch {
+                details: vec![],
+                progress: vec![],
+                failure: None,
+                cursor: "retained-history".into(),
+                purchases: vec![purchase("e", PurchaseStatus::Ordered)],
+            }),
+        },
+        requests: Mutex::new(vec![]),
+    });
+    let service = service.with_mail_intake(store.clone(), provider.clone());
+    let initial = service
+        .configure_mail(
+            &auth.principal,
+            "folders",
+            ConfigureMail {
+                rescan: false,
+                folders: None,
+                collection_id: collection.id,
+                enabled: true,
+                expected_revision: Revision(0),
+            },
+            &context(),
+        )
+        .unwrap();
+    service.sync_purchase_mail().unwrap();
+    let fetching = service.mail_connections(&auth.principal).unwrap().remove(0);
+    // A scan can advance its cursor between the editor opening and saving.
+    let command = ConfigureMail {
+        rescan: false,
+        folders: Some(vec!["INBOX".into(), "Folders/領収書".into()]),
+        collection_id: collection.id,
+        enabled: true,
+        expected_revision: initial.revision,
+    };
+    let receipt = context();
+    let saved = service
+        .configure_mail(&auth.principal, "folders", command.clone(), &receipt)
+        .unwrap();
+    assert_eq!(saved.cursor, "retained-history");
+    assert!(saved.enabled);
+    assert!(saved.last_checked.is_some());
+    assert_eq!(
+        service
+            .configure_mail(&auth.principal, "folders", command.clone(), &receipt)
+            .unwrap()
+            .revision,
+        saved.revision
+    );
+    assert!(matches!(
+        service.configure_mail(&auth.principal, "folders", command.clone(), &context()),
+        Err(Error::Conflict)
+    ));
+    let mut different = command.clone();
+    different.folders = Some(vec!["Archive".into()]);
+    assert!(matches!(
+        service.configure_mail(&auth.principal, "folders", different, &receipt),
+        Err(Error::IdempotencyConflict)
+    ));
+    // A worker holding the pre-edit connection can publish neither results nor errors.
+    assert!(matches!(
+        store.commit_mail_batch(
+            &fetching,
+            MailBatch {
+                details: vec![],
+                progress: vec![],
+                failure: None,
+                cursor: "obsolete".into(),
+                purchases: vec![purchase("f", PurchaseStatus::Ordered)]
+            }
+        ),
+        Err(Error::Conflict)
+    ));
+    store
+        .mail_problem(
+            &fetching,
+            &MailFailure {
+                kind: MailFailureKind::Adapter,
+                folder: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        service.mail_connections(&auth.principal).unwrap()[0]
+            .problem
+            .is_none()
+    );
+    service.sync_purchase_mail().unwrap();
+    assert_eq!(
+        *provider.requests.lock().unwrap(),
+        vec![None, command.folders.clone()]
+    );
+    assert_eq!(
+        service
+            .purchase_inbox(&auth.principal, collection.id, "", PurchaseInboxView::All)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    for folders in [
+        vec![],
+        vec!["INBOX\r\nINJECT".into()],
+        vec![" ".into()],
+        vec!["x".repeat(257)],
+        vec!["INBOX".into(); 17],
+    ] {
+        assert!(matches!(
+            service.configure_mail(
+                &auth.principal,
+                "folders",
+                ConfigureMail {
+                    rescan: false,
+                    folders: Some(folders),
+                    expected_revision: saved.revision,
+                    ..command.clone()
+                },
+                &context()
+            ),
+            Err(Error::Invalid(_))
+        ));
+    }
+    let other = store
+        .create_user("other", "long other folder password", false)
+        .unwrap();
+    Catalog::grant(&*store, collection.id, other, Role::Curator).unwrap();
+    let outsider = Principal {
+        user_id: other,
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.configure_mail(
+            &outsider,
+            "folders",
+            ConfigureMail {
+                rescan: false,
+                expected_revision: saved.revision,
+                ..command.clone()
+            },
+            &context()
+        ),
+        Err(Error::NotFound)
+    ));
+    // Ownership alone cannot edit folders without collection write eligibility,
+    // even when scanning remains paused.
+    Catalog::grant(&*store, collection.id, other, Role::Viewer).unwrap();
+    let mut owned_profile = provider.mail.profile.clone();
+    owned_profile.id = "other-folders".into();
+    owned_profile.owner = other;
+    let owned_service = service.clone().with_mail_intake(
+        store.clone(),
+        Arc::new(Mail {
+            profile: owned_profile,
+            batch: Mutex::new(MailBatch {
+                details: vec![],
+                progress: vec![],
+                failure: None,
+                cursor: String::new(),
+                purchases: vec![],
+            }),
+        }),
+    );
+    let paused_edit = ConfigureMail {
+        rescan: false,
+        folders: Some(vec!["INBOX".into()]),
+        collection_id: collection.id,
+        enabled: false,
+        expected_revision: Revision(0),
+    };
+    assert!(matches!(
+        owned_service.configure_mail(&outsider, "other-folders", paused_edit.clone(), &context()),
+        Err(Error::Forbidden)
+    ));
+    Catalog::grant(&*store, collection.id, other, Role::Curator).unwrap();
+    let before_enable = owned_service
+        .configure_mail(&outsider, "other-folders", paused_edit, &context())
+        .unwrap();
+    assert!(!before_enable.enabled);
+    assert_eq!(before_enable.folders, Some(vec!["INBOX".into()]));
+    drop(owned_service);
+    // Pausing keeps the explicit folders; editing while paused does not enable scanning.
+    let paused = service
+        .configure_mail(
+            &auth.principal,
+            "folders",
+            ConfigureMail {
+                rescan: false,
+                folders: None,
+                enabled: false,
+                expected_revision: saved.revision,
+                ..command.clone()
+            },
+            &context(),
+        )
+        .unwrap();
+    assert_eq!(paused.folders, command.folders);
+    let edited = service
+        .configure_mail(
+            &auth.principal,
+            "folders",
+            ConfigureMail {
+                rescan: false,
+                folders: Some(vec!["Archive".into()]),
+                enabled: false,
+                expected_revision: paused.revision,
+                ..command
+            },
+            &context(),
+        )
+        .unwrap();
+    assert!(!edited.enabled);
+    assert_eq!(edited.cursor, "retained-history");
+    drop(service);
+    drop(store);
+    let reopened = Store::open(&archive, &state).unwrap();
+    let retained = reopened.mail_connection("folders").unwrap().unwrap();
+    assert_eq!(retained.folders, Some(vec!["Archive".into()]));
+    assert_eq!(retained.cursor, "retained-history");
+    assert!(!retained.enabled);
+}
+
+fn review_fixture() -> (
+    tempfile::TempDir,
+    Arc<Store>,
+    CollectionService,
+    Principal,
+    CollectionId,
+    Arc<Mail>,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let owner = store
+        .create_user("owner", "long inbox recovery password", true)
+        .unwrap();
+    let auth = store
+        .login("owner", "long inbox recovery password", "setup")
+        .unwrap()
+        .1;
+    let base = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let collection = base
+        .create_collection(
+            &auth,
+            CreateCollectionCommand {
+                name: "Games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &context(),
+        )
+        .unwrap()
+        .id;
+    let mut recent = purchase("b", PurchaseStatus::Cancelled);
+    recent.observed_at = "2026-10-31T10:00:00Z".parse().unwrap();
+    let provider = Arc::new(Mail {
+        profile: MailProfile {
+            id: "recovery".into(),
+            owner,
+            label: "Mail".into(),
+            provider: "proton_bridge".into(),
+            configuration_revision: Revision(0),
+            folders: vec!["INBOX".into()],
+        },
+        batch: Mutex::new(MailBatch {
+            cursor: "history".into(),
+            purchases: vec![
+                purchase("a", PurchaseStatus::Preordered),
+                recent,
+                purchase("c", PurchaseStatus::Ordered),
+            ],
+            details: vec![],
+            progress: vec![],
+            failure: None,
+        }),
+    });
+    let service = base.with_mail_intake(store.clone(), provider.clone());
+    service
+        .configure_mail(
+            &auth.principal,
+            "recovery",
+            ConfigureMail {
+                rescan: false,
+                folders: None,
+                collection_id: collection,
+                enabled: true,
+                expected_revision: Revision(0),
+            },
+            &context(),
+        )
+        .unwrap();
+    service.sync_purchase_mail().unwrap();
+    (root, store, service, auth.principal, collection, provider)
+}
+fn review_command(s: &PurchaseSuggestion, item: ItemId, revision: Revision) -> ReviewPurchase {
+    ReviewPurchase {
+        suggestion_revision: s.revision,
+        item_id: item,
+        expected_revision: revision,
+        title: "Reviewed entry".into(),
+        existing_order_id: None,
+        intentional_duplicate: true,
+        purchase: s.purchase.clone(),
+    }
+}
+#[test]
+fn out_of_order_evidence_restore_and_reopen_allow_safe_correction_and_reassignment() {
+    let (_root, store, service, actor, collection, _provider) = review_fixture();
+    let older = store.purchase_suggestion(&"a".repeat(64)).unwrap();
+    let recent = store.purchase_suggestion(&"b".repeat(64)).unwrap();
+    let item = service
+        .review_purchase(
+            &actor,
+            &recent.id,
+            review_command(&recent, ItemId::new(), Revision(0)),
+            &context(),
+        )
+        .unwrap();
+    let mut attach = review_command(&older, item.id, item.revision);
+    attach.existing_order_id = Some(recent.id.clone());
+    attach.intentional_duplicate = false;
+    let linked = service
+        .review_purchase(&actor, &older.id, attach, &context())
+        .unwrap();
+    let order = &linked.purchase_orders[0];
+    assert_eq!(order.status, PurchaseStatus::Cancelled);
+    assert_eq!(order.observed_at, recent.purchase.observed_at);
+    assert!(order.intentional_duplicate);
+    assert_eq!(order.source_keys.len(), 2);
+    let dismissed = "c".repeat(64);
+    service
+        .dismiss_purchase(&actor, &dismissed, Revision(0), &context())
+        .unwrap();
+    let first = store.purchase_suggestion(&dismissed).unwrap();
+    let receipt = context();
+    service
+        .restore_purchase(&actor, &dismissed, first.revision, &receipt)
+        .unwrap();
+    service
+        .restore_purchase(&actor, &dismissed, first.revision, &receipt)
+        .unwrap();
+    assert!(matches!(
+        service.dismiss_purchase(&actor, &dismissed, Revision(0), &context()),
+        Err(Error::Conflict)
+    ));
+    service
+        .dismiss_purchase(
+            &actor,
+            &dismissed,
+            Revision(first.revision.0 + 1),
+            &context(),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.restore_purchase(&actor, &dismissed, first.revision, &context()),
+        Err(Error::Conflict)
+    ));
+    let current = store.purchase_suggestion(&recent.id).unwrap();
+    let command = ReopenPurchase {
+        suggestion_revision: current.revision,
+        accepted_item: linked.id,
+        expected_item_revision: linked.revision,
+    };
+    let receipt = context();
+    let reopened = service
+        .reopen_purchase(&actor, &recent.id, command.clone(), &receipt)
+        .unwrap();
+    assert!(reopened.purchase_orders.is_empty());
+    assert_eq!(
+        service
+            .reopen_purchase(&actor, &recent.id, command, &receipt)
+            .unwrap()
+            .revision,
+        reopened.revision
+    );
+    assert!(matches!(
+        service.review_purchase(
+            &actor,
+            &older.id,
+            review_command(&older, reopened.id, reopened.revision),
+            &context()
+        ),
+        Err(Error::Conflict)
+    ));
+    let fresh = store.purchase_suggestion(&older.id).unwrap();
+    assert!(fresh.accepted_item.is_none());
+    let mut correction = review_command(&fresh, ItemId::new(), Revision(0));
+    correction.purchase.title = "Corrected product".into();
+    correction.purchase.platform = "Corrected platform".into();
+    let reassigned = service
+        .review_purchase(&actor, &fresh.id, correction, &context())
+        .unwrap();
+    assert_ne!(reassigned.id, item.id);
+    assert_eq!(reassigned.purchase_orders[0].title, "Corrected product");
+    assert_eq!(
+        store.purchase_suggestion(&fresh.id).unwrap().accepted_item,
+        Some(reassigned.id)
+    );
+    assert_eq!(
+        service
+            .purchase_inbox(&actor, collection, "", PurchaseInboxView::Accepted)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+}
+#[test]
+fn reopen_archive_interruption_preserves_either_accepted_or_reviewable_purchase_and_receipt() {
+    use collector_store::PublicationFaultPoint as Point;
+    for point in [Point::BytesStaged, Point::RevisionCommitted] {
+        let (root, store, service, actor, _, provider) = review_fixture();
+        let s = store.purchase_suggestion(&"a".repeat(64)).unwrap();
+        let saved = service
+            .review_purchase(
+                &actor,
+                &s.id,
+                review_command(&s, ItemId::new(), Revision(0)),
+                &context(),
+            )
+            .unwrap();
+        drop(service);
+        drop(store);
+        let archive = root.path().join("archive");
+        let state = root.path().join("state");
+        let broken = Arc::new(
+            Store::open_with_publication_fault(&archive, &state, Arc::new(FailAt(point))).unwrap(),
+        );
+        let service = CollectionService::new(broken.clone(), Arc::new(Registry::builtins()))
+            .with_mail_intake(broken.clone(), provider.clone());
+        let command = ReopenPurchase {
+            suggestion_revision: s.revision,
+            accepted_item: saved.id,
+            expected_item_revision: saved.revision,
+        };
+        let receipt = context();
+        assert!(
+            service
+                .reopen_purchase(&actor, &s.id, command.clone(), &receipt)
+                .is_err()
+        );
+        drop(service);
+        drop(broken);
+        let restored = Arc::new(Store::open(&archive, &state).unwrap());
+        let service = CollectionService::new(restored.clone(), Arc::new(Registry::builtins()))
+            .with_mail_intake(restored.clone(), provider);
+        let current = Catalog::item(&*restored, saved.id).unwrap();
+        if point == Point::RevisionCommitted {
+            assert!(current.purchase_orders.is_empty());
+            assert_eq!(
+                service
+                    .reopen_purchase(&actor, &s.id, command, &receipt)
+                    .unwrap()
+                    .revision,
+                current.revision
+            );
+        } else {
+            assert_eq!(current.purchase_orders.len(), 1);
+            let fresh = restored.purchase_suggestion(&s.id).unwrap();
+            service
+                .reopen_purchase(
+                    &actor,
+                    &s.id,
+                    ReopenPurchase {
+                        suggestion_revision: fresh.revision,
+                        accepted_item: current.id,
+                        expected_item_revision: current.revision,
+                    },
+                    &context(),
+                )
+                .unwrap();
+        }
+        assert!(
+            restored
+                .purchase_suggestion(&s.id)
+                .unwrap()
+                .accepted_item
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn scan_health_and_source_locators_survive_retries_and_rescan_without_rewriting_receipts() {
+    let (root, store, service, actor, collection, provider) = review_fixture();
+    let original = store.purchase_suggestion(&"a".repeat(64)).unwrap();
+    let source = MailSource {
+        folder: "INBOX".into(),
+        uid_validity: 42,
+        uid: 1,
+        message_id: "<private-message>".into(),
+        subject: "Synthetic receipt".into(),
+        date: "Fri, 30 Oct 2026 10:00:00 +0000".into(),
+    };
+    let mut batch = MailBatch {
+        cursor: "scanned-100".into(),
+        purchases: vec![original.purchase.clone()],
+        details: vec![MailReceiptDetails {
+            key: original.id.clone(),
+            source: source.clone(),
+            issue: None,
+        }],
+        progress: vec![MailFolderProgress {
+            checked_at: chrono::Utc::now(),
+            folder: "INBOX".into(),
+            uid_validity: 42,
+            scanned_through: 100,
+            available_through: 200,
+            caught_up: false,
+        }],
+        failure: None,
+    };
+    *provider.batch.lock().unwrap() = batch.clone();
+    service.sync_purchase_mail().unwrap();
+    let saved = service.mail_connections(&actor).unwrap().remove(0);
+    assert_eq!(saved.progress[0].available_through, 200);
+    assert!(!saved.progress[0].caught_up);
+    assert_eq!(
+        store
+            .purchase_suggestion(&original.id)
+            .unwrap()
+            .source
+            .unwrap()
+            .uid,
+        1
+    );
+    batch.details[0].source.uid = 2;
+    batch.details[0].source.uid_validity = 43;
+    batch.progress[0].uid_validity = 43;
+    batch.cursor = "reset-source".into();
+    *provider.batch.lock().unwrap() = batch.clone();
+    service.sync_purchase_mail().unwrap();
+    assert_eq!(
+        store
+            .purchase_suggestion(&original.id)
+            .unwrap()
+            .source
+            .unwrap()
+            .uid_validity,
+        43
+    );
+    batch.details[0].source.uid = 999;
+    batch.cursor = "invalid-envelope".into();
+    *provider.batch.lock().unwrap() = batch.clone();
+    service.sync_purchase_mail().unwrap();
+    let invalid = service.mail_connections(&actor).unwrap().remove(0);
+    assert_eq!(invalid.cursor, "reset-source");
+    assert!(matches!(
+        invalid.failure.unwrap().kind,
+        MailFailureKind::InvalidResponse
+    ));
+    batch.failure = Some(MailFailure {
+        kind: MailFailureKind::Authentication,
+        folder: None,
+    });
+    *provider.batch.lock().unwrap() = batch;
+    service.sync_purchase_mail().unwrap();
+    let failed = service.mail_connections(&actor).unwrap().remove(0);
+    assert_eq!(failed.cursor, "reset-source");
+    assert!(matches!(
+        failed.failure.unwrap().kind,
+        MailFailureKind::Authentication
+    ));
+    service
+        .configure_mail(
+            &actor,
+            &provider.profile.id,
+            ConfigureMail {
+                rescan: true,
+                folders: None,
+                collection_id: collection,
+                enabled: false,
+                expected_revision: failed.revision,
+            },
+            &context(),
+        )
+        .unwrap();
+    let reset = service.mail_connections(&actor).unwrap().remove(0);
+    assert!(reset.cursor.is_empty());
+    assert!(reset.progress.is_empty());
+    assert!(!reset.enabled);
+    assert_eq!(
+        service
+            .purchase_inbox(&actor, collection, "", PurchaseInboxView::All)
+            .unwrap()
+            .items
+            .len(),
+        3
+    );
+    drop(service);
+    drop(store);
+    let restored = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    let receipt = restored.purchase_suggestion(&original.id).unwrap();
+    assert_eq!(receipt.source.unwrap().uid, 2);
+    assert_eq!(receipt.purchase.title, original.purchase.title);
 }

@@ -1,3 +1,57 @@
+## Inbox connector recovery and review corrections — 2026-10-31
+
+Application mail services own review authorization, typed intake health, older-source
+linking, explicit restore/reopen, and credential revalidation policy. The provider
+owns bounded MIME construction/read-only IMAP, source locators and credential probes.
+Malformed candidate content becomes an unparsed suggestion; transport/incomplete
+responses do not advance the cursor. No raw email is retained. Private source
+coordinates can refresh without replacing receipt facts; per-folder progress is an
+observed Bridge high-water snapshot, not proof of an exhaustive mailbox search.
+
+Provider configuration guards serialize admitted batches/errors with credential
+replacement. A probed active profile is atomically replaced; runtime fencing advances
+immediately post-rename. Secret-free prepared/activated receipts prove which request
+applied, settle an earlier active repair before replacement, reject stale ownership,
+and recover uncertain responses. Operator overrides retain their profile IDs.
+
+Store owns transactional review generations, cursor/progress/error state and the
+existing archive journal. Explicit accepted-purchase reopening removes one current
+order row, returns all linked sources to review and retains earlier archive revisions.
+Private generations reserve new review ownership before publication; interrupted
+attempts may require refresh but cannot revive old forms. All review mutations bind
+the submitted revision; accepted corrections additionally fence the Item revision.
+No inventory, manual metadata or files are removed. The frontend presents explicit
+user decisions and calls application commands rather than composing a second pipeline.
+
+Full selected checks and 30 browser journeys pass. Independent clean-context review
+and its verified corrections have no remaining actionable findings; see
+[delivery evidence](validation/inbox-recovery-2026-10-31.md). No deployment was performed.
+
+## Connected Bridge folder editing — 2026-10-31
+
+The requested delivery adds owner-scoped folder editing to Purchase inbox through
+`mail.configure`, retaining the connection's selected collection, enabled state
+and existing history. Optional folder overrides live in private SQLite beside the
+connection revision, never in collection records or immutable credential files.
+Absent overrides retain provisioned folders, including existing installations.
+Application policy validates 1–16 bounded exact folder names and requires collection
+write eligibility for edits. The provider receives the frozen folder override with
+each read-only batch; the existing transactional revision/cursor fence rejects
+pre-edit batches and failures. New folders begin at UID 1; retained folder cursors
+and accepted/dismissed suggestions survive changes. Removing a folder stops future
+reads without deleting suggestions or its saved cursor. Folder access errors remain
+visible on the next enabled scan; save itself does not claim an IMAP access probe.
+
+The owner can edit before enabling and while enabled or paused. Browser drafts
+freeze revision/enablement, survive status polling, support cancel and use an
+input-bound retry receipt. Stale saves require reopening the editor. Read DTOs expose
+folder names only to the profile owner and never return local credentials. Existing
+curation listener composition protects the command and backing reads. Acceptance
+covers save/reload/restart, cancelled drafts, mobile layout, owner denial, stale
+saves, replay, retained history and late batch refusal. Workspace tests, strict
+Clippy and all 30 browser journeys pass; see the [delivery evidence](validation/mail-folder-editing-2026-10-31.md).
+This source change has not been deployed.
+
 ## Bridge setup and sync status — 2026-10-31
 
 Application mail services own administrator-only Bridge setup/status authorization

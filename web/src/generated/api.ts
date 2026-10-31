@@ -2228,6 +2228,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mail/profiles/{id}/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["repair_bridge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mail/setup": {
         parameters: {
             query?: never;
@@ -2446,6 +2462,38 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["dismiss_purchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-suggestions/{id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reopen_purchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-suggestions/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_purchase"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3270,6 +3318,9 @@ export interface components {
             collection_id: components["schemas"]["CollectionId"];
             enabled: boolean;
             expected_revision: components["schemas"]["Revision"];
+            /** @description Omit to retain the current folders. */
+            folders?: string[] | null;
+            rescan?: boolean;
         };
         ConfirmAlbumGroup: {
             preview: components["schemas"]["PreviewAlbumGroup"];
@@ -4179,13 +4230,39 @@ export interface components {
             collection_id: components["schemas"]["CollectionId"];
             cursor: string;
             enabled: boolean;
+            failure?: components["schemas"]["MailFailure"] | null;
+            /** @description None uses the provisioned profile folders, preserving existing installations. */
+            folders?: string[] | null;
             /** Format: date-time */
             last_checked?: string | null;
             problem?: string | null;
             profile: components["schemas"]["MailProfile"];
+            progress?: components["schemas"]["MailFolderProgress"][];
             revision: components["schemas"]["Revision"];
         };
+        MailFailure: {
+            folder?: string | null;
+            kind: components["schemas"]["MailFailureKind"];
+        };
+        /** @enum {string} */
+        MailFailureKind: "authentication" | "certificate" | "folder" | "transport" | "invalid_response" | "adapter";
+        MailFolderProgress: {
+            /** Format: int64 */
+            available_through: number;
+            caught_up: boolean;
+            /** Format: date-time */
+            checked_at: string;
+            folder: string;
+            /** Format: int64 */
+            scanned_through: number;
+            /** Format: int64 */
+            uid_validity: number;
+        };
+        /** @enum {string} */
+        MailParseIssue: "malformed_date" | "unsupported_content" | "too_large" | "too_many_parts" | "unrecognized_layout";
         MailProfile: {
+            configuration_revision?: components["schemas"]["Revision"];
+            folders?: string[];
             id: string;
             label: string;
             owner: components["schemas"]["UserId"];
@@ -4195,6 +4272,16 @@ export interface components {
             bridge?: components["schemas"]["BridgeSyncStatus"] | null;
             can_connect: boolean;
             problem?: string | null;
+        };
+        MailSource: {
+            date: string;
+            folder: string;
+            message_id: string;
+            subject: string;
+            /** Format: int64 */
+            uid: number;
+            /** Format: int64 */
+            uid_validity: number;
         };
         /** @enum {string} */
         MatchStrength: "name" | "identifier" | "disc_layout" | "complete_hashes";
@@ -5415,10 +5502,13 @@ export interface components {
             connection_id: string;
             dismissed: boolean;
             id: string;
+            issue?: components["schemas"]["MailParseIssue"] | null;
             matches?: components["schemas"]["ItemId"][];
             owner: components["schemas"]["UserId"];
             purchase: components["schemas"]["PurchaseOrder"];
             reason: string;
+            revision?: components["schemas"]["Revision"];
+            source?: components["schemas"]["MailSource"] | null;
         };
         RecoverAccount: {
             code: string;
@@ -5453,6 +5543,17 @@ export interface components {
         RemoteMediaTest: {
             grant: components["schemas"]["RemoteMediaGrant"];
             samples: components["schemas"]["RemoteMediaSample"][];
+        };
+        ReopenPurchase: {
+            accepted_item: components["schemas"]["ItemId"];
+            expected_item_revision: components["schemas"]["Revision"];
+            suggestion_revision: components["schemas"]["Revision"];
+        };
+        RepairBridge: {
+            certificate_sha256: string;
+            expected_revision: components["schemas"]["Revision"];
+            password: string;
+            username: string;
         };
         RepairIntakeDestination: {
             destination: components["schemas"]["IntakeDestination"];
@@ -5517,6 +5618,7 @@ export interface components {
             intentional_duplicate: boolean;
             item_id: components["schemas"]["ItemId"];
             purchase: components["schemas"]["PurchaseOrder"];
+            suggestion_revision?: components["schemas"]["Revision"];
             /** @description User-reviewed title for a new collection entry; existing metadata is retained. */
             title: string;
         };
@@ -12345,6 +12447,13 @@ export interface operations {
                     "application/json": components["schemas"]["MailConnection"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Forbidden */
             403: {
                 headers: {
@@ -12381,6 +12490,60 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    repair_bridge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairBridge"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailProfile"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12999,7 +13162,89 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Revision"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reopen_purchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReopenPurchase"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Item"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    restore_purchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Revision"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

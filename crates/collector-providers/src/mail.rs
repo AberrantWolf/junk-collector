@@ -10,9 +10,11 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Profile {
+    #[serde(default)]
+    revision: collector_core::Revision,
     id: String,
     owner: UserId,
     label: String,
@@ -86,6 +88,21 @@ impl ProtonMailProvider {
     }
 }
 impl MailProviderPort for ProtonMailProvider {
+    fn with_configuration(
+        &self,
+        id: &str,
+        revision: collector_core::Revision,
+        commit: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
+        let profiles = self.profiles.lock().map_err(|_| Error::Conflict)?;
+        if !profiles
+            .iter()
+            .any(|p| p.id == id && p.revision == revision)
+        {
+            return Err(Error::Conflict);
+        }
+        commit()
+    }
     fn profiles(&self) -> Vec<MailProfile> {
         self.profiles
             .lock()
@@ -96,15 +113,21 @@ impl MailProviderPort for ProtonMailProvider {
                 owner: p.owner,
                 label: p.label.clone(),
                 provider: "proton_bridge".into(),
+                configuration_revision: p.revision,
+                folders: p.folders.clone(),
             })
             .collect()
     }
-    fn fetch(&self, id: &str, cursor: &str) -> Result<MailBatch> {
+    fn fetch(&self, id: &str, cursor: &str, folders: Option<&[String]>) -> Result<MailBatch> {
         let profiles = self.profiles.lock().map_err(|_| Error::Conflict)?;
-        let profile = profiles
+        let mut profile = profiles
             .iter()
             .find(|p| p.id == id)
-            .ok_or(Error::NotFound)?;
+            .ok_or(Error::NotFound)?
+            .clone();
+        if let Some(folders) = folders {
+            profile.folders = folders.to_vec();
+        }
         let request = serde_json::to_vec(&serde_json::json!({"profile":profile,"cursor":cursor}))
             .map_err(|_| Error::Conflict)?;
         drop(profiles);

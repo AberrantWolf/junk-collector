@@ -1,7 +1,7 @@
 use super::*;
 use collector_app::{
-    MailBatch, MailConnection, PurchaseInbox, PurchaseInboxPort, PurchaseInboxView,
-    PurchaseSuggestion,
+    MailBatch, MailConnection, MailFailure, MailFailureKind, PurchaseInbox, PurchaseInboxPort,
+    PurchaseInboxView, PurchaseSuggestion,
 };
 
 pub(crate) fn install(db: &Connection) -> Result<()> {
@@ -154,14 +154,39 @@ impl PurchaseInboxPort for Store {
             return Err(Error::Conflict);
         }
         for purchase in batch.purchases {
+            let detail = batch.details.iter().find(|d| d.key == purchase.id);
             purchase.validate()?;
             let id = purchase.source_keys[0].clone();
-            let s=PurchaseSuggestion{id:id.clone(),connection_id:c.profile.id.clone(),owner:c.profile.owner,collection_id:c.collection_id,purchase,reason:"Review the original email, then confirm the item, edition, platform, order reference and status. Email sender names alone do not verify a purchase.".into(),dismissed:false,matches:vec![],accepted_item:None};
-            tx.execute("INSERT OR IGNORE INTO private.purchase_suggestions(id,owner,collection_id,record) VALUES(?,?,?,?)",params![id,c.profile.owner.to_string(),c.collection_id.to_string(),serde_json::to_string(&s).map_err(storage)?]).map_err(storage)?;
+            let s=PurchaseSuggestion{id:id.clone(),connection_id:c.profile.id.clone(),owner:c.profile.owner,collection_id:c.collection_id,purchase,reason:"Review the original email, then confirm the item, edition, platform, order reference and status. Email sender names alone do not verify a purchase.".into(),dismissed:false,revision:Revision(0),source:detail.map(|d| d.source.clone()),issue:detail.and_then(|d| d.issue),matches:vec![],accepted_item:None};
+            let inserted = tx.execute("INSERT OR IGNORE INTO private.purchase_suggestions(id,owner,collection_id,record) VALUES(?,?,?,?)",params![id,c.profile.owner.to_string(),c.collection_id.to_string(),serde_json::to_string(&s).map_err(storage)?]).map_err(storage)?;
+            if inserted == 0 && detail.is_some() {
+                let mut existing = suggestion(&tx, &id)?;
+                // Source coordinates are current private diagnostics, not an immutable
+                // claim or a replacement for the original reviewed receipt content.
+                if existing.owner == s.owner
+                    && existing.collection_id == s.collection_id
+                    && serde_json::to_value(&existing.purchase).map_err(storage)?
+                        == serde_json::to_value(&s.purchase).map_err(storage)?
+                {
+                    existing.source = s.source;
+                    existing.issue = s.issue;
+                    tx.execute(
+                        "UPDATE private.purchase_suggestions SET record=? WHERE id=?",
+                        params![serde_json::to_string(&existing).map_err(storage)?, id],
+                    )
+                    .map_err(storage)?;
+                }
+            }
         }
+        for progress in batch.progress {
+            current.progress.retain(|p| p.folder != progress.folder);
+            current.progress.push(progress);
+        }
+        current.profile = c.profile.clone();
         current.cursor = batch.cursor;
         current.last_checked = Some(Utc::now());
         current.problem = None;
+        current.failure = None;
         tx.execute(
             "UPDATE private.mail_connections SET record=? WHERE id=?",
             params![
@@ -172,7 +197,7 @@ impl PurchaseInboxPort for Store {
         .map_err(storage)?;
         tx.commit().map_err(storage)
     }
-    fn mail_problem(&self, c: &MailConnection) -> Result<()> {
+    fn mail_problem(&self, c: &MailConnection, failure: &MailFailure) -> Result<()> {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         if let Some(mut current) = connection(&tx, &c.profile.id)?
@@ -180,7 +205,29 @@ impl PurchaseInboxPort for Store {
             && current.enabled
             && current.cursor == c.cursor
         {
-            current.problem=Some("Mail sync failed. Check Bridge login, certificate pin, folder names, local credentials or unsupported receipt content on the server; the saved history cursor has not advanced.".into());
+            let message = match failure.kind {
+                MailFailureKind::Authentication => {
+                    "Bridge rejected the local credentials. Revalidate the connection with its current IMAP password."
+                }
+                MailFailureKind::Certificate => {
+                    "Bridge certificate changed. Confirm its fingerprint and revalidate the connection."
+                }
+                MailFailureKind::Folder => {
+                    "A configured folder is unavailable. Check its exact IMAP name in Edit scanned folders."
+                }
+                MailFailureKind::Transport => {
+                    "Bridge connection interrupted or timed out. The scan will retry from its saved position."
+                }
+                MailFailureKind::InvalidResponse => {
+                    "Bridge returned an incomplete or invalid response. The saved scan position has not advanced."
+                }
+                MailFailureKind::Adapter => {
+                    "Mail adapter could not complete. Check the Bridge process and server Python installation."
+                }
+            };
+            current.profile = c.profile.clone();
+            current.problem = Some(message.into());
+            current.failure = Some(failure.clone());
             tx.execute(
                 "UPDATE private.mail_connections SET record=? WHERE id=?",
                 params![
@@ -194,7 +241,11 @@ impl PurchaseInboxPort for Store {
     }
 }
 impl Store {
-    pub(crate) fn save_mail_connection_record(&self, c: &MailConnection) -> Result<MailConnection> {
+    pub(crate) fn save_mail_connection_record(
+        &self,
+        c: &MailConnection,
+        rescan: bool,
+    ) -> Result<MailConnection> {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         let previous = connection(&tx, &c.profile.id)?;
@@ -208,8 +259,17 @@ impl Store {
         }
         let mut result = c.clone();
         if let Some(previous) = previous {
-            result.cursor = previous.cursor;
-            result.last_checked = previous.last_checked;
+            if rescan {
+                result.cursor.clear();
+                result.progress.clear();
+                result.last_checked = None;
+            } else {
+                result.cursor = previous.cursor;
+                result.last_checked = previous.last_checked;
+                result.progress = previous.progress;
+                let folders = result.folders.as_ref().unwrap_or(&result.profile.folders);
+                result.progress.retain(|p| folders.contains(&p.folder));
+            }
         }
         result.revision = Revision(c.revision.0.checked_add(1).ok_or(Error::Conflict)?);
         tx.execute("INSERT INTO private.mail_connections(id,owner,record) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![c.profile.id,c.profile.owner.to_string(),serde_json::to_string(&result).map_err(storage)?]).map_err(storage)?;
@@ -217,20 +277,79 @@ impl Store {
         tx.commit().map_err(storage)?;
         Ok(result)
     }
-    pub(crate) fn dismiss_purchase_record(&self, s: &PurchaseSuggestion) -> Result<()> {
+    pub(crate) fn set_purchase_dismissed(
+        &self,
+        s: &PurchaseSuggestion,
+        dismissed: bool,
+    ) -> Result<()> {
         let _writer = lock(&self.writer)?;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
-        if accepted_item(&tx, &s.id)?.is_some() {
+        let mut current = suggestion(&tx, &s.id)?;
+        if current.revision != s.revision
+            || current.dismissed == dismissed
+            || accepted_item(&tx, &s.id)?.is_some()
+        {
             return Err(Error::Conflict);
         }
+        current.revision = Revision(current.revision.0.checked_add(1).ok_or(Error::Conflict)?);
+        current.dismissed = dismissed;
         tx.execute(
-            "UPDATE private.purchase_suggestions SET dismissed=1 WHERE id=? AND owner=?",
-            params![s.id, s.owner.to_string()],
+            "UPDATE private.purchase_suggestions SET dismissed=?,record=? WHERE id=? AND owner=?",
+            params![
+                dismissed,
+                serde_json::to_string(&current).map_err(storage)?,
+                s.id,
+                s.owner.to_string()
+            ],
         )
         .map_err(storage)?;
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)
+    }
+    pub(crate) fn reopen_purchase_record(
+        &self,
+        s: &PurchaseSuggestion,
+        item: Item,
+        expected: Revision,
+    ) -> Result<Item> {
+        let _writer = lock(&self.writer)?;
+        let current_item = self.item(item.id)?;
+        if current_item.revision != expected || current_item.collection_id != s.collection_id {
+            return Err(Error::Conflict);
+        }
+        let order = current_item
+            .purchase_orders
+            .iter()
+            .find(|o| o.source_keys.contains(&s.id))
+            .ok_or(Error::Conflict)?;
+        {
+            let mut db = lock(&self.db)?;
+            let tx = db.transaction().map_err(storage)?;
+            let current = suggestion(&tx, &s.id)?;
+            if current.revision != s.revision || current.accepted_item != Some(item.id) {
+                return Err(Error::Conflict);
+            }
+            // Reserve new review generations before publication. An interrupted attempt
+            // can require refresh, but cannot allow old review forms to become valid again.
+            for key in &order.source_keys {
+                match suggestion(&tx, key) {
+                    Ok(mut source) => {
+                        source.revision =
+                            Revision(source.revision.0.checked_add(1).ok_or(Error::Conflict)?);
+                        tx.execute(
+                            "UPDATE private.purchase_suggestions SET record=? WHERE id=?",
+                            params![serde_json::to_string(&source).map_err(storage)?, key],
+                        )
+                        .map_err(storage)?;
+                    }
+                    Err(Error::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            tx.commit().map_err(storage)?;
+        }
+        self.publish_under_writer(item, expected, vec![])
     }
     pub(crate) fn accept_purchase_record(
         &self,
@@ -242,7 +361,8 @@ impl Store {
         {
             let db = lock(&self.db)?;
             let current = suggestion(&db, &s.id)?;
-            if current.dismissed
+            if current.revision != s.revision
+                || current.dismissed
                 || current.accepted_item.is_some()
                 || current.owner != s.owner
                 || current.collection_id != item.collection_id

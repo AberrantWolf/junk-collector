@@ -1314,14 +1314,29 @@ impl ContentPort for Store {
     fn save_mail_connection(
         &self,
         connection: &collector_app::MailConnection,
+        rescan: bool,
     ) -> Result<collector_app::MailConnection> {
-        self.save_mail_connection_record(connection)
+        self.save_mail_connection_record(connection, rescan)
+    }
+    fn reopen_purchase_suggestion(
+        &self,
+        suggestion: &collector_app::PurchaseSuggestion,
+        item: Item,
+        expected: Revision,
+    ) -> Result<Item> {
+        self.reopen_purchase_record(suggestion, item, expected)
+    }
+    fn restore_purchase_suggestion(
+        &self,
+        suggestion: &collector_app::PurchaseSuggestion,
+    ) -> Result<()> {
+        self.set_purchase_dismissed(suggestion, false)
     }
     fn dismiss_purchase_suggestion(
         &self,
         suggestion: &collector_app::PurchaseSuggestion,
     ) -> Result<()> {
-        self.dismiss_purchase_record(suggestion)
+        self.set_purchase_dismissed(suggestion, true)
     }
     fn accept_purchase_suggestion(
         &self,

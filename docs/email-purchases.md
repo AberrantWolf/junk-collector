@@ -5,6 +5,10 @@ it does not automatically alter inventory or infer possession from a receipt.
 Installed on Fi on 2026-10-31; see [local account setup](../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31)
 and [deployment evidence](validation/fi-email-deployment-2026-10-31.md).
 
+Folder editing and inbox recovery are source deliveries dated 2026-10-31 and have not been deployed;
+see [folder editing](validation/mail-folder-editing-2026-10-31.md) and
+[recovery validation](validation/inbox-recovery-2026-10-31.md).
+
 ## Boundaries
 
 `MailProviderPort` is the installed transport boundary. Its first adapter uses
@@ -22,12 +26,26 @@ access, then saves the profile without enabling receipt scanning. Proton account
 login/2FA remains in the private Bridge terminal. Legacy operator-provisioned
 profiles remain supported; read APIs never return credentials.
 That user enables it for one explicitly selected collection with curate access.
-Other users cannot enumerate the profile, credentials or suggestions. The initial
-UI supports enable/pause; changing an existing profile's destination is refused.
-Use a new profile ID to import to another collection. No public mail/SMTP tool is
-exposed. Profiles live outside the portable archive, are never returned by the
-API, and must be mode 0600/0400. The file contains reversible local Bridge
-credentials and needs protected local storage and encrypted backups.
+Other users cannot enumerate the profile, credentials or suggestions. The UI
+supports enable/pause and **Edit scanned folders**; changing an existing profile's
+destination is refused.
+Use a new profile ID to import to another collection.
+
+**Edit scanned folders** accepts 1–16 exact IMAP folder names, one per line, then
+**Save folders**. Include `INBOX` to keep scanning inbox mail; archived receipts
+require their folders or the exact Bridge All Mail folder name. Saving retains
+the enabled/paused state, suggestions and saved folder scan positions. New folders
+start at the beginning; removing a folder stops its future reads without deleting
+prior suggestions. Changes apply to subsequent batches without restarting Collector
+or entering credentials again. Folder access is checked by the next enabled scan;
+invalid/inaccessible folders produce a visible scan problem. Cancel and reopen the
+editor if another update causes a revision conflict. Folder choices persist in
+private connection state; provisioned defaults and credential files remain intact.
+
+No public mail/SMTP tool is exposed. Credential-bearing profiles live outside the
+portable archive and must be mode 0600/0400. Read APIs return owner-scoped summaries,
+never credentials. Profile files contain reversible local Bridge credentials and
+need protected local storage and encrypted backups.
 
 Pending/dismissed suggestions, connections and cursors live in private SQLite.
 Accepted orders are portable, role-redacted Item records, retained by ordinary
@@ -37,8 +55,9 @@ external credential file and Bridge home separately and privately.
 
 ## Review
 
-Open **Purchase inbox**, select a collection, expand **Private mail connections**
-and enable its configured account. Every receipt match needs explicit review.
+Open **Purchase inbox**, select a collection, find **Connect your email**
+and enable receipt scanning for its configured account. Every receipt match needs
+explicit review.
 Correct the title, platform, edition, format, order reference and status; then
 link an existing entry or create an unidentified Games entry. Creating entries
 for other collection modules is not implemented; existing entries can be linked.
@@ -60,7 +79,7 @@ from those archive-owned keys. The same Item publication commits Collector's
 existing command receipt, so interruption cannot record a successful review
 without its order. Concurrent/replayed decisions use idempotency receipts,
 expected Item revisions and the archive writer lock; dismissed/accepted receipts
-cannot be applied again to another Item. Disabling a connection fences in-flight
+require an explicit restore/reopen before they can be reviewed again. Disabling a connection fences in-flight
 batch commits without discarding its history cursor.
 
 ## Import and parser coverage
@@ -76,9 +95,13 @@ credential itself can read/write the account and must remain private.
 
 Only matching retailer sender domains and receipt-like subjects trigger body
 fetches. Headers are routing hints, not proof of sender authenticity. Bodies,
-attachments, shipping addresses, payment details and mail headers are not retained
-or sent to browsers. The parser keeps selected product text, order reference,
-status and source date; inspect these fields during review. No external HTML
+attachments and raw messages are not retained or sent to browsers. The parser
+keeps selected product text, order reference, status and source date. Bounded
+owner-private locators retain folder/UID/UIDVALIDITY, Message-ID, subject and the
+email date so an original can be found; they stay outside the portable archive and
+are never exposed to other users. No full header block is retained. Locator text
+can itself contain private sender-supplied details; inspect it only in the private
+review UI. Matching rescans refresh coordinates without rewriting receipt facts. No external HTML
 resource is fetched. Other email clients can still modify mailbox flags; Bridge
 sync itself is separate from the extractor's read-only command set.
 
@@ -90,9 +113,14 @@ as IMAP modified UTF-7, including literal ampersands. Amazon quoted-subject titl
 is tentative and may be truncated. Status comes from the subject to avoid
 cancellation/refund help text in receipt footers. Unknown layouts/oversize receipts
 become an unparsed review entry rather than an owned game. Limits are 2 MiB/mail,
-100 MIME parts, 20 product names/mail and 100 suggestions/batch. Malformed mail or
-unsupported decoding can leave a visible failed sync for operator review; no
-failed batch advances its cursor. Templates without a receipt-like subject or
+100 MIME parts, 20 product names/mail and 100 suggestions/batch. Malformed dates,
+unsupported decoding and excessive MIME parts become unparsed suggestions with a
+typed issue and locator; later messages can progress. Unparsed suggestions require
+manual details/status before acceptance, can be dismissed to skip or restored.
+The received date is used when a malformed sender date cannot be parsed. Transport
+failures, incomplete message bytes and invalid response envelopes keep the saved
+cursor and return typed authentication/certificate/folder/transport/adapter errors.
+No failed batch advances its cursor. Templates without a receipt-like subject or
 recognised sender can be missed. Gift, wallet, subscription, quantity and item-level
 partial-refund semantics need manual review; no claim of universal template support
 is made. Tests use synthetic receipts; actual personal receipt calibration remains
@@ -138,11 +166,48 @@ together in a private immutable file under `state/mail-profiles`. Repeated input
 converge after interruption/restart; reusing the same receipt with different
 inputs conflicts before mutable Bridge status is read. Successful creation is
 visible immediately without restarting Collector. The user then explicitly
-enables scanning for an authorized collection. Existing-profile rotation/removal
-and non-administrator provisioning remain operator tasks.
+enables scanning for an authorized collection. **Revalidate Bridge connection**
+accepts the same local IMAP username, current password and an explicitly confirmed
+current certificate fingerprint. A pinned authentication probe precedes atomic
+replacement of the active private profile. Expected configuration revisions and
+input-bound, secret-free repair receipts fence stale updates and recover uncertain
+responses, including after restart. The provider serializes batch/error publication
+with replacement, so obsolete fetches cannot report success or failure afterward.
+Connection identity, cursors, enablement and suggestions remain intact. Existing
+operator profiles use a managed override with the same ID; their original files are
+retained unchanged. Receipt replay does not restore superseded credentials. Profile
+removal and non-administrator credential provisioning remain operator tasks.
 
 Both setup routes belong to administration listener composition and require the
 administrator role. Existing profile/connection reads remain owner-scoped. The
 managed credentials are reversible private operational data, not archive content;
 include them and Bridge's home in complete paired recovery points. No extra
 per-message or per-poll history is retained.
+
+## Recovery and review corrections — 2026-10-31
+
+Each configured folder shows its last checked time and either not checked, history
+backlog, or caught up at that check. Backlog uses UID positions, not message counts.
+It covers only mail exposed by Bridge; initial Bridge sync and parser coverage are
+separate. For an initial complete history pass, finish Bridge sync, then use
+**Rescan configured folders**. Rescan resets the selected folders' cursor/progress,
+retains suggestions and enabled/paused state, and fences prior work. A paused scan
+stays paused until explicitly enabled. It also provides a retry after parser repair.
+Older unparsed suggestions remain available for review/dismissal when a later parse
+produces a new suggestion; rescanning never silently accepts a receipt.
+
+**Restore suggestion** returns a dismissed receipt to Needs review. **Reopen purchase
+review** previews the affected accepted purchase and requires **Confirm reopen
+purchase**. The command removes that current purchase from the Item and returns
+all of its linked receipts to review; earlier accepted details remain in archive
+history. Review again to correct purchase fields or select another entry. No Item
+inventory, manual metadata or files are removed. All review mutations bind the submitted suggestion revision. Both recovery effects
+are owner-scoped and curation-authorized; accepted reopening also checks the Item revision. Private
+review generations fence old forms. Reopening reserves those generations before
+archive publication: an interrupted unsuccessful attempt can require a refresh,
+but leaves either the accepted purchase or its committed reopened state intact.
+
+Receipt review attaches older source keys to an existing matching order without
+replacing newer status/date/details or duplicate intent. Newer receipts can update
+that order normally. Orders with different retailer/reference still conflict.
+Source review data stays immutable; corrections live in the accepted purchase row.

@@ -250,3 +250,10 @@
 .bridge-connect-form input, .bridge-connect-form textarea { box-sizing: border-box; width: 100%; min-width: 0; }
 .mail-connection code { overflow-wrap: anywhere; white-space: normal; }
 .mail-certificate { font-size: .85rem; }
+
+.purchase-suggestion code { overflow-wrap: anywhere; white-space: normal; }
+
+.bridge-connect-form input[type="checkbox"] { width: auto; }
+
+.bridge-connect-form .bridge-confirmation { display: flex; align-items: flex-start; gap: .5rem; }
+.bridge-confirmation input { flex: none; margin-top: .25rem; }

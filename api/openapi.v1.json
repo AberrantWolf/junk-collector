@@ -7455,6 +7455,9 @@
               }
             }
           },
+          "400": {
+            "description": "Bad Request"
+          },
           "403": {
             "description": "Forbidden"
           },
@@ -7483,6 +7486,56 @@
           },
           "401": {
             "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v1/mail/profiles/{id}/repair": {
+      "post": {
+        "operationId": "repair_bridge",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairBridge"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "503": {
+            "description": "Service Unavailable"
           }
         }
       }
@@ -8021,6 +8074,98 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/purchase-suggestions/{id}/reopen": {
+      "post": {
+        "operationId": "reopen_purchase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenPurchase"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/purchase-suggestions/{id}/restore": {
+      "post": {
+        "operationId": "restore_purchase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -11223,6 +11368,19 @@
           },
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"
+          },
+          "folders": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Omit to retain the current folders."
+          },
+          "rescan": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -14961,6 +15119,26 @@
           "enabled": {
             "type": "boolean"
           },
+          "failure": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MailFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "folders": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "None uses the provisioned profile folders, preserving existing installations."
+          },
           "last_checked": {
             "type": [
               "string",
@@ -14977,10 +15155,92 @@
           "profile": {
             "$ref": "#/components/schemas/MailProfile"
           },
+          "progress": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailFolderProgress"
+            }
+          },
           "revision": {
             "$ref": "#/components/schemas/Revision"
           }
         }
+      },
+      "MailFailure": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MailFailureKind"
+          }
+        }
+      },
+      "MailFailureKind": {
+        "type": "string",
+        "enum": [
+          "authentication",
+          "certificate",
+          "folder",
+          "transport",
+          "invalid_response",
+          "adapter"
+        ]
+      },
+      "MailFolderProgress": {
+        "type": "object",
+        "required": [
+          "checked_at",
+          "folder",
+          "uid_validity",
+          "scanned_through",
+          "available_through",
+          "caught_up"
+        ],
+        "properties": {
+          "available_through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "caught_up": {
+            "type": "boolean"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "scanned_through": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "uid_validity": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "MailParseIssue": {
+        "type": "string",
+        "enum": [
+          "malformed_date",
+          "unsupported_content",
+          "too_large",
+          "too_many_parts",
+          "unrecognized_layout"
+        ]
       },
       "MailProfile": {
         "type": "object",
@@ -14991,6 +15251,15 @@
           "provider"
         ],
         "properties": {
+          "configuration_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "id": {
             "type": "string"
           },
@@ -15029,6 +15298,41 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "MailSource": {
+        "type": "object",
+        "required": [
+          "folder",
+          "uid_validity",
+          "uid",
+          "message_id",
+          "subject",
+          "date"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "uid_validity": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -20311,6 +20615,16 @@
           "id": {
             "type": "string"
           },
+          "issue": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MailParseIssue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "matches": {
             "type": "array",
             "items": {
@@ -20325,6 +20639,19 @@
           },
           "reason": {
             "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MailSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -20457,6 +20784,50 @@
             }
           }
         }
+      },
+      "ReopenPurchase": {
+        "type": "object",
+        "required": [
+          "suggestion_revision",
+          "accepted_item",
+          "expected_item_revision"
+        ],
+        "properties": {
+          "accepted_item": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "expected_item_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "suggestion_revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RepairBridge": {
+        "type": "object",
+        "required": [
+          "username",
+          "password",
+          "certificate_sha256",
+          "expected_revision"
+        ],
+        "properties": {
+          "certificate_sha256": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "RepairIntakeDestination": {
         "type": "object",
@@ -20745,6 +21116,9 @@
           },
           "purchase": {
             "$ref": "#/components/schemas/PurchaseOrder"
+          },
+          "suggestion_revision": {
+            "$ref": "#/components/schemas/Revision"
           },
           "title": {
             "type": "string",

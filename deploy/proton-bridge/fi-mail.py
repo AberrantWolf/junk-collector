@@ -31,7 +31,7 @@ elif a.command=='accounts':
     for uid,name in db.execute('SELECT id,username FROM users WHERE enabled=1 ORDER BY username'):
         print(uid,name)
 elif a.command=='configure':
-    if any(Path('/srv/junk-collector/state/mail-profiles').glob('*.json')):sys.exit('A web-managed mail profile exists. Manage it in Purchase inbox; preserve it before any credential rotation.')
+    if any(Path('/srv/junk-collector/state/mail-profiles').glob('*.json')):sys.exit('A web-managed mail profile exists. Use Revalidate Bridge connection in Purchase inbox to repair credentials or the certificate pin.')
     pending=mail/'profiles.pending.json'
     if pending.exists():sys.exit('A pending private profile already exists; preserve/review it before retrying.')
     command=[sys.executable,str(deploy.parent.parent/'scripts/configure_proton_mail.py'),'--output',str(pending),'--certificate',str(mail/'bridge-home/export/cert.pem'),'--owner',a.owner]
