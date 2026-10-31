@@ -211,7 +211,9 @@ def checked(result):
     return data
 
 
-def fetch_batch(profile, cursor):
+def fetch_batch(profile, cursor, probe=False):
+    if any(not isinstance(profile.get(field), str) or any(ord(c) < 32 or ord(c) == 127 for c in profile[field]) for field in ('username', 'password')):
+        raise ValueError('invalid local credentials')
     if profile.get('host', '127.0.0.1') != '127.0.0.1':
         raise ValueError('Bridge must use loopback')
     state = json.loads(cursor) if cursor else {}
@@ -239,6 +241,8 @@ def fetch_batch(profile, cursor):
             status = checked(client.status(quoted, '(UIDVALIDITY UIDNEXT)'))[0]
             validity = int(re.search(rb'UIDVALIDITY (\d+)', status).group(1))
             uidnext = int(re.search(rb'UIDNEXT (\d+)', status).group(1))
+            if probe:
+                continue
             previous = state.get(folder, {})
             last = previous.get('uid', 0) if previous.get('validity') == validity else 0
             end = min(last + 100, uidnext - 1)
@@ -280,7 +284,7 @@ def fetch_batch(profile, cursor):
 if __name__ == '__main__':
     try:
         request = json.load(sys.stdin)
-        result = fetch_batch(request['profile'], request['cursor'])
+        result = fetch_batch(request['profile'], request['cursor'], request.get('operation') == 'probe')
         sys.stdout.write(json.dumps(result, ensure_ascii=False))
     except Exception:
         # No exception repr: libraries can include credentials, headers or mail bodies.

@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 ARG BRIDGE_VERSION=3.18.0
 ARG BRIDGE_SHA256=4a4b4f3efe5502d2fc1280a2abd3d3bae5091275b466d1148c1b7df27cd571b7
 RUN test "$(dpkg --print-architecture)" = amd64
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg pass debsig-verify tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg pass debsig-verify tini python3 && rm -rf /var/lib/apt/lists/*
 COPY bridge_pubkey.asc /tmp/bridge_pubkey.asc
 COPY bridge.pol /etc/debsig/policies/E2C75D68E6234B07/bridge.pol
 RUN mkdir -p /usr/share/debsig/keyrings/E2C75D68E6234B07 && \
@@ -16,6 +16,7 @@ RUN mkdir -p /usr/share/debsig/keyrings/E2C75D68E6234B07 && \
     rm -rf /var/lib/apt/lists/* /tmp/bridge.deb /tmp/bridge_pubkey.asc && \
     useradd --uid 10001 --create-home bridge
 COPY --chmod=755 entrypoint.sh /usr/local/bin/bridge-container
+COPY status.py /usr/local/lib/bridge-status.py
 ENV HOME=/home/bridge GNUPGHOME=/home/bridge/.gnupg PASSWORD_STORE_DIR=/home/bridge/.password-store
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/bridge-container"]

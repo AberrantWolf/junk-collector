@@ -1,21 +1,54 @@
 // Real Collector UI/storage acceptance against synthetic private receipt records.
 import {chromium,expect} from './support/browser.mjs';
 import {spawn,spawnSync,serverBinary,stopProcess,waitForServer} from './support/runtime.mjs';
-import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,rename,rm,mkdir} from 'node:fs/promises';
 import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-let scratch,server,browser,page,logs='';
+import {createHash,X509Certificate} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+let scratch,server,bridge,browser,page,logs='',heartbeat;let stale=false,partial=false;
 async function port(){const s=createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;}
 const password='Disposable-email-fixture-password';
 try{
  scratch=await mkdtemp(path.join(tmpdir(),'collector-email-'));const publicPort=await port(),privatePort=await port(),lanPort=await port(),origin=`http://localhost:${privatePort}`;
+ const profiles=path.join(scratch,'profiles.json'),managed=path.join(scratch,'mail-profiles'),status=path.join(scratch,'bridge-status.json'),certificate=path.join(scratch,'cert.pem'),key=path.join(scratch,'key.pem');
+ await writeFile(profiles,'[]',{mode:0o600});await mkdir(managed);
+ const cert=spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-subj','/CN=localhost','-days','1','-keyout',key,'-out',certificate],{encoding:'utf8'});assert.equal(cert.status,0,cert.stderr);
+ bridge=spawn('python3',['-u',fileURLToPath(new URL('./support/mail-bridge.py',import.meta.url)),certificate,key],{stdio:['ignore','pipe','pipe']});
+ const imapPort=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('IMAP fixture startup timed out')),10000);bridge.stdout.once('data',v=>{clearTimeout(timer);resolve(Number(v.toString().trim()));});bridge.once('exit',()=>{clearTimeout(timer);reject(Error('IMAP fixture exited before listening'));});});
+ const fingerprint=createHash('sha256').update(new X509Certificate(await readFile(certificate)).raw).digest('hex');
+ async function report(){const now=Math.floor(Date.now()/1000);await writeFile(status+'.pending',JSON.stringify({schema:1,imap_port:imapPort,observed_at:stale?now-60:now,event_at:partial?null:stale?now-60:now,phase:partial?'synced':'syncing',percent:partial?null:37.5,elapsed_seconds:12,remaining_seconds:partial?null:20,certificate_sha256:fingerprint}));await rename(status+'.pending',status);}
+ await report();heartbeat=setInterval(()=>void report().catch(()=>{}),1000);
  const config=path.join(scratch,'collector.toml');await writeFile(config,`archive="${scratch}/archive"\nstate="${scratch}/state"\npublic_bind="127.0.0.1:${publicPort}"\nprivate_bind="127.0.0.1:${privatePort}"\nlan_bind="127.0.0.1:${lanPort}"\nlocal_playback_enabled=false\nmulti_user=true\nallowed_origins=["${origin}"]\n`);
  const setup=spawnSync(serverBinary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
- async function start(){server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',v=>logs+=v);await waitForServer(origin+'/healthz',server,{logs:()=>logs});}
+ async function start(){server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,COLLECTOR_MAIL_PROFILES:profiles,COLLECTOR_MAIL_SETUP_DIRECTORY:managed,COLLECTOR_BRIDGE_STATUS:status}});server.stderr.on('data',v=>logs+=v);await waitForServer(origin+'/healthz',server,{logs:()=>logs});}
  await start();browser=await chromium.launch();page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByLabel('Password',{exact:true}).waitFor({state:'detached'});
  const ids=await page.evaluate(async()=>{const call=async(url,method='GET',body)=>{const r=await fetch('/api/v1'+url,{method,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error(await r.text());return r.json();};const actor=await call('/me');const collection=await call('/admin/collections','POST',{name:'Receipt games',module:'org.junk.games'});return {owner:actor.user_id,collection:collection.id};});
+ await page.goto(`${origin}/purchase-inbox?collection=${ids.collection}`);
+ const submitted=[];page.on('request',r=>{if(r.url().endsWith('/api/v1/mail/setup')&&r.method()==='POST')submitted.push({key:r.headers()['idempotency-key'],body:r.postData()});});
+ const connection=page.getByRole('region',{name:'Mail connection',exact:true});
+ await connection.getByRole('progressbar',{name:'Bridge mailbox sync'}).waitFor();
+ const setupShots=process.env.COLLECTOR_SCREENSHOTS;if(setupShots){await mkdir(setupShots,{recursive:true});await page.screenshot({path:path.join(setupShots,'mail-setup-desktop.png'),fullPage:true});}await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mobile mail setup overflow');if(setupShots)await page.screenshot({path:path.join(setupShots,'mail-setup-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
+ await connection.getByLabel('Bridge IMAP username',{exact:true}).fill('fixture-local');await connection.getByLabel('Bridge IMAP password',{exact:true}).fill('incorrect-private-password');
+ await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await connection.getByRole('alert').filter({hasText:'Could not connect'}).waitFor();
+ assert.equal(await page.evaluate(async()=>{const r=await fetch('/api/v1/mail/profiles');return (await r.json()).length;}),0);
+ await connection.getByLabel('Bridge IMAP password',{exact:true}).fill('fixture-imap-password');await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await connection.getByRole('heading',{name:'My Proton Mail · Connected'}).waitFor();
+ const configured=await page.evaluate(async()=>({profiles:await (await fetch('/api/v1/mail/profiles')).json(),connections:await (await fetch('/api/v1/mail/connections')).json()}));
+ assert.equal(configured.profiles.length,1);assert.equal(configured.connections.length,0);assert.ok(!JSON.stringify(configured).includes('fixture-imap-password'));
+ await page.reload();await connection.getByRole('button',{name:'Enable receipt scanning',exact:true}).click();await connection.getByRole('button',{name:'Pause receipt scanning',exact:true}).waitFor();
+ await connection.getByRole('button',{name:'Pause receipt scanning',exact:true}).click();await connection.getByRole('button',{name:'Enable receipt scanning',exact:true}).waitFor();
+ const successRequest=submitted.at(-1);
+ stale=true;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await connection.getByRole('alert').filter({hasText:'unavailable or stale'}).waitFor();await expect(connection.getByRole('progressbar')).toHaveCount(0);
+ assert.equal(await page.evaluate(async request=>(await fetch('/api/v1/mail/setup',{method:'POST',headers:{'content-type':'application/json','idempotency-key':request.key},body:request.body})).status,successRequest),200);
+ assert.equal(await page.evaluate(async request=>(await fetch('/api/v1/mail/setup',{method:'POST',headers:{'content-type':'application/json','idempotency-key':request.key},body:JSON.stringify({...JSON.parse(request.body),username:'different-input'})})).status,successRequest),409);
+ stale=false;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await connection.getByRole('progressbar').waitFor();
+ partial=true;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await expect(connection.getByRole('progressbar')).toHaveCount(0);assert.equal(await page.evaluate(async()=>(await (await fetch('/api/v1/mail/setup')).json()).bridge),null);partial=false;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await connection.getByRole('progressbar').waitFor();
+ const settings=await page.evaluate(async()=>{const r=await fetch('/api/v1/admin/users',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({username:'mail-viewer',password:'Disposable-mail-viewer-password',administrator:false})});if(!r.ok)throw Error(await r.text());return r.json();});
+ const viewer=await browser.newContext();const viewerPage=await viewer.newPage();await viewerPage.goto(origin);await viewerPage.getByLabel('Username',{exact:true}).fill('mail-viewer');await viewerPage.getByLabel('Password',{exact:true}).fill('Disposable-mail-viewer-password');await viewerPage.getByRole('button',{name:'Sign in',exact:true}).click();await viewerPage.getByLabel('Password',{exact:true}).waitFor({state:'detached'});
+ for(const method of ['GET','POST'])assert.equal(await viewerPage.evaluate(async method=>(await fetch('/api/v1/mail/setup',{method,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},...(method==='POST'?{body:JSON.stringify({username:'fixture-local',password:'fixture-imap-password',folders:['INBOX']})}:{})})).status,method),403);
+ await viewer.close();void settings;
  await stopProcess(server);server=undefined;
  const seed=spawnSync('python3',['-c',`
 import sqlite3,json,sys
@@ -43,4 +76,4 @@ db.commit()
  for(const route of ['/purchase-inbox','/purchase-inbox.js','/api/v1/mail/profiles','/api/v1/collections/'+ids.collection+'/purchase-inbox'])assert.equal((await fetch(`http://127.0.0.1:${publicPort}${route}`)).status,404,route);
  assert.deepEqual(errors,[]);console.log('Email purchase UI passed: accept, link/cancel, intentional duplicate, dismiss, restart, mobile and public listener denial.');
 }catch(error){console.error(logs);if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));throw error;}
-finally{try{await browser?.close();}finally{await stopProcess(server);if(scratch)await rm(scratch,{recursive:true,force:true});}}
+finally{try{await browser?.close();}finally{clearInterval(heartbeat);const stopped=await Promise.allSettled([stopProcess(server),stopProcess(bridge)]);if(scratch)await rm(scratch,{recursive:true,force:true});for(const result of stopped)if(result.status==='rejected')throw result.reason;}}

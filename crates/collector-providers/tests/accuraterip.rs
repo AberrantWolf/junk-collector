@@ -12,10 +12,10 @@ use std::{
     net::TcpListener,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 struct Execution {
@@ -90,12 +90,17 @@ struct FixtureServer {
     requests: Arc<AtomicUsize>,
     paths: Arc<Mutex<Vec<String>>>,
     join: Option<thread::JoinHandle<()>>,
+    stopping: Arc<AtomicBool>,
 }
 
 impl Drop for FixtureServer {
     fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
         if let Some(join) = self.join.take() {
-            join.join().unwrap();
+            let result = join.join();
+            if !thread::panicking() {
+                result.unwrap();
+            }
         }
     }
 }
@@ -103,15 +108,39 @@ impl Drop for FixtureServer {
 fn serve(responses: Vec<(Duration, String, Vec<u8>)>) -> FixtureServer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let stopping = Arc::new(AtomicBool::new(false));
+    let stop = Arc::clone(&stopping);
     let requests = Arc::new(AtomicUsize::new(0));
     let request_count = Arc::clone(&requests);
     let paths = Arc::new(Mutex::new(Vec::new()));
     let request_paths = Arc::clone(&paths);
     let join = thread::spawn(move || {
         for (delay, head, body) in responses {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 4096];
-            let read = stream.read(&mut request).unwrap();
+            let (mut stream, request, read) = loop {
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                let (mut stream, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(e) => panic!("fixture accept failed: {e}"),
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                let mut request = [0_u8; 4096];
+                match stream.read(&mut request) {
+                    Ok(read) if read > 0 => break (stream, request, read),
+                    _ => continue,
+                }
+            };
             request_count.fetch_add(1, Ordering::SeqCst);
             let path = String::from_utf8_lossy(&request[..read])
                 .lines()
@@ -120,7 +149,17 @@ fn serve(responses: Vec<(Duration, String, Vec<u8>)>) -> FixtureServer {
                 .unwrap()
                 .to_owned();
             request_paths.lock().unwrap().push(path);
-            thread::sleep(delay);
+            let deadline = Instant::now() + delay;
+            while Instant::now() < deadline {
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                thread::sleep(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(5)),
+                );
+            }
             let response = format!(
                 "HTTP/1.1 {head}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
@@ -134,6 +173,7 @@ fn serve(responses: Vec<(Duration, String, Vec<u8>)>) -> FixtureServer {
         requests,
         paths,
         join: Some(join),
+        stopping,
     }
 }
 
@@ -254,21 +294,50 @@ fn no_data_is_distinct_from_malformed_unavailable_and_oversize() {
 
 #[test]
 fn timeout_and_transient_outage_are_bounded_to_three_attempts() {
-    let responses = (0..3)
-        .map(|_| (Duration::from_millis(80), "200 OK".into(), dbar(1, 2)))
+    let responses = (0..4)
+        .map(|_| (Duration::from_secs(5), "200 OK".into(), dbar(1, 2)))
         .collect();
     let server = serve(responses);
     let provider = AccurateRipProvider::with_test_origin(
         "junk-collector-test/0.1",
         &server.origin,
-        Duration::from_millis(20),
+        Duration::from_millis(100),
+    )
+    .unwrap();
+    let start = Instant::now();
+    let outcome = provider.acquire(&request(&query(), 1024), &mut Execution::active());
+    assert!(
+        matches!(outcome, Err(collector_core::Error::Unavailable(_))),
+        "timeout returned {outcome:?} after {:?}",
+        start.elapsed()
+    );
+    // A timeout can expire before a request is written under load. Bound
+    // observed requests here; prove the exact retry count using fast HTTP 503s.
+    assert!(server.requests.load(Ordering::SeqCst) <= 3);
+    assert!(start.elapsed() < Duration::from_secs(8));
+    drop(server);
+    let outage = serve(
+        (0..4)
+            .map(|_| {
+                (
+                    Duration::ZERO,
+                    "503 Unavailable\r\nRetry-After: 0".into(),
+                    vec![],
+                )
+            })
+            .collect(),
+    );
+    let provider = AccurateRipProvider::with_test_origin(
+        "junk-collector-test/0.1",
+        &outage.origin,
+        Duration::from_secs(2),
     )
     .unwrap();
     assert!(matches!(
         provider.acquire(&request(&query(), 1024), &mut Execution::active()),
         Err(collector_core::Error::Unavailable(_))
     ));
-    assert_eq!(server.requests.load(Ordering::SeqCst), 3);
+    assert_eq!(outage.requests.load(Ordering::SeqCst), 3);
 }
 
 #[test]
@@ -389,4 +458,16 @@ fn redirect_policy_rejects_other_origins_and_supports_same_origin_redirects() {
         )
         .is_ok()
     );
+}
+
+#[test]
+fn unused_fixture_responses_have_bounded_teardown() {
+    let server = serve(vec![(Duration::ZERO, "200 OK".into(), vec![])]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        drop(server);
+        tx.send(()).unwrap();
+    });
+    rx.recv_timeout(Duration::from_secs(2))
+        .expect("unused fixture blocked teardown");
 }

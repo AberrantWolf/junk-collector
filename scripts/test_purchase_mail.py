@@ -6,6 +6,7 @@ from pathlib import Path
 import unittest
 from email.message import EmailMessage
 from unittest.mock import patch
+ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('mail',Path(__file__).resolve().parents[1]/'crates/collector-providers/src/mail/connector.py')
 mail=importlib.util.module_from_spec(spec);spec.loader.exec_module(mail)
 def receipt(sender,subject,body,html=False,mid='receipt-1',charset='utf-8'):
@@ -65,4 +66,116 @@ class IMAP(unittest.TestCase):
         with patch.object(mail.imaplib,'IMAP4',FakeIMAP):
             with self.assertRaises(ValueError):mail.fetch_batch(dict(id='p',username='u',password='p',certificate_sha256='0'*64),'')
         self.assertNotIn('LOGIN',FakeIMAP.commands)
+    def test_connection_probe_never_fetches_messages(self):
+        FakeIMAP.commands=[]
+        profile=dict(id='p',username='local',password='secret',certificate_sha256=mail.hashlib.sha256(b'certificate').hexdigest())
+        with patch.object(mail.imaplib,'IMAP4',FakeIMAP):
+            result=mail.fetch_batch(profile,'',probe=True)
+        self.assertEqual(result['purchases'],[])
+        self.assertIn('EXAMINE',FakeIMAP.commands)
+        self.assertFalse(any(isinstance(c,tuple) for c in FakeIMAP.commands))
+    def test_local_credentials_cannot_inject_imap_commands(self):
+        FakeIMAP.commands=[]
+        with patch.object(mail.imaplib,'IMAP4',FakeIMAP):
+            for field in ('username','password'):
+                profile=dict(username='local',password='secret');profile[field]='bad\r\nA STORE 1 +FLAGS (\\Seen)'
+                with self.assertRaises(ValueError):mail.fetch_batch(profile,'',probe=True)
+        self.assertEqual(FakeIMAP.commands,[])
+
+class BridgeReporter(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('bridge_status',ROOT/'deploy/proton-bridge/status.py')
+        cls.reporter=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.reporter)
+    def test_real_event_vectors_and_no_identifiers_or_invented_completion(self):
+        s=self.reporter.Status()
+        s.consume('>>> A sync has begun for private-account.',10)
+        s.consume('Sync (private-account): 37.5% (Elapsed: 12.0s, ETA: 20.0s)',11)
+        result=s.snapshot(12)
+        self.assertEqual((result['phase'],result['percent'],result['remaining_seconds']),('syncing',37.5,20))
+        self.assertNotIn('private-account',json.dumps(result))
+        s.consume('Sync (private-account): 100.0% (Elapsed: 25.0s, ETA: 0.0s)',13)
+        self.assertEqual(s.snapshot(14)['phase'],'syncing')
+        s.consume('A sync has finished for private-account.',15)
+        self.assertEqual(s.snapshot(16)['phase'],'synced');self.assertIsNone(s.snapshot(16)['percent'])
+        s.consume('ERRO[time] Sync aborted error="context canceled" user="private-id"',17)
+        self.assertEqual(s.snapshot(18)['phase'],'interrupted');self.assertIsNone(s.snapshot(18)['percent'])
+    def test_multiple_accounts_and_invalid_vectors_never_invent_an_average(self):
+        s=self.reporter.Status()
+        for name in ['first','second']:s.consume(f'Sync ({name}): 10.0% (Elapsed: 2.0s, ETA: 18.0s)',1)
+        self.assertIsNone(s.snapshot(2)['percent'])
+        s.consume('Sync (third): 101.0% (Elapsed: 1.0s, ETA: 2.0s)',3)
+        self.assertEqual(len(s.accounts),2)
+        s.consume('A sync has finished for first.',4)
+        self.assertEqual(s.snapshot(5)['phase'],'syncing')
+        s.consume('ERRO[t] Sync aborted error="context canceled" user="opaque"',6)
+        s.consume('A sync has finished for second.',7)
+        self.assertEqual(s.snapshot(8)['phase'],'unknown')
+        self.assertIsNone(s.snapshot(8)['percent'])
+    def test_process_shutdown_reaps_child_and_clears_progress(self):
+        import os,signal,subprocess,sys,tempfile,time
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'home').mkdir();(root/'status').mkdir()
+            fake=root/'fake.py';fake.write_text('import sys\nprint("x"*100000,flush=True)\nprint("PRIVATE MESSAGE CONTENT",flush=True)\nprint("Sync (secret-account): 37.5% (Elapsed: 12.0s, ETA: 20.0s)",flush=True)\nfor line in sys.stdin:\n if line.strip()=="exit":\n  print("PRIVATE SHUTDOWN"*20000,flush=True);break\n')
+            code=f'import importlib.util; s=importlib.util.spec_from_file_location("s",{str(ROOT/"deploy/proton-bridge/status.py")!r});m=importlib.util.module_from_spec(s);s.loader.exec_module(m);raise SystemExit(m.main([{sys.executable!r},{str(fake)!r}]))'
+            child=subprocess.Popen([sys.executable,'-c',code],env=dict(os.environ,HOME=str(root/'home'),BRIDGE_STATUS_DIRECTORY=str(root/'status')),stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            try:
+                deadline=time.monotonic()+12
+                while time.monotonic()<deadline:
+                    try:
+                        result=json.loads((root/'status/status.json').read_text())
+                        if result['percent']==37.5:break
+                    except (OSError,ValueError):pass
+                    time.sleep(.05)
+                else:self.fail('Reporter did not consume bounded fake-process progress')
+                child.send_signal(signal.SIGTERM);out,err=child.communicate(timeout=5)
+                self.assertEqual(child.returncode,0,err)
+                self.assertEqual(out,b'')
+                result=json.loads((root/'status/status.json').read_text())
+                self.assertEqual(result['phase'],'stopped');self.assertIsNone(result['percent'])
+                self.assertNotIn('secret-account',json.dumps(result))
+            finally:
+                if child.poll() is None:child.kill();child.communicate(timeout=5)
+    def test_terminal_query_does_not_show_stale_progress_or_raw_errors(self):
+        import tempfile
+        spec=importlib.util.spec_from_file_location('query_status',ROOT/'scripts/bridge_status.py')
+        query=importlib.util.module_from_spec(spec);spec.loader.exec_module(query)
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'status.json';value=self.reporter.Status().snapshot(100)
+            value.update(phase='syncing',percent=37.5,event_at=100)
+            p.write_text(json.dumps(value));text,code=query.query(p,105)
+            self.assertEqual(code,0);self.assertIn('37.5%',text)
+            text,code=query.query(p,121);self.assertEqual(code,2);self.assertNotIn('37.5%',text)
+            p.write_text('PRIVATE malformed output');text,code=query.query(p,105)
+            self.assertEqual(code,2);self.assertNotIn('PRIVATE',text)
+            for candidate in [dict(value,event_at=None,phase='synced',percent=None),dict(value,percent=True),dict(value,schema=True),dict(value,percent=10**1000)]:
+                p.write_text(json.dumps(candidate));text,code=query.query(p,105)
+                self.assertEqual(code,2);self.assertNotIn('37.5%',text)
+    def test_terminal_query_refuses_a_pipe_without_waiting_for_a_writer(self):
+        import os,subprocess,sys,tempfile
+        with tempfile.TemporaryDirectory() as d:
+            fifo=Path(d)/'status.json';os.mkfifo(fifo)
+            result=subprocess.run([sys.executable,str(ROOT/'scripts/bridge_status.py'),str(fifo)],capture_output=True,text=True,timeout=2)
+            self.assertEqual(result.returncode,2);self.assertIn('unavailable',result.stdout)
+    def test_forced_stop_is_not_clean_and_reaps_the_actual_process(self):
+        import os,signal,subprocess,sys,tempfile,time
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'home').mkdir();(root/'status').mkdir();pid=root/'child.pid'
+            fake=root/'stuck.py';fake.write_text(f'import os,signal,time\nfrom pathlib import Path\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nPath({str(pid)!r}).write_text(str(os.getpid()))\nwhile True:time.sleep(1)\n')
+            code=f'import importlib.util; s=importlib.util.spec_from_file_location("s",{str(ROOT/"deploy/proton-bridge/status.py")!r});m=importlib.util.module_from_spec(s);s.loader.exec_module(m);raise SystemExit(m.main([{sys.executable!r},{str(fake)!r}],shutdown_timeout=.1,reap_timeout=1))'
+            child=subprocess.Popen([sys.executable,'-c',code],env=dict(os.environ,HOME=str(root/'home'),BRIDGE_STATUS_DIRECTORY=str(root/'status')),stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            try:
+                deadline=time.monotonic()+5
+                while not pid.exists() and time.monotonic()<deadline:time.sleep(.02)
+                self.assertTrue(pid.exists(),'Owned fake process did not start')
+                child.send_signal(signal.SIGTERM);out,err=child.communicate(timeout=5)
+                self.assertEqual(child.returncode,1,err);self.assertEqual(out,b'')
+                with self.assertRaises(ProcessLookupError):os.kill(int(pid.read_text()),0)
+                value=json.loads((root/'status/status.json').read_text())
+                self.assertEqual(value['phase'],'stopped');self.assertIsNone(value['percent'])
+            finally:
+                if child.poll() is None:child.kill();child.communicate(timeout=5)
+
 if __name__=='__main__':unittest.main()

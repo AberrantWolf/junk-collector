@@ -3,6 +3,102 @@ use collector_core::*;
 use collector_modules::Registry;
 use collector_store::Store;
 use std::sync::{Arc, Mutex};
+struct Setup {
+    owners: Mutex<Vec<UserId>>,
+}
+impl MailSetupPort for Setup {
+    fn setup_status(&self) -> Result<MailSetupStatus> {
+        Ok(MailSetupStatus {
+            can_connect: false,
+            bridge: None,
+            problem: Some("No status report".into()),
+        })
+    }
+    fn connect_bridge(
+        &self,
+        owner: UserId,
+        command: &ConnectBridge,
+        key: &str,
+    ) -> Result<MailProfile> {
+        assert_eq!(key, "setup-request");
+        assert_eq!(command.username, "local-only");
+        self.owners.lock().unwrap().push(owner);
+        Ok(MailProfile {
+            id: "fixture".into(),
+            owner,
+            label: "Private mail".into(),
+            provider: "proton_bridge".into(),
+        })
+    }
+}
+#[test]
+fn bridge_setup_is_administrator_only_binds_the_owner_and_does_not_enable_intake() {
+    let root = tempfile::tempdir().unwrap();
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let admin = store
+        .create_user("owner", "a long setup password", true)
+        .unwrap();
+    let user = store
+        .create_user("viewer", "another setup password", false)
+        .unwrap();
+    let port = Arc::new(Setup {
+        owners: Mutex::new(vec![]),
+    });
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()))
+        .with_purchase_inbox(store)
+        .with_mail_setup(port.clone());
+    let actor = Principal {
+        user_id: user,
+        administrator: false,
+        device_id: None,
+    };
+    let command = || ConnectBridge {
+        username: "local-only".into(),
+        password: "never-return-this".into(),
+        folders: vec!["INBOX".into()],
+    };
+    let context = CommandContext::new("setup-request").unwrap();
+    assert!(matches!(
+        service.mail_setup_status(&actor),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.connect_mail_bridge(&actor, command(), &context),
+        Err(Error::Forbidden)
+    ));
+    assert!(port.owners.lock().unwrap().is_empty());
+    let actor = Principal {
+        user_id: admin,
+        administrator: true,
+        device_id: None,
+    };
+    let profile = service
+        .connect_mail_bridge(&actor, command(), &context)
+        .unwrap();
+    assert_eq!(*port.owners.lock().unwrap(), vec![admin]);
+    assert_eq!(profile.owner, admin);
+    assert!(
+        !serde_json::to_string(&profile)
+            .unwrap()
+            .contains("never-return-this")
+    );
+    assert!(service.mail_connections(&actor).unwrap().is_empty());
+    let mut invalid = command();
+    invalid.folders = vec!["INBOX\r\nINJECT".into()];
+    assert!(matches!(
+        service.connect_mail_bridge(&actor, invalid, &context),
+        Err(Error::Invalid(_))
+    ));
+    assert_eq!(port.owners.lock().unwrap().len(), 1);
+    let mut invalid = command();
+    invalid.password = "secret\r\nIMAP command".into();
+    assert!(matches!(
+        service.connect_mail_bridge(&actor, invalid, &context),
+        Err(Error::Invalid(_))
+    ));
+    assert_eq!(port.owners.lock().unwrap().len(), 1);
+}
 struct Mail {
     profile: MailProfile,
     batch: Mutex<MailBatch>,

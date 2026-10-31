@@ -1,3 +1,25 @@
+## Bridge setup and sync status — 2026-10-31
+
+Application mail services own administrator-only Bridge setup/status authorization
+and user ownership. A narrow provider setup port accepts local IMAP credentials,
+validates pinned TLS/read-only folder access and atomically publishes a private
+profile with its input-bound command receipt. Credentials never enter collection
+records, logs or read DTOs. Existing operator profiles remain supported without
+conversion; managed profiles live under private state and reload after restart.
+
+The Bridge container owns its official CLI process and reduces the pinned 3.18.0
+sync events to a bounded atomic status snapshot. It exports the local public
+certificate fingerprint through that snapshot; account names, message identifiers,
+passwords, raw logs and exported private keys never cross the status boundary.
+Collector reads only the status snapshot, with freshness and typed unavailable
+states. An absent/old/partial event cannot imply sync completion. Bridge's full
+mailbox sync and Collector's receipt-history cursor remain distinct workflows.
+The web setup card is visible before any profile exists; credentials are submitted
+only through authenticated management composition. Polling aborts on detach or
+account changes. Terminal status uses the same sanitized snapshot without stopping
+Bridge. Acceptance includes real UI setup, refresh/reopen, denied access, stale
+status, failed TLS/login, input-bound retries and reporter shutdown/restart.
+
 ## Email account-disable review correction — 2026-10-31
 
 Mail sync now rechecks its owner's enabled state after fetching. Batch admission

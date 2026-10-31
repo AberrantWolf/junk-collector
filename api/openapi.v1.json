@@ -7487,6 +7487,67 @@
         }
       }
     },
+    "/api/v1/mail/setup": {
+      "get": {
+        "operationId": "mail_setup",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailSetupStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "connect_bridge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectBridge"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/v1/me": {
       "get": {
         "operationId": "me",
@@ -9649,6 +9710,82 @@
           }
         }
       },
+      "BridgeSyncPhase": {
+        "type": "string",
+        "enum": [
+          "starting",
+          "unknown",
+          "syncing",
+          "synced",
+          "interrupted",
+          "stopped"
+        ]
+      },
+      "BridgeSyncStatus": {
+        "type": "object",
+        "required": [
+          "schema",
+          "imap_port",
+          "observed_at",
+          "phase"
+        ],
+        "properties": {
+          "certificate_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "elapsed_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "event_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "imap_port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "observed_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "percent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/BridgeSyncPhase"
+          },
+          "remaining_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "schema": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "BrowserPlaybackGrant": {
         "type": "object",
         "required": [
@@ -11101,6 +11238,30 @@
             "$ref": "#/components/schemas/PreviewAlbumGroup"
           },
           "token": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConnectBridge": {
+        "type": "object",
+        "description": "Write-only secrets: intentionally no Debug implementation or read DTO.",
+        "required": [
+          "username",
+          "password",
+          "folders"
+        ],
+        "properties": {
+          "folders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "password": {
+            "type": "string"
+          },
+          "username": {
             "type": "string"
           }
         },
@@ -14841,6 +15002,33 @@
           },
           "provider": {
             "type": "string"
+          }
+        }
+      },
+      "MailSetupStatus": {
+        "type": "object",
+        "required": [
+          "can_connect"
+        ],
+        "properties": {
+          "bridge": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BridgeSyncStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "can_connect": {
+            "type": "boolean"
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

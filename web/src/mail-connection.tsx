@@ -1,0 +1,36 @@
+import React,{useEffect,useRef,useState,api,requestErrorMessage,isApiRequestError} from '@collector/runtime';
+import type {components} from './generated/api';
+type Profile=components['schemas']['MailProfile'];
+type Connection=components['schemas']['MailConnection'];
+type Setup=components['schemas']['MailSetupStatus'];
+type Props={userId:string;collection:string;canCurate:boolean;canAdminister:boolean;onSessionExpired:()=>void};
+export default function MailConnection({userId,collection,canCurate,canAdminister,onSessionExpired}:Props){
+ const [profiles,setProfiles]=useState<Profile[]>([]),[connections,setConnections]=useState<Connection[]>([]),[setup,setSetup]=useState<Setup>(),[error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,setRefresh]=useState(0),[loaded,setLoaded]=useState(false),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[folders,setFolders]=useState('INBOX');
+ const mutation=useRef<AbortController|null>(null),receipt=useRef(crypto.randomUUID());
+ function fail(e:unknown){if(isApiRequestError(e)&&e.code==='unauthenticated')onSessionExpired();else setError(requestErrorMessage(e));}
+ useEffect(()=>{const c=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
+  async function poll(){try{const [p,cx,s]=await Promise.all([api<Profile[]>('/mail/profiles',{signal:c.signal}),api<Connection[]>('/mail/connections',{signal:c.signal}),canAdminister?api<Setup>('/mail/setup',{signal:c.signal}):Promise.resolve(undefined)]);if(!c.signal.aborted){setProfiles(p);setConnections(cx);setSetup(s);setLoaded(true);}}catch(e){if(!c.signal.aborted){setSetup(undefined);fail(e);}}finally{if(!c.signal.aborted)timer=setTimeout(()=>void poll(),5000);}}
+  if(!busy)void poll();return()=>{c.abort();clearTimeout(timer);};
+ },[userId,collection,canAdminister,busy,refresh]);
+ async function connect(e:React.FormEvent){e.preventDefault();setError('');setBusy(true);
+  // Mutations have their own lifecycle; polling is paused while secrets are submitted.
+  const c=new AbortController();mutation.current=c;
+  try{await api('/mail/setup',{method:'POST',signal:c.signal,headers:{'Idempotency-Key':receipt.current},body:JSON.stringify({username,password,folders:folders.split('\n').filter(v=>v.trim().length>0)})});if(!c.signal.aborted){setPassword('');setUsername('');setRefresh(v=>v+1);}}
+  catch(e){if(!c.signal.aborted)fail(e);}finally{if(!c.signal.aborted)setBusy(false);}
+ }
+ async function toggle(p:Profile){const current=connections.find(c=>c.profile.id===p.id);setError('');setBusy(true);const c=new AbortController();mutation.current=c;
+  try{await api(`/mail/connections/${p.id}`,{method:'PUT',signal:c.signal,body:JSON.stringify({collection_id:collection,enabled:!current?.enabled,expected_revision:current?.revision||0})});if(!c.signal.aborted)setRefresh(v=>v+1);}catch(e){if(!c.signal.aborted)fail(e);}finally{if(!c.signal.aborted)setBusy(false);}
+ }
+ useEffect(()=>()=>mutation.current?.abort(),[userId,collection]);
+ function edit(update:()=>void){update();receipt.current=crypto.randomUUID();}
+ const bridge=setup?.bridge;
+ const staleProgress=bridge?.event_at!=null&&Date.now()/1000-bridge.event_at>120;
+ const phase=bridge?({starting:'Starting',unknown:'Running · progress not yet reported',syncing:staleProgress?'Waiting for a new sync report':'Syncing mailbox',synced:'Reported sync finished',interrupted:'Sync interrupted · waiting for retry',stopped:'Stopped'}[bridge.phase]):'Status unavailable';
+ return <section className="mail-connection" aria-label="Mail connection"><header><h2>Connect your email</h2><p>Connect Proton Bridge here, then enable receipt scanning for a collection. Bridge keeps its own encrypted cache of your full mailbox on this server.</p></header>
+ {canAdminister&&<section className="bridge-status" aria-label="Proton Bridge status"><h3>Proton Bridge</h3><p role="status">{phase}</p>{bridge?.percent!=null&&bridge.phase==='syncing'&&<><progress aria-label="Bridge mailbox sync" max={100} value={bridge.percent}/><p>{bridge.percent.toFixed(1)}%{bridge.remaining_seconds!=null&&!staleProgress?` · Estimated ${Math.ceil(bridge.remaining_seconds/60)} min remaining`:''}</p></>}{bridge?.event_at&&<p className="muted">Last sync report: {new Date(bridge.event_at*1000).toLocaleString()}</p>}{setup?.problem&&<p role="alert">{setup.problem}</p>}<p>Mailbox sync is separate from Collector’s receipt scan. A running Bridge may take time to report progress after restarting.</p></section>}
+ {!loaded&&!error&&<p role="status">Checking your mail connection…</p>}
+ {loaded&&!profiles.length&&(canAdminister?<form className="bridge-connect-form" onSubmit={e=>void connect(e)}><h3>Connect the receipt watcher</h3><p>First sign in to Proton in the server’s private Bridge terminal: <code>collector-mail login</code>. Use <code>info</code> there to view the local IMAP credentials, then <code>exit</code> to resume the background Bridge. Enter the local credentials below.</p><p>Your Proton account password and two-factor code stay in that private terminal. Enter the distinct local IMAP password here.</p><fieldset disabled={busy}><legend>Local Bridge connection</legend><label>Bridge IMAP username<input autoComplete="off" maxLength={320} required value={username} onChange={e=>edit(()=>setUsername(e.target.value))}/></label><label>Bridge IMAP password<input type="password" autoComplete="off" maxLength={1024} required value={password} onChange={e=>edit(()=>setPassword(e.target.value))}/></label><label>Mail folders, one per line<textarea rows={3} maxLength={4096} required value={folders} onChange={e=>edit(()=>setFolders(e.target.value))}/></label><p>INBOX scans inbox history. Add exact folder names to include archived receipts.</p>{bridge?.certificate_sha256&&<p className="mail-certificate">Server-provided certificate fingerprint: <code>{bridge.certificate_sha256}</code></p>}<button type="submit" disabled={!setup?.can_connect}>Connect Bridge</button></fieldset>{!setup?.can_connect&&<p>Connection will become available when Bridge is running and its certificate is reported.</p>}</form>:<p>Your server administrator needs to connect your private mail profile before receipt scanning can be enabled.</p>)}
+ {profiles.map(p=>{const c=connections.find(v=>v.profile.id===p.id);return <section key={p.id} aria-label="Receipt scan"><h3>{p.label} · Connected</h3><p>Collector receipt scan: {c?.enabled?'Enabled':'Paused'}{c?.last_checked?` · Last checked ${new Date(c.last_checked).toLocaleString()}`:''}</p>{c?.problem&&<p role="alert">{c.problem}</p>}{c&&c.collection_id!==collection?<p>This connection belongs to another collection. Select that collection to manage it.</p>:<><p>{!collection?'Select a collection below to enable receipt scanning.':!canCurate?'Curator access is required for the selected collection.':'Enable to scan configured folders for purchase receipts. Imported suggestions still require review.'}</p><button disabled={busy||!collection||!canCurate} onClick={()=>void toggle(p)}>{c?.enabled?'Pause receipt scanning':'Enable receipt scanning'}</button></>}</section>;})}
+ <button disabled={busy} onClick={()=>{setError('');setRefresh(v=>v+1);}}>Refresh mail status</button>{busy&&<p role="status">Saving mail connection…</p>}{error&&<p role="alert" className="notice error">{error}</p>}
+ </section>;
+}

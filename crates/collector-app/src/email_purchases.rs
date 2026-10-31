@@ -66,6 +66,52 @@ pub trait MailProviderPort: Send + Sync {
     fn profiles(&self) -> Vec<MailProfile>;
     fn fetch(&self, profile: &str, cursor: &str) -> Result<MailBatch>;
 }
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BridgeSyncStatus {
+    pub schema: u32,
+    pub imap_port: u16,
+    pub observed_at: u64,
+    pub event_at: Option<u64>,
+    pub phase: BridgeSyncPhase,
+    pub percent: Option<f64>,
+    pub elapsed_seconds: Option<f64>,
+    pub remaining_seconds: Option<f64>,
+    pub certificate_sha256: Option<String>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeSyncPhase {
+    Starting,
+    Unknown,
+    Syncing,
+    Synced,
+    Interrupted,
+    Stopped,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MailSetupStatus {
+    pub can_connect: bool,
+    pub bridge: Option<BridgeSyncStatus>,
+    pub problem: Option<String>,
+}
+/// Write-only secrets: intentionally no Debug implementation or read DTO.
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectBridge {
+    pub username: String,
+    pub password: String,
+    pub folders: Vec<String>,
+}
+pub trait MailSetupPort: Send + Sync {
+    fn setup_status(&self) -> Result<MailSetupStatus>;
+    fn connect_bridge(
+        &self,
+        owner: UserId,
+        command: &ConnectBridge,
+        request_key: &str,
+    ) -> Result<MailProfile>;
+}
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PurchaseInboxView {
@@ -92,6 +138,56 @@ pub trait PurchaseInboxPort: Send + Sync {
     fn mail_problem(&self, connection: &MailConnection) -> Result<()>;
 }
 impl CollectionService {
+    pub fn with_mail_setup(mut self, port: Arc<dyn MailSetupPort>) -> Self {
+        self.mail_setup = Some(port);
+        self
+    }
+    pub fn mail_setup_status(&self, actor: &Principal) -> Result<MailSetupStatus> {
+        self.mail_enabled_user(actor)?;
+        self.require_administrator(actor)?;
+        self.mail_setup.as_ref().map_or_else(
+            || {
+                Ok(MailSetupStatus {
+                    can_connect: false,
+                    bridge: None,
+                    problem: Some("Bridge setup is not installed on this server.".into()),
+                })
+            },
+            |p| p.setup_status(),
+        )
+    }
+    pub fn connect_mail_bridge(
+        &self,
+        actor: &Principal,
+        command: ConnectBridge,
+        context: &CommandContext,
+    ) -> Result<MailProfile> {
+        self.mail_enabled_user(actor)?;
+        self.require_administrator(actor)?;
+        if command.username.is_empty()
+            || command.username.len() > 320
+            || command.username.chars().any(char::is_control)
+            || command.password.is_empty()
+            || command.password.len() > 1024
+            || command.password.chars().any(char::is_control)
+            || command.folders.is_empty()
+            || command.folders.len() > 16
+            || command
+                .folders
+                .iter()
+                .any(|f| f.is_empty() || f.len() > 256 || f.chars().any(char::is_control))
+        {
+            return Err(Error::Invalid(
+                "Enter local Bridge IMAP credentials and 1–16 valid folder names.".into(),
+            ));
+        }
+        self.mail_setup
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Unavailable("Bridge setup is not installed on this server.".into())
+            })?
+            .connect_bridge(actor.user_id, &command, context.key())
+    }
     fn mail_enabled_user(&self, actor: &Principal) -> Result<()> {
         security::mail_ingestion(self.administration.account(actor.user_id)?.enabled)
     }

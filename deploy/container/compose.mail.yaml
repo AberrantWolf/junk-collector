@@ -4,10 +4,17 @@ services:
   collector:
     environment:
       COLLECTOR_MAIL_PROFILES: /run/collector-mail/profiles.json
+      COLLECTOR_MAIL_SETUP_DIRECTORY: /data/state/mail-profiles
+      COLLECTOR_BRIDGE_STATUS: /run/collector-bridge-status/status.json
     volumes:
       - type: bind
         source: ${COLLECTOR_MAIL_PROFILES:?Set the absolute private mail profiles file}
         target: /run/collector-mail/profiles.json
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${PROTON_BRIDGE_STATUS:?Set the absolute private Bridge status directory}
+        target: /run/collector-bridge-status
         read_only: true
         bind: {create_host_path: false}
   proton-bridge:
@@ -28,4 +35,8 @@ services:
       - type: bind
         source: ${PROTON_BRIDGE_HOME:?Set the absolute persistent Bridge home directory}
         target: /home/bridge
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${PROTON_BRIDGE_STATUS}
+        target: /run/bridge-status
         bind: {create_host_path: false}

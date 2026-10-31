@@ -2228,6 +2228,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mail/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["mail_setup"];
+        put?: never;
+        post: operations["connect_bridge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -2891,6 +2907,26 @@ export interface components {
         Begin: {
             username: string;
         };
+        /** @enum {string} */
+        BridgeSyncPhase: "starting" | "unknown" | "syncing" | "synced" | "interrupted" | "stopped";
+        BridgeSyncStatus: {
+            certificate_sha256?: string | null;
+            /** Format: double */
+            elapsed_seconds?: number | null;
+            /** Format: int64 */
+            event_at?: number | null;
+            /** Format: int32 */
+            imap_port: number;
+            /** Format: int64 */
+            observed_at: number;
+            /** Format: double */
+            percent?: number | null;
+            phase: components["schemas"]["BridgeSyncPhase"];
+            /** Format: double */
+            remaining_seconds?: number | null;
+            /** Format: int32 */
+            schema: number;
+        };
         BrowserPlaybackGrant: {
             /** Format: date-time */
             expires_at: string;
@@ -3238,6 +3274,12 @@ export interface components {
         ConfirmAlbumGroup: {
             preview: components["schemas"]["PreviewAlbumGroup"];
             token: string;
+        };
+        /** @description Write-only secrets: intentionally no Debug implementation or read DTO. */
+        ConnectBridge: {
+            folders: string[];
+            password: string;
+            username: string;
         };
         /** @enum {string} */
         ContentAvailabilityStatus: "available" | "legacy_unassigned" | "owner_unavailable" | "item_schema_unsupported";
@@ -4148,6 +4190,11 @@ export interface components {
             label: string;
             owner: components["schemas"]["UserId"];
             provider: string;
+        };
+        MailSetupStatus: {
+            bridge?: components["schemas"]["BridgeSyncStatus"] | null;
+            can_connect: boolean;
+            problem?: string | null;
         };
         /** @enum {string} */
         MatchStrength: "name" | "identifier" | "disc_layout" | "complete_hashes";
@@ -12334,6 +12381,92 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    mail_setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSetupStatus"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    connect_bridge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectBridge"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailProfile"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

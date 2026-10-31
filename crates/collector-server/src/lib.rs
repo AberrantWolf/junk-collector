@@ -807,6 +807,8 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
 
 fn administration_api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
+        .routes(routes!(mail_setup))
+        .routes(routes!(connect_bridge).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(settings))
         .routes(routes!(worker_settings, update_worker_settings))
         .routes(routes!(inboxes))

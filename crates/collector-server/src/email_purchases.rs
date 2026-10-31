@@ -1,7 +1,30 @@
 use super::*;
 use collector_app::{
-    ConfigureMail, MailConnection, MailProfile, PurchaseInbox, PurchaseInboxView, ReviewPurchase,
+    ConfigureMail, ConnectBridge, MailConnection, MailProfile, MailSetupStatus, PurchaseInbox,
+    PurchaseInboxView, ReviewPurchase,
 };
+#[utoipa::path(get,path="/api/v1/mail/setup",responses((status=200,body=MailSetupStatus),(status=401),(status=403)))]
+pub(super) async fn mail_setup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<MailSetupStatus>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.mail_setup_status(&actor)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/mail/setup",request_body=ConnectBridge,responses((status=200,body=MailProfile),(status=401),(status=403),(status=409),(status=503)))]
+pub(super) async fn connect_bridge(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<ConnectBridge>,
+) -> ApiResult<Json<MailProfile>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || state.service.connect_mail_bridge(&actor, command, &context)).await?,
+    ))
+}
 #[derive(Deserialize)]
 pub(super) struct InboxQuery {
     #[serde(default)]

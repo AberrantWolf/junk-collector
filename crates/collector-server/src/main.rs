@@ -1165,11 +1165,19 @@ async fn main() -> Result<()> {
                 .take()
                 .expect("serve validates passkey configuration before opening storage");
             if let Some(path) = std::env::var_os("COLLECTOR_MAIL_PROFILES") {
-                let provider=Arc::new(collector_providers::mail::ProtonMailProvider::load(std::path::Path::new(&path)).map_err(|_|anyhow::anyhow!("Mail profile configuration invalid; verify local file permissions and settings"))?);
+                let mut provider=collector_providers::mail::ProtonMailProvider::load(std::path::Path::new(&path)).map_err(|_|anyhow::anyhow!("Mail profile configuration invalid; verify local file permissions and settings"))?;
+                if let Some(directory) = std::env::var_os("COLLECTOR_MAIL_SETUP_DIRECTORY") {
+                    let status = std::env::var_os("COLLECTOR_BRIDGE_STATUS").ok_or_else(|| {
+                        anyhow::anyhow!("COLLECTOR_BRIDGE_STATUS is required with mail setup")
+                    })?;
+                    provider=provider.with_setup(std::path::Path::new(&directory),std::path::Path::new(&status)).map_err(|_|anyhow::anyhow!("Mail setup configuration invalid; check private state and reporter paths"))?;
+                }
+                let provider = Arc::new(provider);
                 state.service = state
                     .service
                     .clone()
-                    .with_mail_intake(store.clone(), provider);
+                    .with_mail_intake(store.clone(), provider.clone())
+                    .with_mail_setup(provider);
             }
             let _job_runtime = collector_server::start_job_workers(state.clone())?;
             let _local_runtime = match config

@@ -18,6 +18,6 @@ pass rm --force collector-startup-check >/dev/null
 unset probe
 case "${1:-serve}" in
     cli) exec /usr/bin/protonmail-bridge --cli ;;
-    serve) exec /usr/bin/protonmail-bridge --noninteractive ;;
+    serve) exec python3 -I /usr/local/lib/bridge-status.py ;;
     *) exec "$@" ;;
 esac

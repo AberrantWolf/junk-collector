@@ -1,3 +1,30 @@
+## Bridge status and web connection — source implemented, 2026-10-31
+
+Purchase inbox now has a visible setup card before a profile exists, with typed
+Bridge sync progress/ETA, freshness failures and distinct receipt-scan status.
+Administrators can validate and save local IMAP credentials there without an
+operator-file edit or Collector restart. Proton login/2FA stays in the private
+Bridge terminal. The status query does not interrupt Bridge. Credentials remain
+private, read APIs are secret-free, and scanning requires an explicit collection
+enable action. The workspace baseline passes 565 tests (5 normally ignored), all 30 browser
+journeys pass, and both review passes have been addressed and rechecked. Earlier
+release-image workflows pass; final committed-image qualification and Fi
+installation are pending. See
+[behavior and ownership](email-purchases.md#bridge-status-and-web-connection).
+
+## Email intake installed on Fi — 2026-10-31
+
+Fi now runs the release-mode image built from merged source `83a9e0d`, with
+Proton Bridge 3.18.0 in the same Compose stack. Private state and Bridge home are
+local to Fi; FatChocobo retains the NFS archive. Paired stopped-writer recovery
+snapshots, exact-image upgrade/recovery/media checks, release-image browser smoke,
+retained data/configuration and loopback-only mail listeners pass. No registry
+release was published. Proton account login and live receipt intake remain the
+operator's next steps; no mailbox credentials were used. See
+[deployment evidence](validation/fi-email-deployment-2026-10-31.md) and
+[Fi setup commands](../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31).
+The dated branch/NAS records below describe their original delivery scope.
+
 ## Email account-disable review correction — 2026-10-31
 
 Mail sync now rechecks its owner's enabled state after fetching. Batch admission

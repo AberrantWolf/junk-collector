@@ -1,3 +1,29 @@
+## Active: Bridge status and web connection — 2026-10-31
+
+The requested status query and visible web setup are implemented across the
+application/provider/HTTP/UI/container layers. Focused browser setup and the
+exact release-image workflow pass, including TLS credentials, refresh/restart,
+explicit enable/pause and mobile layout. The workspace baseline, all 30 browser journeys and two review passes are
+complete. Finish commit/push, committed-image qualification and the guarded Fi
+update, then record acceptance. No Proton
+account credentials or real messages are needed for the development checks.
+Actual retailer receipt calibration remains a separate operator acceptance step.
+
+## Email intake installed on Fi — 2026-10-31
+
+The requested server update is complete: Fi runs merged source `83a9e0d` as a
+qualified release-mode container, with persistent Proton Bridge in its retained
+stack. FatChocobo serves the NFS archive; it is no longer the application host.
+Paired snapshots and retained-state/runtime checks pass. See
+[deployment evidence](validation/fi-email-deployment-2026-10-31.md).
+Next, the operator signs into Bridge privately, exports its certificate, provisions
+the pinned local IMAP profile and enables My Proton Mail in Purchase inbox using
+the [Fi commands](../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31).
+Actual account persistence, live unread-state/history and receipt-template
+qualification remain unrun. Earlier dated branch/NAS scope statements below are
+historical; this update does not claim a new public registry release or a full
+Fi/NFS failure/recovery qualification.
+
 ## Email account-disable review correction — 2026-10-31
 
 Mail sync now rechecks its owner's enabled state after fetching. Batch admission
