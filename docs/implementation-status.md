@@ -1,16 +1,17 @@
-## Bridge status and web connection — source implemented, 2026-10-31
+## Bridge status and web connection installed on Fi — 2026-10-31
 
 Purchase inbox now has a visible setup card before a profile exists, with typed
 Bridge sync progress/ETA, freshness failures and distinct receipt-scan status.
-Administrators can validate and save local IMAP credentials there without an
-operator-file edit or Collector restart. Proton login/2FA stays in the private
-Bridge terminal. The status query does not interrupt Bridge. Credentials remain
-private, read APIs are secret-free, and scanning requires an explicit collection
-enable action. The workspace baseline passes 565 tests (5 normally ignored), all 30 browser
-journeys pass, and both review passes have been addressed and rechecked. Earlier
-release-image workflows pass; final committed-image qualification and Fi
-installation are pending. See
-[behavior and ownership](email-purchases.md#bridge-status-and-web-connection).
+Administrators can validate and save local IMAP credentials without an operator
+file edit or Collector restart. Proton login/2FA stays in the private Bridge
+terminal. The status query does not interrupt Bridge; credentials remain private
+and scanning requires an explicit collection enable action. Signed source
+`18ae94b` is pushed; its qualified release images are installed on Fi. The
+workspace baseline passes 565 tests (5 normally ignored), all 30 browser journeys
+pass, and both review passes have been addressed and rechecked. Native image and
+retained-state acceptance pass; Bridge resumed syncing at 27.9%.
+See [behavior and ownership](email-purchases.md#bridge-status-and-web-connection)
+and [deployment evidence](validation/mail-bridge-status-2026-10-31.md).
 
 ## Email intake installed on Fi — 2026-10-31
 

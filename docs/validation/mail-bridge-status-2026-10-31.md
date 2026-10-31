@@ -93,9 +93,49 @@ the final deployment identity.
 
 ## Publication and Fi installation
 
-Pending: commit/push, build and test the final committed-source images, take a
-complete stopped-writer Fi/NAS recovery pair,
-then update Fi and verify identity/TLS/data, isolation, status freshness and
-unrelated services. No public registry release or new release tag is requested.
-Actual Proton login/receipt-template calibration remains an operator workflow;
-the status monitor itself does not read message contents.
+Signed commit `18ae94b0f64c2bb0df30f2a43002d2d4dc455bd7` was pushed to main.
+Its git archive SHA-256 is
+`1760967505f710ba5e627a7be07fe273b894d28b1714d2e3fa763016619330fd`.
+Fi built each final deployment target once from that archive, with the source
+revision label; those exact tested bytes are installed:
+
+- Collector/core and media: `sha256:6647dc5edae589b72180091fa09cc5978c5e21cee4be19d0af4fd0e0304a4c29`.
+- Official Bridge plus reporter: `sha256:add5534fa0dcb507bbc9b6ea9040071abf037fdbe968645ff46a8b0a2975b5b1`.
+
+Final native upgrade/configuration/group access, partial-upload update, read-only
+inbox refusal and explicit cleanup, FLAC, SIGTERM, full backup/restore, media
+isolation and Caddy fixture checks pass. The actual release-image browser passes
+served asset equality, progress, desktop/mobile, TLS credential setup, immediate
+enable/pause and reload persistence. The final official Bridge image passes
+persistent certificate, heartbeat, restart and graceful zero-exit shutdown with
+network disabled. Fixtures and their disposable homes were removed.
+
+Before activation all five stack processes were stopped. The first strict stop
+check refused nonzero legacy process outcomes and restarted the old stack; no
+snapshot was accepted then. The recorded cutoff has core/media/Caddy exit 0,
+cloudflared exit 2 and old unsupervised Bridge exit 143 after stop. No process was
+left running; the new supervisor's zero-exit stop was separately qualified.
+Complete read-only recovery points retain local databases/WAL, Bridge vault/cache,
+configuration and the matching archive:
+
+- Fi: `/var/backups/collector-fi-pairs/before-mail-status-20261031/fi-data`.
+- FatChocobo: `/volume1/collector-recovery/before-mail-status-20261031`.
+
+Snapshot database quick checks pass. The private Fi recovery directory additionally
+retains paired-point metadata, old deployment/environment/unit, authority key,
+image references, cutoff/after facts and final build/qualification logs.
+
+All five production services are running; core is healthy. Server identity,
+configuration/TLS files, 79 catalog items, user/grant counts, existing mount sources,
+container isolation and all seven unrelated container start times are retained.
+The existing proxy and tunnel container identities remain unchanged. Public HTTPS
+health and served application asset equality pass; IMAP/SMTP remain refused over
+Fi's LAN address. The fresh reporter certificate matches the original Bridge
+certificate without a mailbox LOGIN. Bridge resumed its existing account sync and
+reported **27.9%** at acceptance. `ssh fi-home /home/link/bin/collector-mail status`
+works noninteractively and does not stop Bridge.
+
+The operator can now enter local IMAP credentials in Purchase inbox and explicitly
+enable scanning. No real mailbox credentials/messages were used by development
+checks. Actual retailer receipt calibration remains an operator workflow. No
+public registry release or new release tag was requested or published.

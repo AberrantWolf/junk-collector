@@ -1,13 +1,16 @@
-## Active: Bridge status and web connection — 2026-10-31
+## Bridge status and web connection installed on Fi — 2026-10-31
 
-The requested status query and visible web setup are implemented across the
-application/provider/HTTP/UI/container layers. Focused browser setup and the
-exact release-image workflow pass, including TLS credentials, refresh/restart,
-explicit enable/pause and mobile layout. The workspace baseline, all 30 browser journeys and two review passes are
-complete. Finish commit/push, committed-image qualification and the guarded Fi
-update, then record acceptance. No Proton
-account credentials or real messages are needed for the development checks.
-Actual retailer receipt calibration remains a separate operator acceptance step.
+The requested delivery is complete. Signed source `18ae94b` is pushed to main;
+its release-mode Collector and Bridge images passed native qualification and are
+installed on Fi. The visible Purchase inbox card supplies live progress and a
+certificate-pinned local IMAP connection flow, followed by explicit scan enablement.
+Both review passes, the workspace baseline and all 30 browser journeys pass.
+Paired stopped-writer Fi/NAS snapshots and retained-state/runtime acceptance are
+recorded in [deployment evidence](validation/mail-bridge-status-2026-10-31.md).
+Bridge resumed the existing account sync (27.9% at acceptance). The operator can
+connect its local IMAP credentials in the web form; actual retailer receipt
+calibration remains a separate operator acceptance step. Earlier dated records
+below retain their original delivery scope.
 
 ## Email intake installed on Fi — 2026-10-31
 
