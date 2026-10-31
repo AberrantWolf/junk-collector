@@ -1,3 +1,13 @@
+## Trash Amp iPhone follow-up — 2026-10-31
+
+Fi remains healthy and the operator reports working iPhone web playback. Native
+read-only iOS library/media probes pass through the public control origin. The
+sibling app has validated source corrections and signed build 2.8 ready, but its
+physical cellular stall is not yet isolated or accepted as fixed. Signed source
+[`2204ec8`](https://github.com/AberrantWolf/trash-amp/commit/2204ec83305457a92704bafcb4a823995266831b)
+is pushed to Trash Amp main; phone installation remains pending. See the active entry in
+[remaining work](remaining-work.md). No further server deployment was performed.
+
 ## Bridge status and web connection installed on Fi — 2026-10-31
 
 Purchase inbox now has a visible setup card before a profile exists, with typed

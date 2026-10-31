@@ -1,3 +1,28 @@
+## Active: Trash Amp iPhone cellular follow-up — 2026-10-31
+
+The operator reports cached/offline refresh and stalled playback away from home;
+Collector web playback works on that iPhone. Fi's public control/media identity,
+TLS and router forwarding pass; read-only native iOS probes also pass authenticated
+library and FLAC-range access through the public control origin. No server change
+was made for this follow-up. A pinned old Trash Amp client emits an iOS PEM-parser
+panic, but its route selector can still fall back and read audio; that finding
+alone does not establish the physical stall's cause.
+
+The sibling Trash Amp delivery updates the client pin and keeps cached refresh
+results in a loading state until the live result arrives. Its Servers picker now
+contains only Collector servers; an explicit local-library action opens Home.
+Real-widget coverage selects both sources across presentation polls, including an
+empty library. Source choice now persists before loading, so empty/failed/denied
+reads keep their selected source and visible feedback; saved catalogs survive.
+Native mobile/desktop layout was inspected. Two review passes,
+241 tests, strict Clippy and signed arm64 iPhone build 2.8 pass. Signed source
+[`2204ec8`](https://github.com/AberrantWolf/trash-amp/commit/2204ec83305457a92704bafcb4a823995266831b)
+is pushed to Trash Amp main following explicit approval. Physical installation,
+per-app cellular permission and audible
+cellular playback remain pending. See the sibling's `docs/validation.md` for the
+full evidence and comparison limits; preserve the existing phone connection and
+downloads while diagnosing. Web playback is the current working fallback.
+
 ## Bridge status and web connection installed on Fi — 2026-10-31
 
 The requested delivery is complete. Signed source `18ae94b` is pushed to main;
