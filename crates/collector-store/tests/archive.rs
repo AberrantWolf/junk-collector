@@ -29539,3 +29539,298 @@ fn wav_completion_retained_analysis_enriches_in_place_and_keeps_manual_authority
         "WAV title"
     );
 }
+
+#[test]
+fn guided_failed_file_analysis_retries_after_preservation_without_republishing() {
+    preserved_file_analysis_retry(false, false);
+}
+
+#[test]
+fn preserved_file_analysis_retry_rejects_changed_archived_bytes() {
+    preserved_file_analysis_retry(true, false);
+}
+
+#[test]
+fn preserved_file_analysis_retry_resumes_requested_wav_preparation() {
+    if std::env::var_os("COLLECTOR_TEST_FLAC").is_some() {
+        preserved_file_analysis_retry(false, true);
+    }
+}
+
+fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
+    let (root, store, actor, service, collection) = setup();
+    let wav = include_bytes!("fixtures/digital-audio/03.wav");
+    let bytes: &[u8] = if prepare {
+        wav
+    } else {
+        include_bytes!("fixtures/digital-audio/embedded.flac")
+    };
+    let source_name = if prepare { "track.wav" } else { "track.flac" };
+    let converter = prepare.then(|| {
+        let tool = collector_providers::ConfiguredEncoder::probe(
+            collector_providers::EncoderKind::Flac,
+            "flac",
+        )
+        .unwrap();
+        Arc::new(collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap())
+    });
+    let service = match &converter {
+        Some(converter) => service.with_audio_converter(converter.clone()),
+        None => service,
+    };
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Retried purchase".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            name: "receipt.txt".into(),
+                            bytes: ByteLength(7),
+                            sha256: None,
+                            visibility: Some(Visibility::Curators),
+                        },
+                        UploadFile {
+                            name: source_name.into(),
+                            bytes: ByteLength(bytes.len() as u64),
+                            sha256: None,
+                            visibility: Some(Visibility::Shared),
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: prepare,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, b"receipt")
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, bytes)
+        .unwrap();
+    // Model an old decoder's terminal failure with its actual durable Job, then
+    // let the ordinary workflow preserve the originals before upgrading/retrying.
+    let old = store.claim_job("old-decoder", 30).unwrap().unwrap();
+    assert_eq!(old.kind, "import_analysis");
+    store
+        .fail_job(
+            old.id,
+            &old.claim_token,
+            "old decoder compatibility failure",
+        )
+        .unwrap();
+    service.resume_guided_ingests().unwrap();
+    for _ in 0..8 {
+        if !service.run_next_job("preserve-failed-analysis").unwrap() {
+            break;
+        }
+    }
+    let failed = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(failed.import.phase, ImportPhase::Published);
+    assert!(
+        failed
+            .steps
+            .iter()
+            .any(|s| s.step == "identification" && s.retryable)
+    );
+    let item_id = failed.summary.target_item_id.unwrap();
+    let review = service.metadata_review(&actor, item_id).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            item_id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: review.revision,
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "My accepted album".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let before = store.item(item_id).unwrap();
+    let capture = store.capture(failed.summary.capture_id).unwrap();
+    let representation = capture.representations[0].clone();
+    if corrupt {
+        let path = files_named(&root.path().join("archive"), source_name)
+            .pop()
+            .unwrap();
+        let mut changed = bytes.to_vec();
+        *changed.last_mut().unwrap() ^= 1;
+        std::fs::write(path, changed).unwrap();
+    }
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    let service = match &converter {
+        Some(converter) => service.with_audio_converter(converter.clone()),
+        None => service,
+    };
+    if prepare {
+        let intent = store.guided_ingest_intent(id).unwrap().unwrap();
+        assert!(intent.preparation_error.is_some());
+        assert!(intent.preparation_batch_id.is_none());
+    }
+    let retry = command();
+    for _ in 0..2 {
+        service
+            .retry_ingest(
+                &actor,
+                id,
+                collector_app::RetryIngestCommand {
+                    job_id: Some(old.id),
+                },
+                &retry,
+            )
+            .unwrap();
+    }
+    service.resume_guided_ingests().unwrap();
+    if prepare {
+        let intent = store.guided_ingest_intent(id).unwrap().unwrap();
+        assert!(intent.preparation_error.is_none());
+        assert!(
+            intent.preparation_batch_id.is_none(),
+            "preparation preceded identification"
+        );
+    }
+    assert!(service.run_next_job("retry-preserved-analysis").unwrap());
+    for _ in 0..16 {
+        // The server's periodic coordinator settles imports after child track
+        // Jobs, which deliberately do not own the whole ingest request.
+        service.resume_guided_ingests().unwrap();
+        if !service.run_next_job("finish-retried-workflow").unwrap() {
+            break;
+        }
+    }
+    service.resume_guided_ingests().unwrap();
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    if corrupt {
+        assert!(
+            detail
+                .steps
+                .iter()
+                .any(|s| s.step == "identification"
+                    && s.state == collector_app::IngestStepState::Failed),
+            "{detail:?}"
+        );
+        assert!(
+            service
+                .recorded_music_track_availability(&actor, item_id)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.capture(capture.id).unwrap().representations.len(), 1);
+        return;
+    }
+    assert!(
+        detail
+            .steps
+            .iter()
+            .any(|s| s.step == "identification"
+                && s.state == collector_app::IngestStepState::Succeeded),
+        "{detail:?}"
+    );
+    assert_eq!(
+        store.job_record(old.id, actor.user_id).unwrap().attempt,
+        old.attempt + 1
+    );
+    assert_eq!(
+        store.item(item_id).unwrap().captures.len(),
+        before.captures.len()
+    );
+    let after = store.capture(capture.id).unwrap();
+    assert_eq!(after.representations.len(), if prepare { 2 } else { 1 });
+    assert_eq!(
+        serde_json::to_value(&after.representations[0].files).unwrap(),
+        serde_json::to_value(&representation.files).unwrap()
+    );
+    let rows = service
+        .recorded_music_track_availability(&actor, item_id)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    // Availability describes the playable prepared FLAC. The exact WAV master
+    // is checked separately through its preserved file record and download.
+    assert_eq!(rows[0].audio_format.as_ref().unwrap().codec, "flac");
+    assert!(matches!(
+        rows[0].state,
+        collector_app::MusicTrackAvailabilityState::Available { .. }
+    ));
+    assert_eq!(
+        detail.summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+    assert_eq!(
+        service.item_presented(&actor, item_id).unwrap().title,
+        "My accepted album"
+    );
+    assert_eq!(
+        resource_bytes(
+            service
+                .representation(&actor, item_id, representation.id, 0)
+                .unwrap()
+        ),
+        b"receipt"
+    );
+    let mut original = service
+        .representation(&actor, item_id, representation.id, 1)
+        .unwrap();
+    let mut downloaded = Vec::new();
+    original.reader.read_to_end(&mut downloaded).unwrap();
+    assert_eq!(downloaded, bytes);
+    if !prepare {
+        assert!(
+            service
+                .metadata_view(&actor, item_id)
+                .unwrap()
+                .display
+                .artwork
+                .is_some()
+        );
+    }
+    store.reindex().unwrap();
+    assert_eq!(
+        service.item_presented(&actor, item_id).unwrap().title,
+        "My accepted album"
+    );
+    let reindexed = service
+        .recorded_music_track_availability(&actor, item_id)
+        .unwrap();
+    assert!(matches!(
+        reindexed[0].state,
+        collector_app::MusicTrackAvailabilityState::Available { file_index, .. }
+            if file_index == if prepare { 0 } else { 1 }
+    ));
+    assert!(
+        detail
+            .attempts
+            .iter()
+            .any(|a| a.job_id == old.id && a.state == JobState::Failed)
+    );
+}

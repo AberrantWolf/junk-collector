@@ -2,6 +2,61 @@
 use crate::*;
 use collector_modules::music::{MusicImportAnalysisOutput, files::FileTrackManifest};
 impl CollectionService {
+    /// A failed optional identification may already have been followed by
+    /// preservation. Retry against those exact archived bytes through the same
+    /// retained-analysis implementation, without reopening or republishing intake.
+    pub(crate) fn analyze_preserved_import_for_job(
+        &self,
+        claim: &JobClaim,
+        original: &FrozenProcessingJob,
+        mut record: ImportRecord,
+    ) -> Result<ImportView> {
+        let capture = self.reader.capture(record.view.capture_id)?;
+        let item = self.reader.item(claim.item_id.ok_or(Error::Conflict)?)?;
+        if capture.collection_id != original.collection_id
+            || capture.association.item_id != Some(item.id)
+            || item.deleted
+            || !capture
+                .representations
+                .iter()
+                .any(|source| source.id == record.view.representation_id)
+        {
+            return Err(Error::Conflict);
+        }
+        let source = PackageScope::Representation(record.view.representation_id);
+        let committed = self
+            .processing
+            .recorded_source(original.collection_id, source)?;
+        let rebinding = ImportSourceRebinding {
+            provisional_fingerprint: original.source_fingerprint.clone(),
+            committed_fingerprint: committed.clone(),
+            files: original
+                .source_fingerprint
+                .files
+                .iter()
+                .zip(&committed.files)
+                .map(|(before, after)| SourceFileRebinding {
+                    import_file_id: before.id,
+                    representation_file_id: after.id,
+                    bytes: before.bytes,
+                    sha256: before.sha256.clone(),
+                })
+                .collect(),
+        };
+        rebinding.validate()?;
+        let mut retained = original.clone();
+        retained.source = source;
+        retained.source_fingerprint = committed;
+        let mut selection: serde_json::Value = retained.selection.parse()?;
+        selection["item_generation"] = serde_json::json!(item.lifecycle.generation);
+        retained.selection = RawJson::from_value(selection);
+        self.run_frozen_processing(claim, retained)?;
+        let observation = self.processing.processing_record(original.observation_id)?;
+        record.view.limitations = observation.observation.limitations;
+        record.view.analysis_job_id = Some(claim.id);
+        let revision = record.view.revision;
+        Ok(self.provisional_imports.save_import(record, revision)?.view)
+    }
     pub(crate) fn recorded_file_tracks(
         &self,
         collection: CollectionId,
@@ -392,17 +447,18 @@ impl CollectionService {
                 .map_err(|e| Error::Unavailable(e.to_string()))?
                 .metadata
             } else {
-                let decoder =
-                    junk_libs_audio::AudioDecoder::open(junk_libs_audio::ByteSource::new(
+                junk_libs_audio::inspect_file_audio_metadata(
+                    junk_libs_audio::ByteSource::new(
                         reader,
                         junk_libs_audio::MediaHint::new(
                             Some(member.bytes.0),
                             member.display_name.as_str().rsplit('.').next(),
                             None,
                         ),
-                    ))
-                    .map_err(|e| Error::Unavailable(e.to_string()))?;
-                decoder.inspection
+                    ),
+                    &mut || checkpoint().map_err(|_| junk_libs_audio::AudioDecodeError::Cancelled),
+                )
+                .map_err(|e| Error::Unavailable(e.to_string()))?
             };
             checkpoint()?;
             if self.fingerprint_inventory_checked(&inventory, &mut || checkpoint())? != expected {

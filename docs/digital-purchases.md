@@ -52,6 +52,24 @@ and the [initial delivery](validation/wav-digital-originals-2026-10-31.md).
 The dated FLAC/MP3-only delivery record below retains its original scope; WAV
 preparation is the explicit exception to its direct-original playback policy.
 
+## Inbox format compatibility — source work, 2026-11-01
+
+Integer PCM WAV also accepts 40-byte `fmt` chunks containing an empty, entirely
+zero-padded PCM extension. Nonzero unknown extensions remain unsupported; the
+sample format, RIFF/chunk boundaries and original bytes retain the existing checks.
+MP3 inspection accepts bounded APEv2 suffix metadata, with optional matching header
+and final ID3v1 tag, including text and JPEG/PNG front covers. ID3v2 text retains
+priority over APE, followed by ID3v1 fallback. MP3 decoding includes the upstream
+zero-length-channel correction rather than skipping failed frames.
+
+For imports whose **Identify files** step failed before originals were preserved,
+open **Review import** and choose **Retry this step** after updating the server.
+The same Job validates the archived originals against its original frozen file
+fingerprints and runs retained-audio analysis. Preservation is not repeated and
+no original bytes or existing manual metadata are replaced. Unsupported or damaged
+sources still fail visibly. This change does not add float/multichannel WAV or new
+codecs. See [delivery and validation](validation/audio-compatibility-2026-11-01.md).
+
 ## Portable ownership and listening identity
 
 A digital package uses an ordinary Music Item and Capture, with optional

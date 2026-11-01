@@ -1,3 +1,16 @@
+## Inbox audio compatibility — beta.17 candidate, 2026-11-01
+
+Checked zero-padded PCM WAV headers, bounded APEv2 MP3 metadata/artwork and the
+upstream empty-channel decoder correction are implemented. Failed digital
+identification retries after preservation/restart without republishing originals;
+requested automatic FLAC preparation resumes. Direct inbox qualification passes
+547 MP3s and 736 WAVs; 12 WAVs with contradictory declared boundaries remain
+explicit failures. Full selected checks pass: 600 Rust tests, strict Clippy,
+web checks/build/models and all 30 browser journeys. No inbox fixtures were added.
+Shared fixes are merged/pushed to junk-libs main. Beta.17 release qualification
+and Fi deployment are authorized and in progress. See
+[delivery evidence](validation/audio-compatibility-2026-11-01.md).
+
 ## Import source selector cleanup — source delivery, 2026-11-01
 
 The shared inbox package chooser aligns folder names beside checkbox/radio controls,

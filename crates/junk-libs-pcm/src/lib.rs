@@ -147,7 +147,10 @@ impl<R: Read + Seek + Send> WavReader<R> {
                         return Err(invalid("unsupported or inconsistent WAV PCM format"));
                     }
                     match u16_at(0) {
-                        1 if size == 16 || size == 18 && u16_at(16) == 0 => {}
+                        // Some mastering tools emit a 40-byte format chunk for
+                        // ordinary PCM, with an empty extension and zero padding.
+                        // Accept only that unambiguous layout, not unknown extensions.
+                        1 if size == 16 || raw[16..size as usize].iter().all(|b| *b == 0) => {}
                         0xfffe
                             if size == 40
                                 && u16_at(16) == 22
@@ -375,6 +378,24 @@ mod tests {
             reader.seek_frame(0).unwrap();
             assert_eq!(reader.read_pcm(&mut result).unwrap(), 1);
             assert!(reader.seek_frame(2).is_err());
+        }
+    }
+    #[test]
+    fn padded_pcm_format_keeps_samples_and_refuses_unknown_extensions() {
+        let pcm = [0, 0, 128, 255, 255, 127];
+        let mut bytes = wave(1, 24, &pcm);
+        bytes.splice(36..36, [0; 24]);
+        bytes[16..20].copy_from_slice(&40u32.to_le_bytes());
+        let length = (bytes.len() - 8) as u32;
+        bytes[4..8].copy_from_slice(&length.to_le_bytes());
+        let mut reader = WavReader::open(Cursor::new(&bytes), &mut || Ok(())).unwrap();
+        let mut output = [0; 6];
+        assert_eq!(reader.read_pcm(&mut output).unwrap(), 2);
+        assert_eq!(output, pcm);
+        for offset in 36..60 {
+            let mut bad = bytes.clone();
+            bad[offset] = 1;
+            assert!(WavReader::open(Cursor::new(bad), &mut || Ok(())).is_err());
         }
     }
     #[test]

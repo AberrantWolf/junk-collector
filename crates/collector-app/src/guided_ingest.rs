@@ -1209,6 +1209,22 @@ impl CollectionService {
                 }
             }
             ImportPhase::Published => {
+                // Identification can be retried against preserved digital files.
+                // Its committed result must precede metadata/preparation admission.
+                if self
+                    .provisional_imports
+                    .import_job_records(id, intent.user_id)?
+                    .iter()
+                    .any(|job| {
+                        job.kind == "import_analysis"
+                            && matches!(
+                                job.state,
+                                JobState::Queued | JobState::Running | JobState::CancelRequested
+                            )
+                    })
+                {
+                    return Ok(());
+                }
                 if let Some(context) = &intent.bulk_context
                     && !self.intake_port.intake_album_preservation_settled(
                         intent.user_id,

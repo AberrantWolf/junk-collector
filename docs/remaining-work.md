@@ -1,3 +1,14 @@
+## Active: Beta.17 audio compatibility publication and Fi update — 2026-11-01
+
+The three user-selected fixes and preserved-import retry are implemented and
+locally validated, including direct mounted-file checks and all selected source/
+browser checks. Shared junk-libs commit `438f195449622da2a2b9082c36cb06f66098813c`
+is merged/pushed to main after explicit publication authorization. Complete the
+beta.17 exact-source/container qualification, publish the sealed images and update
+Fi with a matching stopped-writer recovery pair. Twelve inbox WAVs with
+contradictory lengths remain rejected and need a separate source-repair policy.
+See [delivery evidence](validation/audio-compatibility-2026-11-01.md).
+
 ## Import source selector cleanup — source delivery, 2026-11-01
 
 The shared inbox package chooser aligns folder names beside checkbox/radio controls,

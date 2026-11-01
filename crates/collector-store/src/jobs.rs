@@ -1649,7 +1649,9 @@ impl Store {
             .map_err(storage)?;
         }
         if let Some(import) = request.get("import_id").and_then(serde_json::Value::as_str) {
-            tx.execute("UPDATE private.guided_ingest_intents SET settled=0,enrichment_error=NULL WHERE import_id=? AND cancelled=0", [import]).map_err(storage)?;
+            tx.execute("UPDATE private.guided_ingest_intents SET settled=0,enrichment_error=NULL,
+                preparation_error=CASE WHEN ?2='import_analysis' AND preparation_batch_id IS NULL THEN NULL ELSE preparation_error END
+                WHERE import_id=?1 AND cancelled=0", params![import,kind]).map_err(storage)?;
         }
         let mut result = prior_result
             .as_deref()

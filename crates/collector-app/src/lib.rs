@@ -4408,7 +4408,23 @@ impl CollectionService {
             return Err(Error::JobCancelled);
         }
         let mut record = self.provisional_imports.import_record(id)?;
-        if record.user_id != claim.user_id || record.view.phase != ImportPhase::Analyzing {
+        if record.user_id != claim.user_id {
+            return Err(Error::Conflict);
+        }
+        if record.view.phase == ImportPhase::Published
+            && module.0 == "org.junk.music"
+            && collector_modules::music::files::is_file_package(
+                &record
+                    .view
+                    .files
+                    .iter()
+                    .map(|file| PackageFileName::new(file.name.clone()))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        {
+            return self.analyze_preserved_import_for_job(claim, frozen, record);
+        }
+        if record.view.phase != ImportPhase::Analyzing {
             return Err(Error::Conflict);
         }
         if record.view.collection_id != frozen.collection_id

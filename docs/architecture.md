@@ -1931,3 +1931,22 @@ No compatibility migration or destructive conversion of existing data is require
 Saved export URLs retain read access to authorized historical media when the owner
 module or schema cannot execute: serve the recorded FLAC with ordinary transfer
 integrity checking, without requiring metadata reconstruction or write eligibility.
+
+## Inbox audio compatibility — 2026-11-01
+
+The shared WAV reader accepts only zero-filled padding on ordinary PCM format
+chunks. The shared `junk-libs-audio` adapter owns bounded APEv2 suffix parsing and
+the narrowly vendored upstream Symphonia MP3 zero-length-channel backport. Its
+metadata-only port shares those tag readers without decoding the payload. Decoder
+reads and seek/length coordinates are bounded to the checked audio extent, so
+suffix artwork cannot be decoded as MPEG frames. Collector
+continues to map identities and apply metadata/preservation policy; it does not
+add a second decoder or rewrite purchased files.
+
+A published digital import's failed identification Job can reuse the existing
+retained-file processing implementation. Application policy validates an ordered
+Import-to-Representation fingerprint rebinding before reading archived bytes, then
+uses ordinary cancellable processing, metadata/artwork and source validation.
+The Import remains Published and its preservation Capture/Representation identities
+are unchanged. Retry, lifecycle, grant, collection-binding and Job claim fences
+continue to apply. No data migration or production retry is performed automatically.
