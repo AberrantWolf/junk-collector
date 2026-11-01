@@ -1,5 +1,13 @@
 # Official Proton Bridge with Collector email intake
 
+## Fi beta.15 update — 2026-11-01
+
+Collector core/media now run published beta.15, including the inbox/Bridge work
+since beta.14 and WAV support. The existing Bridge image/home, private profiles,
+paused connection/cursor and installation paths are retained. See
+[release and preservation evidence](../../docs/validation/container-beta15-publication-2026-11-01.md).
+The dated installation baseline below remains a historical/setup reference.
+
 ## Current Fi installation — 2026-10-31
 
 The reviewed inbox recovery update (`0bec4af`) is installed. Its existing Bridge

@@ -14,6 +14,9 @@ for configuration and limits.
 
 ## WAV addition and completion — 2026-11-01
 
+Published in beta.15 and installed on Fi; see
+[publication/deployment evidence](validation/container-beta15-publication-2026-11-01.md).
+
 Digital ingestion also accepts integer PCM WAV originals: 16/24-bit mono/stereo,
 8–192 kHz, strict RIFF or checked WAVE_FORMAT_EXTENSIBLE PCM. Preserve exact WAV
 bytes and select **Prepare FLAC after import**, or prepare FLAC later in the

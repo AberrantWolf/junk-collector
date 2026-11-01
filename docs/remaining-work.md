@@ -1,14 +1,17 @@
-## Active: beta.15 publication and Fi update — 2026-11-01
+## Beta.15 published and installed on Fi — 2026-11-01
 
-User authorizes committing and pushing the complete candidate since beta.14,
-cutting beta.15 and installing its validated release image on Fi. Include the
-private purchase inbox/Bridge work, WAV digital-release support and all intervening
-fixes. Validate the complete release scope through the existing multi-platform
-container workflow. Preserve the Fi/NAS recovery pair, identity/configuration,
-accounts, archive/imports, Jobs, Bridge profiles and unrelated services. Update core
-and media with the same qualified immutable image; retain current topology.
+The complete change since beta.14 is committed/pushed and released as beta.15,
+including email purchase/Bridge setup and recovery, WAV support and intervening
+fixes. Signed source/tag `6c0f42a` passed full-scope beta qualification, 30 browser
+journeys and native AMD64/ARM64 release-image checks. Publication promotes those
+same sealed bytes to `preview`; stable `latest` is unchanged. Fi core/media run the
+verified immutable release image, with a complete stopped-writer Fi/NAS recovery
+pair and preserved identity/config/TLS, accounts, 79 Items, 2,585 Jobs, Bridge
+profiles/paused connection and seven unrelated containers. HTTPS/runtime/assets
+pass. See [publication and deployment evidence](validation/container-beta15-publication-2026-11-01.md).
+Independent active assignments below retain their scope and authorization.
 
-## WAV digital-release completion — delivered in source, 2026-11-01
+## WAV digital-release completion — delivered in beta.15, 2026-11-01
 
 All four user-selected support gaps are implemented: bounded WAV INFO/ID3 metadata
 and artwork, direct PCM audio matching honoring excluded alternates, portable FLAC
@@ -16,7 +19,7 @@ downloads with accepted metadata/artwork, and in-place analysis/enrichment of
 retained digital packages. Exact originals/listening media, manual authority,
 private-source redaction and physical inventory are preserved. Existing durable
 processing/provider/publication effects own the workflow; exports use authorized,
-bounded temporary scratch. Beta.15 publication/deployment is now authorized above. See
+bounded temporary scratch. Beta.15 publication/deployment is complete as recorded above. See
 [completion and acceptance](validation/wav-digital-completion-2026-11-01.md).
 
 ## WAV digital originals — delivered in source, 2026-10-31
@@ -29,7 +32,7 @@ The complete delivery, supported format boundary and validation are recorded in
 [WAV delivery](validation/wav-digital-originals-2026-10-31.md). Float/multichannel WAV,
 RF64 and continuous-image splitting remain broader codec/layout work under HL-13.
 The completion above delivers tags, artwork and fingerprint matching. Publication
-and Fi deployment are authorized by the active assignment above. Independent active
+and Fi deployment are complete as recorded above. Independent active
 assignments below retain their scope and authorization.
 
 ## Reviewed inbox recovery installed on Fi — 2026-10-31

@@ -1,7 +1,9 @@
 # WAV digital-release completion — 2026-11-01
 
-Source-only delivery of the four support-review findings. No deployment or release
-publication is included. The [initial delivery](wav-digital-originals-2026-10-31.md)
+The four support-review remedies are now published in beta.15 and installed on Fi;
+see [release/deployment evidence](container-beta15-publication-2026-11-01.md).
+The implementation validation below records its initial source-only scope.
+The [initial delivery](wav-digital-originals-2026-10-31.md)
 retains its dated validation; [current workflow](../digital-purchases.md) describes
 supported intake and controls.
 

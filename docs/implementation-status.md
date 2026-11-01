@@ -1,3 +1,15 @@
+## Beta.15 publication and Fi update — 2026-11-01
+
+Beta.15 includes the complete Collector change since beta.14: private email purchase
+intake/Bridge setup/status/recovery and WAV intake, native FLAC preparation,
+metadata/artwork, matching, retained-source analysis and metadata-aware downloads.
+The signed release is published on `preview` and its qualified immutable core/media
+image runs on Fi. Full-scope source checks, 30 browser journeys and both native
+platform release-image qualifications pass; live HTTPS, identity/state preservation
+and served assets pass after a sealed Fi/NAS stopped-writer recovery pair. Existing
+Bridge state and unrelated services are retained. Stable `latest` is unchanged.
+See [release/deployment evidence](validation/container-beta15-publication-2026-11-01.md).
+
 ## Inbox recovery installed on Fi — 2026-10-31
 
 Reviewed signed source `0bec4af` is installed on Fi. One release-mode image was

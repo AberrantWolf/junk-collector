@@ -2,7 +2,9 @@
 
 Branch delivery, 2026-10-30. Optional email intake proposes collection changes;
 it does not automatically alter inventory or infer possession from a receipt.
-Installed on Fi on 2026-10-31; see [local account setup](../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31)
+Published in beta.15 and installed on Fi on 2026-11-01; see
+[release/deployment evidence](validation/container-beta15-publication-2026-11-01.md).
+The initial installation was on 2026-10-31; see [local account setup](../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31)
 and [deployment evidence](validation/fi-email-deployment-2026-10-31.md).
 
 Folder editing and inbox recovery are installed on Fi from signed source `0bec4af`;
